@@ -3,7 +3,7 @@ import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
   Building2, User, ClipboardList, ChevronDown, ChevronRight, Check,
   AlertTriangle, CircleAlert, Info, Copy, Sparkles, Loader2,
-  ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid
+  ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star
 } from "lucide-react";
 
 /* ============================================================
@@ -222,15 +222,19 @@ const RELATORIO_OPCOES = ["Pendente", "Em processo", "Entregue"];
 /* ---------- Perfis de acesso (agora definidos pelo backend/login, não escolhidos na tela) ----------
    vistoriador   -> só enxerga o módulo Laudos (não vê Documentação nem Gerência)
    documentacao  -> só enxerga o módulo Documentação
-   gerencia      -> acesso restrito, mas enxerga tudo (Laudos + Documentação + Gerência, incl. financeiro)
-   O cadastro/acompanhamento de Cliente agora é uma tela pública separada, sem login.
+   comercial     -> só enxerga o módulo Clientes (cadastro, agendamento, acompanhamento)
+   qualidade     -> só enxerga o módulo Qualidade (avaliações dos clientes)
+   gerencia      -> acesso restrito, mas enxerga tudo (incl. financeiro)
+   O cadastro/acompanhamento de Cliente em si continua sendo uma tela pública separada, sem login.
 ------------------------------------------------------------------ */
 const MODULOS_POR_PERFIL = {
   vistoriador: ["laudos"],
   documentacao: ["documentacao"],
-  gerencia: ["laudos", "documentacao", "gerencia"],
+  comercial: ["clientes"],
+  qualidade: ["qualidade"],
+  gerencia: ["laudos", "documentacao", "gerencia", "clientes", "qualidade"],
 };
-const PERFIL_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", gerencia: "Gerência" };
+const PERFIL_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", comercial: "Comercial", qualidade: "Qualidade", gerencia: "Gerência" };
 
 const novoRegistroDoc = () => ({
   id: `doc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -425,7 +429,7 @@ function AppInterno({ session, onLogout }) {
   const notify = (m) => { setToast(m); setTimeout(() => setToast(""), 2200); };
 
   /* ---- Documentação/Gerência: carregar e persistir via API real ---- */
-  const podeVerDocs = perfil === "gerencia" || perfil === "documentacao";
+  const podeVerDocs = perfil === "gerencia" || perfil === "documentacao" || perfil === "qualidade";
   const carregarDocs = async () => {
     if (!podeVerDocs) return;
     setDocsCarregando(true);
@@ -456,11 +460,14 @@ function AppInterno({ session, onLogout }) {
 
   /* ---- Cliente: cadastros (lidos via API — cadastro em si acontece na tela pública, sem login) ---- */
   const [clientes, setClientes] = useState([]);
+  const [clientesCarregando, setClientesCarregando] = useState(false);
   const carregarClientes = async () => {
+    setClientesCarregando(true);
     try {
       const r = await apiFetch("/api/clientes", { token });
       setClientes((r.clientes || []).map(mapClienteDaApi));
     } catch (e) { notify(`Não foi possível carregar clientes: ${e.message}`); }
+    setClientesCarregando(false);
   };
   useEffect(() => { carregarClientes(); }, []);
   const updCliente = async (id, patch) => {
@@ -468,6 +475,20 @@ function AppInterno({ session, onLogout }) {
     try { await apiFetch(`/api/clientes/${id}`, { method: "PATCH", token, body: patch }); }
     catch (e) { notify(`Não foi possível atualizar cliente: ${e.message}`); }
   };
+
+  /* ---- Qualidade: avaliações que os clientes deixaram (nota + comentário) ---- */
+  const [avaliacoes, setAvaliacoes] = useState([]);
+  const [avaliacoesCarregando, setAvaliacoesCarregando] = useState(false);
+  const carregarAvaliacoes = async () => {
+    if (perfil !== "qualidade" && perfil !== "gerencia") return;
+    setAvaliacoesCarregando(true);
+    try {
+      const r = await apiFetch("/api/avaliacoes", { token });
+      setAvaliacoes(r.avaliacoes || []);
+    } catch (e) { notify(`Não foi possível carregar avaliações: ${e.message}`); }
+    setAvaliacoesCarregando(false);
+  };
+  useEffect(() => { carregarAvaliacoes(); }, []);
 
   /* ---- Assinatura digital da Gerência (via API real) ---- */
   const [assinatura, setAssinatura] = useState(null); // { imagem, nome }
@@ -641,7 +662,7 @@ function AppInterno({ session, onLogout }) {
 
         {/* Navegação de módulos (filtrada pelo perfil de acesso) */}
         <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, borderTop: "1px solid rgba(255,255,255,.12)" }}>
-          {[["laudos", "Laudos", FileText], ["documentacao", "Documentação", ClipboardCheck], ["gerencia", "Gerência", BarChart3]]
+          {[["laudos", "Laudos", FileText], ["documentacao", "Documentação", ClipboardCheck], ["clientes", "Clientes", Users], ["qualidade", "Qualidade", Star], ["gerencia", "Gerência", BarChart3]]
             .filter(([k]) => modulosPermitidos.includes(k))
             .map(([k, label, Icon]) => (
               <button key={k} onClick={() => setAbaTop(k)} className="tab" style={{ borderBottomColor: abaTop === k ? "#fff" : "transparent", color: abaTop === k ? "#fff" : "rgba(255,255,255,.55)" }}>
@@ -677,9 +698,16 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "documentacao" && (
           <AbaDocumentacao docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={docsCarregando} notify={notify} />
         )}
+        {abaTop === "clientes" && (
+          <AbaClientesComercial clientes={clientes} carregando={clientesCarregando} atualizarCliente={updCliente} notify={notify} />
+        )}
+        {abaTop === "qualidade" && (
+          <AbaQualidade avaliacoes={avaliacoes} carregando={avaliacoesCarregando} docs={docs} docsCarregando={docsCarregando} />
+        )}
         {abaTop === "gerencia" && (
           <AbaGerencia docs={docs} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
-            usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={session.usuario.id} />
+            usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={session.usuario.id}
+            avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando} />
         )}
       </main>
 
@@ -754,7 +782,235 @@ function NotificacoesClientes({ clientes, preencherComCliente, style }) {
   );
 }
 
-/* ================= Aba: Dados ================= */
+/* ================= Aba: Clientes (perfil Comercial) ================= */
+function AbaClientesComercial({ clientes, carregando, atualizarCliente, notify }) {
+  const [busca, setBusca] = useState("");
+  const [editando, setEditando] = useState(null); // cópia do cliente em edição
+
+  const filtrados = clientes.filter((c) =>
+    !busca || `${c.nome} ${c.empreendimento} ${c.construtora}`.toLowerCase().includes(busca.toLowerCase())
+  );
+
+  const abrirEdicao = (c) => setEditando({ ...c });
+  const salvar = async () => {
+    try {
+      await atualizarCliente(editando.id, editando);
+      setEditando(null);
+      notify("Cliente atualizado ✓");
+    } catch (e) { notify(`Erro: ${e.message}`); }
+  };
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <Card icon={Users} titulo={`Clientes cadastrados (${clientes.length})`}>
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
+          Cadastro, agendamento e acompanhamento de todos os clientes que já se cadastraram (pelo portal público) ou foram cadastrados pela equipe.
+        </p>
+        <input style={{ ...inp, marginBottom: 14 }} placeholder="Buscar por nome, empreendimento ou construtora…" value={busca} onChange={(e) => setBusca(e.target.value)} />
+
+        {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+        {!carregando && filtrados.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum cliente encontrado.</p>}
+
+        {filtrados.length > 0 && (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: CINZA_CLARO }}>
+                  {["Cliente", "Empreendimento", "Serviço", "Agendamento", "Status", ""].map((h) => (
+                    <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}` }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtrados.map((c) => (
+                  <tr key={c.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                    <td style={{ padding: "8px 10px", fontWeight: 600 }}>{c.nome}<div style={{ fontWeight: 400, fontSize: 12, color: "#8593a8" }}>{c.telefone}</div></td>
+                    <td style={{ padding: "8px 10px" }}>{c.empreendimento || "—"}{c.complemento ? ` · ${c.complemento}` : ""}</td>
+                    <td style={{ padding: "8px 10px" }}>{c.servico || "—"}</td>
+                    <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+                      {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""}
+                    </td>
+                    <td style={{ padding: "8px 10px" }}><Selo valor={c.atendido ? "Concluída" : "Agendada"} /></td>
+                    <td style={{ padding: "8px 10px" }}>
+                      <button className="icon-btn" onClick={() => abrirEdicao(c)}><Edit3 size={15} color={AZUL_MEDIO} /></button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      {editando && (
+        <div className="no-print" style={overlay} onClick={() => setEditando(null)}>
+          <div style={{ ...modal, maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <strong>Editar cliente</strong>
+              <button className="icon-btn" onClick={() => setEditando(null)}><X size={16} /></button>
+            </div>
+            <Grid>
+              <Field label="Nome" value={editando.nome} onChange={(v) => setEditando({ ...editando, nome: v })} full />
+              <Field label="Telefone" value={editando.telefone} onChange={(v) => setEditando({ ...editando, telefone: v })} />
+              <Field label="E-mail" value={editando.email} onChange={(v) => setEditando({ ...editando, email: v })} />
+              <Field label="Construtora" value={editando.construtora} onChange={(v) => setEditando({ ...editando, construtora: v })} />
+              <Field label="Empreendimento" value={editando.empreendimento} onChange={(v) => setEditando({ ...editando, empreendimento: v })} />
+              <Field label="Bloco / Apto" value={editando.complemento} onChange={(v) => setEditando({ ...editando, complemento: v })} />
+              <Field label="Data desejada" type="date" value={editando.dataDesejada} onChange={(v) => setEditando({ ...editando, dataDesejada: v })} />
+              <Field label="Horário desejado" type="time" value={editando.horarioDesejado} onChange={(v) => setEditando({ ...editando, horarioDesejado: v })} />
+              <div style={cell(true)}>
+                <label style={lab}>Status do agendamento</label>
+                <select style={inp} value={editando.atendido ? "1" : "0"} onChange={(e) => setEditando({ ...editando, atendido: e.target.value === "1" })}>
+                  <option value="0">Agendado / pendente</option>
+                  <option value="1">Concluído</option>
+                </select>
+              </div>
+            </Grid>
+            <Area label="Observações" value={editando.observacoes} onChange={(v) => setEditando({ ...editando, observacoes: v })} rows={2} />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setEditando(null)}>Cancelar</button>
+              <button className="btn-solid" onClick={salvar}><Save size={15} /> Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ================= Estrelas (exibição e seleção) ================= */
+function Estrelas({ valor, onChange, tamanho = 18 }) {
+  const interativo = !!onChange;
+  return (
+    <div style={{ display: "flex", gap: 2 }}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <Star key={n} size={tamanho}
+          fill={n <= valor ? "#F5A623" : "none"} color={n <= valor ? "#F5A623" : "#C9D2DE"}
+          style={{ cursor: interativo ? "pointer" : "default" }}
+          onClick={() => interativo && onChange(n)} />
+      ))}
+    </div>
+  );
+}
+
+/* ================= Aba: Qualidade (avaliações dos clientes) ================= */
+function EtapaTempo({ label, cor, ativa }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, flex: 1, minWidth: 70 }}>
+      <div style={{ width: 14, height: 14, borderRadius: "50%", background: ativa ? cor : "#E3E8EF", border: `2px solid ${ativa ? cor : "#C9D2DE"}` }} />
+      <div style={{ fontSize: 10.5, color: ativa ? AZUL_MARINHO : "#9AA6B5", textAlign: "center", fontWeight: ativa ? 700 : 400 }}>{label}</div>
+    </div>
+  );
+}
+function LinhaDoTempo({ doc, avaliacao }) {
+  const etapas = [
+    { label: "Solicitado", cor: "#2E7D32", ativa: true },
+    { label: "Vistoria", cor: doc.vistoria === "Concluída" ? "#2E7D32" : doc.vistoria === "Cancelada" ? "#8593a8" : "#2C75B5", ativa: true },
+    { label: "ART/TRT", cor: doc.art === "Elaborada" ? "#2E7D32" : "#B26A00", ativa: doc.art !== "Não solicitada" },
+    { label: "Relatório", cor: doc.relatorio === "Entregue" ? "#2E7D32" : "#B26A00", ativa: doc.relatorio !== "Pendente" },
+    { label: "Avaliação", cor: "#F5A623", ativa: !!avaliacao },
+  ];
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 0, marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${CINZA_BORDA}` }}>
+      {etapas.map((e, i) => (
+        <React.Fragment key={e.label}>
+          <EtapaTempo {...e} />
+          {i < etapas.length - 1 && <div style={{ height: 2, background: "#D8DEE7", flex: 0.6, marginTop: 6 }} />}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
+function AbaQualidade({ avaliacoes, carregando, docs, docsCarregando }) {
+  const [busca, setBusca] = useState("");
+  const total = avaliacoes.length;
+  const media = total ? (avaliacoes.reduce((s, a) => s + a.nota, 0) / total) : 0;
+  const contagemPorNota = [5, 4, 3, 2, 1].map((n) => ({ n, qtd: avaliacoes.filter((a) => a.nota === n).length }));
+
+  const avaliacaoPorDoc = {};
+  avaliacoes.forEach((a) => { if (a.doc_id) avaliacaoPorDoc[a.doc_id] = a; });
+
+  const termo = busca.trim().toLowerCase();
+  const docsFiltrados = docs.filter((d) =>
+    !termo || `${d.cliente} ${d.empreendimento}`.toLowerCase().includes(termo)
+  );
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <Card icon={Star} titulo="Avaliações dos clientes">
+        {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+        {!carregando && total === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhuma avaliação recebida ainda. Elas aparecem aqui assim que o cliente avalia o atendimento pelo portal público.</p>}
+
+        {total > 0 && (
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 18, flexWrap: "wrap" }}>
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 34, fontWeight: 800, color: AZUL_MARINHO, lineHeight: 1 }}>{media.toFixed(1)}</div>
+                <Estrelas valor={Math.round(media)} />
+                <div style={{ fontSize: 12, color: "#65758b", marginTop: 4 }}>{total} avaliação(ões)</div>
+              </div>
+              <div style={{ flex: 1, minWidth: 200, display: "grid", gap: 4 }}>
+                {contagemPorNota.map(({ n, qtd }) => (
+                  <div key={n} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 12, width: 14 }}>{n}</span>
+                    <div style={{ flex: 1, height: 8, background: CINZA_CLARO, borderRadius: 4, overflow: "hidden" }}>
+                      <div style={{ width: `${total ? (qtd / total) * 100 : 0}%`, height: "100%", background: "#F5A623" }} />
+                    </div>
+                    <span style={{ fontSize: 12, width: 20, textAlign: "right" }}>{qtd}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gap: 10 }}>
+              {avaliacoes.map((a) => (
+                <div key={a.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, flexWrap: "wrap", gap: 6 }}>
+                    <strong style={{ fontSize: 14 }}>{a.cliente || "Cliente"}</strong>
+                    <Estrelas valor={a.nota} tamanho={15} />
+                  </div>
+                  {a.empreendimento && <div style={{ fontSize: 12, color: "#65758b", marginBottom: 6 }}>{a.empreendimento}</div>}
+                  {a.comentario && <div style={{ fontSize: 13.5, color: "#334", background: CINZA_CLARO, borderRadius: 8, padding: "8px 10px" }}>{a.comentario}</div>}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </Card>
+
+      <Card icon={ClipboardCheck} titulo="Acompanhamento do atendimento — do início ao fim">
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
+          Veja em que etapa está cada atendimento: solicitação, vistoria, ART/TRT, relatório e, por fim, a avaliação do cliente.
+        </p>
+        <input style={{ ...inp, marginBottom: 14 }} placeholder="Buscar por cliente ou empreendimento…" value={busca} onChange={(e) => setBusca(e.target.value)} />
+
+        {docsCarregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+        {!docsCarregando && docsFiltrados.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum atendimento encontrado.</p>}
+
+        <div style={{ display: "grid", gap: 14 }}>
+          {docsFiltrados.map((d) => (
+            <div key={d.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                <strong style={{ fontSize: 14 }}>{d.cliente || "—"}</strong>
+                <span style={{ fontSize: 12, color: "#65758b" }}>{d.empreendimento}{d.complemento ? ` · ${d.complemento}` : ""}</span>
+              </div>
+              <LinhaDoTempo doc={d} avaliacao={avaliacaoPorDoc[d.id]} />
+              {avaliacaoPorDoc[d.id] && (
+                <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                  <Estrelas valor={avaliacaoPorDoc[d.id].nota} tamanho={13} />
+                  {avaliacaoPorDoc[d.id].comentario && <span style={{ fontSize: 12.5, color: "#65758b" }}>"{avaliacaoPorDoc[d.id].comentario}"</span>}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+
 function AbaDados({ dados, setD, setTexto, clientes = [], preencherComCliente }) {
   const [clienteSel, setClienteSel] = useState("");
 
@@ -1321,7 +1577,7 @@ function CardIndicadoresGerais({ docs, modo = "completo" }) {
 function FaixaIndicadoresGerais({ docs, modo = "completo", style }) {
   return <div style={style}><CardIndicadoresGerais docs={docs} modo={modo} /></div>;
 }
-function AbaGerencia({ docs, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId }) {
+function AbaGerencia({ docs, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando }) {
   const somaCampo = (campo, filtro) => docs.filter(filtro).reduce((s, d) => s + (Number(d[campo]) || 0), 0);
   const pago = (d) => d.pagamento === "Pago";
   const naoPago = (d) => d.pagamento !== "Pago";
@@ -1350,6 +1606,23 @@ function AbaGerencia({ docs, carregando, assinatura, salvarAssinatura, removerAs
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando indicadores…</p>}
 
       <CardIndicadoresGerais docs={docs} />
+
+      <Card icon={Star} titulo="Qualidade — avaliações dos clientes">
+        {avaliacoesCarregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+        {!avaliacoesCarregando && avaliacoes.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhuma avaliação recebida ainda.</p>}
+        {avaliacoes.length > 0 && (() => {
+          const media = avaliacoes.reduce((s, a) => s + a.nota, 0) / avaliacoes.length;
+          return (
+            <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 30, fontWeight: 800, color: AZUL_MARINHO, lineHeight: 1 }}>{media.toFixed(1)}</div>
+                <Estrelas valor={Math.round(media)} tamanho={16} />
+              </div>
+              <div style={{ fontSize: 13, color: "#65758b" }}>{avaliacoes.length} avaliação(ões) recebida(s). Veja os comentários completos na aba Qualidade.</div>
+            </div>
+          );
+        })()}
+      </Card>
 
       <Card icon={DollarSign} titulo="Financeiro (acesso restrito · Gerência)">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 20 }}>
@@ -1412,11 +1685,13 @@ function AbaGerencia({ docs, carregando, assinatura, salvarAssinatura, removerAs
   );
 }
 
-const ROLE_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", gerencia: "Gerência" };
+const ROLE_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", comercial: "Comercial", qualidade: "Qualidade", gerencia: "Gerência" };
 const ROLE_DESCRICAO = {
   vistoriador: "Só acessa Laudos. Sem acesso a Documentação nem Gerência.",
   documentacao: "Só acessa Documentação/TRT. Sem acesso a Laudos nem Gerência.",
-  gerencia: "Acesso completo: Laudos, Documentação, Gerência e financeiro.",
+  comercial: "Só acessa Clientes: cadastro, agendamento e acompanhamento.",
+  qualidade: "Só acessa Qualidade: avaliações que os clientes deixaram.",
+  gerencia: "Acesso completo: Laudos, Documentação, Clientes, Qualidade, Gerência e financeiro.",
 };
 
 function CardUsuarios({ usuarios, carregando, criarUsuario, atualizarUsuario, excluirUsuario, notify, usuarioAtualId }) {
@@ -1607,6 +1882,53 @@ function CardAssinaturaGerencia({ assinatura, salvarAssinatura, removerAssinatur
 }
 
 /* ================= Aba: Cliente (autocadastro e acompanhamento) ================= */
+function AvaliarServico({ doc, notify }) {
+  const [aberto, setAberto] = useState(false);
+  const [nota, setNota] = useState(0);
+  const [comentario, setComentario] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [enviado, setEnviado] = useState(false);
+
+  const enviar = async () => {
+    if (!nota) { notify("Escolha de 1 a 5 estrelas"); return; }
+    setEnviando(true);
+    try {
+      await apiFetch("/api/avaliacoes", {
+        method: "POST",
+        body: { docId: doc.id, cliente: doc.cliente, empreendimento: doc.empreendimento, nota, comentario },
+      });
+      setEnviado(true);
+      notify("Obrigado pela avaliação! ✓");
+    } catch (e) { notify(`Não foi possível enviar: ${e.message}`); }
+    setEnviando(false);
+  };
+
+  if (enviado) {
+    return <div style={{ marginTop: 10, fontSize: 13, color: "#2E7D32", fontWeight: 600 }}>✓ Avaliação enviada. Obrigado!</div>;
+  }
+
+  if (!aberto) {
+    return (
+      <button className="btn-ghost" style={{ marginTop: 10, color: AZUL_MEDIO, background: CINZA_CLARO }} onClick={() => setAberto(true)}>
+        <Star size={14} /> Avaliar este atendimento
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${CINZA_BORDA}` }}>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Como foi o atendimento?</div>
+      <Estrelas valor={nota} onChange={setNota} tamanho={24} />
+      <textarea style={{ ...inp, marginTop: 10, resize: "vertical" }} rows={2} placeholder="Conte como foi (opcional)"
+        value={comentario} onChange={(e) => setComentario(e.target.value)} />
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <button className="btn-solid" onClick={enviar} disabled={enviando}>{enviando ? "Enviando…" : "Enviar avaliação"}</button>
+        <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setAberto(false)}>Cancelar</button>
+      </div>
+    </div>
+  );
+}
+
 function AbaCliente({ notify }) {
   const [form, setForm] = useState(novoCadastroCliente());
   const [enviando, setEnviando] = useState(false);
@@ -1699,6 +2021,7 @@ function AbaCliente({ notify }) {
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <Selo valor={d.vistoria} /> <Selo valor={d.art} /> <Selo valor={d.relatorio} />
                 </div>
+                <AvaliarServico doc={d} notify={notify} />
               </div>
             ))}
           </div>
