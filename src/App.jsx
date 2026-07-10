@@ -488,6 +488,36 @@ function AppInterno({ session, onLogout }) {
     try { await apiFetch("/api/assinatura", { method: "DELETE", token }); } catch {}
   };
 
+  /* ---- Gerenciar usuários da equipe (somente perfil Gerência) ---- */
+  const [usuarios, setUsuarios] = useState([]);
+  const [usuariosCarregando, setUsuariosCarregando] = useState(false);
+  const carregarUsuarios = async () => {
+    if (perfil !== "gerencia") return;
+    setUsuariosCarregando(true);
+    try {
+      const r = await apiFetch("/api/users", { token });
+      setUsuarios(r.usuarios || []);
+    } catch (e) { notify(`Não foi possível carregar usuários: ${e.message}`); }
+    setUsuariosCarregando(false);
+  };
+  useEffect(() => { carregarUsuarios(); }, []);
+
+  const criarUsuario = async (dadosUsuario) => {
+    await apiFetch("/api/users", { method: "POST", token, body: dadosUsuario });
+    notify("Usuário criado ✓");
+    carregarUsuarios();
+  };
+  const atualizarUsuario = async (id, patch) => {
+    await apiFetch(`/api/users/${id}`, { method: "PATCH", token, body: patch });
+    notify("Usuário atualizado ✓");
+    carregarUsuarios();
+  };
+  const excluirUsuario = async (id) => {
+    await apiFetch(`/api/users/${id}`, { method: "DELETE", token });
+    notify("Usuário removido ✓");
+    carregarUsuarios();
+  };
+
   const preencherComCliente = (cli, { irParaItens = false } = {}) => {
     if (!cli) return;
     setDados((d) => ({
@@ -596,12 +626,8 @@ function AppInterno({ session, onLogout }) {
           </div>
           {abaTop === "laudos" && (
             <>
-              {temStorage && (
-                <>
-                  <button className="btn-ghost" onClick={() => { setShowLoad(true); listarRascunhos(); }}><FolderOpen size={15} /> Abrir</button>
-                  <button className="btn-ghost" onClick={salvarRascunho}><Save size={15} /> Salvar</button>
-                </>
-              )}
+              <button className="btn-ghost" onClick={() => { setShowLoad(true); listarRascunhos(); }}><FolderOpen size={15} /> Abrir</button>
+              <button className="btn-ghost" onClick={salvarRascunho}><Save size={15} /> Salvar</button>
               <button className="btn-solid" onClick={() => { setAba("laudo"); setTimeout(imprimir, 300); }}><Printer size={15} /> Gerar PDF</button>
             </>
           )}
@@ -652,7 +678,8 @@ function AppInterno({ session, onLogout }) {
           <AbaDocumentacao docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={docsCarregando} notify={notify} />
         )}
         {abaTop === "gerencia" && (
-          <AbaGerencia docs={docs} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify} />
+          <AbaGerencia docs={docs} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
+            usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={session.usuario.id} />
         )}
       </main>
 
@@ -1294,7 +1321,7 @@ function CardIndicadoresGerais({ docs, modo = "completo" }) {
 function FaixaIndicadoresGerais({ docs, modo = "completo", style }) {
   return <div style={style}><CardIndicadoresGerais docs={docs} modo={modo} /></div>;
 }
-function AbaGerencia({ docs, carregando, assinatura, salvarAssinatura, removerAssinatura, notify }) {
+function AbaGerencia({ docs, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId }) {
   const somaCampo = (campo, filtro) => docs.filter(filtro).reduce((s, d) => s + (Number(d[campo]) || 0), 0);
   const pago = (d) => d.pagamento === "Pago";
   const naoPago = (d) => d.pagamento !== "Pago";
@@ -1378,8 +1405,162 @@ function AbaGerencia({ docs, carregando, assinatura, salvarAssinatura, removerAs
         </Card>
       )}
 
+      <CardUsuarios usuarios={usuarios} carregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} notify={notify} usuarioAtualId={usuarioAtualId} />
+
       <CardAssinaturaGerencia assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify} />
     </div>
+  );
+}
+
+const ROLE_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", gerencia: "Gerência" };
+const ROLE_DESCRICAO = {
+  vistoriador: "Só acessa Laudos. Sem acesso a Documentação nem Gerência.",
+  documentacao: "Só acessa Documentação/TRT. Sem acesso a Laudos nem Gerência.",
+  gerencia: "Acesso completo: Laudos, Documentação, Gerência e financeiro.",
+};
+
+function CardUsuarios({ usuarios, carregando, criarUsuario, atualizarUsuario, excluirUsuario, notify, usuarioAtualId }) {
+  const [novo, setNovo] = useState(null); // { nome, email, senha, role } quando o modal de criação está aberto
+  const [salvando, setSalvando] = useState(false);
+  const [resetandoId, setResetandoId] = useState(null);
+  const [novaSenha, setNovaSenha] = useState("");
+
+  const abrirNovo = () => setNovo({ nome: "", email: "", senha: "", role: "vistoriador" });
+
+  const salvar = async () => {
+    if (!novo.nome.trim() || !novo.email.trim() || !novo.senha.trim()) { notify("Preencha nome, e-mail e senha"); return; }
+    if (novo.senha.length < 6) { notify("A senha precisa ter pelo menos 6 caracteres"); return; }
+    setSalvando(true);
+    try { await criarUsuario(novo); setNovo(null); }
+    catch (e) { notify(`Não foi possível criar: ${e.message}`); }
+    setSalvando(false);
+  };
+
+  const trocarPapel = async (id, role) => {
+    try { await atualizarUsuario(id, { role }); } catch (e) { notify(`Erro: ${e.message}`); }
+  };
+  const alternarAtivo = async (u) => {
+    try { await atualizarUsuario(u.id, { ativo: !u.ativo }); } catch (e) { notify(`Erro: ${e.message}`); }
+  };
+  const confirmarReset = async (id) => {
+    if (novaSenha.length < 6) { notify("A senha precisa ter pelo menos 6 caracteres"); return; }
+    try { await atualizarUsuario(id, { senha: novaSenha }); setResetandoId(null); setNovaSenha(""); }
+    catch (e) { notify(`Erro: ${e.message}`); }
+  };
+  const remover = async (u) => {
+    if (u.id === usuarioAtualId) { notify("Você não pode remover o próprio usuário logado"); return; }
+    try { await excluirUsuario(u.id); } catch (e) { notify(`Erro: ${e.message}`); }
+  };
+
+  return (
+    <Card icon={Users} titulo="Usuários da equipe (acesso ao sistema)">
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Cada pessoa entra com o próprio e-mail e senha. O papel definido aqui é o que controla o que ela enxerga — não é escolhido por ela.
+      </p>
+      <button className="btn-add" style={{ width: "auto", padding: "9px 16px", marginBottom: 14 }} onClick={abrirNovo}><Plus size={16} /> Novo usuário</button>
+
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && usuarios.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum usuário além de você ainda.</p>}
+
+      {usuarios.length > 0 && (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: CINZA_CLARO }}>
+                {["Nome", "E-mail", "Papel", "Status", ""].map((h) => (
+                  <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}` }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {usuarios.map((u) => (
+                <tr key={u.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                  <td style={{ padding: "8px 10px", fontWeight: 600 }}>
+                    {u.nome}{u.id === usuarioAtualId && <span style={{ color: "#8593a8", fontWeight: 400 }}> (você)</span>}
+                  </td>
+                  <td style={{ padding: "8px 10px" }}>{u.email}</td>
+                  <td style={{ padding: "8px 10px" }}>
+                    <select value={u.role} onChange={(e) => trocarPapel(u.id, e.target.value)} disabled={u.id === usuarioAtualId}
+                      style={{ ...inp, padding: "5px 8px", fontSize: 12.5 }} title={ROLE_DESCRICAO[u.role]}>
+                      {Object.entries(ROLE_LABEL).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+                    </select>
+                  </td>
+                  <td style={{ padding: "8px 10px" }}>
+                    <Selo valor={u.ativo ? "Concluída" : "Cancelada"} />
+                  </td>
+                  <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+                    <button className="icon-btn" onClick={() => alternarAtivo(u)} title={u.ativo ? "Desativar" : "Reativar"} disabled={u.id === usuarioAtualId}>
+                      {u.ativo ? <X size={15} color="#c62828" /> : <Check size={15} color="#2E7D32" />}
+                    </button>
+                    <button className="icon-btn" onClick={() => { setResetandoId(u.id); setNovaSenha(""); }} title="Redefinir senha">
+                      <Edit3 size={15} color={AZUL_MEDIO} />
+                    </button>
+                    {u.id !== usuarioAtualId && (
+                      <button className="icon-btn" onClick={() => remover(u)} title="Remover"><Trash2 size={15} color="#c62828" /></button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Modal: novo usuário */}
+      {novo && (
+        <div className="no-print" style={overlay} onClick={() => setNovo(null)}>
+          <div style={{ ...modal, maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <strong>Novo usuário</strong>
+              <button className="icon-btn" onClick={() => setNovo(null)}><X size={16} /></button>
+            </div>
+            <div style={cell(true)}>
+              <label style={lab}>Nome</label>
+              <input style={inp} value={novo.nome} onChange={(e) => setNovo({ ...novo, nome: e.target.value })} />
+            </div>
+            <div style={{ ...cell(true), marginTop: 10 }}>
+              <label style={lab}>E-mail</label>
+              <input style={inp} type="email" value={novo.email} onChange={(e) => setNovo({ ...novo, email: e.target.value })} />
+            </div>
+            <div style={{ ...cell(true), marginTop: 10 }}>
+              <label style={lab}>Senha provisória</label>
+              <input style={inp} type="text" value={novo.senha} onChange={(e) => setNovo({ ...novo, senha: e.target.value })} placeholder="mínimo 6 caracteres" />
+            </div>
+            <div style={{ ...cell(true), marginTop: 10 }}>
+              <label style={lab}>Papel de acesso</label>
+              <select style={inp} value={novo.role} onChange={(e) => setNovo({ ...novo, role: e.target.value })}>
+                {Object.entries(ROLE_LABEL).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+              </select>
+              <div style={{ fontSize: 12, color: "#65758b", marginTop: 4 }}>{ROLE_DESCRICAO[novo.role]}</div>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setNovo(null)}>Cancelar</button>
+              <button className="btn-solid" onClick={salvar} disabled={salvando}>{salvando ? "Criando…" : "Criar usuário"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: redefinir senha */}
+      {resetandoId && (
+        <div className="no-print" style={overlay} onClick={() => setResetandoId(null)}>
+          <div style={{ ...modal, maxWidth: 360 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <strong>Redefinir senha</strong>
+              <button className="icon-btn" onClick={() => setResetandoId(null)}><X size={16} /></button>
+            </div>
+            <div style={cell(true)}>
+              <label style={lab}>Nova senha</label>
+              <input style={inp} type="text" value={novaSenha} onChange={(e) => setNovaSenha(e.target.value)} placeholder="mínimo 6 caracteres" autoFocus />
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setResetandoId(null)}>Cancelar</button>
+              <button className="btn-solid" onClick={() => confirmarReset(resetandoId)}>Salvar nova senha</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }
 
