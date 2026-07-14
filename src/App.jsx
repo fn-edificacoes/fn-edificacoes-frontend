@@ -50,7 +50,7 @@ function mapDocDaApi(d) {
 function mapClienteDaApi(c) {
   return {
     id: c.id, nome: c.nome || "", cpf: c.cpf || "", telefone: c.telefone || "", email: c.email || "",
-    construtora: c.construtora || "", empreendimento: c.empreendimento || "", complemento: c.complemento || "",
+    construtora: c.construtora || "", empreendimento: c.empreendimento || "", complemento: c.complemento || "", endereco: c.endereco || "",
     servico: c.servico || "", dataDesejada: c.data_desejada || "", horarioDesejado: c.horario_desejado || "",
     observacoes: c.observacoes || "", atendido: !!c.atendido,
   };
@@ -263,7 +263,7 @@ const SERVICO_OPCOES = ["Vistoria de entrega de chaves", "Laudo técnico / TRT",
 const novoCadastroCliente = () => ({
   id: `cli_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
   nome: "", cpf: "", telefone: "", email: "",
-  construtora: "", empreendimento: "", complemento: "",
+  construtora: "", empreendimento: "", complemento: "", endereco: "",
   servico: SERVICO_OPCOES[0], dataDesejada: "", horarioDesejado: "", observacoes: "",
   atendido: false,
   criadoEm: new Date().toISOString(),
@@ -557,7 +557,7 @@ function AppInterno({ session, onLogout }) {
     setDados((d) => ({
       ...d,
       contratante: { ...d.contratante, nome: cli.nome || d.contratante.nome, cpf: cli.cpf || d.contratante.cpf },
-      imovel: { ...d.imovel, construtora: cli.construtora || d.imovel.construtora, empreendimento: cli.empreendimento || d.imovel.empreendimento, unidade: cli.complemento || d.imovel.unidade },
+      imovel: { ...d.imovel, construtora: cli.construtora || d.imovel.construtora, empreendimento: cli.empreendimento || d.imovel.empreendimento, unidade: cli.complemento || d.imovel.unidade, endereco: cli.endereco || d.imovel.endereco },
       vistoria: { ...d.vistoria, data: cli.dataDesejada || d.vistoria.data, inicio: cli.horarioDesejado || d.vistoria.inicio },
     }));
     if (!cli.atendido) updCliente(cli.id, { atendido: true });
@@ -2052,6 +2052,7 @@ function AbaCliente({ notify }) {
           <Field label="E-mail" value={form.email} onChange={(v) => setF("email", v)} full />
           <Field label="Construtora" value={form.construtora} onChange={(v) => setFMaiusc("construtora", v)} />
           <Field label="Empreendimento" value={form.empreendimento} onChange={(v) => setFMaiusc("empreendimento", v)} />
+          <Field label="Endereço completo" value={form.endereco} onChange={(v) => setFMaiusc("endereco", v)} full />
           <Field label="Bloco / Apto" value={form.complemento} onChange={(v) => setFMaiusc("complemento", v)} />
           <div style={cell(true)}>
             <label style={lab}>Serviço desejado</label>
