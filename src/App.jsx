@@ -219,41 +219,6 @@ const ART_OPCOES = ["Não solicitada", "Em processo", "Elaborada"];
 const TIPO_ART_OPCOES = ["Individual", "Coletiva"];
 const RELATORIO_OPCOES = ["Pendente", "Em processo", "Entregue"];
 
-/* ---------- Andamento exibido ao cliente ---------- */
-const ANDAMENTO_OPCOES = [
-  "Agendado",
-  "Vistoria realizada",
-  "Laudo em elaboração",
-  "Laudo em revisão",
-  "Laudo disponível",
-  "Atendimento concluído",
-];
-
-const ANDAMENTO_INFO = {
-  "Agendado": { cor: "#2C75B5", bg: "#EAF3FB", texto: "Sua vistoria já foi agendada. Nossa equipe estará preparada para realizar o atendimento na data combinada." },
-  "Vistoria realizada": { cor: "#6A4BBC", bg: "#F0EBFC", texto: "Sua vistoria foi realizada. Os registros técnicos agora seguem para análise e elaboração do laudo." },
-  "Laudo em elaboração": { cor: "#B26A00", bg: "#FFF4E0", texto: "Seu atendimento está no setor de vistoria: o laudo está sendo elaborado." },
-  "Laudo em revisão": { cor: "#9A6700", bg: "#FFF7D6", texto: "Seu laudo está em revisão técnica para conferência das informações antes da liberação." },
-  "Laudo disponível": { cor: "#2E7D32", bg: "#E6F4EA", texto: "Seu laudo está disponível. A equipe da FN Edificações entrará em contato para realizar a entrega." },
-  "Atendimento concluído": { cor: "#1B5E20", bg: "#E1F3E4", texto: "Seu atendimento foi concluído. Agradecemos por confiar na FN Edificações." },
-};
-
-function somenteNumeros(v = "") { return String(v).replace(/\D/g, ""); }
-function extrairAndamento(d = {}) {
-  if (d.andamento && ANDAMENTO_INFO[d.andamento]) return d.andamento;
-  const marcador = String(d.observacoes || "").match(/ANDAMENTO_CLIENTE:([^|\n]+)/);
-  if (marcador && ANDAMENTO_INFO[marcador[1].trim()]) return marcador[1].trim();
-  if (d.relatorio === "Entregue") return "Laudo disponível";
-  if (d.relatorio === "Em processo") return "Laudo em elaboração";
-  if (d.vistoria === "Concluída") return "Vistoria realizada";
-  return "Agendado";
-}
-function extrairAtualizacao(d = {}) {
-  if (d.atualizado_em) return d.atualizado_em;
-  const marcador = String(d.observacoes || "").match(/ATUALIZADO_EM:([^|\n]+)/);
-  return marcador ? marcador[1].trim() : (d.updated_at || d.criado_em || "");
-}
-
 /* ---------- Perfis de acesso (agora definidos pelo backend/login, não escolhidos na tela) ----------
    vistoriador   -> só enxerga o módulo Laudos (não vê Documentação nem Gerência)
    documentacao  -> só enxerga o módulo Documentação
@@ -464,7 +429,7 @@ function AppInterno({ session, onLogout }) {
   const notify = (m) => { setToast(m); setTimeout(() => setToast(""), 2200); };
 
   /* ---- Documentação/Gerência: carregar e persistir via API real ---- */
-  const podeVerDocs = perfil === "gerencia" || perfil === "documentacao" || perfil === "qualidade" || perfil === "vistoriador";
+  const podeVerDocs = perfil === "gerencia" || perfil === "documentacao" || perfil === "qualidade";
   const carregarDocs = async () => {
     if (!podeVerDocs) return;
     setDocsCarregando(true);
@@ -487,47 +452,6 @@ function AppInterno({ session, onLogout }) {
     try { await apiFetch(`/api/docs/${id}`, { method: "PATCH", token, body: patch }); }
     catch (e) { notify(`Não foi possível atualizar: ${e.message}`); }
   };
-
-  const atualizarAndamentoCliente = async ({ nome, cpf, empreendimento, unidade, andamento }) => {
-    const cpfLimpo = somenteNumeros(cpf);
-    if (!nome.trim()) throw new Error("Informe o nome do cliente.");
-    if (cpfLimpo.length !== 11) throw new Error("Informe um CPF válido com 11 dígitos.");
-    if (!andamento) throw new Error("Escolha o status do atendimento.");
-
-    const agora = new Date().toISOString();
-    const existente = docs.find((d) => somenteNumeros(d.cpf) === cpfLimpo);
-    const infoStatus = {
-      "Agendado": { vistoria: "Agendada", relatorio: "Pendente" },
-      "Vistoria realizada": { vistoria: "Concluída", relatorio: "Pendente" },
-      "Laudo em elaboração": { vistoria: "Concluída", relatorio: "Em processo" },
-      "Laudo em revisão": { vistoria: "Concluída", relatorio: "Em processo" },
-      "Laudo disponível": { vistoria: "Concluída", relatorio: "Entregue" },
-      "Atendimento concluído": { vistoria: "Concluída", relatorio: "Entregue" },
-    }[andamento];
-    const observacoesAnteriores = String(existente?.observacoes || "")
-      .replace(/ANDAMENTO_CLIENTE:[^|\n]+\|?/g, "")
-      .replace(/ATUALIZADO_EM:[^|\n]+\|?/g, "")
-      .trim();
-    const patch = {
-      cliente: nome.trim().toUpperCase(), cpf: cpfLimpo,
-      empreendimento: (empreendimento || "").trim().toUpperCase(),
-      complemento: (unidade || "").trim().toUpperCase(),
-      vistoria: infoStatus.vistoria, relatorio: infoStatus.relatorio,
-      andamento, atualizadoEm: agora,
-      observacoes: `ANDAMENTO_CLIENTE:${andamento}|ATUALIZADO_EM:${agora}${observacoesAnteriores ? `|${observacoesAnteriores}` : ""}`,
-    };
-
-    if (existente) {
-      await apiFetch(`/api/docs/${existente.id}`, { method: "PATCH", token, body: patch });
-      setDocs((atual) => atual.map((d) => d.id === existente.id ? { ...d, ...patch } : d));
-    } else {
-      const novo = { ...novoRegistroDoc(), ...patch };
-      const r = await apiFetch("/api/docs", { method: "POST", token, body: novo });
-      setDocs((atual) => [{ ...novo, id: r.id }, ...atual]);
-    }
-    notify("Andamento atualizado para o cliente ✓");
-  };
-
   const delDoc = async (id) => {
     setDocs((atual) => atual.filter((d) => d.id !== id));
     try { await apiFetch(`/api/docs/${id}`, { method: "DELETE", token }); }
@@ -764,7 +688,7 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "laudos" && <FaixaIndicadoresGerais docs={docs} modo="vistorias" style={{ marginBottom: 18 }} />}
         {abaTop === "documentacao" && <FaixaIndicadoresGerais docs={docs} modo="art" style={{ marginBottom: 18 }} />}
 
-        {abaTop === "laudos" && aba === "dados" && <AbaDados dados={dados} setD={setD} setTexto={setTexto} clientes={clientes} preencherComCliente={preencherComCliente} atualizarAndamentoCliente={atualizarAndamentoCliente} />}
+        {abaTop === "laudos" && aba === "dados" && <AbaDados dados={dados} setD={setD} setTexto={setTexto} clientes={clientes} preencherComCliente={preencherComCliente} />}
         {abaTop === "laudos" && aba === "itens" && (
           <AbaItens itens={itens} setItens={setItens} updItem={updItem} escolherPatologia={escolherPatologia}
             addFotos={addFotos} removerFoto={removerFoto} contagem={contagem} />
@@ -1087,24 +1011,8 @@ function AbaQualidade({ avaliacoes, carregando, docs, docsCarregando }) {
 }
 
 
-function AbaDados({ dados, setD, setTexto, clientes = [], preencherComCliente, atualizarAndamentoCliente }) {
+function AbaDados({ dados, setD, setTexto, clientes = [], preencherComCliente }) {
   const [clienteSel, setClienteSel] = useState("");
-  const [andamento, setAndamento] = useState("Agendado");
-  const [salvandoAndamento, setSalvandoAndamento] = useState(false);
-
-  const publicarAndamento = async () => {
-    setSalvandoAndamento(true);
-    try {
-      await atualizarAndamentoCliente({
-        nome: dados.contratante.nome,
-        cpf: dados.contratante.cpf,
-        empreendimento: dados.imovel.empreendimento,
-        unidade: dados.imovel.unidade,
-        andamento,
-      });
-    } catch (e) { alert(e.message); }
-    setSalvandoAndamento(false);
-  };
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -1134,24 +1042,6 @@ function AbaDados({ dados, setD, setTexto, clientes = [], preencherComCliente, a
           <Field label="Nome" value={dados.contratante.nome} onChange={(v) => setD("contratante", "nome", v)} full />
           <Field label="CPF / CNPJ" value={dados.contratante.cpf} onChange={(v) => setD("contratante", "cpf", v)} />
         </Grid>
-      </Card>
-
-      <Card icon={RefreshCcw} titulo="Andamento para o cliente">
-        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
-          Confira o nome e o CPF acima, escolha o status atual e publique. O cliente poderá consultar somente pelo CPF.
-        </p>
-        <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-          <div style={{ ...cell(true), flex: 1, minWidth: 230 }}>
-            <label style={lab}>Status atual</label>
-            <select style={inp} value={andamento} onChange={(e) => setAndamento(e.target.value)}>
-              {ANDAMENTO_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
-            </select>
-          </div>
-          <button className="btn-solid" style={{ width: "auto", padding: "10px 16px" }} onClick={publicarAndamento} disabled={salvandoAndamento}>
-            {salvandoAndamento ? <Loader2 size={15} className="spin" /> : <RefreshCcw size={15} />}
-            Atualizar andamento para o cliente
-          </button>
-        </div>
       </Card>
 
       <Card icon={Building2} titulo="Dados do imóvel">
@@ -2040,88 +1930,102 @@ function AvaliarServico({ doc, notify }) {
 }
 
 function AbaCliente({ notify }) {
-  const [cpf, setCpf] = useState("");
+  const [form, setForm] = useState(novoCadastroCliente());
+  const [enviando, setEnviando] = useState(false);
+  const [busca, setBusca] = useState("");
   const [buscando, setBuscando] = useState(false);
   const [buscou, setBuscou] = useState(false);
-  const [resultado, setResultado] = useState(null);
+  const [resultados, setResultados] = useState([]);
+
+  const setF = (campo, v) => setForm((f) => ({ ...f, [campo]: v }));
+  const setFMaiusc = (campo, v) => setForm((f) => ({ ...f, [campo]: v.toUpperCase() }));
+  const setFCpf = (v) => setForm((f) => ({ ...f, cpf: v.replace(/\D/g, "").slice(0, 11) }));
+
+  const enviar = async () => {
+    if (!form.nome.trim() || !form.telefone.trim()) { notify("Informe pelo menos nome e telefone"); return; }
+    if (form.cpf && form.cpf.length !== 11) { notify("O CPF deve ter 11 dígitos"); return; }
+    setEnviando(true);
+    try {
+      await apiFetch("/api/clientes", { method: "POST", body: form });
+      setForm(novoCadastroCliente());
+      notify("Cadastro enviado! Nossa equipe entrará em contato ✓");
+    } catch (e) { notify(`Não foi possível enviar: ${e.message}`); }
+    setEnviando(false);
+  };
 
   const buscar = async () => {
-    const cpfLimpo = somenteNumeros(cpf);
-    if (cpfLimpo.length !== 11) { notify("Digite um CPF válido com 11 dígitos"); return; }
-    setBuscando(true); setBuscou(true); setResultado(null);
+    const termo = busca.trim();
+    if (termo.length < 3) { notify("Digite ao menos 3 caracteres"); return; }
+    setBuscando(true); setBuscou(true);
     try {
-      const r = await apiFetch("/api/acompanhamento", { method: "POST", body: { termo: cpfLimpo, cpf: cpfLimpo } });
-      const encontrados = r.resultados || [];
-      const exato = encontrados.find((d) => somenteNumeros(d.cpf) === cpfLimpo) || encontrados[0] || null;
-      setResultado(exato);
-    } catch (e) { notify(`Não foi possível consultar: ${e.message}`); }
+      const r = await apiFetch("/api/acompanhamento", { method: "POST", body: { termo } });
+      setResultados(r.resultados || []);
+    } catch (e) { notify(`Não foi possível buscar: ${e.message}`); setResultados([]); }
     setBuscando(false);
   };
 
-  const status = resultado ? extrairAndamento(resultado) : "";
-  const info = ANDAMENTO_INFO[status] || ANDAMENTO_INFO["Agendado"];
-  const atualizado = resultado ? extrairAtualizacao(resultado) : "";
-  const dataFormatada = atualizado ? new Date(atualizado).toLocaleString("pt-BR") : "Não informada";
-
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <Card icon={ClipboardCheck} titulo="Consulta do cliente">
-        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
-          Digite seu CPF para acompanhar o andamento do atendimento realizado pela FN Edificações.
+      <Card icon={Users} titulo="Cadastre-se">
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+          Preencha seus dados para agendar uma vistoria, laudo técnico ou outro serviço da FN Edificações. Nossa equipe entra em contato para confirmar o atendimento.
         </p>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <input style={{ ...inp, flex: 1, minWidth: 220 }} inputMode="numeric" placeholder="Digite os 11 números do CPF"
-            value={cpf} maxLength={11}
-            onChange={(e) => { setCpf(somenteNumeros(e.target.value).slice(0, 11)); setBuscou(false); setResultado(null); }}
+        <Grid>
+          <Field label="Nome completo" value={form.nome} onChange={(v) => setFMaiusc("nome", v)} full />
+          <Field label="CPF (11 dígitos)" value={form.cpf} onChange={setFCpf} />
+          <Field label="Telefone / WhatsApp" value={form.telefone} onChange={(v) => setF("telefone", v.replace(/\D/g, "").slice(0, 11))} />
+          <Field label="E-mail" value={form.email} onChange={(v) => setF("email", v)} full />
+          <Field label="Construtora" value={form.construtora} onChange={(v) => setFMaiusc("construtora", v)} />
+          <Field label="Empreendimento" value={form.empreendimento} onChange={(v) => setFMaiusc("empreendimento", v)} />
+          <Field label="Bloco / Apto" value={form.complemento} onChange={(v) => setFMaiusc("complemento", v)} />
+          <div style={cell(true)}>
+            <label style={lab}>Serviço desejado</label>
+            <select style={inp} value={form.servico} onChange={(e) => setF("servico", e.target.value)}>
+              {SERVICO_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </div>
+          <Field label="Data desejada" type="date" value={form.dataDesejada} onChange={(v) => setF("dataDesejada", v)} />
+          <Field label="Horário desejado" type="time" value={form.horarioDesejado} onChange={(v) => setF("horarioDesejado", v)} />
+        </Grid>
+        <Area label="Observações (opcional)" value={form.observacoes} onChange={(v) => setFMaiusc("observacoes", v)} rows={2} placeholder="EX.: MELHOR HORÁRIO PARA CONTATO, DETALHES DO IMÓVEL..." />
+        <button className="btn-solid" style={{ marginTop: 12 }} onClick={enviar} disabled={enviando}>
+          {enviando ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} Enviar cadastro
+        </button>
+      </Card>
+
+      <Card icon={ClipboardCheck} titulo="Acompanhar meu atendimento">
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
+          Busque pelo seu nome ou CPF para ver o status da sua vistoria, ART/TRT e relatório.
+        </p>
+        <div style={{ display: "flex", gap: 10 }}>
+          <input style={{ ...inp, flex: 1 }} placeholder="Seu nome ou CPF…" value={busca}
+            onChange={(e) => { setBusca(e.target.value); setBuscou(false); }}
             onKeyDown={(e) => e.key === "Enter" && buscar()} />
-          <button className="btn-solid" style={{ width: "auto", padding: "10px 18px" }} onClick={buscar} disabled={buscando}>
-            {buscando ? <><Loader2 size={15} className="spin" /> Consultando…</> : "Consultar"}
-          </button>
+          <button className="btn-solid" onClick={buscar} disabled={buscando}>{buscando ? "Buscando…" : "Buscar"}</button>
         </div>
 
-        {buscou && !buscando && !resultado && (
+        {buscou && !buscando && resultados.length === 0 && (
           <p style={{ color: "#8593a8", fontSize: 14, marginTop: 14 }}>
-            Nenhum atendimento foi encontrado para este CPF. Confira os números digitados ou fale com nossa equipe.
+            Nenhum atendimento encontrado ainda com esse nome/CPF. Assim que sua vistoria for agendada pela nossa equipe, ela aparecerá aqui.
           </p>
         )}
 
-        {resultado && (
-          <div style={{ marginTop: 18, border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, overflow: "hidden" }}>
-            <div style={{ padding: 16, background: "#fff" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-                <div>
-                  <div style={{ fontSize: 12, color: "#8593a8", marginBottom: 3 }}>Cliente</div>
-                  <strong style={{ fontSize: 16, color: AZUL_MARINHO }}>{resultado.cliente || "Cliente FN"}</strong>
+        {resultados.length > 0 && (
+          <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
+            {resultados.map((d) => (
+              <div key={d.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
+                  <strong style={{ fontSize: 14 }}>{d.cliente || "—"}</strong>
+                  <span style={{ fontSize: 12, color: "#65758b" }}>{d.empreendimento}{d.complemento ? ` · ${d.complemento}` : ""}</span>
                 </div>
-                <span style={{ background: info.bg, color: info.cor, borderRadius: 999, padding: "7px 12px", fontSize: 12.5, fontWeight: 700 }}>{status}</span>
-              </div>
-
-              {(resultado.empreendimento || resultado.complemento) && (
-                <div style={{ marginTop: 14, fontSize: 13.5, color: "#4D5D72" }}>
-                  <strong>Imóvel:</strong> {[resultado.empreendimento, resultado.complemento].filter(Boolean).join(" · ")}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <Selo valor={d.vistoria} /> <Selo valor={d.art} /> <Selo valor={d.relatorio} />
                 </div>
-              )}
-
-              <div style={{ marginTop: 14, background: info.bg, color: info.cor, borderRadius: 10, padding: 13, fontSize: 13.5, lineHeight: 1.5 }}>
-                {info.texto}
+                <AvaliarServico doc={d} notify={notify} />
               </div>
-
-              <div style={{ marginTop: 13, fontSize: 12.5, color: "#7A889A" }}>
-                Última atualização: <strong>{dataFormatada}</strong>
-              </div>
-            </div>
+            ))}
           </div>
         )}
-      </Card>
-
-      <Card icon={Info} titulo="Precisa de ajuda?">
-        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 10px" }}>
-          Para dúvidas sobre seu atendimento, fale diretamente com a FN Edificações.
-        </p>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <a href="https://wa.me/5581987388104" target="_blank" rel="noreferrer" className="btn-solid" style={{ textDecoration: "none", width: "auto" }}>WhatsApp</a>
-          <a href="https://www.instagram.com/fnedificacoes" target="_blank" rel="noreferrer" className="btn-ghost" style={{ textDecoration: "none", color: AZUL_MARINHO, background: CINZA_CLARO }}>Instagram</a>
-        </div>
       </Card>
     </div>
   );
