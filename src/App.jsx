@@ -377,7 +377,7 @@ function TelaLogin({ onLogin, onVoltar }) {
 }
 
 /* ================= Portal público do cliente (sem login) ================= */
-function PortalCliente({ onIrParaLogin }) {
+function PortalCliente({ onIrParaLogin, onIrParaCadastroParceiro }) {
   const [toast, setToast] = useState("");
   const notify = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
 
@@ -392,6 +392,7 @@ function PortalCliente({ onIrParaLogin }) {
             <div style={{ fontWeight: 700, fontSize: 15 }}>FN Edificações</div>
             <div style={{ fontSize: 11, opacity: 0.7 }}>Área do Cliente</div>
           </div>
+          {onIrParaCadastroParceiro && <button className="btn-ghost" onClick={onIrParaCadastroParceiro}>Seja um parceiro</button>}
           <button className="btn-ghost" onClick={onIrParaLogin}>Sou da equipe →</button>
         </div>
       </header>
@@ -411,11 +412,15 @@ function PortalCliente({ onIrParaLogin }) {
 export default function App() {
   const [session, setSession] = useState(null); // { token, usuario }
   const [mostrarLogin, setMostrarLogin] = useState(false);
+  const [mostrarCadastroParceiro, setMostrarCadastroParceiro] = useState(false);
 
   if (!session) {
+    if (mostrarCadastroParceiro) {
+      return <TelaCadastroParceiro onVoltar={() => setMostrarCadastroParceiro(false)} />;
+    }
     return mostrarLogin
       ? <TelaLogin onLogin={setSession} onVoltar={() => setMostrarLogin(false)} />
-      : <PortalCliente onIrParaLogin={() => setMostrarLogin(true)} />;
+      : <PortalCliente onIrParaLogin={() => setMostrarLogin(true)} onIrParaCadastroParceiro={() => setMostrarCadastroParceiro(true)} />;
   }
   return <AppInterno session={session} onLogout={() => { setSession(null); setMostrarLogin(false); }} />;
 }
@@ -502,6 +507,25 @@ function AppInterno({ session, onLogout }) {
     setAvaliacoesCarregando(false);
   };
   useEffect(() => { carregarAvaliacoes(); }, []);
+
+  /* ---- Parceiros/Afiliados: homologação (somente perfil Gerência) ---- */
+  const [parceiros, setParceiros] = useState([]);
+  const [parceirosCarregando, setParceirosCarregando] = useState(false);
+  const carregarParceiros = async () => {
+    if (perfil !== "gerencia") return;
+    setParceirosCarregando(true);
+    try {
+      const r = await apiFetch("/api/parceiros", { token });
+      setParceiros((r.parceiros || []).map(mapParceiroDaApi));
+    } catch (e) { notify(`Não foi possível carregar parceiros: ${e.message}`); }
+    setParceirosCarregando(false);
+  };
+  useEffect(() => { carregarParceiros(); }, []);
+  const atualizarParceiro = async (id, patch) => {
+    setParceiros((atual) => atual.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+    try { await apiFetch(`/api/parceiros/${id}`, { method: "PATCH", token, body: patch }); }
+    catch (e) { notify(`Não foi possível atualizar parceiro: ${e.message}`); }
+  };
 
   /* ---- Assinatura digital da Gerência (via API real) ---- */
   const [assinatura, setAssinatura] = useState(null); // { imagem, nome }
@@ -720,7 +744,8 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "gerencia" && (
           <AbaGerencia docs={docs} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
             usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={session.usuario.id}
-            avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando} />
+            avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
+            parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} />
         )}
       </main>
 
@@ -1652,7 +1677,7 @@ function CardIndicadoresGerais({ docs, modo = "completo" }) {
 function FaixaIndicadoresGerais({ docs, modo = "completo", style }) {
   return <div style={style}><CardIndicadoresGerais docs={docs} modo={modo} /></div>;
 }
-function AbaGerencia({ docs, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando }) {
+function AbaGerencia({ docs, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro }) {
   const somaCampo = (campo, filtro) => docs.filter(filtro).reduce((s, d) => s + (Number(d[campo]) || 0), 0);
   const pago = (d) => d.pagamento === "Pago";
   const naoPago = (d) => d.pagamento !== "Pago";
@@ -1754,6 +1779,8 @@ function AbaGerencia({ docs, carregando, assinatura, salvarAssinatura, removerAs
       )}
 
       <CardUsuarios usuarios={usuarios} carregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} notify={notify} usuarioAtualId={usuarioAtualId} />
+
+      <CardParceiros parceiros={parceiros} carregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} notify={notify} />
 
       <CardAssinaturaGerencia assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify} />
     </div>
@@ -2130,7 +2157,406 @@ function AbaCliente({ notify }) {
           </div>
         </div>
       </Card>
+
+      <SecaoParceirosVitrine notify={notify} />
     </div>
+  );
+}
+
+/* ================= Módulo: Parceiros / Afiliados (aditivo) ================= */
+const PARCEIRO_TIPO_OPCOES = [
+  { valor: "servico", label: "Prestadores de Serviço" },
+  { valor: "produto", label: "Venda de Produtos" },
+];
+const PARCEIRO_TIPO_LABEL = { servico: "Prestador de Serviço", produto: "Venda de Produtos" };
+
+const PARCEIRO_STATUS_OPCOES = ["em_analise", "aprovado", "suspenso", "encerrado"];
+const PARCEIRO_STATUS_LABEL = { em_analise: "Em análise", aprovado: "Aprovado", suspenso: "Suspenso", encerrado: "Encerrado" };
+STATUS_COR["Em análise"] = { cor: "#2C75B5", bg: "#EAF2FB" };
+STATUS_COR["Aprovado"] = { cor: "#2E7D32", bg: "#E6F4EA" };
+STATUS_COR["Suspenso"] = { cor: "#B26A00", bg: "#FFF4E0" };
+STATUS_COR["Encerrado"] = { cor: "#65758b", bg: "#EEF1F5" };
+
+function safeParseArray(v) {
+  if (Array.isArray(v)) return v;
+  if (typeof v === "string") { try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch { return []; } }
+  return [];
+}
+/* Converte um registro de Parceiro vindo do banco (snake_case) para o formato usado no app (camelCase) */
+function mapParceiroDaApi(p) {
+  return {
+    id: p.id, status: p.status || "em_analise", tipo: p.tipo || "servico",
+    empresa: p.empresa || "", responsavel: p.responsavel || "", cnpj: p.cnpj || "",
+    cidade: p.cidade || "", uf: p.uf || "", whatsapp: p.whatsapp || "",
+    instagram: p.instagram || "", site: p.site || "", logo: p.logo || "", email: p.email || "",
+    comissao: safeParseArray(p.comissao),
+    beneficio: p.beneficio || "", descricaoBeneficio: p.descricao_beneficio || p.descricaoBeneficio || "",
+    avaliacao: p.avaliacao || "",
+  };
+}
+
+const novaComissaoLinha = () => ({ name: "", p: "" });
+const novoCadastroParceiro = () => ({
+  email: "", senha: "", tipo: "servico", empresa: "", responsavel: "", cnpj: "",
+  cidade: "", uf: "", whatsapp: "", instagram: "", site: "", logo: "",
+  comissao: [novaComissaoLinha()], beneficio: "", descricaoBeneficio: "",
+});
+
+/* ---- Tela pública: cadastro de Parceiro/Afiliado (sem login) ---- */
+function TelaCadastroParceiro({ onVoltar }) {
+  const [form, setForm] = useState(novoCadastroParceiro());
+  const [enviando, setEnviando] = useState(false);
+  const [erro, setErro] = useState("");
+  const [resultado, setResultado] = useState(null); // { id, status }
+
+  const setF = (campo, v) => setForm((f) => ({ ...f, [campo]: v }));
+  const setComissaoLinha = (idx, patch) => setForm((f) => ({ ...f, comissao: f.comissao.map((l, i) => (i === idx ? { ...l, ...patch } : l)) }));
+  const addComissaoLinha = () => setForm((f) => ({ ...f, comissao: [...f.comissao, novaComissaoLinha()] }));
+  const removerComissaoLinha = (idx) => setForm((f) => ({ ...f, comissao: f.comissao.filter((_, i) => i !== idx) }));
+
+  const onLogo = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { setErro("Envie uma imagem (PNG ou JPG) para a logo"); return; }
+    const reader = new FileReader();
+    reader.onload = () => setF("logo", reader.result);
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const enviar = async () => {
+    setErro("");
+    if (!form.email.trim() || !form.senha.trim()) { setErro("Informe e-mail e senha de acesso."); return; }
+    if (form.senha.length < 6) { setErro("A senha precisa ter pelo menos 6 caracteres."); return; }
+    if (!form.empresa.trim() || !form.responsavel.trim()) { setErro("Informe a empresa e o responsável."); return; }
+    if (!form.cidade.trim() || !form.uf.trim()) { setErro("Informe cidade e UF."); return; }
+    if (!form.whatsapp.trim()) { setErro("Informe um WhatsApp para contato."); return; }
+    const comissaoValida = form.comissao.filter((l) => l.name.trim() && l.p !== "");
+    if (comissaoValida.length === 0) { setErro("Adicione ao menos uma categoria de comissão com percentual."); return; }
+
+    setEnviando(true);
+    try {
+      const body = { ...form, comissao: comissaoValida.map((l) => ({ name: l.name.trim(), p: Number(l.p) })) };
+      const r = await apiFetch("/api/parceiros/signup", { method: "POST", body });
+      setResultado({ id: r.id, status: r.status || "em_analise" });
+    } catch (e) {
+      setErro(e.message === "Failed to fetch" ? "Não foi possível conectar à API. Verifique sua internet e tente novamente." : e.message);
+    }
+    setEnviando(false);
+  };
+
+  if (resultado) {
+    return (
+      <div style={{ minHeight: "100vh", background: CINZA_CLARO, display: "grid", placeItems: "center", padding: 18, fontFamily: "'Inter', system-ui, sans-serif" }}>
+        <div style={{ background: "#fff", borderRadius: 16, padding: "36px 30px", width: "100%", maxWidth: 440, boxShadow: "0 10px 30px rgba(18,51,91,.12)", textAlign: "center" }}>
+          <div style={{ width: 56, height: 56, borderRadius: "50%", background: "#E6F4EA", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
+            <Check size={28} color="#2E7D32" />
+          </div>
+          <h2 style={{ color: AZUL_MARINHO, fontSize: 19, margin: "0 0 8px" }}>Cadastro enviado!</h2>
+          <p style={{ color: "#65758b", fontSize: 13.5, margin: "0 0 16px" }}>
+            Recebemos os dados da <strong>{form.empresa}</strong>. Nossa equipe vai avaliar o cadastro e entrar em contato pelo WhatsApp informado.
+          </p>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}>
+            <Selo valor={PARCEIRO_STATUS_LABEL[resultado.status] || resultado.status} />
+          </div>
+          <button type="button" className="btn-solid" style={{ width: "100%", justifyContent: "center" }} onClick={onVoltar}>Voltar</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: CINZA_CLARO, fontFamily: "'Inter', system-ui, sans-serif" }}>
+      <header style={{ background: AZUL_MARINHO, color: "#fff" }}>
+        <div style={{ maxWidth: 720, margin: "0 auto", padding: "16px 18px", display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 38, height: 38, borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
+            <img src={LOGO_FN_BASE64} alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+          </div>
+          <div style={{ lineHeight: 1.1, flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: 15 }}>FN Edificações</div>
+            <div style={{ fontSize: 11, opacity: 0.7 }}>Seja um Parceiro</div>
+          </div>
+          <button className="btn-ghost" onClick={onVoltar}>← Voltar</button>
+        </div>
+      </header>
+      <main style={{ maxWidth: 720, margin: "0 auto", padding: "22px 18px 80px" }}>
+        <Card icon={Users} titulo="Cadastro de Parceiro / Afiliado">
+          <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+            Cadastre sua empresa para se tornar parceira FN Edificações e oferecer benefícios aos nossos clientes.
+          </p>
+          <div style={{ background: "#FFF4E0", color: "#B26A00", padding: "10px 12px", borderRadius: 8, fontSize: 12.5, marginBottom: 16, display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>A senha de acesso é única — guarde-a bem. Os percentuais de comissão informados abaixo ficam travados assim que o cadastro é enviado.</span>
+          </div>
+
+          <Grid>
+            <Field label="E-mail de acesso" type="email" value={form.email} onChange={(v) => setF("email", v)} />
+            <Field label="Senha de acesso" type="password" value={form.senha} onChange={(v) => setF("senha", v)} />
+            <div style={cell()}>
+              <label style={lab}>Tipo de parceria</label>
+              <select style={inp} value={form.tipo} onChange={(e) => setF("tipo", e.target.value)}>
+                {PARCEIRO_TIPO_OPCOES.map((o) => <option key={o.valor} value={o.valor}>{o.label}</option>)}
+              </select>
+            </div>
+            <Field label="CNPJ" value={form.cnpj} onChange={(v) => setF("cnpj", v)} />
+            <Field label="Empresa" value={form.empresa} onChange={(v) => setF("empresa", v)} full />
+            <Field label="Responsável" value={form.responsavel} onChange={(v) => setF("responsavel", v)} />
+            <Field label="WhatsApp" value={form.whatsapp} onChange={(v) => setF("whatsapp", v)} />
+            <Field label="Cidade" value={form.cidade} onChange={(v) => setF("cidade", v)} />
+            <Field label="UF" value={form.uf} onChange={(v) => setF("uf", v.toUpperCase().slice(0, 2))} />
+            <Field label="Instagram" value={form.instagram} onChange={(v) => setF("instagram", v)} />
+            <Field label="Site" value={form.site} onChange={(v) => setF("site", v)} />
+          </Grid>
+
+          <div style={{ ...cell(true), marginTop: 12 }}>
+            <label style={lab}>Logo da empresa</label>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              {form.logo && <img src={form.logo} alt="Logo" style={{ width: 52, height: 52, objectFit: "contain", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, background: "#fff" }} />}
+              <label className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, cursor: "pointer" }}>
+                <Camera size={14} /> {form.logo ? "Trocar logo" : "Enviar logo"}
+                <input type="file" accept="image/*" onChange={onLogo} style={{ display: "none" }} />
+              </label>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 18 }}>
+            <label style={lab}>Categorias e percentual de comissão</label>
+            <div style={{ display: "grid", gap: 8, marginTop: 6 }}>
+              {form.comissao.map((linha, idx) => (
+                <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input style={{ ...inp, flex: 1 }} placeholder="Categoria (ex.: Mão de obra)" value={linha.name}
+                    onChange={(e) => setComissaoLinha(idx, { name: e.target.value })} />
+                  <input style={{ ...inp, width: 90 }} type="number" min="0" max="100" placeholder="%" value={linha.p}
+                    onChange={(e) => setComissaoLinha(idx, { p: e.target.value })} />
+                  <button type="button" className="icon-btn" onClick={() => removerComissaoLinha(idx)} disabled={form.comissao.length === 1}>
+                    <Trash2 size={15} color="#c62828" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button type="button" className="btn-add" style={{ marginTop: 10, padding: 10, fontSize: 13 }} onClick={addComissaoLinha}>
+              <Plus size={15} /> Adicionar categoria de comissão
+            </button>
+          </div>
+
+          <Field label="Benefício oferecido (resumo)" value={form.beneficio} onChange={(v) => setF("beneficio", v)} full />
+          <Area label="Descrição do benefício" value={form.descricaoBeneficio} onChange={(v) => setF("descricaoBeneficio", v)} rows={3} placeholder="Explique as condições do benefício oferecido aos clientes FN" />
+
+          {erro && <div style={{ marginTop: 12, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>{erro}</div>}
+
+          <button type="button" className="btn-solid" style={{ marginTop: 16 }} onClick={enviar} disabled={enviando}>
+            {enviando ? <><Loader2 size={15} className="spin" /> Enviando…</> : <><Check size={15} /> Enviar cadastro</>}
+          </button>
+        </Card>
+      </main>
+    </div>
+  );
+}
+
+/* ---- Aba Parceiros dentro da Gerência (homologação) ---- */
+function CardParceiros({ parceiros, carregando, atualizarParceiro, notify }) {
+  const [editando, setEditando] = useState(null); // { id, status, avaliacao }
+
+  const abrirEdicao = (p) => setEditando({ id: p.id, status: p.status, avaliacao: p.avaliacao || "" });
+  const salvar = async () => {
+    try {
+      await atualizarParceiro(editando.id, { status: editando.status, avaliacao: editando.avaliacao });
+      setEditando(null);
+      notify("Status do parceiro atualizado ✓");
+    } catch (e) { notify(`Erro: ${e.message}`); }
+  };
+
+  return (
+    <Card icon={Users} titulo={`Parceiros / Afiliados (${parceiros.length})`}>
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Homologação dos parceiros cadastrados pelo portal público. Aprove, suspenda ou encerre a parceria conforme necessário.
+      </p>
+
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && parceiros.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum parceiro cadastrado ainda.</p>}
+
+      {parceiros.length > 0 && (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: CINZA_CLARO }}>
+                {["Status", "Empresa", "Categoria", "Comissão", ""].map((h) => (
+                  <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}` }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {parceiros.map((p) => (
+                <tr key={p.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                  <td style={{ padding: "8px 10px" }}><Selo valor={PARCEIRO_STATUS_LABEL[p.status] || p.status} /></td>
+                  <td style={{ padding: "8px 10px", fontWeight: 600 }}>
+                    {p.empresa}<div style={{ fontWeight: 400, fontSize: 12, color: "#8593a8" }}>{p.responsavel}{p.cidade ? ` · ${p.cidade}/${p.uf}` : ""}</div>
+                  </td>
+                  <td style={{ padding: "8px 10px" }}>{PARCEIRO_TIPO_LABEL[p.tipo] || p.tipo}</td>
+                  <td style={{ padding: "8px 10px", fontSize: 12 }}>
+                    {p.comissao.length > 0 ? p.comissao.map((c) => `${c.name} ${c.p}%`).join(", ") : "—"}
+                  </td>
+                  <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+                    <button className="icon-btn" onClick={() => abrirEdicao(p)}><Edit3 size={15} color={AZUL_MEDIO} /></button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {editando && (
+        <div className="no-print" style={overlay} onClick={() => setEditando(null)}>
+          <div style={{ ...modal, maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <strong>Homologação do parceiro</strong>
+              <button className="icon-btn" onClick={() => setEditando(null)}><X size={16} /></button>
+            </div>
+            <div style={cell(true)}>
+              <label style={lab}>Status</label>
+              <select style={inp} value={editando.status} onChange={(e) => setEditando({ ...editando, status: e.target.value })}>
+                {PARCEIRO_STATUS_OPCOES.map((o) => <option key={o} value={o}>{PARCEIRO_STATUS_LABEL[o]}</option>)}
+              </select>
+            </div>
+            <Area label="Avaliação / observações internas" value={editando.avaliacao} onChange={(v) => setEditando({ ...editando, avaliacao: v })} rows={3} />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setEditando(null)}>Cancelar</button>
+              <button className="btn-solid" onClick={salvar}><Save size={15} /> Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/* ---- Vitrine de parceiros dentro da Área do Cliente ---- */
+function LogoParceiro({ p, onClick }) {
+  return (
+    <button onClick={onClick} style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: 14, display: "flex", flexDirection: "column", alignItems: "center", gap: 8, cursor: "pointer" }}>
+      <div style={{ width: 64, height: 64, borderRadius: 10, background: CINZA_CLARO, display: "grid", placeItems: "center", overflow: "hidden" }}>
+        {p.logo ? <img src={p.logo} alt={p.empresa} style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <Building2 size={24} color={AZUL_MEDIO} />}
+      </div>
+      <div style={{ fontSize: 12.5, fontWeight: 600, textAlign: "center", color: AZUL_MARINHO }}>{p.empresa}</div>
+    </button>
+  );
+}
+
+function ModalBeneficioParceiro({ parceiro, onClose, notify }) {
+  const [nome, setNome] = useState("");
+  const [whatsapp, setWhatsapp] = useState("");
+  const [gerando, setGerando] = useState(false);
+  const [vale, setVale] = useState(null); // { codigo, beneficio, expiraEm }
+  const [erro, setErro] = useState("");
+
+  const gerar = async () => {
+    setErro("");
+    if (!nome.trim() || !whatsapp.trim()) { setErro("Informe seu nome e WhatsApp."); return; }
+    setGerando(true);
+    try {
+      const r = await apiFetch("/api/vales", { method: "POST", body: { parceiroId: parceiro.id, clienteNome: nome, clienteWhatsapp: whatsapp } });
+      setVale(r);
+      notify("Código do benefício gerado ✓");
+    } catch (e) { setErro(e.message); }
+    setGerando(false);
+  };
+
+  return (
+    <div className="no-print" style={overlay} onClick={onClose}>
+      <div style={{ ...modal, maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <strong>{parceiro.empresa}</strong>
+          <button className="icon-btn" onClick={onClose}><X size={16} /></button>
+        </div>
+
+        {!vale && (
+          <>
+            {parceiro.logo && <img src={parceiro.logo} alt={parceiro.empresa} style={{ maxHeight: 64, display: "block", margin: "0 auto 14px" }} />}
+            {parceiro.beneficio && <div style={{ fontWeight: 700, color: AZUL_MARINHO, marginBottom: 6, textAlign: "center" }}>{parceiro.beneficio}</div>}
+            {parceiro.descricaoBeneficio && <p style={{ fontSize: 13.5, color: "#4a5a70", textAlign: "center", margin: "0 0 16px" }}>{parceiro.descricaoBeneficio}</p>}
+
+            <div style={cell(true)}>
+              <label style={lab}>Seu nome</label>
+              <input style={inp} value={nome} onChange={(e) => setNome(e.target.value)} />
+            </div>
+            <div style={{ ...cell(true), marginTop: 10 }}>
+              <label style={lab}>Seu WhatsApp</label>
+              <input style={inp} value={whatsapp} onChange={(e) => setWhatsapp(e.target.value.replace(/\D/g, "").slice(0, 11))} />
+            </div>
+
+            {erro && <div style={{ marginTop: 12, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>{erro}</div>}
+
+            <button className="btn-solid" style={{ width: "100%", justifyContent: "center", marginTop: 14 }} onClick={gerar} disabled={gerando}>
+              {gerando ? <><Loader2 size={15} className="spin" /> Gerando…</> : "Quero esse benefício"}
+            </button>
+          </>
+        )}
+
+        {vale && (
+          <div style={{ textAlign: "center" }}>
+            <div style={{ width: 52, height: 52, borderRadius: "50%", background: "#E6F4EA", display: "grid", placeItems: "center", margin: "0 auto 14px" }}>
+              <Check size={24} color="#2E7D32" />
+            </div>
+            <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>Apresente este código para o parceiro:</p>
+            <div style={{ fontFamily: "monospace", fontSize: 26, fontWeight: 800, color: AZUL_MARINHO, background: CINZA_CLARO, borderRadius: 10, padding: "14px", letterSpacing: 2 }}>
+              {vale.codigo}
+            </div>
+            {vale.beneficio && <div style={{ fontSize: 13, color: "#4a5a70", marginTop: 10 }}>{vale.beneficio}</div>}
+            {vale.expiraEm && <div style={{ fontSize: 12, color: "#8593a8", marginTop: 6 }}>Válido até {new Date(vale.expiraEm).toLocaleDateString("pt-BR")}</div>}
+            <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, marginTop: 16 }} onClick={onClose}>Fechar</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SecaoParceirosVitrine({ notify }) {
+  const [parceiros, setParceiros] = useState([]);
+  const [carregando, setCarregando] = useState(false);
+  const [abaTipo, setAbaTipo] = useState("servico");
+  const [selecionado, setSelecionado] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      setCarregando(true);
+      try {
+        const r = await apiFetch("/api/parceiros/vitrine");
+        setParceiros((r.parceiros || []).map(mapParceiroDaApi));
+      } catch (e) { notify(`Não foi possível carregar os parceiros: ${e.message}`); }
+      setCarregando(false);
+    })();
+  }, []);
+
+  const filtrados = parceiros.filter((p) => p.tipo === abaTipo);
+
+  return (
+    <Card icon={Building2} titulo="Parceiros FN">
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Empresas parceiras da FN Edificações que oferecem benefícios exclusivos para nossos clientes.
+      </p>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+        {PARCEIRO_TIPO_OPCOES.map((o) => (
+          <button key={o.valor} onClick={() => setAbaTipo(o.valor)}
+            className={abaTipo === o.valor ? "btn-solid" : "btn-ghost"}
+            style={abaTipo === o.valor ? {} : { color: AZUL_MARINHO, background: CINZA_CLARO }}>
+            {o.label}
+          </button>
+        ))}
+      </div>
+
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && filtrados.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum parceiro disponível nesta categoria no momento.</p>}
+
+      {filtrados.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 12 }}>
+          {filtrados.map((p) => <LogoParceiro key={p.id} p={p} onClick={() => setSelecionado(p)} />)}
+        </div>
+      )}
+
+      {selecionado && <ModalBeneficioParceiro parceiro={selecionado} onClose={() => setSelecionado(null)} notify={notify} />}
+    </Card>
   );
 }
 
