@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "mcp__Claude_Browser__read_page"
+      "mcp__Claude_Browser__read_page",
+      "Bash(git fetch *)"
     ]
   }
 }
