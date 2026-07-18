@@ -344,7 +344,7 @@ function TelaLogin({ onLogin, onVoltar }) {
     <div style={{ minHeight: "100vh", background: CINZA_CLARO, display: "grid", placeItems: "center", padding: 18, fontFamily: "'Inter', system-ui, sans-serif" }}>
       <div style={{ background: "#fff", borderRadius: 16, padding: "32px 30px", width: "100%", maxWidth: 380, boxShadow: "0 10px 30px rgba(18,51,91,.12)" }}>
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}>
-          <img src={LOGO_FN_BASE64} alt="FN Edificações" style={{ height: 64 }} />
+          <img src="/logo-fn-transparente.png" alt="FN Edificações" style={{ height: "clamp(56px, 14vw, 72px)", width: "auto" }} />
         </div>
         <h2 style={{ textAlign: "center", color: AZUL_MARINHO, fontSize: 18, margin: "0 0 4px" }}>Entrar no sistema</h2>
         <p style={{ textAlign: "center", color: "#65758b", fontSize: 13, margin: "0 0 20px" }}>Acesso da equipe FN Edificações</p>
@@ -385,8 +385,8 @@ function PortalCliente({ onIrParaLogin, onIrParaCadastroParceiro }) {
     <div style={{ minHeight: "100vh", background: CINZA_CLARO, fontFamily: "'Inter', system-ui, sans-serif" }}>
       <header style={{ background: AZUL_MARINHO, color: "#fff" }}>
         <div style={{ maxWidth: 720, margin: "0 auto", padding: "16px 18px", display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 38, height: 38, borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
-            <img src={LOGO_FN_BASE64} alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+          <div style={{ width: "clamp(36px, 9vw, 44px)", height: "clamp(36px, 9vw, 44px)", borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
+            <img src="/logo-fn-transparente.png" alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
           </div>
           <div style={{ lineHeight: 1.1, flex: 1 }}>
             <div style={{ fontWeight: 700, fontSize: 15 }}>FN Edificações</div>
@@ -421,6 +421,9 @@ export default function App() {
     return mostrarLogin
       ? <TelaLogin onLogin={setSession} onVoltar={() => setMostrarLogin(false)} />
       : <PortalCliente onIrParaLogin={() => setMostrarLogin(true)} onIrParaCadastroParceiro={() => setMostrarCadastroParceiro(true)} />;
+  }
+  if (session.usuario.role === "afiliado") {
+    return <PainelParceiro session={session} onLogout={() => { setSession(null); setMostrarLogin(false); }} />;
   }
   return <AppInterno session={session} onLogout={() => { setSession(null); setMostrarLogin(false); }} />;
 }
@@ -522,9 +525,14 @@ function AppInterno({ session, onLogout }) {
   };
   useEffect(() => { carregarParceiros(); }, []);
   const atualizarParceiro = async (id, patch) => {
-    setParceiros((atual) => atual.map((p) => (p.id === id ? { ...p, ...patch } : p)));
-    try { await apiFetch(`/api/parceiros/${id}`, { method: "PATCH", token, body: patch }); }
-    catch (e) { notify(`Não foi possível atualizar parceiro: ${e.message}`); }
+    try {
+      await apiFetch(`/api/parceiros/${id}`, { method: "PATCH", token, body: patch });
+      setParceiros((atual) => atual.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+      return true;
+    } catch (e) {
+      notify(`Não foi possível atualizar parceiro: ${e.message}`);
+      return false;
+    }
   };
 
   /* ---- Assinatura digital da Gerência (via API real) ---- */
@@ -666,8 +674,8 @@ function AppInterno({ session, onLogout }) {
       <header className="no-print" style={{ background: AZUL_MARINHO, color: "#fff", position: "sticky", top: 0, zIndex: 20 }}>
         <div style={{ maxWidth: 1080, margin: "0 auto", padding: "12px 18px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 38, height: 38, borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
-              <img src={LOGO_FN_BASE64} alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+            <div style={{ width: "clamp(36px, 9vw, 44px)", height: "clamp(36px, 9vw, 44px)", borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
+              <img src="/logo-fn-transparente.png" alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
             </div>
             <div style={{ lineHeight: 1.1 }}>
               <div style={{ fontWeight: 700, fontSize: 15 }}>FN Edificações</div>
@@ -2269,8 +2277,8 @@ function TelaCadastroParceiro({ onVoltar }) {
     <div style={{ minHeight: "100vh", background: CINZA_CLARO, fontFamily: "'Inter', system-ui, sans-serif" }}>
       <header style={{ background: AZUL_MARINHO, color: "#fff" }}>
         <div style={{ maxWidth: 720, margin: "0 auto", padding: "16px 18px", display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 38, height: 38, borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
-            <img src={LOGO_FN_BASE64} alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+          <div style={{ width: "clamp(36px, 9vw, 44px)", height: "clamp(36px, 9vw, 44px)", borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
+            <img src="/logo-fn-transparente.png" alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
           </div>
           <div style={{ lineHeight: 1.1, flex: 1 }}>
             <div style={{ fontWeight: 700, fontSize: 15 }}>FN Edificações</div>
@@ -2353,17 +2361,169 @@ function TelaCadastroParceiro({ onVoltar }) {
   );
 }
 
+/* ---- Painel do Parceiro (área logada do afiliado, papel "afiliado") ---- */
+const PARCEIRO_STATUS_INFO = {
+  em_analise: "Seu cadastro está em análise pela nossa equipe. Assim que for aprovado, sua logo aparecerá para os clientes.",
+  aprovado: "Sua parceria está ativa! Sua logo já aparece na vitrine para os clientes da FN Edificações.",
+  suspenso: "Sua parceria está temporariamente suspensa. Entre em contato com a FN Edificações para mais informações.",
+  encerrado: "Sua parceria foi encerrada. Entre em contato com a FN Edificações caso tenha dúvidas.",
+};
+
+const VALE_STATUS_LABEL = { ativo: "Ativo", usado: "Usado", expirado: "Expirado", cancelado: "Cancelado" };
+STATUS_COR["Ativo"] = { cor: "#2C75B5", bg: "#EAF2FB" };
+STATUS_COR["Usado"] = { cor: "#2E7D32", bg: "#E6F4EA" };
+STATUS_COR["Expirado"] = { cor: "#65758b", bg: "#EEF1F5" };
+STATUS_COR["Cancelado"] = { cor: "#C62828", bg: "#FCEAEA" };
+
+/* Converte um vale vindo do banco (snake_case) para o formato usado no app (camelCase) */
+function mapValeDaApi(v) {
+  return {
+    id: v.id || v.codigo,
+    codigo: v.codigo || "",
+    clienteNome: v.cliente_nome || v.clienteNome || "",
+    status: v.status || "ativo",
+    criadoEm: v.criado_em || v.criadoEm || null,
+    usadoEm: v.usado_em || v.usadoEm || null,
+  };
+}
+
+function CardStatusParceiro({ parceiro }) {
+  const info = PARCEIRO_STATUS_INFO[parceiro.status] || "";
+  return (
+    <Card icon={Building2} titulo="Status da parceria">
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+        <div style={{ fontSize: 18, fontWeight: 800, color: AZUL_MARINHO }}>{parceiro.empresa || "Sua empresa"}</div>
+        <Selo valor={PARCEIRO_STATUS_LABEL[parceiro.status] || parceiro.status} />
+      </div>
+      {info && <div style={{ fontSize: 13.5, color: "#334", background: CINZA_CLARO, borderRadius: 8, padding: "10px 12px" }}>{info}</div>}
+    </Card>
+  );
+}
+
+function CardPerfilParceiro({ parceiro }) {
+  const comissaoTexto = parceiro.comissao.length > 0 ? parceiro.comissao.map((c) => `${c.name}: ${c.p}%`).join(" · ") : "";
+  return (
+    <Card icon={User} titulo="Dados do parceiro">
+      <TabelaDados rows={[
+        ["Empresa", parceiro.empresa], ["Responsável", parceiro.responsavel],
+        ["Categoria", PARCEIRO_TIPO_LABEL[parceiro.tipo] || parceiro.tipo],
+        ["Cidade/UF", parceiro.cidade ? `${parceiro.cidade}/${parceiro.uf}` : ""],
+        ["WhatsApp", parceiro.whatsapp], ["Instagram", parceiro.instagram], ["Site", parceiro.site],
+        ["Comissão combinada", comissaoTexto], ["Benefício oferecido", parceiro.beneficio],
+      ]} />
+      {parceiro.descricaoBeneficio && <p style={{ fontSize: 13.5, color: "#4a5a70", margin: 0 }}>{parceiro.descricaoBeneficio}</p>}
+    </Card>
+  );
+}
+
+function CardValesParceiro({ vales }) {
+  return (
+    <Card icon={ClipboardList} titulo={`Vales gerados (${vales.length})`}>
+      {vales.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum vale gerado até o momento.</p>}
+      {vales.length > 0 && (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: CINZA_CLARO }}>
+                {["Código", "Cliente", "Status", "Criado em", "Usado em"].map((h) => (
+                  <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}` }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {vales.map((v) => (
+                <tr key={v.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                  <td style={{ padding: "8px 10px", fontFamily: "monospace", fontWeight: 700, color: AZUL_MARINHO }}>{v.codigo}</td>
+                  <td style={{ padding: "8px 10px" }}>{v.clienteNome || "—"}</td>
+                  <td style={{ padding: "8px 10px" }}><Selo valor={VALE_STATUS_LABEL[v.status] || v.status} /></td>
+                  <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{v.criadoEm ? new Date(v.criadoEm).toLocaleString("pt-BR") : "—"}</td>
+                  <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{v.usadoEm ? new Date(v.usadoEm).toLocaleString("pt-BR") : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function PainelParceiro({ session, onLogout }) {
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState("");
+  const [parceiro, setParceiro] = useState(null);
+  const [vales, setVales] = useState([]);
+
+  const carregar = async () => {
+    setCarregando(true); setErro("");
+    try {
+      const r = await apiFetch("/api/parceiros/me", { token: session.token });
+      setParceiro(r.parceiro ? mapParceiroDaApi(r.parceiro) : null);
+      setVales((r.vales || []).map(mapValeDaApi).sort((a, b) => new Date(b.criadoEm || 0) - new Date(a.criadoEm || 0)));
+    } catch (e) { setErro(e.message); }
+    setCarregando(false);
+  };
+  useEffect(() => { carregar(); }, []);
+
+  return (
+    <div style={{ fontFamily: "'Inter', system-ui, sans-serif", color: "#1a2330", background: CINZA_CLARO, minHeight: "100vh" }}>
+      <style>{estilos}</style>
+
+      <header className="no-print" style={{ background: AZUL_MARINHO, color: "#fff", position: "sticky", top: 0, zIndex: 20 }}>
+        <div style={{ maxWidth: 900, margin: "0 auto", padding: "12px 18px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: "clamp(36px, 9vw, 44px)", height: "clamp(36px, 9vw, 44px)", borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
+              <img src="/logo-fn-transparente.png" alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+            </div>
+            <div style={{ lineHeight: 1.1 }}>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>FN Edificações</div>
+              <div style={{ fontSize: 11, opacity: 0.7 }}>Painel do Parceiro</div>
+            </div>
+          </div>
+          <div style={{ flex: 1 }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
+            <div style={{ textAlign: "right", lineHeight: 1.2 }}>
+              <div style={{ fontWeight: 700 }}>{session.usuario.nome || session.usuario.email}</div>
+              <div style={{ opacity: 0.7 }}>Parceiro FN</div>
+            </div>
+            <button className="btn-ghost" onClick={onLogout} title="Sair"><X size={14} /> Sair</button>
+          </div>
+        </div>
+      </header>
+
+      <main style={{ maxWidth: 900, margin: "0 auto", padding: "22px 18px 80px", display: "grid", gap: 16 }}>
+        {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+
+        {!carregando && erro && (
+          <Card icon={AlertTriangle} titulo="Não foi possível carregar seus dados">
+            <p style={{ color: "#C62828", fontSize: 14, margin: "0 0 10px" }}>{erro}</p>
+            <button className="btn-solid" onClick={carregar}><RefreshCcw size={15} /> Tentar novamente</button>
+          </Card>
+        )}
+
+        {!carregando && !erro && parceiro && (
+          <>
+            <CardStatusParceiro parceiro={parceiro} />
+            <CardPerfilParceiro parceiro={parceiro} />
+            <CardValesParceiro vales={vales} />
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
+
 /* ---- Aba Parceiros dentro da Gerência (homologação) ---- */
 function CardParceiros({ parceiros, carregando, atualizarParceiro, notify }) {
   const [editando, setEditando] = useState(null); // { id, status, avaliacao }
 
   const abrirEdicao = (p) => setEditando({ id: p.id, status: p.status, avaliacao: p.avaliacao || "" });
   const salvar = async () => {
-    try {
-      await atualizarParceiro(editando.id, { status: editando.status, avaliacao: editando.avaliacao });
+    const ok = await atualizarParceiro(editando.id, { status: editando.status, avaliacao: editando.avaliacao });
+    if (ok) {
       setEditando(null);
       notify("Status do parceiro atualizado ✓");
-    } catch (e) { notify(`Erro: ${e.message}`); }
+    }
   };
 
   return (
