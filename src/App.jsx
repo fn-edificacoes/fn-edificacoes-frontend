@@ -236,9 +236,7 @@ const novoItem = () => ({ id: idCounter++, local: "", tipo: "", patologia: "", s
 
 const PAGAMENTO_OPCOES = ["Pendente", "Pago", "Parcial"];
 const VISTORIA_OPCOES = ["Agendada", "Concluída", "Cancelada"];
-const ART_OPCOES = ["Não solicitada", "Em processo", "Elaborada"];
 const TIPO_ART_OPCOES = ["Individual", "Coletiva"];
-const RELATORIO_OPCOES = ["Pendente", "Em processo", "Entregue"];
 
 /* ---------- Status do CLIENTE (status_cliente) — só estes 3, nesta ordem, sempre automático ----------
    O cliente NUNCA vê status internos de gerência/documentação (STATUS_INTERNO_OPCOES abaixo).
@@ -1299,8 +1297,7 @@ function LinhaDoTempo({ doc, avaliacao }) {
   const etapas = [
     { label: "Solicitado", cor: "#2E7D32", ativa: true },
     { label: "Vistoria", cor: doc.vistoria === "Concluída" ? "#2E7D32" : doc.vistoria === "Cancelada" ? "#8593a8" : "#2C75B5", ativa: true },
-    { label: "ART/TRT", cor: doc.art === "Elaborada" ? "#2E7D32" : "#B26A00", ativa: doc.art !== "Não solicitada" },
-    { label: "Relatório", cor: doc.relatorio === "Entregue" ? "#2E7D32" : "#B26A00", ativa: doc.relatorio !== "Pendente" },
+    { label: "ART Documentações", cor: doc.statusProducao === "Realizado" ? "#2E7D32" : "#B26A00", ativa: doc.statusProducao !== "Recebido" },
     { label: "Avaliação", cor: "#F5A623", ativa: !!avaliacao },
   ];
   return (
@@ -2463,8 +2460,7 @@ function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, a
 
 function AbaGerenciaVisaoGeral({ docs, clientes, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo }) {
   const porVistoria = docs.reduce((acc, d) => { acc[d.vistoria] = (acc[d.vistoria] || 0) + 1; return acc; }, {});
-  const porArt = docs.reduce((acc, d) => { acc[d.art] = (acc[d.art] || 0) + 1; return acc; }, {});
-  const porRelatorio = docs.reduce((acc, d) => { acc[d.relatorio] = (acc[d.relatorio] || 0) + 1; return acc; }, {});
+  const porStatusProducao = docs.reduce((acc, d) => { acc[d.statusProducao] = (acc[d.statusProducao] || 0) + 1; return acc; }, {});
   const totalRegistrosDocs = docs.length;
 
   // Ranking por cadastros reais (clientes), não por docs — mesma causa raiz dos indicadores gerais.
@@ -2508,8 +2504,7 @@ function AbaGerenciaVisaoGeral({ docs, clientes, carregando, assinatura, salvarA
         ) : (
           <>
             <BarraStatus titulo="Vistorias" contagens={porVistoria} />
-            <BarraStatus titulo="ART / TRT" contagens={porArt} />
-            <BarraStatus titulo="Relatórios" contagens={porRelatorio} />
+            <BarraStatus titulo="ART Documentações" contagens={porStatusProducao} />
           </>
         )}
       </Card>
