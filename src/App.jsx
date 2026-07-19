@@ -1517,6 +1517,10 @@ function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, notify }) 
     try { await updCliente(c.id, { status: "Agendamento aprovado" }); notify("Agendamento aprovado ✓"); }
     catch (e) { notify(`Erro: ${e.message}`); }
   };
+  const cancelar = async (c) => {
+    try { await updCliente(c.id, { status: "Cancelado" }); notify("Agendamento cancelado"); }
+    catch (e) { notify(`Erro: ${e.message}`); }
+  };
   return (
     <Card icon={ClipboardCheck} titulo={`Aguardando análise (${pendentesTodos.length})`}>
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
@@ -1561,9 +1565,14 @@ function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, notify }) 
                   Cruza com {conflitos.length} outro(s) agendamento(s) no mesmo horário: {conflitos.map((x) => x.nome).join(", ")}
                 </div>
               )}
-              <button className="btn-solid" style={{ marginTop: 10, width: "auto", padding: "8px 16px" }} onClick={() => aprovar(c)}>
-                <Check size={15} /> Aprovar agendamento
-              </button>
+              <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                <button className="btn-solid" style={{ width: "auto", padding: "8px 16px" }} onClick={() => aprovar(c)}>
+                  <Check size={15} /> Aprovar agendamento
+                </button>
+                <button className="btn-ghost" style={{ color: "#C62828", background: "#FCEAEA" }} onClick={() => cancelar(c)}>
+                  <X size={15} /> Cancelar agendamento
+                </button>
+              </div>
             </div>
           );
         })}
@@ -3311,6 +3320,7 @@ STATUS_COR["Agendamento aprovado"] = { cor: "#2C75B5", bg: "#EAF2FB" };
 STATUS_COR["Vistoria agendada"] = { cor: "#6A3FB2", bg: "#F1EBFB" };
 STATUS_COR["Laudo em análise"] = { cor: "#B26A00", bg: "#FFF4E0" };
 STATUS_COR["Laudo enviado por e-mail"] = { cor: "#2E7D32", bg: "#E6F4EA" };
+STATUS_COR["Cancelado"] = { cor: "#C62828", bg: "#FCEAEA" };
 
 function safeParseArray(v) {
   if (Array.isArray(v)) return v;
