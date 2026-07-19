@@ -2585,6 +2585,63 @@ function AvaliarServico({ doc, notify }) {
   );
 }
 
+/* ================= Acesso do cliente ao laudo final (armazenado no Google Drive) =================
+   O Drive nunca fica público: o backend só libera o download depois de confirmar CPF + e-mail
+   cadastrados, e devolve um link com token curto (expira em minutos) que faz o backend buscar
+   o arquivo no Drive e entregar diretamente — o cliente nunca vê nem precisa de conta Google. */
+function AcessoLaudoFinal({ cpf, notify }) {
+  const [aberto, setAberto] = useState(false);
+  const [email, setEmail] = useState("");
+  const [consultando, setConsultando] = useState(false);
+  const [laudos, setLaudos] = useState(null); // null = ainda não confirmou o e-mail
+
+  const consultar = async () => {
+    if (!email.trim()) { notify("Informe seu e-mail cadastrado"); return; }
+    setConsultando(true);
+    try {
+      const r = await apiFetch("/api/laudo-final/consultar", { method: "POST", body: { cpf, email } });
+      setLaudos(r.laudos || []);
+      if ((r.laudos || []).length === 0) notify("Não encontramos laudo disponível para esse e-mail.");
+    } catch (e) { notify(`Não foi possível confirmar: ${e.message}`); setLaudos(null); }
+    setConsultando(false);
+  };
+
+  if (!aberto) {
+    return (
+      <button className="btn-ghost" style={{ marginTop: 10, color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setAberto(true)}>
+        <FileText size={14} /> Ver / baixar meu laudo
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${CINZA_BORDA}` }}>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Confirme seu e-mail para acessar o laudo</div>
+      {!laudos && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input style={{ ...inp, flex: 1, minWidth: 180 }} type="email" placeholder="Seu e-mail cadastrado" value={email}
+            onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && consultar()} />
+          <button className="btn-solid" onClick={consultar} disabled={consultando}>{consultando ? "Confirmando…" : "Confirmar"}</button>
+        </div>
+      )}
+      {laudos && laudos.length === 0 && (
+        <p style={{ color: "#8593a8", fontSize: 13, margin: 0 }}>E-mail não confere ou nenhum laudo disponível ainda.</p>
+      )}
+      {laudos && laudos.length > 0 && (
+        <div style={{ display: "grid", gap: 8 }}>
+          {laudos.map((l) => (
+            <a key={l.docId} href={`${API_URL}/api/laudo-final/download?token=${encodeURIComponent(l.tokenDownload)}`}
+              target="_blank" rel="noopener noreferrer" className="btn-solid" style={{ textDecoration: "none", justifyContent: "center" }}>
+              <FileText size={14} /> Baixar laudo{l.empreendimento ? ` — ${l.empreendimento}` : ""}
+            </a>
+          ))}
+          <p style={{ fontSize: 11, color: "#8593a8", margin: 0 }}>O link expira em alguns minutos por segurança — se der erro, confirme de novo.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AbaCliente({ notify }) {
   const [form, setForm] = useState(novoCadastroCliente());
   const [enviando, setEnviando] = useState(false);
@@ -2692,6 +2749,7 @@ function AbaCliente({ notify }) {
                       Atualizado em {new Date(d.atualizadoEm).toLocaleString("pt-BR")}
                     </div>
                   )}
+                  {d.status === "Laudo enviado por e-mail" && <AcessoLaudoFinal cpf={cpfConsulta} notify={notify} />}
                   <AvaliarServico doc={d} notify={notify} />
                 </div>
               );
