@@ -917,7 +917,6 @@ function AppInterno({ session, onLogout }) {
 
       <main style={{ maxWidth: 1080, margin: "0 auto", padding: "22px 18px 80px" }}>
         {abaTop === "laudos" && <NotificacoesClientes clientes={clientes} preencherComCliente={preencherComCliente} style={{ marginBottom: 18 }} />}
-        {abaTop === "laudos" && <FaixaIndicadoresGerais docs={docs} clientes={clientes} modo="vistorias" style={{ marginBottom: 18 }} />}
         {abaTop === "documentacao" && <FaixaIndicadoresGerais docs={docs} clientes={clientes} modo="art" style={{ marginBottom: 18 }} />}
 
         {abaTop === "laudos" && aba === "dados" && <AbaDados dados={dados} setD={setD} setTexto={setTexto} clientes={clientes} preencherComCliente={preencherComCliente} docs={docs} updDoc={updDoc} notify={notify} token={token} />}
