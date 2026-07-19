@@ -532,6 +532,11 @@ function AppInterno({ session, onLogout }) {
     setAvaliacoesCarregando(false);
   };
   useEffect(() => { carregarAvaliacoes(); }, []);
+  const aprovarAvaliacao = async (id, aprovado) => {
+    setAvaliacoes((atual) => atual.map((a) => (a.id === id ? { ...a, aprovado } : a)));
+    try { await apiFetch(`/api/avaliacoes/${id}/aprovar`, { method: "PATCH", token, body: { aprovado } }); }
+    catch (e) { notify(`Não foi possível atualizar: ${e.message}`); carregarAvaliacoes(); }
+  };
 
   /* ---- Parceiros/Afiliados: homologação (somente perfil Gerência) ---- */
   const [parceiros, setParceiros] = useState([]);
@@ -907,7 +912,7 @@ function AppInterno({ session, onLogout }) {
           <AbaClientesComercial clientes={clientes} carregando={clientesCarregando} atualizarCliente={updCliente} notify={notify} />
         )}
         {abaTop === "qualidade" && (
-          <AbaQualidade avaliacoes={avaliacoes} carregando={avaliacoesCarregando} docs={docs} docsCarregando={docsCarregando} />
+          <AbaQualidade avaliacoes={avaliacoes} carregando={avaliacoesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao} />
         )}
         {abaTop === "gerencia" && (
           <AbaGerencia sub={abaGerencia} docs={docs} clientes={clientes} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
@@ -1183,7 +1188,7 @@ function LinhaDoTempo({ doc, avaliacao }) {
   );
 }
 
-function AbaQualidade({ avaliacoes, carregando, docs, docsCarregando }) {
+function AbaQualidade({ avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao }) {
   const [busca, setBusca] = useState("");
   const total = avaliacoes.length;
   const media = total ? (avaliacoes.reduce((s, a) => s + a.nota, 0) / total) : 0;
@@ -1232,7 +1237,19 @@ function AbaQualidade({ avaliacoes, carregando, docs, docsCarregando }) {
                     <Estrelas valor={a.nota} tamanho={15} />
                   </div>
                   {a.empreendimento && <div style={{ fontSize: 12, color: "#65758b", marginBottom: 6 }}>{a.empreendimento}</div>}
-                  {a.comentario && <div style={{ fontSize: 13.5, color: "#334", background: CINZA_CLARO, borderRadius: 8, padding: "8px 10px" }}>{a.comentario}</div>}
+                  {a.comentario && <div style={{ fontSize: 13.5, color: "#334", background: CINZA_CLARO, borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>{a.comentario}</div>}
+                  {aprovarAvaliacao && (
+                    a.aprovado ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                        <span style={{ fontSize: 12, color: "#2E7D32", fontWeight: 600 }}>✓ Exibida na página inicial</span>
+                        <button className="btn-ghost" style={{ color: "#C62828", padding: "4px 10px" }} onClick={() => aprovarAvaliacao(a.id, false)}>Remover da vitrine</button>
+                      </div>
+                    ) : (
+                      <button className="btn-ghost" style={{ color: AZUL_MEDIO, padding: "4px 10px", marginTop: 4 }} onClick={() => aprovarAvaliacao(a.id, true)}>
+                        <Check size={14} /> Aprovar para a página inicial
+                      </button>
+                    )
+                  )}
                 </div>
               ))}
             </div>
@@ -2819,6 +2836,7 @@ function AbaCliente({ notify }) {
         </div>
       </Card>
 
+      <SecaoFeedbackVitrine notify={notify} />
       <SecaoParceirosVitrine notify={notify} />
     </div>
   );
@@ -3322,6 +3340,42 @@ function ModalBeneficioParceiro({ parceiro, onClose, notify }) {
         )}
       </div>
     </div>
+  );
+}
+
+/* Vitrine pública de avaliações — só as que a Qualidade aprovou pra exibir (GET /api/avaliacoes/vitrine). */
+function SecaoFeedbackVitrine({ notify }) {
+  const [avaliacoes, setAvaliacoes] = useState([]);
+  const [carregando, setCarregando] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      setCarregando(true);
+      try {
+        const r = await apiFetch("/api/avaliacoes/vitrine");
+        setAvaliacoes(r.avaliacoes || []);
+      } catch (e) { notify(`Não foi possível carregar as avaliações: ${e.message}`); }
+      setCarregando(false);
+    })();
+  }, []);
+
+  if (carregando || avaliacoes.length === 0) return null;
+
+  return (
+    <Card icon={Star} titulo="O que nossos clientes dizem">
+      <div style={{ display: "grid", gap: 10 }}>
+        {avaliacoes.map((a, i) => (
+          <div key={i} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, flexWrap: "wrap", gap: 6 }}>
+              <strong style={{ fontSize: 14 }}>{a.cliente || "Cliente"}</strong>
+              <Estrelas valor={a.nota} tamanho={15} />
+            </div>
+            {a.empreendimento && <div style={{ fontSize: 12, color: "#65758b", marginBottom: 6 }}>{a.empreendimento}</div>}
+            {a.comentario && <div style={{ fontSize: 13.5, color: "#334", background: CINZA_CLARO, borderRadius: 8, padding: "8px 10px" }}>{a.comentario}</div>}
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }
 
