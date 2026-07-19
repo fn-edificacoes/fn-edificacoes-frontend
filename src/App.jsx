@@ -207,6 +207,7 @@ const DADOS_INICIAIS = {
   rt: { nome: "ANTONIO FELIPE NEVES BARBOSA", qualificacao: "Técnico em Edificações / Eletrotécnico", registro: "CFT-03 nº 09753183496" },
   vistoria: { data: "", inicio: "", termino: "", presentes: "", cidade: "Paulista - PE" },
   textos: { ...TEXTOS_PADRAO },
+  fotoCliente: null, // foto do vistoriador com o cliente (opcional) — aparece na última página do laudo e na página de acompanhamento do cliente
 };
 
 const sevMeta = {
@@ -702,6 +703,7 @@ function AppInterno({ session, onLogout }) {
      revisar/aprovar remotamente. Redimensiona as fotos antes de enviar (evita payload
      enorme). Muda o status do cliente para "Laudo em análise" automaticamente. ---- */
   const [enviandoParaGerencia, setEnviandoParaGerencia] = useState(false);
+  const setFotoCliente = (foto) => setDados((d) => ({ ...d, fotoCliente: foto }));
   const enviarParaGerencia = async () => {
     if (!clienteAtualId) { notify("Selecione um cliente cadastrado em \"Dados do laudo\" antes de enviar."); return; }
     setEnviandoParaGerencia(true);
@@ -710,9 +712,10 @@ function AppInterno({ session, onLogout }) {
         ...item,
         fotos: await Promise.all(item.fotos.map((f) => redimensionar(f))),
       })));
+      const dadosComprimidos = { ...dados, fotoCliente: dados.fotoCliente ? await redimensionar(dados.fotoCliente) : null };
       await apiFetch("/api/vistoria/finalizar", {
         method: "POST", token,
-        body: { clienteId: clienteAtualId, dados, itens: itensComprimidos },
+        body: { clienteId: clienteAtualId, dados: dadosComprimidos, itens: itensComprimidos },
       });
       notify("Laudo enviado para a gerência ✓");
       carregarDocs();
@@ -872,7 +875,7 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "laudos" && <FaixaIndicadoresGerais docs={docs} clientes={clientes} modo="vistorias" style={{ marginBottom: 18 }} />}
         {abaTop === "documentacao" && <FaixaIndicadoresGerais docs={docs} clientes={clientes} modo="art" style={{ marginBottom: 18 }} />}
 
-        {abaTop === "laudos" && aba === "dados" && <AbaDados dados={dados} setD={setD} setTexto={setTexto} clientes={clientes} preencherComCliente={preencherComCliente} docs={docs} updDoc={updDoc} notify={notify} token={token} />}
+        {abaTop === "laudos" && aba === "dados" && <AbaDados dados={dados} setD={setD} setTexto={setTexto} setFotoCliente={setFotoCliente} clientes={clientes} preencherComCliente={preencherComCliente} docs={docs} updDoc={updDoc} notify={notify} token={token} />}
         {abaTop === "laudos" && aba === "itens" && (
           <AbaItens itens={itens} setItens={setItens} updItem={updItem} escolherPatologia={escolherPatologia}
             addFotos={addFotos} removerFoto={removerFoto} contagem={contagem} />
@@ -1345,8 +1348,16 @@ function CardAndamentoAtendimento({ cpf, docs = [], updDoc, notify, token }) {
   );
 }
 
-function AbaDados({ dados, setD, setTexto, clientes = [], preencherComCliente, docs = [], updDoc, notify, token }) {
+function AbaDados({ dados, setD, setTexto, setFotoCliente, clientes = [], preencherComCliente, docs = [], updDoc, notify, token }) {
   const [clienteSel, setClienteSel] = useState("");
+
+  const handleFotoCliente = (file) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { notify("Envie uma imagem (PNG ou JPG)"); return; }
+    const reader = new FileReader();
+    reader.onload = (e) => setFotoCliente(e.target.result);
+    reader.readAsDataURL(file);
+  };
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -1406,6 +1417,24 @@ function AbaDados({ dados, setD, setTexto, clientes = [], preencherComCliente, d
           <Field label="Cidade" value={dados.vistoria.cidade} onChange={(v) => setD("vistoria", "cidade", v)} />
           <Field label="Presentes na vistoria" value={dados.vistoria.presentes} onChange={(v) => setD("vistoria", "presentes", v)} full />
         </Grid>
+      </Card>
+
+      <Card icon={Camera} titulo="Foto com o cliente (opcional)">
+        <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
+          Uma foto sua com o cliente durante a vistoria. Aparece na última página do laudo final (como agradecimento) e na página de acompanhamento do cliente.
+        </p>
+        {dados.fotoCliente ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <img src={dados.fotoCliente} alt="Foto com o cliente" style={{ width: 110, height: 110, objectFit: "cover", borderRadius: 8, border: `1px solid ${CINZA_BORDA}` }} />
+            <button className="btn-ghost" style={{ color: "#C62828" }} onClick={() => setFotoCliente(null)}><X size={14} /> Remover foto</button>
+          </div>
+        ) : (
+          <label className="btn-ghost" style={{ display: "inline-flex", cursor: "pointer", width: "auto" }}>
+            <Camera size={15} /> Adicionar foto
+            <input type="file" accept="image/*" capture="environment" style={{ display: "none" }}
+              onChange={(e) => { handleFotoCliente(e.target.files[0]); e.target.value = ""; }} />
+          </label>
+        )}
       </Card>
 
       <Colapsavel titulo="Textos institucionais (Objetivo, Metodologia, Encerramento)">
@@ -2628,12 +2657,17 @@ function AcessoLaudoFinal({ cpf, notify }) {
         <p style={{ color: "#8593a8", fontSize: 13, margin: 0 }}>E-mail não confere ou nenhum laudo disponível ainda.</p>
       )}
       {laudos && laudos.length > 0 && (
-        <div style={{ display: "grid", gap: 8 }}>
+        <div style={{ display: "grid", gap: 12 }}>
           {laudos.map((l) => (
-            <a key={l.docId} href={`${API_URL}/api/laudo-final/download?token=${encodeURIComponent(l.tokenDownload)}`}
-              target="_blank" rel="noopener noreferrer" className="btn-solid" style={{ textDecoration: "none", justifyContent: "center" }}>
-              <FileText size={14} /> Baixar laudo{l.empreendimento ? ` — ${l.empreendimento}` : ""}
-            </a>
+            <div key={l.docId}>
+              {l.fotoCliente && (
+                <img src={l.fotoCliente} alt="Foto da sua vistoria com nosso vistoriador" style={{ width: "100%", maxWidth: 320, borderRadius: 10, display: "block", marginBottom: 8 }} />
+              )}
+              <a href={`${API_URL}/api/laudo-final/download?token=${encodeURIComponent(l.tokenDownload)}`}
+                target="_blank" rel="noopener noreferrer" className="btn-solid" style={{ textDecoration: "none", justifyContent: "center" }}>
+                <FileText size={14} /> Baixar laudo{l.empreendimento ? ` — ${l.empreendimento}` : ""}
+              </a>
+            </div>
           ))}
           <p style={{ fontSize: 11, color: "#8593a8", margin: 0 }}>O link expira em alguns minutos por segurança — se der erro, confirme de novo.</p>
         </div>
