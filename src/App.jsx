@@ -46,6 +46,7 @@ function mapDocDaApi(d) {
     relatorio: d.relatorio || "Pendente", observacoes: d.observacoes || "",
     status: d.status || "Agendado", statusCliente: d.status_cliente || "Agendado",
     vistoriadorId: d.vistoriador_id || null, atualizadoEm: d.atualizado_em || d.atualizadoEm || null,
+    statusProducao: d.status_producao || "Recebido",
   };
 }
 /* Converte um cadastro de Cliente vindo do banco (snake_case) para o formato usado no app (camelCase) */
@@ -278,15 +279,17 @@ const novoRegistroDoc = () => ({
   vistoria: "Agendada", art: "Não solicitada", tipoArt: "Individual",
   relatorio: "Pendente", observacoes: "",
   status: "Agendado", atualizadoEm: null,
+  statusProducao: "Recebido",
 });
+const STATUS_PRODUCAO_OPCOES = ["Recebido", "Em produção", "Realizado"];
 
 /* ---------- Cliente (autocadastro e acompanhamento) ---------- */
-const SERVICO_OPCOES = ["Vistoria de entrega de chaves", "Laudo técnico / TRT", "Outro"];
+const SERVICO_OPCOES = ["Vistoria de entrega de chaves", "Documentação ART/TRT", "Outro"];
 
 const novoCadastroCliente = () => ({
   id: `cli_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
   nome: "", cpf: "", telefone: "", email: "",
-  construtora: "", empreendimento: "", blocoTorre: "", endereco: "",
+  construtora: "", empreendimento: "", blocoTorre: "", endereco: "", cep: "",
   servico: SERVICO_OPCOES[0], dataDesejada: "", horarioDesejado: "", observacoes: "",
   atendido: false,
   criadoEm: new Date().toISOString(),
@@ -1935,6 +1938,8 @@ const STATUS_COR = {
   // art / relatório
   Elaborada: { cor: "#2E7D32", bg: "#E6F4EA" }, Entregue: { cor: "#2E7D32", bg: "#E6F4EA" },
   "Em processo": { cor: "#B26A00", bg: "#FFF4E0" }, "Não solicitada": { cor: "#65758b", bg: "#EEF1F5" },
+  // status de produção do bloco "ART Documentações"
+  "Recebido": { cor: "#2C75B5", bg: "#EAF2FB" }, "Em produção": { cor: "#B26A00", bg: "#FFF4E0" }, "Realizado": { cor: "#2E7D32", bg: "#E6F4EA" },
   // status do cliente (status_cliente) — os 3 únicos que o cliente vê
   "Agendado": { cor: "#2C75B5", bg: "#EAF2FB" },
   "Laudo em análise": { cor: "#B26A00", bg: "#FFF4E0" },
@@ -1969,10 +1974,15 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify }) {
     setEditando(null);
     notify("Registro salvo ✓");
   };
+  const avancarStatusProducao = (d) => {
+    const i = STATUS_PRODUCAO_OPCOES.indexOf(d.statusProducao);
+    const proximo = STATUS_PRODUCAO_OPCOES[(i + 1) % STATUS_PRODUCAO_OPCOES.length];
+    updDoc(d.id, { statusProducao: proximo });
+  };
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <Card icon={ClipboardCheck} titulo="Documentação e TRT — controle de vistorias">
+      <Card icon={ClipboardCheck} titulo="ART Documentações — controle de vistorias e documentação">
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
           <input style={{ ...inp, flex: 1, minWidth: 200 }} placeholder="Buscar por cliente ou empreendimento…" value={busca} onChange={(e) => setBusca(e.target.value)} />
           <select style={inp} value={filtroVistoria} onChange={(e) => setFiltroVistoria(e.target.value)}>
@@ -1990,7 +2000,7 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify }) {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: CINZA_CLARO }}>
-                  {["Cliente", "Empreendimento", "Data", "Pagamento", "Valor", "Vistoria", "ART", "Relatório", ""].map((h) => (
+                  {["Cliente", "Empreendimento", "Data", "Pagamento", "Valor", "Vistoria", "Status", ""].map((h) => (
                     <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}` }}>{h}</th>
                   ))}
                 </tr>
@@ -2006,8 +2016,11 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify }) {
                       {((Number(d.valorVistoria) || 0) + (Number(d.valorTrt) || 0)).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
                     </td>
                     <td style={{ padding: "8px 10px" }}><Selo valor={d.vistoria} /></td>
-                    <td style={{ padding: "8px 10px" }}><Selo valor={d.art} /></td>
-                    <td style={{ padding: "8px 10px" }}><Selo valor={d.relatorio} /></td>
+                    <td style={{ padding: "8px 10px" }}>
+                      <button className="icon-btn" style={{ padding: 0 }} title="Clique para avançar o status" onClick={() => avancarStatusProducao(d)}>
+                        <Selo valor={d.statusProducao} />
+                      </button>
+                    </td>
                     <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
                       <button className="icon-btn" onClick={() => abrirEdicao(d)}><Edit3 size={15} color={AZUL_MEDIO} /></button>
                       <button className="icon-btn" onClick={() => delDoc(d.id)}><Trash2 size={15} color="#c62828" /></button>
@@ -2049,21 +2062,15 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify }) {
                 </select>
               </div>
               <div style={cell()}>
-                <label style={lab}>ART / TRT</label>
-                <select style={inp} value={editando.art} onChange={(e) => setEditando({ ...editando, art: e.target.value })}>
-                  {ART_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
-                </select>
-              </div>
-              <div style={cell()}>
                 <label style={lab}>Tipo de ART/TRT</label>
                 <select style={inp} value={editando.tipoArt} onChange={(e) => setEditando({ ...editando, tipoArt: e.target.value })}>
                   {TIPO_ART_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
               </div>
               <div style={cell()}>
-                <label style={lab}>Relatório</label>
-                <select style={inp} value={editando.relatorio} onChange={(e) => setEditando({ ...editando, relatorio: e.target.value })}>
-                  {RELATORIO_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
+                <label style={lab}>Status</label>
+                <select style={inp} value={editando.statusProducao} onChange={(e) => setEditando({ ...editando, statusProducao: e.target.value })}>
+                  {STATUS_PRODUCAO_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
               </div>
             </Grid>
@@ -2124,9 +2131,7 @@ function CardIndicadoresGerais({ docs, clientes = [], modo = "completo" }) {
   const concluidas = vistoriasClientes.filter((c) => c.atendido).length;
 
   const contarPor = (campo) => docs.reduce((acc, d) => { acc[d[campo]] = (acc[d[campo]] || 0) + 1; return acc; }, {});
-  const porArt = contarPor("art");
-  const artRealizadas = porArt["Elaborada"] || 0;
-  const artRegistradas = docs.filter((d) => d.art !== "Não solicitada").length; // solicitadas: em processo + elaboradas
+  const porStatusProducao = contarPor("statusProducao");
 
   const mostraVistoria = modo === "completo" || modo === "vistorias";
   const mostraArt = modo === "completo" || modo === "art";
@@ -2148,11 +2153,12 @@ function CardIndicadoresGerais({ docs, clientes = [], modo = "completo" }) {
         {mostraArt && (
           <div>
             <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
-              <FileText size={14} /> ART / TRT
+              <FileText size={14} /> ART Documentações
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <KpiCard label="Registradas" valor={artRegistradas} cor="#2C75B5" Icon={FileText} />
-              <KpiCard label="Realizadas" valor={artRealizadas} cor="#2E7D32" Icon={FileText} />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+              <KpiCard label="Recebido" valor={porStatusProducao["Recebido"] || 0} cor="#2C75B5" Icon={FileText} />
+              <KpiCard label="Em produção" valor={porStatusProducao["Em produção"] || 0} cor="#B26A00" Icon={FileText} />
+              <KpiCard label="Realizado" valor={porStatusProducao["Realizado"] || 0} cor="#2E7D32" Icon={FileText} />
             </div>
           </div>
         )}
@@ -2951,6 +2957,12 @@ function AbaCliente({ notify }) {
           Preencha seus dados para agendar uma vistoria, laudo técnico ou outro serviço da FN Edificações. Nossa equipe entra em contato para confirmar o atendimento.
         </p>
         <Grid>
+          <div style={cell(true)}>
+            <label style={lab}>Serviço desejado</label>
+            <select style={inp} value={form.servico} onChange={(e) => setF("servico", e.target.value)}>
+              {SERVICO_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </div>
           <Field label="Nome completo" value={form.nome} onChange={(v) => setFMaiusc("nome", v)} full />
           <Field label="CPF (11 dígitos)" value={form.cpf} onChange={setFCpf} />
           <Field label="Telefone / WhatsApp" value={form.telefone} onChange={(v) => setF("telefone", v.replace(/\D/g, "").slice(0, 11))} />
@@ -2978,13 +2990,8 @@ function AbaCliente({ notify }) {
             )}
           </div>
           <Field label="Endereço completo" value={form.endereco} onChange={(v) => setFMaiusc("endereco", v)} full />
+          <Field label="CEP" value={form.cep} onChange={(v) => setF("cep", v.replace(/\D/g, "").slice(0, 8))} />
           <Field label="Bloco / Apto" value={form.blocoTorre} onChange={(v) => setFMaiusc("blocoTorre", v)} />
-          <div style={cell(true)}>
-            <label style={lab}>Serviço desejado</label>
-            <select style={inp} value={form.servico} onChange={(e) => setF("servico", e.target.value)}>
-              {SERVICO_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
-            </select>
-          </div>
           <Field label="Data desejada" type="date" value={form.dataDesejada} onChange={(v) => setF("dataDesejada", v)} />
           <Field label="Horário desejado" type="time" value={form.horarioDesejado} onChange={(v) => setF("horarioDesejado", v)} />
         </Grid>
