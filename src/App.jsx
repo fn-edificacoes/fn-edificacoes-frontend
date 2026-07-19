@@ -4,7 +4,7 @@ import {
   Building2, User, ClipboardList, ChevronDown, ChevronRight, Check,
   AlertTriangle, CircleAlert, Info, Copy, Sparkles, Loader2,
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
-  TrendingUp, Percent
+  TrendingUp, Percent, Send, CalendarDays, Eye, Mail
 } from "lucide-react";
 
 /* ============================================================
@@ -44,7 +44,8 @@ function mapDocDaApi(d) {
     pagamento: d.pagamento || "Pendente", valorVistoria: d.valor_vistoria ?? 0, valorTrt: d.valor_trt ?? 0,
     vistoria: d.vistoria || "Agendada", art: d.art || "Não solicitada", tipoArt: d.tipo_art || "Individual",
     relatorio: d.relatorio || "Pendente", observacoes: d.observacoes || "",
-    status: d.status || "Recebido", atualizadoEm: d.atualizado_em || d.atualizadoEm || null,
+    status: d.status || "Agendado", statusCliente: d.status_cliente || "Agendado",
+    vistoriadorId: d.vistoriador_id || null, atualizadoEm: d.atualizado_em || d.atualizadoEm || null,
   };
 }
 /* Converte um cadastro de Cliente vindo do banco (snake_case) para o formato usado no app (camelCase) */
@@ -225,16 +226,20 @@ const ART_OPCOES = ["Não solicitada", "Em processo", "Elaborada"];
 const TIPO_ART_OPCOES = ["Individual", "Coletiva"];
 const RELATORIO_OPCOES = ["Pendente", "Em processo", "Entregue"];
 
-/* ---------- Andamento do atendimento (status único mostrado ao cliente) ---------- */
-const STATUS_ATENDIMENTO_OPCOES = ["Recebido", "Em andamento", "Realizada", "Laudo em elaboração", "Laudo entregue", "Concluído"];
+/* ---------- Status do CLIENTE (status_cliente) — só estes 3, nesta ordem, sempre automático ----------
+   O cliente NUNCA vê status internos de gerência/documentação (STATUS_INTERNO_OPCOES abaixo).
+   Muda sozinho: "Agendado" -> "Laudo em análise" quando o vistoriador finaliza a vistoria
+   (POST /api/vistoria/finalizar) -> "Laudo enviado por e-mail" quando a gerência aprova
+   (POST /api/docs/:id/aprovar, que já gera o PDF e envia o e-mail). */
+const STATUS_ATENDIMENTO_OPCOES = ["Agendado", "Laudo em análise", "Laudo enviado por e-mail"];
 const STATUS_ATENDIMENTO_INFO = {
-  "Recebido": "Recebemos sua solicitação. Em breve nossa equipe entrará em contato para confirmar o agendamento.",
-  "Em andamento": "Seu atendimento está em andamento — nossa equipe já está cuidando da sua vistoria.",
-  "Realizada": "A vistoria já foi realizada. Estamos organizando as informações coletadas.",
-  "Laudo em elaboração": "Seu atendimento está no setor de vistoria: o laudo está sendo elaborado.",
-  "Laudo entregue": "Seu laudo já foi entregue. Verifique seu e-mail ou WhatsApp.",
-  "Concluído": "Seu atendimento foi concluído. Agradecemos a confiança na FN Edificações!",
+  "Agendado": "Recebemos sua solicitação e sua vistoria está agendada. Em breve nossa equipe entrará em contato.",
+  "Laudo em análise": "Sua vistoria foi realizada e o laudo está em análise pela nossa equipe técnica.",
+  "Laudo enviado por e-mail": "Seu laudo foi aprovado e enviado para o e-mail cadastrado. Verifique sua caixa de entrada (e o spam).",
 };
+/* ---------- Status INTERNO (docs.status) — uso exclusivo da equipe (Documentação/Gerência),
+   nunca mostrado ao cliente. Precisa bater exatamente com STATUS_ATENDIMENTO_VALIDOS do backend. */
+const STATUS_INTERNO_OPCOES = ["Agendado", "Em vistoria", "Laudo em elaboração", "Laudo pronto"];
 
 /* ---------- Perfis de acesso (agora definidos pelo backend/login, não escolhidos na tela) ----------
    vistoriador   -> só enxerga o módulo Laudos (não vê Documentação nem Gerência)
@@ -259,7 +264,7 @@ const novoRegistroDoc = () => ({
   pagamento: "Pendente", valorVistoria: "", valorTrt: "",
   vistoria: "Agendada", art: "Não solicitada", tipoArt: "Individual",
   relatorio: "Pendente", observacoes: "",
-  status: "Recebido", atualizadoEm: null,
+  status: "Agendado", atualizadoEm: null,
 });
 
 /* ---------- Cliente (autocadastro e acompanhamento) ---------- */
@@ -441,6 +446,7 @@ function AppInterno({ session, onLogout }) {
   const [abaGerencia, setAbaGerencia] = useState("visao-geral"); // "visao-geral" | "parceiros" | "financeiro"
   const [dados, setDados] = useState(DADOS_INICIAIS);
   const [itens, setItens] = useState([novoItem()]);
+  const [clienteAtualId, setClienteAtualId] = useState(null); // id do cliente carregado no laudo em edição — necessário para "Enviar para gerência"
   const [rascunhos, setRascunhos] = useState([]);
   const [toast, setToast] = useState("");
   const [showLoad, setShowLoad] = useState(false);
@@ -589,6 +595,46 @@ function AppInterno({ session, onLogout }) {
     } catch (e) { notify(`Não foi possível remover o preço: ${e.message}`); }
   };
 
+  /* ---- Laudos aguardando aprovação da Gerência ---- */
+  const [laudosPendentes, setLaudosPendentes] = useState([]);
+  const [laudosPendentesCarregando, setLaudosPendentesCarregando] = useState(false);
+  const carregarLaudosPendentes = async () => {
+    if (perfil !== "gerencia") return;
+    setLaudosPendentesCarregando(true);
+    try {
+      const r = await apiFetch("/api/laudos/pendentes", { token });
+      setLaudosPendentes(r.pendentes || []);
+    } catch (e) { notify(`Não foi possível carregar laudos pendentes: ${e.message}`); }
+    setLaudosPendentesCarregando(false);
+  };
+  useEffect(() => { carregarLaudosPendentes(); }, []);
+  const aprovarLaudo = async (docId) => {
+    try {
+      const r = await apiFetch(`/api/docs/${docId}/aprovar`, { method: "POST", token });
+      notify(`Laudo aprovado e enviado para ${r.emailEnviadoPara} ✓`);
+      setLaudosPendentes((atual) => atual.filter((p) => p.doc_id !== docId));
+      carregarDocs();
+      return true;
+    } catch (e) {
+      notify(`Não foi possível aprovar: ${e.message}`);
+      return false;
+    }
+  };
+
+  /* ---- Calendário do vistoriador: agendamentos atribuídos a ele ---- */
+  const [agendaVistoriador, setAgendaVistoriador] = useState([]);
+  const [agendaVistoriadorCarregando, setAgendaVistoriadorCarregando] = useState(false);
+  const carregarAgendaVistoriador = async () => {
+    if (perfil !== "vistoriador") return;
+    setAgendaVistoriadorCarregando(true);
+    try {
+      const r = await apiFetch("/api/clientes/minha-agenda", { token });
+      setAgendaVistoriador(r.agenda || []);
+    } catch (e) { notify(`Não foi possível carregar sua agenda: ${e.message}`); }
+    setAgendaVistoriadorCarregando(false);
+  };
+  useEffect(() => { carregarAgendaVistoriador(); }, []);
+
   /* ---- Assinatura digital da Gerência (via API real) ---- */
   const [assinatura, setAssinatura] = useState(null); // { imagem, nome }
   const carregarAssinatura = async () => {
@@ -646,9 +692,32 @@ function AppInterno({ session, onLogout }) {
       imovel: { ...d.imovel, construtora: cli.construtora || d.imovel.construtora, empreendimento: cli.empreendimento || d.imovel.empreendimento, unidade: cli.blocoTorre || d.imovel.unidade, endereco: cli.endereco || d.imovel.endereco },
       vistoria: { ...d.vistoria, data: cli.dataDesejada || d.vistoria.data, inicio: cli.horarioDesejado || d.vistoria.inicio },
     }));
+    setClienteAtualId(cli.id);
     if (!cli.atendido) updCliente(cli.id, { atendido: true });
     if (irParaItens) { setAbaTop("laudos"); setAba("itens"); }
     notify("Dados do cliente aplicados ao laudo ✓");
+  };
+
+  /* ---- Finalizar vistoria: vistoriador envia o laudo (dados + itens) para a gerência
+     revisar/aprovar remotamente. Redimensiona as fotos antes de enviar (evita payload
+     enorme). Muda o status do cliente para "Laudo em análise" automaticamente. ---- */
+  const [enviandoParaGerencia, setEnviandoParaGerencia] = useState(false);
+  const enviarParaGerencia = async () => {
+    if (!clienteAtualId) { notify("Selecione um cliente cadastrado em \"Dados do laudo\" antes de enviar."); return; }
+    setEnviandoParaGerencia(true);
+    try {
+      const itensComprimidos = await Promise.all(itens.map(async (item) => ({
+        ...item,
+        fotos: await Promise.all(item.fotos.map((f) => redimensionar(f))),
+      })));
+      await apiFetch("/api/vistoria/finalizar", {
+        method: "POST", token,
+        body: { clienteId: clienteAtualId, dados, itens: itensComprimidos },
+      });
+      notify("Laudo enviado para a gerência ✓");
+      carregarDocs();
+    } catch (e) { notify(`Não foi possível enviar para a gerência: ${e.message}`); }
+    setEnviandoParaGerencia(false);
   };
 
   /* ---- rascunhos de laudo em andamento: guardados só neste navegador (não vão para o banco da equipe) ---- */
@@ -749,6 +818,9 @@ function AppInterno({ session, onLogout }) {
               <button className="btn-ghost" onClick={() => { setShowLoad(true); listarRascunhos(); }}><FolderOpen size={15} /> Abrir</button>
               <button className="btn-ghost" onClick={salvarRascunho}><Save size={15} /> Salvar</button>
               <button className="btn-solid" onClick={() => { setAba("laudo"); setTimeout(imprimir, 300); }}><Printer size={15} /> Gerar PDF</button>
+              <button className="btn-solid" style={{ background: AZUL_MARINHO }} onClick={enviarParaGerencia} disabled={enviandoParaGerencia}>
+                {enviandoParaGerencia ? <Loader2 size={15} className="spin" /> : <Send size={15} />} Enviar para gerência
+              </button>
             </>
           )}
           {abaTop === "documentacao" && (
@@ -773,11 +845,13 @@ function AppInterno({ session, onLogout }) {
         {/* Sub-navegação (somente dentro do módulo Laudos) */}
         {abaTop === "laudos" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)" }}>
-            {[["dados", "Dados do laudo", ClipboardList], ["itens", `Vistoria (${totalItens})`, Camera], ["laudo", "Laudo final", FileText]].map(([k, label, Icon]) => (
-              <button key={k} onClick={() => setAba(k)} className="tab" style={{ borderBottomColor: aba === k ? AZUL_MEDIO : "transparent", color: aba === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13 }}>
-                <Icon size={15} /> {label}
-              </button>
-            ))}
+            {[["dados", "Dados do laudo", ClipboardList], ["itens", `Vistoria (${totalItens})`, Camera], ["laudo", "Laudo final", FileText],
+              ...(perfil === "vistoriador" ? [["agenda", "Minha agenda", CalendarDays]] : [])]
+              .map(([k, label, Icon]) => (
+                <button key={k} onClick={() => setAba(k)} className="tab" style={{ borderBottomColor: aba === k ? AZUL_MEDIO : "transparent", color: aba === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13 }}>
+                  <Icon size={15} /> {label}
+                </button>
+              ))}
           </nav>
         )}
 
@@ -798,12 +872,15 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "laudos" && <FaixaIndicadoresGerais docs={docs} clientes={clientes} modo="vistorias" style={{ marginBottom: 18 }} />}
         {abaTop === "documentacao" && <FaixaIndicadoresGerais docs={docs} clientes={clientes} modo="art" style={{ marginBottom: 18 }} />}
 
-        {abaTop === "laudos" && aba === "dados" && <AbaDados dados={dados} setD={setD} setTexto={setTexto} clientes={clientes} preencherComCliente={preencherComCliente} docs={docs} updDoc={updDoc} notify={notify} />}
+        {abaTop === "laudos" && aba === "dados" && <AbaDados dados={dados} setD={setD} setTexto={setTexto} clientes={clientes} preencherComCliente={preencherComCliente} docs={docs} updDoc={updDoc} notify={notify} token={token} />}
         {abaTop === "laudos" && aba === "itens" && (
           <AbaItens itens={itens} setItens={setItens} updItem={updItem} escolherPatologia={escolherPatologia}
             addFotos={addFotos} removerFoto={removerFoto} contagem={contagem} />
         )}
         {abaTop === "laudos" && aba === "laudo" && <Laudo dados={dados} itens={itens} contagem={contagem} totalItens={totalItens} assinatura={assinatura} />}
+        {abaTop === "laudos" && aba === "agenda" && perfil === "vistoriador" && (
+          <CalendarioVistoriador agenda={agendaVistoriador} carregando={agendaVistoriadorCarregando} />
+        )}
 
         {abaTop === "documentacao" && (
           <AbaDocumentacao docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={docsCarregando} notify={notify} />
@@ -820,7 +897,8 @@ function AppInterno({ session, onLogout }) {
             avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
             parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
             vales={vales} valesCarregando={valesCarregando}
-            precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} removerPreco={removerPreco} />
+            precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} removerPreco={removerPreco}
+            laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} />
         )}
       </main>
 
@@ -890,6 +968,58 @@ function NotificacoesClientes({ clientes, preencherComCliente, style }) {
             </div>
           ))}
         </div>
+      </Card>
+    </div>
+  );
+}
+
+/* ================= Calendário de acompanhamento do vistoriador ================= */
+function CalendarioVistoriador({ agenda = [], carregando }) {
+  const porData = agenda.reduce((acc, a) => {
+    const k = a.data_desejada || "(sem data)";
+    (acc[k] = acc[k] || []).push(a);
+    return acc;
+  }, {});
+  const datasOrdenadas = Object.keys(porData).sort();
+
+  const fmtDataLonga = (d) => {
+    if (!d || d === "(sem data)") return "Sem data definida";
+    return new Date(`${d}T00:00:00`).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
+  };
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <Card icon={CalendarDays} titulo="Minha agenda">
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+          Vistorias atribuídas a você, ordenadas por data. Apenas consulta — a atribuição e o agendamento são feitos pela Gerência/Comercial.
+        </p>
+
+        {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+        {!carregando && agenda.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhuma vistoria atribuída a você ainda.</p>}
+
+        {datasOrdenadas.map((data) => (
+          <div key={data} style={{ marginBottom: 18 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8, textTransform: "capitalize", borderBottom: `2px solid ${CINZA_CLARO}`, paddingBottom: 6 }}>
+              {fmtDataLonga(data)}
+            </div>
+            <div style={{ display: "grid", gap: 10 }}>
+              {porData[data].map((a) => (
+                <div key={a.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ width: 56, textAlign: "center", flexShrink: 0, fontSize: 15, fontWeight: 800, color: AZUL_MEDIO }}>
+                    {a.horario_desejado || "—"}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 180 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>{a.nome}</div>
+                    <div style={{ fontSize: 12.5, color: "#65758b" }}>
+                      {a.servico}{a.empreendimento ? ` · ${a.empreendimento}` : ""}{a.bloco_torre ? ` (${a.bloco_torre})` : ""}
+                    </div>
+                  </div>
+                  <Selo valor={a.atendido ? "Concluída" : "Agendada"} />
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
       </Card>
     </div>
   );
@@ -1124,44 +1254,80 @@ function AbaQualidade({ avaliacoes, carregando, docs, docsCarregando }) {
 }
 
 
-function CardAndamentoAtendimento({ cpf, docs = [], updDoc, notify }) {
+function CardAndamentoAtendimento({ cpf, docs = [], updDoc, notify, token }) {
   const cpfLimpo = (cpf || "").replace(/\D/g, "");
   const doc = docs.find((d) => cpfLimpo && (d.cpf || "").replace(/\D/g, "") === cpfLimpo);
-  const [status, setStatus] = useState(doc?.status || STATUS_ATENDIMENTO_OPCOES[0]);
+  const [statusInterno, setStatusInterno] = useState(doc?.status || STATUS_INTERNO_OPCOES[0]);
   const [salvando, setSalvando] = useState(false);
+  const [historico, setHistorico] = useState([]);
 
-  useEffect(() => { setStatus(doc?.status || STATUS_ATENDIMENTO_OPCOES[0]); }, [doc?.id, doc?.status]);
+  useEffect(() => { setStatusInterno(doc?.status || STATUS_INTERNO_OPCOES[0]); }, [doc?.id, doc?.status]);
+
+  useEffect(() => {
+    if (!doc?.id) { setHistorico([]); return; }
+    (async () => {
+      try {
+        const r = await apiFetch(`/api/docs/${doc.id}/historico`, { token });
+        setHistorico(r.historico || []);
+      } catch { setHistorico([]); }
+    })();
+  }, [doc?.id]);
 
   const atualizar = async () => {
     setSalvando(true);
     try {
-      await updDoc(doc.id, { status, atualizadoEm: new Date().toISOString() });
-      notify("Andamento atualizado para o cliente ✓");
+      await updDoc(doc.id, { status: statusInterno });
+      notify("Status interno atualizado ✓");
     } catch (e) { notify(`Não foi possível atualizar: ${e.message}`); }
     setSalvando(false);
   };
 
   return (
     <Card icon={ClipboardCheck} titulo="Andamento do atendimento">
-      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
-        Escolha em que etapa este atendimento está. O cliente vê essa informação ao consultar pelo CPF dele.
-      </p>
-
       {!cpfLimpo && (
         <p style={{ color: "#8593a8", fontSize: 14 }}>Informe o CPF do contratante acima para localizar (ou criar) o acompanhamento deste cliente.</p>
       )}
 
       {cpfLimpo && !doc && (
-        <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum registro de atendimento encontrado para este CPF ainda. Crie um registro na aba "Documentação" para poder atualizar o andamento.</p>
+        <p style={{ color: "#8593a8", fontSize: 14 }}>
+          Nenhum registro de atendimento encontrado para este CPF ainda. Ele é criado automaticamente quando o vistoriador
+          envia o laudo para a gerência, ou manualmente na aba "Documentação".
+        </p>
       )}
 
       {cpfLimpo && doc && (
         <>
+          <div style={{ marginBottom: 16 }}>
+            <label style={lab}>Status visto pelo cliente (automático)</label>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6, flexWrap: "wrap" }}>
+              <Selo valor={doc.statusCliente || "Agendado"} />
+              <span style={{ fontSize: 12.5, color: "#65758b" }}>{STATUS_ATENDIMENTO_INFO[doc.statusCliente] || ""}</span>
+            </div>
+            <p style={{ fontSize: 11.5, color: "#8593a8", marginTop: 6 }}>
+              Muda sozinho: quando o vistoriador envia o laudo para a gerência, e quando a gerência aprova (o laudo é
+              enviado por e-mail automaticamente). Não é editável manualmente aqui.
+            </p>
+          </div>
+
+          {historico.length > 0 && (
+            <div style={{ marginBottom: 16, paddingBottom: 14, borderBottom: `1px dashed ${CINZA_BORDA}` }}>
+              <label style={lab}>Histórico</label>
+              <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
+                {historico.map((h, i) => (
+                  <div key={i} style={{ fontSize: 12, color: "#4a5a70", display: "flex", justifyContent: "space-between", gap: 10 }}>
+                    <span>{h.status_cliente}</span>
+                    <span style={{ color: "#8593a8", whiteSpace: "nowrap" }}>{new Date(h.criado_em).toLocaleString("pt-BR")}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <Grid>
             <div style={cell(true)}>
-              <label style={lab}>Status atual</label>
-              <select style={inp} value={status} onChange={(e) => setStatus(e.target.value)}>
-                {STATUS_ATENDIMENTO_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
+              <label style={lab}>Status interno (uso da equipe — o cliente não vê isso)</label>
+              <select style={inp} value={statusInterno} onChange={(e) => setStatusInterno(e.target.value)}>
+                {STATUS_INTERNO_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
               </select>
             </div>
           </Grid>
@@ -1171,7 +1337,7 @@ function CardAndamentoAtendimento({ cpf, docs = [], updDoc, notify }) {
             </div>
           )}
           <button className="btn-solid" style={{ marginTop: 12 }} onClick={atualizar} disabled={salvando}>
-            {salvando ? <Loader2 size={15} className="spin" /> : <Check size={15} />} Atualizar andamento para o cliente
+            {salvando ? <Loader2 size={15} className="spin" /> : <Check size={15} />} Atualizar status interno
           </button>
         </>
       )}
@@ -1179,7 +1345,7 @@ function CardAndamentoAtendimento({ cpf, docs = [], updDoc, notify }) {
   );
 }
 
-function AbaDados({ dados, setD, setTexto, clientes = [], preencherComCliente, docs = [], updDoc, notify }) {
+function AbaDados({ dados, setD, setTexto, clientes = [], preencherComCliente, docs = [], updDoc, notify, token }) {
   const [clienteSel, setClienteSel] = useState("");
 
   return (
@@ -1212,7 +1378,7 @@ function AbaDados({ dados, setD, setTexto, clientes = [], preencherComCliente, d
         </Grid>
       </Card>
 
-      <CardAndamentoAtendimento cpf={dados.contratante.cpf} docs={docs} updDoc={updDoc} notify={notify} />
+      <CardAndamentoAtendimento cpf={dados.contratante.cpf} docs={docs} updDoc={updDoc} notify={notify} token={token} />
 
       <Card icon={Building2} titulo="Dados do imóvel">
         <Grid>
@@ -1534,11 +1700,14 @@ const STATUS_COR = {
   // art / relatório
   Elaborada: { cor: "#2E7D32", bg: "#E6F4EA" }, Entregue: { cor: "#2E7D32", bg: "#E6F4EA" },
   "Em processo": { cor: "#B26A00", bg: "#FFF4E0" }, "Não solicitada": { cor: "#65758b", bg: "#EEF1F5" },
-  // andamento do atendimento (status único mostrado ao cliente)
-  "Recebido": { cor: "#2C75B5", bg: "#EAF2FB" }, "Em andamento": { cor: "#B26A00", bg: "#FFF4E0" },
-  "Realizada": { cor: "#2E7D32", bg: "#E6F4EA" },
-  "Laudo em elaboração": { cor: "#B26A00", bg: "#FFF4E0" }, "Laudo entregue": { cor: "#2E7D32", bg: "#E6F4EA" },
-  "Concluído": { cor: "#2E7D32", bg: "#E6F4EA" },
+  // status do cliente (status_cliente) — os 3 únicos que o cliente vê
+  "Agendado": { cor: "#2C75B5", bg: "#EAF2FB" },
+  "Laudo em análise": { cor: "#B26A00", bg: "#FFF4E0" },
+  "Laudo enviado por e-mail": { cor: "#2E7D32", bg: "#E6F4EA" },
+  // status interno (docs.status) — uso exclusivo da equipe
+  "Em vistoria": { cor: "#B26A00", bg: "#FFF4E0" },
+  "Laudo em elaboração": { cor: "#B26A00", bg: "#FFF4E0" },
+  "Laudo pronto": { cor: "#2E7D32", bg: "#E6F4EA" },
 };
 function Selo({ valor }) {
   const s = STATUS_COR[valor] || { cor: "#65758b", bg: "#EEF1F5" };
@@ -1792,7 +1961,73 @@ function CardCadastrosClientes({ clientes }) {
   );
 }
 
-function AbaGerenciaVisaoGeral({ docs, clientes, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando }) {
+/* ---- Laudos aguardando aprovação da Gerência: pré-visualiza (reaproveita o componente
+   Laudo já existente) e aprova (gera PDF + envia por e-mail automaticamente). ---- */
+function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, assinatura, notify }) {
+  const [previewId, setPreviewId] = useState(null);
+  const [aprovandoId, setAprovandoId] = useState(null);
+  const laudoPreview = laudosPendentes.find((l) => l.doc_id === previewId);
+
+  const aprovar = async (docId) => {
+    setAprovandoId(docId);
+    await aprovarLaudo(docId);
+    setAprovandoId(null);
+    if (previewId === docId) setPreviewId(null);
+  };
+
+  const contagemPreview = { Baixa: 0, Média: 0, Alta: 0 };
+  (laudoPreview?.itens || []).forEach((i) => { if (i.tipo && contagemPreview[i.severidade] !== undefined) contagemPreview[i.severidade]++; });
+
+  return (
+    <Card icon={Mail} titulo={`Laudos aguardando aprovação (${laudosPendentes.length})`}>
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Ao aprovar, o sistema gera o PDF final e envia automaticamente por e-mail para o endereço já cadastrado do cliente — sem precisar digitar nada.
+      </p>
+
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && laudosPendentes.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum laudo aguardando aprovação no momento.</p>}
+
+      <div style={{ display: "grid", gap: 10 }}>
+        {laudosPendentes.map((l) => (
+          <div key={l.doc_id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>{l.cliente}</div>
+              <div style={{ fontSize: 12.5, color: "#65758b" }}>
+                {l.empreendimento}{l.bloco_torre ? ` · ${l.bloco_torre}` : ""} · enviado em {new Date(l.laudo_criado_em).toLocaleString("pt-BR")}
+              </div>
+            </div>
+            <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setPreviewId(l.doc_id)}>
+              <Eye size={14} /> Pré-visualizar
+            </button>
+            <button className="btn-solid" onClick={() => aprovar(l.doc_id)} disabled={aprovandoId === l.doc_id}>
+              {aprovandoId === l.doc_id ? <Loader2 size={14} className="spin" /> : <Mail size={14} />} Aprovar e enviar por e-mail
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {laudoPreview && (
+        <div className="no-print" style={overlay} onClick={() => setPreviewId(null)}>
+          <div style={{ ...modal, maxWidth: 780, maxHeight: "85vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <strong>Pré-visualização do laudo</strong>
+              <button className="icon-btn" onClick={() => setPreviewId(null)}><X size={16} /></button>
+            </div>
+            <Laudo dados={laudoPreview.dados} itens={laudoPreview.itens || []} contagem={contagemPreview} totalItens={(laudoPreview.itens || []).length} assinatura={assinatura} />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setPreviewId(null)}>Fechar</button>
+              <button className="btn-solid" onClick={() => aprovar(laudoPreview.doc_id)} disabled={aprovandoId === laudoPreview.doc_id}>
+                {aprovandoId === laudoPreview.doc_id ? <Loader2 size={14} className="spin" /> : <Mail size={14} />} Aprovar e enviar por e-mail
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function AbaGerenciaVisaoGeral({ docs, clientes, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo }) {
   const porVistoria = docs.reduce((acc, d) => { acc[d.vistoria] = (acc[d.vistoria] || 0) + 1; return acc; }, {});
   const porArt = docs.reduce((acc, d) => { acc[d.art] = (acc[d.art] || 0) + 1; return acc; }, {});
   const porRelatorio = docs.reduce((acc, d) => { acc[d.relatorio] = (acc[d.relatorio] || 0) + 1; return acc; }, {});
@@ -1809,6 +2044,8 @@ function AbaGerenciaVisaoGeral({ docs, clientes, carregando, assinatura, salvarA
   return (
     <div style={{ display: "grid", gap: 16 }}>
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando indicadores…</p>}
+
+      <CardLaudosPendentes laudosPendentes={laudosPendentes} carregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} assinatura={assinatura} notify={notify} />
 
       <CardIndicadoresGerais docs={docs} clientes={clientes} />
 
@@ -2089,7 +2326,7 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, clientes = [], carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, removerPreco }) {
+function AbaGerencia({ sub = "visao-geral", docs, clientes = [], carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, removerPreco, laudosPendentes, laudosPendentesCarregando, aprovarLaudo }) {
   if (sub === "parceiros") {
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} vales={vales} valesCarregando={valesCarregando} notify={notify} />;
   }
@@ -2099,7 +2336,8 @@ function AbaGerencia({ sub = "visao-geral", docs, clientes = [], carregando, ass
   return (
     <AbaGerenciaVisaoGeral docs={docs} clientes={clientes} carregando={carregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
       usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={usuarioAtualId}
-      avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando} />
+      avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
+      laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} />
   );
 }
 
