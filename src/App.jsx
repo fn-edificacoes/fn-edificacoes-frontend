@@ -2201,6 +2201,21 @@ function Laudo({ dados, itens, contagem, totalItens, assinatura }) {
           )}
         </div>
       </div>
+
+      {/* Última página: foto com o cliente + agradecimento (mesma ordem do PDF final: foto primeiro, legenda abaixo) */}
+      {dados.fotoCliente && (
+        <div style={{ breakBefore: "page" }}>
+          <div style={{ background: `linear-gradient(135deg, ${AZUL_MARINHO}, ${AZUL_MEDIO})`, color: "#fff", padding: "26px 40px", textAlign: "center" }}>
+            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>Agradecemos a confiança</h2>
+          </div>
+          <div style={{ padding: "34px 40px", textAlign: "center" }}>
+            <img src={dados.fotoCliente} alt="Foto com o cliente" style={{ maxWidth: 380, width: "100%", borderRadius: 12, border: `1px solid ${CINZA_BORDA}` }} />
+            <p style={{ ...pTexto, maxWidth: 480, margin: "20px auto 0" }}>
+              A FN Edificações agradece a confiança depositada em nosso trabalho. Foi um prazer acompanhar você nesta etapa tão importante da aquisição do seu imóvel.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
