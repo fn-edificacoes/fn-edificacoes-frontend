@@ -55,7 +55,19 @@ function mapClienteDaApi(c) {
     construtora: c.construtora || "", empreendimento: c.empreendimento || "", blocoTorre: c.bloco_torre || "", endereco: c.endereco || "",
     servico: c.servico || "", dataDesejada: c.data_desejada || "", horarioDesejado: c.horario_desejado || "",
     observacoes: c.observacoes || "", atendido: !!c.atendido,
+    status: c.status || "Em análise", cep: c.cep || "", vistoriadorId: c.vistoriador_id || "",
+    precisaCadastroEmpreendimento: !!c.precisa_cadastro_empreendimento,
   };
+}
+/* Etapa atual de um cliente no fluxo completo (cadastro → análise → vistoria → laudo → feedback).
+   Antes de existir um "docs" pra esse CPF, quem manda é cliente.status (Em análise/Agendamento
+   aprovado/Vistoria agendada). Depois que a vistoria é finalizada, o docs.statusCliente assume
+   (Agendado/Laudo em análise/Laudo enviado por e-mail) — cliente.status não é mais tocado. */
+function etapaAtualCliente(cliente, docs = []) {
+  const cpfLimpo = (cliente.cpf || "").replace(/\D/g, "");
+  const doc = cpfLimpo ? docs.find((d) => (d.cpf || "").replace(/\D/g, "") === cpfLimpo) : null;
+  if (doc) return doc.statusCliente || "Agendado";
+  return cliente.status || "Em análise";
 }
 /* Converte um registro de preço de vistoria por empreendimento vindo do banco (snake_case) */
 function mapPrecoDaApi(p) {
@@ -454,6 +466,7 @@ function AppInterno({ session, onLogout }) {
   const [abaTop, setAbaTop] = useState("laudos"); // "laudos" | "documentacao" | "gerencia"
   const [aba, setAba] = useState("dados");
   const [abaGerencia, setAbaGerencia] = useState("visao-geral"); // "visao-geral" | "parceiros" | "financeiro"
+  const [abaQualidade, setAbaQualidade] = useState("analise"); // "analise" | "vistoria" | "feedback"
   const [dados, setDados] = useState(DADOS_INICIAIS);
   const [itens, setItens] = useState([novoItem()]);
   const [clienteAtualId, setClienteAtualId] = useState(null); // id do cliente carregado no laudo em edição — necessário para "Enviar para gerência"
@@ -673,7 +686,7 @@ function AppInterno({ session, onLogout }) {
   const [usuarios, setUsuarios] = useState([]);
   const [usuariosCarregando, setUsuariosCarregando] = useState(false);
   const carregarUsuarios = async () => {
-    if (perfil !== "gerencia") return;
+    if (perfil !== "gerencia" && perfil !== "qualidade") return;
     setUsuariosCarregando(true);
     try {
       const r = await apiFetch("/api/users", { token });
@@ -888,6 +901,17 @@ function AppInterno({ session, onLogout }) {
             ))}
           </nav>
         )}
+
+        {/* Sub-navegação (somente dentro do módulo Qualidade) */}
+        {abaTop === "qualidade" && (
+          <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)" }}>
+            {[["analise", "Análise", ClipboardCheck], ["vistoria", "Vistoria", CalendarDays], ["feedback", "Feedback", Star]].map(([k, label, Icon]) => (
+              <button key={k} onClick={() => setAbaQualidade(k)} className="tab" style={{ borderBottomColor: abaQualidade === k ? AZUL_MEDIO : "transparent", color: abaQualidade === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13 }}>
+                <Icon size={15} /> {label}
+              </button>
+            ))}
+          </nav>
+        )}
       </header>
 
       <main style={{ maxWidth: 1080, margin: "0 auto", padding: "22px 18px 80px" }}>
@@ -902,17 +926,18 @@ function AppInterno({ session, onLogout }) {
         )}
         {abaTop === "laudos" && aba === "laudo" && <Laudo dados={dados} itens={itens} contagem={contagem} totalItens={totalItens} assinatura={assinatura} />}
         {abaTop === "laudos" && aba === "agenda" && (perfil === "vistoriador" || perfil === "gerencia") && (
-          <CalendarioVistoriador agenda={agendaVistoriador} carregando={agendaVistoriadorCarregando} />
+          <CalendarioVistoriador agenda={agendaVistoriador} carregando={agendaVistoriadorCarregando} clientes={clientes} preencherComCliente={preencherComCliente} />
         )}
 
         {abaTop === "documentacao" && (
           <AbaDocumentacao docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={docsCarregando} notify={notify} />
         )}
         {abaTop === "clientes" && (
-          <AbaClientesComercial clientes={clientes} carregando={clientesCarregando} atualizarCliente={updCliente} notify={notify} />
+          <AbaClientesComercial clientes={clientes} carregando={clientesCarregando} atualizarCliente={updCliente} notify={notify} docs={docs} />
         )}
         {abaTop === "qualidade" && (
-          <AbaQualidade avaliacoes={avaliacoes} carregando={avaliacoesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao} />
+          <AbaQualidade sub={abaQualidade} avaliacoes={avaliacoes} carregando={avaliacoesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
+            clientes={clientes} clientesCarregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} preencherComCliente={preencherComCliente} />
         )}
         {abaTop === "gerencia" && (
           <AbaGerencia sub={abaGerencia} docs={docs} clientes={clientes} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
@@ -997,7 +1022,7 @@ function NotificacoesClientes({ clientes, preencherComCliente, style }) {
 }
 
 /* ================= Calendário de acompanhamento do vistoriador ================= */
-function CalendarioVistoriador({ agenda = [], carregando }) {
+function CalendarioVistoriador({ agenda = [], carregando, clientes = [], preencherComCliente }) {
   const porData = agenda.reduce((acc, a) => {
     const k = a.data_desejada || "(sem data)";
     (acc[k] = acc[k] || []).push(a);
@@ -1038,6 +1063,15 @@ function CalendarioVistoriador({ agenda = [], carregando }) {
                     </div>
                   </div>
                   <Selo valor={a.atendido ? "Concluída" : "Agendada"} />
+                  {preencherComCliente && (
+                    <button className="btn-solid" style={{ width: "auto", padding: "8px 14px" }}
+                      onClick={() => {
+                        const cli = clientes.find((c) => c.id === a.id);
+                        if (cli) preencherComCliente(cli, { irParaItens: true });
+                      }}>
+                      <Check size={14} /> Iniciar vistoria
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -1049,7 +1083,7 @@ function CalendarioVistoriador({ agenda = [], carregando }) {
 }
 
 /* ================= Aba: Clientes (perfil Comercial) ================= */
-function AbaClientesComercial({ clientes, carregando, atualizarCliente, notify }) {
+function AbaClientesComercial({ clientes, carregando, atualizarCliente, notify, docs = [] }) {
   const [busca, setBusca] = useState("");
   const [editando, setEditando] = useState(null); // cópia do cliente em edição
 
@@ -1066,8 +1100,21 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, notify }
     } catch (e) { notify(`Erro: ${e.message}`); }
   };
 
+  const contagemPorEtapa = {};
+  clientes.forEach((c) => { const et = etapaAtualCliente(c, docs); contagemPorEtapa[et] = (contagemPorEtapa[et] || 0) + 1; });
+
   return (
     <div style={{ display: "grid", gap: 16 }}>
+      {Object.keys(contagemPorEtapa).length > 0 && (
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {Object.entries(contagemPorEtapa).map(([etapa, qtd]) => (
+            <div key={etapa} style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "8px 12px" }}>
+              <Selo valor={etapa} />
+              <strong style={{ fontSize: 14 }}>{qtd}</strong>
+            </div>
+          ))}
+        </div>
+      )}
       <Card icon={Users} titulo={`Clientes cadastrados (${clientes.length})`}>
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
           Cadastro, agendamento e acompanhamento de todos os clientes que já se cadastraram (pelo portal público) ou foram cadastrados pela equipe.
@@ -1096,7 +1143,7 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, notify }
                     <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
                       {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""}
                     </td>
-                    <td style={{ padding: "8px 10px" }}><Selo valor={c.atendido ? "Concluída" : "Agendada"} /></td>
+                    <td style={{ padding: "8px 10px" }}><Selo valor={etapaAtualCliente(c, docs)} /></td>
                     <td style={{ padding: "8px 10px" }}>
                       <button className="icon-btn" onClick={() => abrirEdicao(c)}><Edit3 size={15} color={AZUL_MEDIO} /></button>
                     </td>
@@ -1188,7 +1235,18 @@ function LinhaDoTempo({ doc, avaliacao }) {
   );
 }
 
-function AbaQualidade({ avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao }) {
+/* Dispatcher das 3 sub-abas do setor Qualidade (mesmo padrão de "sub" já usado em AbaGerencia). */
+function AbaQualidade({ sub = "analise", clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao }) {
+  if (sub === "vistoria") {
+    return <AbaQualidadeVistoria clientes={clientes} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} />;
+  }
+  if (sub === "feedback") {
+    return <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao} />;
+  }
+  return <AbaQualidadeAnalise clientes={clientes} carregando={clientesCarregando} updCliente={updCliente} notify={notify} />;
+}
+
+function AbaQualidadeFeedback({ avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao }) {
   const [busca, setBusca] = useState("");
   const total = avaliacoes.length;
   const media = total ? (avaliacoes.reduce((s, a) => s + a.nota, 0) / total) : 0;
@@ -1288,6 +1346,122 @@ function AbaQualidade({ avaliacoes, carregando, docs, docsCarregando, aprovarAva
   );
 }
 
+
+function minutosDoHorario(hhmm) {
+  if (!hhmm || !/^\d{1,2}:\d{2}$/.test(hhmm)) return null;
+  const [h, m] = hhmm.split(":").map(Number);
+  return h * 60 + m;
+}
+/* Lista de outros clientes com a mesma data e horário desejado a menos de 1h de distância
+   (checagem de cruzamento de horário — item "Análise" do fluxo de Qualidade). */
+function conflitosDeHorario(cliente, todos) {
+  if (!cliente.dataDesejada || !cliente.horarioDesejado) return [];
+  const minCliente = minutosDoHorario(cliente.horarioDesejado);
+  if (minCliente === null) return [];
+  return todos.filter((c) => {
+    if (c.id === cliente.id || c.dataDesejada !== cliente.dataDesejada) return false;
+    const minOutro = minutosDoHorario(c.horarioDesejado);
+    return minOutro !== null && Math.abs(minOutro - minCliente) < 60;
+  });
+}
+
+/* ================= Qualidade · Análise: valida agendamento antes de liberar (checa cruzamento de horário) ================= */
+function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, notify }) {
+  const pendentes = clientes.filter((c) => c.status === "Em análise");
+  const aprovar = async (c) => {
+    try { await updCliente(c.id, { status: "Agendamento aprovado" }); notify("Agendamento aprovado ✓"); }
+    catch (e) { notify(`Erro: ${e.message}`); }
+  };
+  return (
+    <Card icon={ClipboardCheck} titulo={`Aguardando análise (${pendentes.length})`}>
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Confira se não há cruzamento de horário com outro agendamento antes de aprovar.
+      </p>
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && pendentes.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum cadastro aguardando análise.</p>}
+      <div style={{ display: "grid", gap: 10 }}>
+        {pendentes.map((c) => {
+          const conflitos = conflitosDeHorario(c, clientes);
+          return (
+            <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                <div>
+                  <strong style={{ fontSize: 14 }}>{c.nome}</strong>
+                  <div style={{ fontSize: 12, color: "#65758b" }}>{c.empreendimento || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}</div>
+                </div>
+                <div style={{ fontSize: 13, textAlign: "right" }}>
+                  {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""}
+                </div>
+              </div>
+              {conflitos.length > 0 && (
+                <div style={{ marginTop: 8, background: "#FFF4E0", color: "#B26A00", padding: "8px 10px", borderRadius: 8, fontSize: 12.5 }}>
+                  <AlertTriangle size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                  Cruza com {conflitos.length} outro(s) agendamento(s) no mesmo horário: {conflitos.map((x) => x.nome).join(", ")}
+                </div>
+              )}
+              <button className="btn-solid" style={{ marginTop: 10, width: "auto", padding: "8px 16px" }} onClick={() => aprovar(c)}>
+                <Check size={15} /> Aprovar agendamento
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+/* ================= Qualidade · Vistoria: agenda o técnico responsável e a data/hora final ================= */
+function AbaQualidadeVistoria({ clientes = [], carregando, updCliente, usuarios = [], notify }) {
+  const aprovados = clientes.filter((c) => c.status === "Agendamento aprovado");
+  const vistoriadores = usuarios.filter((u) => u.role === "vistoriador" && u.ativo);
+  const [form, setForm] = useState({});
+
+  const setCampo = (id, campo, valor) => setForm((f) => ({ ...f, [id]: { ...f[id], [campo]: valor } }));
+  const valorCampo = (c, campo, padrao) => form[c.id]?.[campo] ?? padrao;
+
+  const confirmar = async (c) => {
+    const vistoriadorId = valorCampo(c, "vistoriadorId", "");
+    const dataDesejada = valorCampo(c, "dataDesejada", c.dataDesejada);
+    const horarioDesejado = valorCampo(c, "horarioDesejado", c.horarioDesejado);
+    if (!vistoriadorId) { notify("Escolha o vistoriador responsável"); return; }
+    try {
+      await updCliente(c.id, { vistoriadorId, dataDesejada, horarioDesejado, status: "Vistoria agendada" });
+      notify("Vistoria agendada ✓ — já aparece na agenda do técnico");
+    } catch (e) { notify(`Erro: ${e.message}`); }
+  };
+
+  return (
+    <Card icon={CalendarDays} titulo={`Aguardando agendamento da vistoria (${aprovados.length})`}>
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Escolha o técnico responsável e confirme a data/hora — assim que salvar, entra automaticamente na agenda dele.
+      </p>
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && aprovados.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum agendamento aprovado aguardando vistoria.</p>}
+      <div style={{ display: "grid", gap: 10 }}>
+        {aprovados.map((c) => (
+          <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
+            <strong style={{ fontSize: 14 }}>{c.nome}</strong>
+            <div style={{ fontSize: 12, color: "#65758b", marginBottom: 10 }}>{c.empreendimento || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}</div>
+            <Grid>
+              <div style={cell(false)}>
+                <label style={lab}>Vistoriador</label>
+                <select style={inp} value={valorCampo(c, "vistoriadorId", "")} onChange={(e) => setCampo(c.id, "vistoriadorId", e.target.value)}>
+                  <option value="">selecionar…</option>
+                  {vistoriadores.map((v) => <option key={v.id} value={v.id}>{v.nome}</option>)}
+                </select>
+              </div>
+              <Field label="Data" type="date" value={valorCampo(c, "dataDesejada", c.dataDesejada)} onChange={(v) => setCampo(c.id, "dataDesejada", v)} />
+              <Field label="Horário" type="time" value={valorCampo(c, "horarioDesejado", c.horarioDesejado)} onChange={(v) => setCampo(c.id, "horarioDesejado", v)} />
+            </Grid>
+            <button className="btn-solid" style={{ marginTop: 10, width: "auto", padding: "8px 16px" }} onClick={() => confirmar(c)}>
+              <Check size={15} /> Confirmar agendamento
+            </button>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
 
 function CardAndamentoAtendimento({ cpf, docs = [], updDoc, notify, token }) {
   const cpfLimpo = (cpf || "").replace(/\D/g, "");
@@ -2855,6 +3029,11 @@ STATUS_COR["Em análise"] = { cor: "#2C75B5", bg: "#EAF2FB" };
 STATUS_COR["Aprovado"] = { cor: "#2E7D32", bg: "#E6F4EA" };
 STATUS_COR["Suspenso"] = { cor: "#B26A00", bg: "#FFF4E0" };
 STATUS_COR["Encerrado"] = { cor: "#65758b", bg: "#EEF1F5" };
+/* Etapa atual do cliente no fluxo completo (cadastro → análise → vistoria → laudo), ver etapaAtualCliente. */
+STATUS_COR["Agendamento aprovado"] = { cor: "#2C75B5", bg: "#EAF2FB" };
+STATUS_COR["Vistoria agendada"] = { cor: "#6A3FB2", bg: "#F1EBFB" };
+STATUS_COR["Laudo em análise"] = { cor: "#B26A00", bg: "#FFF4E0" };
+STATUS_COR["Laudo enviado por e-mail"] = { cor: "#2E7D32", bg: "#E6F4EA" };
 
 function safeParseArray(v) {
   if (Array.isArray(v)) return v;
