@@ -1498,18 +1498,49 @@ function conflitosDeHorario(cliente, todos) {
 
 /* ================= Qualidade · Análise: valida agendamento antes de liberar (checa cruzamento de horário) ================= */
 function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, notify }) {
-  const pendentes = clientes.filter((c) => c.status === "Em análise");
+  const [mesRef, setMesRef] = useState(() => { const h = new Date(); return new Date(h.getFullYear(), h.getMonth(), 1); });
+  const [diaSelecionado, setDiaSelecionado] = useState(null);
+
+  // Todos os agendamentos (qualquer status), pra dar visão completa da agenda no calendário
+  // e ajudar a enxergar cruzamento de horário antes de aprovar.
+  const porDataTodos = clientes.reduce((acc, c) => {
+    if (!c.dataDesejada) return acc;
+    (acc[c.dataDesejada] = acc[c.dataDesejada] || []).push(c);
+    return acc;
+  }, {});
+
+  const pendentesTodos = clientes.filter((c) => c.status === "Em análise");
+  const pendentes = diaSelecionado ? pendentesTodos.filter((c) => c.dataDesejada === diaSelecionado) : pendentesTodos;
+  const outrosNoDia = diaSelecionado ? (porDataTodos[diaSelecionado] || []).filter((c) => c.status !== "Em análise") : [];
+
   const aprovar = async (c) => {
     try { await updCliente(c.id, { status: "Agendamento aprovado" }); notify("Agendamento aprovado ✓"); }
     catch (e) { notify(`Erro: ${e.message}`); }
   };
   return (
-    <Card icon={ClipboardCheck} titulo={`Aguardando análise (${pendentes.length})`}>
+    <Card icon={ClipboardCheck} titulo={`Aguardando análise (${pendentesTodos.length})`}>
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-        Confira se não há cruzamento de horário com outro agendamento antes de aprovar.
+        Confira se não há cruzamento de horário com outro agendamento antes de aprovar. Clique num dia do calendário pra ver a agenda completa daquela data.
       </p>
+
+      <CalendarioMensal porData={porDataTodos} mesRef={mesRef} setMesRef={setMesRef} diaSelecionado={diaSelecionado} setDiaSelecionado={setDiaSelecionado} />
+
+      {diaSelecionado && (
+        <div style={{ marginBottom: 14 }}>
+          <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, marginBottom: 10 }} onClick={() => setDiaSelecionado(null)}>
+            <X size={14} /> Ver todos os dias
+          </button>
+          {outrosNoDia.length > 0 && (
+            <div style={{ background: "#EAF2FB", borderRadius: 8, padding: 10, fontSize: 12.5, color: AZUL_MARINHO }}>
+              <strong>Já agendados nesse dia:</strong> {outrosNoDia.map((c) => `${c.nome} (${c.horarioDesejado || "sem horário"})`).join(", ")}
+            </div>
+          )}
+        </div>
+      )}
+
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
-      {!carregando && pendentes.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum cadastro aguardando análise.</p>}
+      {!carregando && pendentesTodos.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum cadastro aguardando análise.</p>}
+      {!carregando && pendentesTodos.length > 0 && pendentes.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum cadastro aguardando análise nesse dia.</p>}
       <div style={{ display: "grid", gap: 10 }}>
         {pendentes.map((c) => {
           const conflitos = conflitosDeHorario(c, clientes);
