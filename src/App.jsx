@@ -626,7 +626,7 @@ function AppInterno({ session, onLogout }) {
   const [agendaVistoriador, setAgendaVistoriador] = useState([]);
   const [agendaVistoriadorCarregando, setAgendaVistoriadorCarregando] = useState(false);
   const carregarAgendaVistoriador = async () => {
-    if (perfil !== "vistoriador") return;
+    if (perfil !== "vistoriador" && perfil !== "gerencia") return;
     setAgendaVistoriadorCarregando(true);
     try {
       const r = await apiFetch("/api/clientes/minha-agenda", { token });
@@ -849,7 +849,7 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "laudos" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)" }}>
             {[["dados", "Dados do laudo", ClipboardList], ["itens", `Vistoria (${totalItens})`, Camera], ["laudo", "Laudo final", FileText],
-              ...(perfil === "vistoriador" ? [["agenda", "Minha agenda", CalendarDays]] : [])]
+              ...((perfil === "vistoriador" || perfil === "gerencia") ? [["agenda", "Minha agenda", CalendarDays]] : [])]
               .map(([k, label, Icon]) => (
                 <button key={k} onClick={() => setAba(k)} className="tab" style={{ borderBottomColor: aba === k ? AZUL_MEDIO : "transparent", color: aba === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13 }}>
                   <Icon size={15} /> {label}
@@ -881,7 +881,7 @@ function AppInterno({ session, onLogout }) {
             addFotos={addFotos} removerFoto={removerFoto} contagem={contagem} />
         )}
         {abaTop === "laudos" && aba === "laudo" && <Laudo dados={dados} itens={itens} contagem={contagem} totalItens={totalItens} assinatura={assinatura} />}
-        {abaTop === "laudos" && aba === "agenda" && perfil === "vistoriador" && (
+        {abaTop === "laudos" && aba === "agenda" && (perfil === "vistoriador" || perfil === "gerencia") && (
           <CalendarioVistoriador agenda={agendaVistoriador} carregando={agendaVistoriadorCarregando} />
         )}
 
