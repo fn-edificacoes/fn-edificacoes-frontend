@@ -922,10 +922,11 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "laudos" && <FaixaIndicadoresGerais docs={docs} clientes={clientes} modo="vistorias" style={{ marginBottom: 18 }} />}
         {abaTop === "documentacao" && <FaixaIndicadoresGerais docs={docs} clientes={clientes} modo="art" style={{ marginBottom: 18 }} />}
 
-        {abaTop === "laudos" && aba === "dados" && <AbaDados dados={dados} setD={setD} setTexto={setTexto} setFotoCliente={setFotoCliente} clientes={clientes} preencherComCliente={preencherComCliente} docs={docs} updDoc={updDoc} notify={notify} token={token} />}
+        {abaTop === "laudos" && aba === "dados" && <AbaDados dados={dados} setD={setD} setTexto={setTexto} clientes={clientes} preencherComCliente={preencherComCliente} docs={docs} updDoc={updDoc} notify={notify} token={token} />}
         {abaTop === "laudos" && aba === "itens" && (
           <AbaItens itens={itens} setItens={setItens} updItem={updItem} escolherPatologia={escolherPatologia}
-            addFotos={addFotos} removerFoto={removerFoto} contagem={contagem} />
+            addFotos={addFotos} removerFoto={removerFoto} contagem={contagem}
+            fotoCliente={dados.fotoCliente} setFotoCliente={setFotoCliente} notify={notify} />
         )}
         {abaTop === "laudos" && aba === "laudo" && <Laudo dados={dados} itens={itens} contagem={contagem} totalItens={totalItens} assinatura={assinatura} />}
         {abaTop === "laudos" && aba === "agenda" && (perfil === "vistoriador" || perfil === "gerencia") && (
@@ -1132,7 +1133,7 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, notify, 
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: CINZA_CLARO }}>
-                  {["Cliente", "Empreendimento", "Serviço", "Agendamento", "Status", ""].map((h) => (
+                  {["Cliente", "CPF", "Empreendimento", "Serviço", "Agendamento", "Status", ""].map((h) => (
                     <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}` }}>{h}</th>
                   ))}
                 </tr>
@@ -1141,6 +1142,7 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, notify, 
                 {filtrados.map((c) => (
                   <tr key={c.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
                     <td style={{ padding: "8px 10px", fontWeight: 600 }}>{c.nome}<div style={{ fontWeight: 400, fontSize: 12, color: "#8593a8" }}>{c.telefone}</div></td>
+                    <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{c.cpf || "—"}</td>
                     <td style={{ padding: "8px 10px" }}>{c.empreendimento || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}</td>
                     <td style={{ padding: "8px 10px" }}>{c.servico || "—"}</td>
                     <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
@@ -1167,10 +1169,19 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, notify, 
             </div>
             <Grid>
               <Field label="Nome" value={editando.nome} onChange={(v) => setEditando({ ...editando, nome: v })} full />
+              <Field label="CPF" value={editando.cpf} onChange={(v) => setEditando({ ...editando, cpf: v })} />
               <Field label="Telefone" value={editando.telefone} onChange={(v) => setEditando({ ...editando, telefone: v })} />
               <Field label="E-mail" value={editando.email} onChange={(v) => setEditando({ ...editando, email: v })} />
+              <div style={cell(true)}>
+                <label style={lab}>Serviço desejado</label>
+                <select style={inp} value={editando.servico} onChange={(e) => setEditando({ ...editando, servico: e.target.value })}>
+                  {SERVICO_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </div>
               <Field label="Construtora" value={editando.construtora} onChange={(v) => setEditando({ ...editando, construtora: v })} />
               <Field label="Empreendimento" value={editando.empreendimento} onChange={(v) => setEditando({ ...editando, empreendimento: v })} />
+              <Field label="Endereço completo" value={editando.endereco} onChange={(v) => setEditando({ ...editando, endereco: v })} full />
+              <Field label="CEP" value={editando.cep} onChange={(v) => setEditando({ ...editando, cep: v })} />
               <Field label="Bloco / Apto" value={editando.blocoTorre} onChange={(v) => setEditando({ ...editando, blocoTorre: v })} />
               <Field label="Data desejada" type="date" value={editando.dataDesejada} onChange={(v) => setEditando({ ...editando, dataDesejada: v })} />
               <Field label="Horário desejado" type="time" value={editando.horarioDesejado} onChange={(v) => setEditando({ ...editando, horarioDesejado: v })} />
@@ -1557,16 +1568,8 @@ function CardAndamentoAtendimento({ cpf, docs = [], updDoc, notify, token }) {
   );
 }
 
-function AbaDados({ dados, setD, setTexto, setFotoCliente, clientes = [], preencherComCliente, docs = [], updDoc, notify, token }) {
+function AbaDados({ dados, setD, setTexto, clientes = [], preencherComCliente, docs = [], updDoc, notify, token }) {
   const [clienteSel, setClienteSel] = useState("");
-
-  const handleFotoCliente = (file) => {
-    if (!file) return;
-    if (!file.type.startsWith("image/")) { notify("Envie uma imagem (PNG ou JPG)"); return; }
-    const reader = new FileReader();
-    reader.onload = (e) => setFotoCliente(e.target.result);
-    reader.readAsDataURL(file);
-  };
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -1628,24 +1631,6 @@ function AbaDados({ dados, setD, setTexto, setFotoCliente, clientes = [], preenc
         </Grid>
       </Card>
 
-      <Card icon={Camera} titulo="Foto com o cliente (obrigatória)">
-        <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
-          Uma foto sua com o cliente durante a vistoria. Necessária para enviar o laudo para a gerência. Aparece na última página do laudo final (como agradecimento) e na página de acompanhamento do cliente.
-        </p>
-        {dados.fotoCliente ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <img src={dados.fotoCliente} alt="Foto com o cliente" style={{ width: 110, height: 110, objectFit: "cover", borderRadius: 8, border: `1px solid ${CINZA_BORDA}` }} />
-            <button className="btn-ghost" style={{ color: "#C62828" }} onClick={() => setFotoCliente(null)}><X size={14} /> Remover foto</button>
-          </div>
-        ) : (
-          <label className="btn-ghost" style={{ display: "inline-flex", cursor: "pointer", width: "auto" }}>
-            <Camera size={15} /> Adicionar foto
-            <input type="file" accept="image/*" capture="environment" style={{ display: "none" }}
-              onChange={(e) => { handleFotoCliente(e.target.files[0]); e.target.value = ""; }} />
-          </label>
-        )}
-      </Card>
-
       <Colapsavel titulo="Textos institucionais (Objetivo, Metodologia, Encerramento)">
         <Area label="Objetivo" value={dados.textos.objetivo} onChange={(v) => setTexto("objetivo", v)} rows={4} />
         <Area label="Referências técnicas" value={dados.textos.referencias} onChange={(v) => setTexto("referencias", v)} rows={3} />
@@ -1657,9 +1642,37 @@ function AbaDados({ dados, setD, setTexto, setFotoCliente, clientes = [], preenc
 }
 
 /* ================= Aba: Itens ================= */
-function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem }) {
+function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, fotoCliente, setFotoCliente, notify }) {
+  const handleFotoCliente = (file) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { notify("Envie uma imagem (PNG ou JPG)"); return; }
+    const reader = new FileReader();
+    reader.onload = (e) => setFotoCliente(e.target.result);
+    reader.readAsDataURL(file);
+  };
+
   return (
     <div>
+      <div style={{ marginBottom: 16 }}>
+        <Card icon={Camera} titulo="Foto com o cliente (obrigatória)">
+          <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
+            Uma foto sua com o cliente durante a vistoria. Necessária para enviar o laudo para a gerência. Aparece na última página do laudo final (como agradecimento) e na página de acompanhamento do cliente.
+          </p>
+          {fotoCliente ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <img src={fotoCliente} alt="Foto com o cliente" style={{ width: 110, height: 110, objectFit: "cover", borderRadius: 8, border: `1px solid ${CINZA_BORDA}` }} />
+              <button className="btn-ghost" style={{ color: "#C62828" }} onClick={() => setFotoCliente(null)}><X size={14} /> Remover foto</button>
+            </div>
+          ) : (
+            <label className="btn-ghost" style={{ display: "inline-flex", cursor: "pointer", width: "auto" }}>
+              <Camera size={15} /> Adicionar foto
+              <input type="file" accept="image/*" capture="environment" style={{ display: "none" }}
+                onChange={(e) => { handleFotoCliente(e.target.files[0]); e.target.value = ""; }} />
+            </label>
+          )}
+        </Card>
+      </div>
+
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
         {["Baixa", "Média", "Alta"].map((s) => {
           const m = sevMeta[s];
@@ -2992,8 +3005,12 @@ function AbaCliente({ notify }) {
           <Field label="Endereço completo" value={form.endereco} onChange={(v) => setFMaiusc("endereco", v)} full />
           <Field label="CEP" value={form.cep} onChange={(v) => setF("cep", v.replace(/\D/g, "").slice(0, 8))} />
           <Field label="Bloco / Apto" value={form.blocoTorre} onChange={(v) => setFMaiusc("blocoTorre", v)} />
-          <Field label="Data desejada" type="date" value={form.dataDesejada} onChange={(v) => setF("dataDesejada", v)} />
-          <Field label="Horário desejado" type="time" value={form.horarioDesejado} onChange={(v) => setF("horarioDesejado", v)} />
+          {form.servico === SERVICO_OPCOES[0] && (
+            <>
+              <Field label="Data desejada" type="date" value={form.dataDesejada} onChange={(v) => setF("dataDesejada", v)} />
+              <Field label="Horário desejado" type="time" value={form.horarioDesejado} onChange={(v) => setF("horarioDesejado", v)} />
+            </>
+          )}
         </Grid>
         <Area label="Observações (opcional)" value={form.observacoes} onChange={(v) => setFMaiusc("observacoes", v)} rows={2} placeholder="EX.: MELHOR HORÁRIO PARA CONTATO, DETALHES DO IMÓVEL..." />
         <button className="btn-solid" style={{ marginTop: 12 }} onClick={enviar} disabled={enviando}>
