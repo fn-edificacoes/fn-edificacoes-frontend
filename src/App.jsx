@@ -2882,6 +2882,8 @@ function AcessoLaudoFinal({ cpf, notify }) {
   );
 }
 
+const OUTROS = "__outros__";
+
 function AbaCliente({ notify }) {
   const [form, setForm] = useState(novoCadastroCliente());
   const [enviando, setEnviando] = useState(false);
@@ -2890,6 +2892,24 @@ function AbaCliente({ notify }) {
   const [buscou, setBuscou] = useState(false);
   const [resultados, setResultados] = useState([]);
 
+  const [refEmpreendimentos, setRefEmpreendimentos] = useState([]);
+  const [construtoraSel, setConstrutoraSel] = useState("");
+  const [empreendimentoSel, setEmpreendimentoSel] = useState("");
+  const [construtoraOutros, setConstrutoraOutros] = useState("");
+  const [empreendimentoOutros, setEmpreendimentoOutros] = useState("");
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await apiFetch("/api/empreendimentos-ref");
+        setRefEmpreendimentos(r.empreendimentos || []);
+      } catch { /* dropdown vira "Outros" direto se a lista não carregar */ }
+    })();
+  }, []);
+  const construtorasDisponiveis = [...new Set(refEmpreendimentos.map((e) => e.construtora))].sort();
+  const empreendimentosDisponiveis = [...new Set(
+    refEmpreendimentos.filter((e) => e.construtora === construtoraSel).map((e) => e.empreendimento)
+  )].sort();
+
   const setF = (campo, v) => setForm((f) => ({ ...f, [campo]: v }));
   const setFMaiusc = (campo, v) => setForm((f) => ({ ...f, [campo]: v.toUpperCase() }));
   const setFCpf = (v) => setForm((f) => ({ ...f, cpf: v.replace(/\D/g, "").slice(0, 11) }));
@@ -2897,10 +2917,17 @@ function AbaCliente({ notify }) {
   const enviar = async () => {
     if (!form.nome.trim() || !form.telefone.trim()) { notify("Informe pelo menos nome e telefone"); return; }
     if (form.cpf && form.cpf.length !== 11) { notify("O CPF deve ter 11 dígitos"); return; }
+    const construtoraFinal = construtoraSel === OUTROS ? construtoraOutros.trim() : construtoraSel;
+    const empreendimentoFinal = empreendimentoSel === OUTROS ? empreendimentoOutros.trim() : empreendimentoSel;
+    const precisaCadastroEmpreendimento = construtoraSel === OUTROS || empreendimentoSel === OUTROS;
     setEnviando(true);
     try {
-      await apiFetch("/api/clientes", { method: "POST", body: form });
+      await apiFetch("/api/clientes", {
+        method: "POST",
+        body: { ...form, construtora: construtoraFinal.toUpperCase(), empreendimento: empreendimentoFinal.toUpperCase(), precisaCadastroEmpreendimento },
+      });
       setForm(novoCadastroCliente());
+      setConstrutoraSel(""); setEmpreendimentoSel(""); setConstrutoraOutros(""); setEmpreendimentoOutros("");
       notify("Cadastro enviado! Nossa equipe entrará em contato ✓");
     } catch (e) { notify(`Não foi possível enviar: ${e.message}`); }
     setEnviando(false);
@@ -2928,8 +2955,28 @@ function AbaCliente({ notify }) {
           <Field label="CPF (11 dígitos)" value={form.cpf} onChange={setFCpf} />
           <Field label="Telefone / WhatsApp" value={form.telefone} onChange={(v) => setF("telefone", v.replace(/\D/g, "").slice(0, 11))} />
           <Field label="E-mail" value={form.email} onChange={(v) => setF("email", v)} full />
-          <Field label="Construtora" value={form.construtora} onChange={(v) => setFMaiusc("construtora", v)} />
-          <Field label="Empreendimento" value={form.empreendimento} onChange={(v) => setFMaiusc("empreendimento", v)} />
+          <div style={cell(false)}>
+            <label style={lab}>Construtora</label>
+            <select style={inp} value={construtoraSel} onChange={(e) => { setConstrutoraSel(e.target.value); setEmpreendimentoSel(""); }}>
+              <option value="">selecionar…</option>
+              {construtorasDisponiveis.map((c) => <option key={c} value={c}>{c}</option>)}
+              <option value={OUTROS}>Outros (não está na lista)</option>
+            </select>
+            {construtoraSel === OUTROS && (
+              <input style={{ ...inp, marginTop: 6 }} placeholder="Digite o nome da construtora" value={construtoraOutros} onChange={(e) => setConstrutoraOutros(e.target.value)} />
+            )}
+          </div>
+          <div style={cell(false)}>
+            <label style={lab}>Empreendimento</label>
+            <select style={inp} value={empreendimentoSel} onChange={(e) => setEmpreendimentoSel(e.target.value)} disabled={!construtoraSel}>
+              <option value="">{construtoraSel ? "selecionar…" : "escolha a construtora primeiro"}</option>
+              {empreendimentosDisponiveis.map((e) => <option key={e} value={e}>{e}</option>)}
+              <option value={OUTROS}>Outros (não está na lista)</option>
+            </select>
+            {empreendimentoSel === OUTROS && (
+              <input style={{ ...inp, marginTop: 6 }} placeholder="Digite o nome do empreendimento" value={empreendimentoOutros} onChange={(e) => setEmpreendimentoOutros(e.target.value)} />
+            )}
+          </div>
           <Field label="Endereço completo" value={form.endereco} onChange={(v) => setFMaiusc("endereco", v)} full />
           <Field label="Bloco / Apto" value={form.blocoTorre} onChange={(v) => setFMaiusc("blocoTorre", v)} />
           <div style={cell(true)}>
