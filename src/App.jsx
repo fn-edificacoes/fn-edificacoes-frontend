@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
-  Building2, User, ClipboardList, ChevronDown, ChevronRight, Check,
+  Building2, User, ClipboardList, ChevronDown, ChevronRight, ChevronLeft, Check,
   AlertTriangle, CircleAlert, Info, Copy, Sparkles, Loader2,
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail
@@ -1026,13 +1026,70 @@ function NotificacoesClientes({ clientes, preencherComCliente, style }) {
 }
 
 /* ================= Calendário de acompanhamento do vistoriador ================= */
+function paraChaveISO(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/* Dashboard de calendário (visão mensal) — clicar num dia filtra a lista abaixo pra
+   só os agendamentos daquele dia; sem dia selecionado, mostra tudo agrupado por data. */
+function CalendarioMensal({ porData, mesRef, setMesRef, diaSelecionado, setDiaSelecionado }) {
+  const ano = mesRef.getFullYear(), mes = mesRef.getMonth();
+  const primeiroDiaSemana = new Date(ano, mes, 1).getDay();
+  const totalDias = new Date(ano, mes + 1, 0).getDate();
+  const hojeISO = paraChaveISO(new Date());
+
+  const celulas = [];
+  for (let i = 0; i < primeiroDiaSemana; i++) celulas.push(null);
+  for (let dia = 1; dia <= totalDias; dia++) celulas.push(dia);
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <button className="icon-btn" onClick={() => setMesRef(new Date(ano, mes - 1, 1))}><ChevronLeft size={18} /></button>
+        <strong style={{ fontSize: 14, color: AZUL_MARINHO, textTransform: "capitalize" }}>
+          {mesRef.toLocaleDateString("pt-BR", { month: "long", year: "numeric" })}
+        </strong>
+        <button className="icon-btn" onClick={() => setMesRef(new Date(ano, mes + 1, 1))}><ChevronRight size={18} /></button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, fontSize: 11, color: "#8593a8", textAlign: "center", marginBottom: 4 }}>
+        {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((d) => <div key={d}>{d}</div>)}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+        {celulas.map((dia, i) => {
+          if (dia === null) return <div key={`vazio-${i}`} />;
+          const chave = paraChaveISO(new Date(ano, mes, dia));
+          const qtd = (porData[chave] || []).length;
+          const selecionado = diaSelecionado === chave;
+          const hoje = chave === hojeISO;
+          return (
+            <button key={chave} onClick={() => setDiaSelecionado(selecionado ? null : chave)}
+              style={{
+                aspectRatio: "1", border: `1px solid ${selecionado ? AZUL_MEDIO : CINZA_BORDA}`, borderRadius: 8,
+                background: selecionado ? AZUL_MEDIO : hoje ? CINZA_CLARO : "#fff", color: selecionado ? "#fff" : "#1a2330",
+                cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, padding: 2,
+              }}>
+              <span style={{ fontSize: 12.5, fontWeight: hoje ? 800 : 500 }}>{dia}</span>
+              {qtd > 0 && (
+                <span style={{ fontSize: 9.5, fontWeight: 700, color: selecionado ? "#fff" : AZUL_MEDIO }}>{qtd}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function CalendarioVistoriador({ agenda = [], carregando, clientes = [], preencherComCliente }) {
+  const [mesRef, setMesRef] = useState(() => { const h = new Date(); return new Date(h.getFullYear(), h.getMonth(), 1); });
+  const [diaSelecionado, setDiaSelecionado] = useState(null);
+
   const porData = agenda.reduce((acc, a) => {
     const k = a.data_desejada || "(sem data)";
     (acc[k] = acc[k] || []).push(a);
     return acc;
   }, {});
-  const datasOrdenadas = Object.keys(porData).sort();
+  const datasOrdenadas = Object.keys(porData).filter((d) => !diaSelecionado || d === diaSelecionado).sort();
 
   const fmtDataLonga = (d) => {
     if (!d || d === "(sem data)") return "Sem data definida";
@@ -1043,11 +1100,20 @@ function CalendarioVistoriador({ agenda = [], carregando, clientes = [], preench
     <div style={{ display: "grid", gap: 16 }}>
       <Card icon={CalendarDays} titulo="Minha agenda">
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-          Vistorias atribuídas a você, ordenadas por data. Apenas consulta — a atribuição e o agendamento são feitos pela Gerência/Comercial.
+          Vistorias atribuídas a você. Clique num dia do calendário pra ver só os agendamentos daquela data. Apenas consulta — a atribuição e o agendamento são feitos pela Qualidade/Gerência.
         </p>
+
+        <CalendarioMensal porData={porData} mesRef={mesRef} setMesRef={setMesRef} diaSelecionado={diaSelecionado} setDiaSelecionado={setDiaSelecionado} />
+
+        {diaSelecionado && (
+          <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, marginBottom: 14 }} onClick={() => setDiaSelecionado(null)}>
+            <X size={14} /> Ver todos os dias
+          </button>
+        )}
 
         {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
         {!carregando && agenda.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhuma vistoria atribuída a você ainda.</p>}
+        {!carregando && agenda.length > 0 && datasOrdenadas.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum agendamento nesse dia.</p>}
 
         {datasOrdenadas.map((data) => (
           <div key={data} style={{ marginBottom: 18 }}>
@@ -1250,14 +1316,68 @@ function LinhaDoTempo({ doc, avaliacao }) {
 }
 
 /* Dispatcher das 3 sub-abas do setor Qualidade (mesmo padrão de "sub" já usado em AbaGerencia). */
+/* Dashboard de indicadores visível nas 3 sub-abas de Qualidade: etapa do fluxo dos
+   clientes, status do bloco ART Documentações, e média das avaliações dos clientes. */
+function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [] }) {
+  const porEtapa = {};
+  clientes.forEach((c) => { const et = etapaAtualCliente(c, docs); porEtapa[et] = (porEtapa[et] || 0) + 1; });
+
+  const porStatusProducao = {};
+  docs.forEach((d) => { porStatusProducao[d.statusProducao] = (porStatusProducao[d.statusProducao] || 0) + 1; });
+
+  const totalAvaliacoes = avaliacoes.length;
+  const media = totalAvaliacoes ? (avaliacoes.reduce((s, a) => s + a.nota, 0) / totalAvaliacoes) : 0;
+
+  return (
+    <Card icon={LayoutGrid} titulo="Indicadores da Qualidade">
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 20 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>Clientes por etapa do fluxo</div>
+          <div style={{ display: "grid", gap: 6 }}>
+            {Object.keys(porEtapa).length === 0 && <span style={{ fontSize: 13, color: "#8593a8" }}>Nenhum cliente ainda.</span>}
+            {Object.entries(porEtapa).map(([etapa, qtd]) => (
+              <div key={etapa} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <Selo valor={etapa} />
+                <strong style={{ fontSize: 13 }}>{qtd}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>ART Documentações por status</div>
+          <div style={{ display: "grid", gap: 6 }}>
+            {STATUS_PRODUCAO_OPCOES.map((s) => (
+              <div key={s} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <Selo valor={s} />
+                <strong style={{ fontSize: 13 }}>{porStatusProducao[s] || 0}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>Avaliações dos clientes</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ fontSize: 30, fontWeight: 800, color: AZUL_MARINHO }}>{media.toFixed(1)}</div>
+            <div>
+              <Estrelas valor={Math.round(media)} tamanho={16} />
+              <div style={{ fontSize: 12, color: "#65758b" }}>{totalAvaliacoes} avaliação(ões)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function AbaQualidade({ sub = "analise", clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao }) {
-  if (sub === "vistoria") {
-    return <AbaQualidadeVistoria clientes={clientes} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} />;
-  }
-  if (sub === "feedback") {
-    return <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao} />;
-  }
-  return <AbaQualidadeAnalise clientes={clientes} carregando={clientesCarregando} updCliente={updCliente} notify={notify} />;
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <CardIndicadoresQualidade clientes={clientes} docs={docs} avaliacoes={avaliacoes} />
+      {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} />}
+      {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao} />}
+      {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} carregando={clientesCarregando} updCliente={updCliente} notify={notify} />}
+    </div>
+  );
 }
 
 function AbaQualidadeFeedback({ avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao }) {
@@ -1425,10 +1545,45 @@ function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, notify }) 
 }
 
 /* ================= Qualidade · Vistoria: agenda o técnico responsável e a data/hora final ================= */
-function AbaQualidadeVistoria({ clientes = [], carregando, updCliente, usuarios = [], notify }) {
-  const aprovados = clientes.filter((c) => c.status === "Agendamento aprovado");
-  const vistoriadores = usuarios.filter((u) => u.role === "vistoriador" && u.ativo);
+/* Card resumido de uma vistoria — colapsado por padrão, expande ao clicar pra reduzir
+   a quantidade de informação exibida de uma vez (item 3.19). */
+function CardVistoriaResumo({ c, aberto, onToggle, children }) {
+  return (
+    <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, overflow: "hidden" }}>
+      <button onClick={onToggle} style={{ width: "100%", background: "#fff", border: "none", cursor: "pointer", padding: 12, display: "flex", alignItems: "center", gap: 12, textAlign: "left" }}>
+        <div style={{ flex: 1, minWidth: 160 }}>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>{c.nome}</div>
+          <div style={{ fontSize: 12, color: "#65758b" }}>{c.empreendimento || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}</div>
+        </div>
+        <div style={{ fontSize: 12.5, color: AZUL_MARINHO, fontWeight: 700, whiteSpace: "nowrap" }}>
+          {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""}
+        </div>
+        {aberto ? <ChevronDown size={16} color="#8593a8" /> : <ChevronRight size={16} color="#8593a8" />}
+      </button>
+      {aberto && <div style={{ padding: "0 12px 12px" }}>{children}</div>}
+    </div>
+  );
+}
+
+/* Sub-aba Vistoria: agrupa por status (pendente de agendamento / já agendada / já
+   realizada), com busca e cards resumidos que expandem ao clicar — antes mostrava
+   tudo (formulário completo) de uma vez pra cada cliente, o que ficava confuso. */
+function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify }) {
+  const [busca, setBusca] = useState("");
+  const [abertoId, setAbertoId] = useState(null);
   const [form, setForm] = useState({});
+  const vistoriadores = usuarios.filter((u) => u.role === "vistoriador" && u.ativo);
+
+  const temDoc = (c) => {
+    const cpfLimpo = (c.cpf || "").replace(/\D/g, "");
+    return cpfLimpo && docs.some((d) => (d.cpf || "").replace(/\D/g, "") === cpfLimpo);
+  };
+  const termo = busca.trim().toLowerCase();
+  const combina = (c) => !termo || `${c.nome} ${c.empreendimento}`.toLowerCase().includes(termo);
+
+  const pendentes = clientes.filter((c) => c.status === "Agendamento aprovado" && combina(c));
+  const agendadas = clientes.filter((c) => c.status === "Vistoria agendada" && !temDoc(c) && combina(c));
+  const realizadas = clientes.filter((c) => c.status === "Vistoria agendada" && temDoc(c) && combina(c));
 
   const setCampo = (id, campo, valor) => setForm((f) => ({ ...f, [id]: { ...f[id], [campo]: valor } }));
   const valorCampo = (c, campo, padrao) => form[c.id]?.[campo] ?? padrao;
@@ -1444,32 +1599,57 @@ function AbaQualidadeVistoria({ clientes = [], carregando, updCliente, usuarios 
     } catch (e) { notify(`Erro: ${e.message}`); }
   };
 
+  const nomeVistoriador = (id) => vistoriadores.find((v) => v.id === id)?.nome || usuarios.find((u) => u.id === id)?.nome || "—";
+
+  const grupos = [
+    { chave: "pendente", titulo: "Aguardando agendamento", lista: pendentes },
+    { chave: "agendada", titulo: "Vistoria agendada", lista: agendadas },
+    { chave: "realizada", titulo: "Vistoria já realizada", lista: realizadas },
+  ];
+
   return (
-    <Card icon={CalendarDays} titulo={`Aguardando agendamento da vistoria (${aprovados.length})`}>
-      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-        Escolha o técnico responsável e confirme a data/hora — assim que salvar, entra automaticamente na agenda dele.
-      </p>
+    <Card icon={CalendarDays} titulo="Vistorias">
+      <input style={{ ...inp, marginBottom: 16 }} placeholder="Buscar por cliente ou empreendimento…" value={busca} onChange={(e) => setBusca(e.target.value)} />
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
-      {!carregando && aprovados.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum agendamento aprovado aguardando vistoria.</p>}
-      <div style={{ display: "grid", gap: 10 }}>
-        {aprovados.map((c) => (
-          <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
-            <strong style={{ fontSize: 14 }}>{c.nome}</strong>
-            <div style={{ fontSize: 12, color: "#65758b", marginBottom: 10 }}>{c.empreendimento || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}</div>
-            <Grid>
-              <div style={cell(false)}>
-                <label style={lab}>Vistoriador</label>
-                <select style={inp} value={valorCampo(c, "vistoriadorId", "")} onChange={(e) => setCampo(c.id, "vistoriadorId", e.target.value)}>
-                  <option value="">selecionar…</option>
-                  {vistoriadores.map((v) => <option key={v.id} value={v.id}>{v.nome}</option>)}
-                </select>
-              </div>
-              <Field label="Data" type="date" value={valorCampo(c, "dataDesejada", c.dataDesejada)} onChange={(v) => setCampo(c.id, "dataDesejada", v)} />
-              <Field label="Horário" type="time" value={valorCampo(c, "horarioDesejado", c.horarioDesejado)} onChange={(v) => setCampo(c.id, "horarioDesejado", v)} />
-            </Grid>
-            <button className="btn-solid" style={{ marginTop: 10, width: "auto", padding: "8px 16px" }} onClick={() => confirmar(c)}>
-              <Check size={15} /> Confirmar agendamento
-            </button>
+      {!carregando && grupos.every((g) => g.lista.length === 0) && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhuma vistoria encontrada.</p>}
+
+      <div style={{ display: "grid", gap: 20 }}>
+        {grupos.map((g) => g.lista.length > 0 && (
+          <div key={g.chave}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8, borderBottom: `2px solid ${CINZA_CLARO}`, paddingBottom: 6 }}>
+              {g.titulo} ({g.lista.length})
+            </div>
+            <div style={{ display: "grid", gap: 8 }}>
+              {g.lista.map((c) => (
+                <CardVistoriaResumo key={c.id} c={c} aberto={abertoId === c.id} onToggle={() => setAbertoId(abertoId === c.id ? null : c.id)}>
+                  {g.chave === "pendente" ? (
+                    <>
+                      <Grid>
+                        <div style={cell(false)}>
+                          <label style={lab}>Vistoriador</label>
+                          <select style={inp} value={valorCampo(c, "vistoriadorId", "")} onChange={(e) => setCampo(c.id, "vistoriadorId", e.target.value)}>
+                            <option value="">selecionar…</option>
+                            {vistoriadores.map((v) => <option key={v.id} value={v.id}>{v.nome}</option>)}
+                          </select>
+                        </div>
+                        <Field label="Data" type="date" value={valorCampo(c, "dataDesejada", c.dataDesejada)} onChange={(v) => setCampo(c.id, "dataDesejada", v)} />
+                        <Field label="Horário" type="time" value={valorCampo(c, "horarioDesejado", c.horarioDesejado)} onChange={(v) => setCampo(c.id, "horarioDesejado", v)} />
+                      </Grid>
+                      <button className="btn-solid" style={{ marginTop: 10, width: "auto", padding: "8px 16px" }} onClick={() => confirmar(c)}>
+                        <Check size={15} /> Confirmar agendamento
+                      </button>
+                    </>
+                  ) : (
+                    <div style={{ fontSize: 13, color: "#4a5a70", display: "grid", gap: 4 }}>
+                      <div><strong>Telefone:</strong> {c.telefone || "—"}</div>
+                      <div><strong>Construtora:</strong> {c.construtora || "—"}</div>
+                      <div><strong>Vistoriador:</strong> {nomeVistoriador(c.vistoriadorId)}</div>
+                      <div><strong>Status:</strong> <Selo valor={etapaAtualCliente(c, docs)} /></div>
+                    </div>
+                  )}
+                </CardVistoriaResumo>
+              ))}
+            </div>
           </div>
         ))}
       </div>
