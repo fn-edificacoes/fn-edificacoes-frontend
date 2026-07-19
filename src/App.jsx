@@ -3,7 +3,8 @@ import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
   Building2, User, ClipboardList, ChevronDown, ChevronRight, Check,
   AlertTriangle, CircleAlert, Info, Copy, Sparkles, Loader2,
-  ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star
+  ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
+  TrendingUp, Percent
 } from "lucide-react";
 
 /* ============================================================
@@ -54,6 +55,10 @@ function mapClienteDaApi(c) {
     servico: c.servico || "", dataDesejada: c.data_desejada || "", horarioDesejado: c.horario_desejado || "",
     observacoes: c.observacoes || "", atendido: !!c.atendido,
   };
+}
+/* Converte um registro de preço de vistoria por empreendimento vindo do banco (snake_case) */
+function mapPrecoDaApi(p) {
+  return { id: p.id, empreendimento: p.empreendimento || "", precoVistoria: Number(p.preco_vistoria) || 0, atualizadoEm: p.atualizado_em || null };
 }
 const LOGO_FN_BASE64 = "data:image/png;base64,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";
 
@@ -433,6 +438,7 @@ function AppInterno({ session, onLogout }) {
   const token = session.token;
   const [abaTop, setAbaTop] = useState("laudos"); // "laudos" | "documentacao" | "gerencia"
   const [aba, setAba] = useState("dados");
+  const [abaGerencia, setAbaGerencia] = useState("visao-geral"); // "visao-geral" | "parceiros" | "financeiro"
   const [dados, setDados] = useState(DADOS_INICIAIS);
   const [itens, setItens] = useState([novoItem()]);
   const [rascunhos, setRascunhos] = useState([]);
@@ -533,6 +539,54 @@ function AppInterno({ session, onLogout }) {
       notify(`Não foi possível atualizar parceiro: ${e.message}`);
       return false;
     }
+  };
+
+  /* ---- Vales (todos, para a gerência acompanhar leads/conversão de Parceiros) ---- */
+  const [vales, setVales] = useState([]);
+  const [valesCarregando, setValesCarregando] = useState(false);
+  const carregarVales = async () => {
+    if (perfil !== "gerencia") return;
+    setValesCarregando(true);
+    try {
+      const r = await apiFetch("/api/vales", { token });
+      setVales((r.vales || []).map(mapValeDaApi));
+    } catch (e) { notify(`Não foi possível carregar vales: ${e.message}`); }
+    setValesCarregando(false);
+  };
+  useEffect(() => { carregarVales(); }, []);
+
+  /* ---- Preço de vistoria por empreendimento (alimenta o Financeiro) ---- */
+  const [precos, setPrecos] = useState([]);
+  const [precosCarregando, setPrecosCarregando] = useState(false);
+  const carregarPrecos = async () => {
+    if (perfil !== "gerencia") return;
+    setPrecosCarregando(true);
+    try {
+      const r = await apiFetch("/api/precos-empreendimento", { token });
+      setPrecos((r.precos || []).map(mapPrecoDaApi));
+    } catch (e) { notify(`Não foi possível carregar preços por empreendimento: ${e.message}`); }
+    setPrecosCarregando(false);
+  };
+  useEffect(() => { carregarPrecos(); }, []);
+  const salvarPreco = async (empreendimento, precoVistoria) => {
+    try {
+      const r = await apiFetch("/api/precos-empreendimento", { method: "POST", token, body: { empreendimento, precoVistoria } });
+      setPrecos((atual) => {
+        const existe = atual.some((p) => p.id === r.id);
+        const item = mapPrecoDaApi(r);
+        return existe ? atual.map((p) => (p.id === r.id ? item : p)) : [...atual, item];
+      });
+      return true;
+    } catch (e) {
+      notify(`Não foi possível salvar o preço: ${e.message}`);
+      return false;
+    }
+  };
+  const removerPreco = async (id) => {
+    try {
+      await apiFetch(`/api/precos-empreendimento/${id}`, { method: "DELETE", token });
+      setPrecos((atual) => atual.filter((p) => p.id !== id));
+    } catch (e) { notify(`Não foi possível remover o preço: ${e.message}`); }
   };
 
   /* ---- Assinatura digital da Gerência (via API real) ---- */
@@ -726,12 +780,23 @@ function AppInterno({ session, onLogout }) {
             ))}
           </nav>
         )}
+
+        {/* Sub-navegação (somente dentro do módulo Gerência) */}
+        {abaTop === "gerencia" && (
+          <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)" }}>
+            {[["visao-geral", "Visão geral", LayoutGrid], ["parceiros", "Parceiros e Afiliados", Users], ["financeiro", "Financeiro", DollarSign]].map(([k, label, Icon]) => (
+              <button key={k} onClick={() => setAbaGerencia(k)} className="tab" style={{ borderBottomColor: abaGerencia === k ? AZUL_MEDIO : "transparent", color: abaGerencia === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13 }}>
+                <Icon size={15} /> {label}
+              </button>
+            ))}
+          </nav>
+        )}
       </header>
 
       <main style={{ maxWidth: 1080, margin: "0 auto", padding: "22px 18px 80px" }}>
         {abaTop === "laudos" && <NotificacoesClientes clientes={clientes} preencherComCliente={preencherComCliente} style={{ marginBottom: 18 }} />}
-        {abaTop === "laudos" && <FaixaIndicadoresGerais docs={docs} modo="vistorias" style={{ marginBottom: 18 }} />}
-        {abaTop === "documentacao" && <FaixaIndicadoresGerais docs={docs} modo="art" style={{ marginBottom: 18 }} />}
+        {abaTop === "laudos" && <FaixaIndicadoresGerais docs={docs} clientes={clientes} modo="vistorias" style={{ marginBottom: 18 }} />}
+        {abaTop === "documentacao" && <FaixaIndicadoresGerais docs={docs} clientes={clientes} modo="art" style={{ marginBottom: 18 }} />}
 
         {abaTop === "laudos" && aba === "dados" && <AbaDados dados={dados} setD={setD} setTexto={setTexto} clientes={clientes} preencherComCliente={preencherComCliente} docs={docs} updDoc={updDoc} notify={notify} />}
         {abaTop === "laudos" && aba === "itens" && (
@@ -750,10 +815,12 @@ function AppInterno({ session, onLogout }) {
           <AbaQualidade avaliacoes={avaliacoes} carregando={avaliacoesCarregando} docs={docs} docsCarregando={docsCarregando} />
         )}
         {abaTop === "gerencia" && (
-          <AbaGerencia docs={docs} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
+          <AbaGerencia sub={abaGerencia} docs={docs} clientes={clientes} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
             usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={session.usuario.id}
             avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
-            parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} />
+            parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
+            vales={vales} valesCarregando={valesCarregando}
+            precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} removerPreco={removerPreco} />
         )}
       </main>
 
@@ -1641,12 +1708,19 @@ function BarraStatus({ titulo, contagens }) {
     </div>
   );
 }
-function CardIndicadoresGerais({ docs, modo = "completo" }) {
+const fmtReal = (v) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const SERVICO_VISTORIA = "Vistoria de entrega de chaves";
+
+/* Indicadores de "Vistorias" agora vêm de clientes (cadastros reais do portal público),
+   não de docs — docs só ganha uma linha quando a equipe cria manualmente um registro em
+   Documentação, o que deixava esses números zerados mesmo com cadastros reais existindo. */
+function CardIndicadoresGerais({ docs, clientes = [], modo = "completo" }) {
+  const vistoriasClientes = clientes.filter((c) => c.servico === SERVICO_VISTORIA);
+  const totalRegistros = vistoriasClientes.length;
+  const concluidas = vistoriasClientes.filter((c) => c.atendido).length;
+
   const contarPor = (campo) => docs.reduce((acc, d) => { acc[d[campo]] = (acc[d[campo]] || 0) + 1; return acc; }, {});
-  const porVistoria = contarPor("vistoria");
   const porArt = contarPor("art");
-  const totalRegistros = docs.length;
-  const concluidas = porVistoria["Concluída"] || 0;
   const artRealizadas = porArt["Elaborada"] || 0;
   const artRegistradas = docs.filter((d) => d.art !== "Não solicitada").length; // solicitadas: em processo + elaboradas
 
@@ -1682,38 +1756,63 @@ function CardIndicadoresGerais({ docs, modo = "completo" }) {
     </Card>
   );
 }
-function FaixaIndicadoresGerais({ docs, modo = "completo", style }) {
-  return <div style={style}><CardIndicadoresGerais docs={docs} modo={modo} /></div>;
+function FaixaIndicadoresGerais({ docs, clientes = [], modo = "completo", style }) {
+  return <div style={style}><CardIndicadoresGerais docs={docs} clientes={clientes} modo={modo} /></div>;
 }
-function AbaGerencia({ docs, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro }) {
-  const somaCampo = (campo, filtro) => docs.filter(filtro).reduce((s, d) => s + (Number(d[campo]) || 0), 0);
-  const pago = (d) => d.pagamento === "Pago";
-  const naoPago = (d) => d.pagamento !== "Pago";
 
-  const receitaVistoriaPaga = somaCampo("valorVistoria", pago);
-  const receitaVistoriaAReceber = somaCampo("valorVistoria", naoPago);
-  const receitaTrtPaga = somaCampo("valorTrt", pago);
-  const receitaTrtAReceber = somaCampo("valorTrt", naoPago);
+/* ---- Gerência · Visão geral ---- */
+function CardCadastrosClientes({ clientes }) {
+  const total = clientes.length;
+  const atendidos = clientes.filter((c) => c.atendido).length;
+  const pendentes = total - atendidos;
+  const porServico = clientes.reduce((acc, c) => {
+    const k = c.servico?.trim() || "(sem serviço)";
+    acc[k] = (acc[k] || 0) + 1;
+    return acc;
+  }, {});
 
+  return (
+    <Card icon={Users} titulo="Cadastros de clientes (portal público)">
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: porServico && Object.keys(porServico).length ? 16 : 0 }}>
+        <KpiCard label="Total de cadastros" valor={total} Icon={Users} />
+        <KpiCard label="Atendidos" valor={atendidos} cor="#2E7D32" Icon={Check} />
+        <KpiCard label="Pendentes" valor={pendentes} cor="#B26A00" Icon={ClipboardList} />
+      </div>
+      {Object.keys(porServico).length > 0 && (
+        <div style={{ display: "grid", gap: 6 }}>
+          {Object.entries(porServico).sort((a, b) => b[1] - a[1]).map(([servico, qtd]) => (
+            <div key={servico} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#4a5a70", padding: "6px 0", borderBottom: `1px solid ${CINZA_BORDA}` }}>
+              <span>{servico}</span>
+              <strong style={{ color: AZUL_MARINHO }}>{qtd}</strong>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function AbaGerenciaVisaoGeral({ docs, clientes, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando }) {
   const porVistoria = docs.reduce((acc, d) => { acc[d.vistoria] = (acc[d.vistoria] || 0) + 1; return acc; }, {});
   const porArt = docs.reduce((acc, d) => { acc[d.art] = (acc[d.art] || 0) + 1; return acc; }, {});
   const porRelatorio = docs.reduce((acc, d) => { acc[d.relatorio] = (acc[d.relatorio] || 0) + 1; return acc; }, {});
-  const totalRegistros = docs.length;
+  const totalRegistrosDocs = docs.length;
 
-  const porEmpreendimento = docs.reduce((acc, d) => {
-    const k = d.empreendimento?.trim() || "(sem empreendimento)";
+  // Ranking por cadastros reais (clientes), não por docs — mesma causa raiz dos indicadores gerais.
+  const porEmpreendimento = clientes.reduce((acc, c) => {
+    const k = c.empreendimento?.trim() || "(sem empreendimento)";
     acc[k] = (acc[k] || 0) + 1;
     return acc;
   }, {});
   const rankingEmpreendimentos = Object.entries(porEmpreendimento).sort((a, b) => b[1] - a[1]).slice(0, 6);
 
-  const fmtReal = (v) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-
   return (
     <div style={{ display: "grid", gap: 16 }}>
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando indicadores…</p>}
 
-      <CardIndicadoresGerais docs={docs} />
+      <CardIndicadoresGerais docs={docs} clientes={clientes} />
+
+      <CardCadastrosClientes clientes={clientes} />
 
       <Card icon={Star} titulo="Qualidade — avaliações dos clientes">
         {avaliacoesCarregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
@@ -1732,11 +1831,235 @@ function AbaGerencia({ docs, carregando, assinatura, salvarAssinatura, removerAs
         })()}
       </Card>
 
+      <Card icon={BarChart3} titulo="Status operacional">
+        {totalRegistrosDocs === 0 ? (
+          <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum dado ainda. Cadastre registros na aba "Documentação" para ver os indicadores aqui.</p>
+        ) : (
+          <>
+            <BarraStatus titulo="Vistorias" contagens={porVistoria} />
+            <BarraStatus titulo="ART / TRT" contagens={porArt} />
+            <BarraStatus titulo="Relatórios" contagens={porRelatorio} />
+          </>
+        )}
+      </Card>
+
+      {rankingEmpreendimentos.length > 0 && (
+        <Card icon={LayoutGrid} titulo="Empreendimentos com mais cadastros">
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
+            <tbody>
+              {rankingEmpreendimentos.map(([nome, qtd]) => (
+                <tr key={nome} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                  <td style={{ padding: "8px 10px" }}>{nome}</td>
+                  <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700, color: AZUL_MARINHO }}>{qtd}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+
+      <CardUsuarios usuarios={usuarios} carregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} notify={notify} usuarioAtualId={usuarioAtualId} />
+
+      <CardAssinaturaGerencia assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify} />
+    </div>
+  );
+}
+
+/* ---- Gerência · Parceiros e Afiliados ---- */
+function CardIndicadoresParceiros({ parceiros, vales, valesCarregando }) {
+  const ativos = parceiros.filter((p) => p.status === "aprovado").length;
+  const leadsEnviados = vales.length;
+  const valesUsados = vales.filter((v) => v.status === "usado").length;
+  const taxaConversao = leadsEnviados > 0 ? (valesUsados / leadsEnviados) * 100 : 0;
+
+  return (
+    <Card icon={TrendingUp} titulo="Indicadores de Parceiros e Afiliados">
+      {valesCarregando && <p style={{ color: "#8593a8", fontSize: 14, marginBottom: 10 }}>Carregando vales…</p>}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
+        <KpiCard label="Parceiros ativos" valor={ativos} Icon={Users} />
+        <KpiCard label="Leads enviados" valor={leadsEnviados} cor="#2C75B5" Icon={TrendingUp} />
+        <KpiCard label="Taxa de conversão" valor={`${taxaConversao.toFixed(0)}%`} cor="#2E7D32" Icon={Percent} />
+        <KpiCard label="Vendas por indicação" valor={valesUsados} cor="#2E7D32" Icon={Check} />
+        <KpiCard label="Comissão gerada" valor="—" cor="#8593a8" Icon={DollarSign} />
+      </div>
+      <p style={{ fontSize: 12, color: "#8593a8", marginTop: 12 }}>
+        "Leads enviados" e "taxa de conversão" são calculados a partir dos códigos de benefício (vales) gerados e ativados pelos clientes.
+        "Comissão gerada" ainda não tem dado real — os vales não registram o valor da venda, só o benefício concedido.
+      </p>
+    </Card>
+  );
+}
+function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, notify }) {
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <CardIndicadoresParceiros parceiros={parceiros} vales={vales} valesCarregando={valesCarregando} />
+      <CardParceiros parceiros={parceiros} carregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} notify={notify} />
+    </div>
+  );
+}
+
+/* ---- Gerência · Financeiro ---- */
+function CardPrecoEmpreendimento({ precos, carregando, salvarPreco, removerPreco, clientes, notify }) {
+  const [novoEmpreendimento, setNovoEmpreendimento] = useState("");
+  const [novoPreco, setNovoPreco] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const [editandoId, setEditandoId] = useState(null);
+  const [editandoValor, setEditandoValor] = useState("");
+
+  const empreendimentosConhecidos = [...new Set(clientes.map((c) => c.empreendimento?.trim()).filter(Boolean))].sort();
+
+  const adicionar = async () => {
+    if (!novoEmpreendimento.trim()) { notify("Informe o empreendimento"); return; }
+    const preco = Number(novoPreco);
+    if (!Number.isFinite(preco) || preco < 0) { notify("Informe um preço de vistoria válido"); return; }
+    setSalvando(true);
+    const ok = await salvarPreco(novoEmpreendimento.trim(), preco);
+    if (ok) { setNovoEmpreendimento(""); setNovoPreco(""); notify("Preço salvo ✓"); }
+    setSalvando(false);
+  };
+  const iniciarEdicao = (p) => { setEditandoId(p.id); setEditandoValor(String(p.precoVistoria)); };
+  const salvarEdicao = async (p) => {
+    const preco = Number(editandoValor);
+    if (!Number.isFinite(preco) || preco < 0) { notify("Informe um preço de vistoria válido"); return; }
+    const ok = await salvarPreco(p.empreendimento, preco);
+    if (ok) { setEditandoId(null); notify("Preço atualizado ✓"); }
+  };
+
+  return (
+    <Card icon={DollarSign} titulo="Preço de vistoria por empreendimento">
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Cadastre o valor da vistoria de cada empreendimento. Esse preço alimenta automaticamente o cálculo de receita de vistoria abaixo.
+      </p>
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <input list="empreendimentos-conhecidos" style={{ ...inp, flex: 1, minWidth: 200 }} placeholder="Empreendimento" value={novoEmpreendimento} onChange={(e) => setNovoEmpreendimento(e.target.value)} />
+        <datalist id="empreendimentos-conhecidos">{empreendimentosConhecidos.map((e) => <option key={e} value={e} />)}</datalist>
+        <input style={{ ...inp, width: 140 }} type="number" min="0" step="0.01" placeholder="Preço (R$)" value={novoPreco} onChange={(e) => setNovoPreco(e.target.value)} />
+        <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }} onClick={adicionar} disabled={salvando}>
+          {salvando ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} Salvar
+        </button>
+      </div>
+
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && precos.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum preço cadastrado ainda.</p>}
+      {precos.length > 0 && (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: CINZA_CLARO }}>
+                {["Empreendimento", "Preço da vistoria", ""].map((h) => (
+                  <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}` }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {precos.map((p) => (
+                <tr key={p.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                  <td style={{ padding: "8px 10px", fontWeight: 600 }}>{p.empreendimento}</td>
+                  <td style={{ padding: "8px 10px" }}>
+                    {editandoId === p.id
+                      ? <input type="number" min="0" step="0.01" style={{ ...inp, width: 120, padding: "5px 8px" }} value={editandoValor} onChange={(e) => setEditandoValor(e.target.value)} autoFocus />
+                      : fmtReal(p.precoVistoria)}
+                  </td>
+                  <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+                    {editandoId === p.id ? (
+                      <>
+                        <button className="icon-btn" onClick={() => salvarEdicao(p)}><Check size={15} color="#2E7D32" /></button>
+                        <button className="icon-btn" onClick={() => setEditandoId(null)}><X size={15} /></button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="icon-btn" onClick={() => iniciarEdicao(p)}><Edit3 size={15} color={AZUL_MEDIO} /></button>
+                        <button className="icon-btn" onClick={() => removerPreco(p.id)}><Trash2 size={15} color="#c62828" /></button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+function CardReceitaVistoriaEstimada({ precos, clientes }) {
+  const precoPorEmpreendimento = {};
+  precos.forEach((p) => { precoPorEmpreendimento[p.empreendimento] = p.precoVistoria; });
+
+  const vistoriasAtendidas = clientes.filter((c) => c.servico === SERVICO_VISTORIA && c.atendido);
+  const porEmpreendimento = {};
+  vistoriasAtendidas.forEach((c) => {
+    const k = c.empreendimento?.trim() || "(sem empreendimento)";
+    const temPreco = Object.prototype.hasOwnProperty.call(precoPorEmpreendimento, k);
+    if (!porEmpreendimento[k]) porEmpreendimento[k] = { qtd: 0, receita: 0, temPreco };
+    porEmpreendimento[k].qtd += 1;
+    porEmpreendimento[k].receita += temPreco ? precoPorEmpreendimento[k] : 0;
+  });
+
+  const linhas = Object.entries(porEmpreendimento).sort((a, b) => b[1].receita - a[1].receita);
+  const totalReceita = linhas.reduce((s, [, v]) => s + v.receita, 0);
+  const semPreco = linhas.filter(([, v]) => !v.temPreco);
+
+  return (
+    <Card icon={TrendingUp} titulo="Receita de vistoria estimada (por empreendimento)">
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Calculada automaticamente: preço cadastrado × quantidade de vistorias já atendidas em cada empreendimento.
+      </p>
+      {linhas.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhuma vistoria atendida ainda.</p>}
+      {linhas.length > 0 && (
+        <>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: CINZA_CLARO }}>
+                  {["Empreendimento", "Vistorias atendidas", "Receita"].map((h) => (
+                    <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}` }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {linhas.map(([nome, v]) => (
+                  <tr key={nome} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                    <td style={{ padding: "8px 10px", fontWeight: 600 }}>{nome}</td>
+                    <td style={{ padding: "8px 10px" }}>{v.qtd}</td>
+                    <td style={{ padding: "8px 10px", color: v.temPreco ? AZUL_MARINHO : "#B26A00", fontWeight: v.temPreco ? 700 : 400 }}>
+                      {v.temPreco ? fmtReal(v.receita) : "sem preço cadastrado"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${CINZA_BORDA}`, fontSize: 14 }}>
+            <strong style={{ color: AZUL_MARINHO }}>Total estimado: </strong>{fmtReal(totalReceita)}
+          </div>
+          {semPreco.length > 0 && (
+            <div style={{ marginTop: 10, background: "#FFF4E0", color: "#B26A00", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>
+              {semPreco.length} empreendimento(s) sem preço cadastrado — a receita desses ainda não está sendo contabilizada no total.
+            </div>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salvarPreco, removerPreco, notify }) {
+  const somaCampo = (campo, filtro) => docs.filter(filtro).reduce((s, d) => s + (Number(d[campo]) || 0), 0);
+  const pago = (d) => d.pagamento === "Pago";
+  const naoPago = (d) => d.pagamento !== "Pago";
+
+  const receitaVistoriaPaga = somaCampo("valorVistoria", pago);
+  const receitaVistoriaAReceber = somaCampo("valorVistoria", naoPago);
+  const receitaTrtPaga = somaCampo("valorTrt", pago);
+  const receitaTrtAReceber = somaCampo("valorTrt", naoPago);
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
       <Card icon={DollarSign} titulo="Financeiro (acesso restrito · Gerência)">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 20 }}>
           <div>
             <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
-              <ClipboardCheck size={14} /> Vistorias
+              <ClipboardCheck size={14} /> Vistorias (valores lançados em Documentação)
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <KpiCard label="Recebido" valor={fmtReal(receitaVistoriaPaga)} cor="#2E7D32" />
@@ -1759,39 +2082,24 @@ function AbaGerencia({ docs, carregando, assinatura, salvarAssinatura, removerAs
         </div>
       </Card>
 
-      <Card icon={BarChart3} titulo="Status operacional">
-        {totalRegistros === 0 ? (
-          <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum dado ainda. Cadastre registros na aba "Documentação" para ver os indicadores aqui.</p>
-        ) : (
-          <>
-            <BarraStatus titulo="Vistorias" contagens={porVistoria} />
-            <BarraStatus titulo="ART / TRT" contagens={porArt} />
-            <BarraStatus titulo="Relatórios" contagens={porRelatorio} />
-          </>
-        )}
-      </Card>
+      <CardPrecoEmpreendimento precos={precos} carregando={precosCarregando} salvarPreco={salvarPreco} removerPreco={removerPreco} clientes={clientes} notify={notify} />
 
-      {rankingEmpreendimentos.length > 0 && (
-        <Card icon={LayoutGrid} titulo="Empreendimentos com mais vistorias">
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
-            <tbody>
-              {rankingEmpreendimentos.map(([nome, qtd]) => (
-                <tr key={nome} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
-                  <td style={{ padding: "8px 10px" }}>{nome}</td>
-                  <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700, color: AZUL_MARINHO }}>{qtd}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
-      )}
-
-      <CardUsuarios usuarios={usuarios} carregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} notify={notify} usuarioAtualId={usuarioAtualId} />
-
-      <CardParceiros parceiros={parceiros} carregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} notify={notify} />
-
-      <CardAssinaturaGerencia assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify} />
+      <CardReceitaVistoriaEstimada precos={precos} clientes={clientes} />
     </div>
+  );
+}
+
+function AbaGerencia({ sub = "visao-geral", docs, clientes = [], carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, removerPreco }) {
+  if (sub === "parceiros") {
+    return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} vales={vales} valesCarregando={valesCarregando} notify={notify} />;
+  }
+  if (sub === "financeiro") {
+    return <AbaGerenciaFinanceiro docs={docs} clientes={clientes} precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} removerPreco={removerPreco} notify={notify} />;
+  }
+  return (
+    <AbaGerenciaVisaoGeral docs={docs} clientes={clientes} carregando={carregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
+      usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={usuarioAtualId}
+      avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando} />
   );
 }
 
