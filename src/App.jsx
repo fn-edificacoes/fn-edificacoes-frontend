@@ -1151,9 +1151,56 @@ function CalendarioVistoriador({ agenda = [], carregando, clientes = [], preench
 }
 
 /* ================= Aba: Clientes (perfil Comercial) ================= */
+/* Ordem das colunas do Kanban — mesmas etapas do status dinâmico (etapaAtualCliente),
+   só numa ordem lógica de pipeline em vez da ordem que aparecem nos dados. */
+const ETAPA_ORDEM = ["Em análise", "Agendamento aprovado", "Vistoria agendada", "Agendado", "Laudo em análise", "Laudo enviado por e-mail", "Cancelado"];
+
+function KanbanClientes({ clientes, docs, onAbrir }) {
+  const porEtapa = {};
+  clientes.forEach((c) => {
+    const et = etapaAtualCliente(c, docs);
+    (porEtapa[et] = porEtapa[et] || []).push(c);
+  });
+  const etapas = [...ETAPA_ORDEM.filter((e) => porEtapa[e]), ...Object.keys(porEtapa).filter((e) => !ETAPA_ORDEM.includes(e))];
+
+  return (
+    <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 8 }}>
+      {etapas.map((etapa) => (
+        <div key={etapa} style={{ minWidth: 260, width: 260, flexShrink: 0, background: CINZA_CLARO, borderRadius: 12, padding: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, padding: "0 4px" }}>
+            <Selo valor={etapa} />
+            <strong style={{ fontSize: 13, color: "#65758b" }}>{porEtapa[etapa].length}</strong>
+          </div>
+          <div style={{ display: "grid", gap: 8, maxHeight: 560, overflowY: "auto" }}>
+            {porEtapa[etapa].map((c) => (
+              <button key={c.id} onClick={() => onAbrir(c)}
+                style={{ textAlign: "left", background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 10, cursor: "pointer" }}>
+                <div style={{ fontWeight: 700, fontSize: 13.5 }}>{c.nome}</div>
+                <div style={{ fontSize: 12, color: "#65758b", marginTop: 2 }}>
+                  {c.empreendimento || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}
+                </div>
+                <div style={{ fontSize: 11.5, color: "#8593a8", marginTop: 4 }}>
+                  {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""}
+                </div>
+                {c.observacoes && (
+                  <div style={{ fontSize: 11.5, color: "#9AA6B5", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {c.observacoes}
+                  </div>
+                )}
+              </button>
+            ))}
+            {porEtapa[etapa].length === 0 && <span style={{ fontSize: 12, color: "#9AA6B5", padding: "0 4px" }}>Vazio</span>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function AbaClientesComercial({ clientes, carregando, atualizarCliente, notify, docs = [] }) {
   const [busca, setBusca] = useState("");
   const [editando, setEditando] = useState(null); // cópia do cliente em edição
+  const [visualizacao, setVisualizacao] = useState("kanban"); // "kanban" | "tabela"
 
   const filtrados = clientes.filter((c) =>
     !busca || `${c.nome} ${c.empreendimento} ${c.construtora}`.toLowerCase().includes(busca.toLowerCase())
@@ -1187,12 +1234,26 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, notify, 
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
           Cadastro, agendamento e acompanhamento de todos os clientes que já se cadastraram (pelo portal público) ou foram cadastrados pela equipe.
         </p>
-        <input style={{ ...inp, marginBottom: 14 }} placeholder="Buscar por nome, empreendimento ou construtora…" value={busca} onChange={(e) => setBusca(e.target.value)} />
+        <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+          <input style={{ ...inp, flex: 1, minWidth: 200 }} placeholder="Buscar por nome, empreendimento ou construtora…" value={busca} onChange={(e) => setBusca(e.target.value)} />
+          <div style={{ display: "flex", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, overflow: "hidden" }}>
+            <button onClick={() => setVisualizacao("kanban")} style={{ padding: "8px 14px", border: "none", cursor: "pointer", fontSize: 13, background: visualizacao === "kanban" ? AZUL_MEDIO : "#fff", color: visualizacao === "kanban" ? "#fff" : "#4a5a70" }}>
+              <LayoutGrid size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} /> Kanban
+            </button>
+            <button onClick={() => setVisualizacao("tabela")} style={{ padding: "8px 14px", border: "none", cursor: "pointer", fontSize: 13, background: visualizacao === "tabela" ? AZUL_MEDIO : "#fff", color: visualizacao === "tabela" ? "#fff" : "#4a5a70" }}>
+              <ClipboardList size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} /> Tabela
+            </button>
+          </div>
+        </div>
 
         {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
         {!carregando && filtrados.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum cliente encontrado.</p>}
 
-        {filtrados.length > 0 && (
+        {filtrados.length > 0 && visualizacao === "kanban" && (
+          <KanbanClientes clientes={filtrados} docs={docs} onAbrir={abrirEdicao} />
+        )}
+
+        {filtrados.length > 0 && visualizacao === "tabela" && (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
