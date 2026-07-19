@@ -924,7 +924,7 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "laudos" && aba === "itens" && (
           <AbaItens itens={itens} setItens={setItens} updItem={updItem} escolherPatologia={escolherPatologia}
             addFotos={addFotos} removerFoto={removerFoto} contagem={contagem}
-            fotoCliente={dados.fotoCliente} setFotoCliente={setFotoCliente} notify={notify} />
+            fotoCliente={dados.fotoCliente} setFotoCliente={setFotoCliente} notify={notify} setAba={setAba} />
         )}
         {abaTop === "laudos" && aba === "laudo" && <Laudo dados={dados} itens={itens} contagem={contagem} totalItens={totalItens} assinatura={assinatura} />}
         {abaTop === "laudos" && aba === "agenda" && (perfil === "vistoriador" || perfil === "gerencia") && (
@@ -1920,12 +1920,17 @@ function AbaDados({ dados, setD, setTexto, clientes = [], preencherComCliente, d
 }
 
 /* ================= Aba: Itens ================= */
-function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, fotoCliente, setFotoCliente, notify }) {
+function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, fotoCliente, setFotoCliente, notify, setAba }) {
+  const fotoClienteRef = useRef();
   const handleFotoCliente = (file) => {
     if (!file) return;
     if (!file.type.startsWith("image/")) { notify("Envie uma imagem (PNG ou JPG)"); return; }
     const reader = new FileReader();
-    reader.onload = (e) => setFotoCliente(e.target.result);
+    reader.onload = (e) => {
+      setFotoCliente(e.target.result);
+      notify("Foto registrada ✓ — indo para o laudo final");
+      if (setAba) setAba("laudo");
+    };
     reader.readAsDataURL(file);
   };
 
@@ -1934,20 +1939,24 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
       <div style={{ marginBottom: 16 }}>
         <Card icon={Camera} titulo="Foto com o cliente (obrigatória)">
           <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
-            Uma foto sua com o cliente durante a vistoria. Necessária para enviar o laudo para a gerência. Aparece na última página do laudo final (como agradecimento) e na página de acompanhamento do cliente.
+            Tire uma foto sua com o cliente durante a vistoria, igual às fotos dos itens. Necessária pra enviar o laudo para a gerência — assim que tirar, você já vai direto pro laudo final.
           </p>
-          {fotoCliente ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <img src={fotoCliente} alt="Foto com o cliente" style={{ width: 110, height: 110, objectFit: "cover", borderRadius: 8, border: `1px solid ${CINZA_BORDA}` }} />
-              <button className="btn-ghost" style={{ color: "#C62828" }} onClick={() => setFotoCliente(null)}><X size={14} /> Remover foto</button>
-            </div>
-          ) : (
-            <label className="btn-ghost" style={{ display: "inline-flex", cursor: "pointer", width: "auto" }}>
-              <Camera size={15} /> Adicionar foto
-              <input type="file" accept="image/*" capture="environment" style={{ display: "none" }}
-                onChange={(e) => { handleFotoCliente(e.target.files[0]); e.target.value = ""; }} />
-            </label>
-          )}
+          <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+            {fotoCliente ? (
+              <div style={{ position: "relative", width: 160, height: 160, borderRadius: 10, overflow: "hidden", border: `1px solid ${CINZA_BORDA}` }}>
+                <img src={fotoCliente} alt="Foto com o cliente" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                <button className="foto-x" onClick={() => setFotoCliente(null)}><X size={12} /></button>
+              </div>
+            ) : (
+              <button onClick={() => fotoClienteRef.current?.click()}
+                style={{ width: 160, height: 160, borderRadius: 10, border: `1.5px dashed ${AZUL_MEDIO}`, background: "#f6f9fd", color: AZUL_MEDIO, display: "flex", flexDirection: "column", gap: 6, alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                <Camera size={28} />
+                <span style={{ fontSize: 12.5, fontWeight: 600 }}>Tirar foto</span>
+              </button>
+            )}
+            <input ref={fotoClienteRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }}
+              onChange={(e) => { handleFotoCliente(e.target.files[0]); e.target.value = ""; }} />
+          </div>
         </Card>
       </div>
 
