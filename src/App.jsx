@@ -309,6 +309,15 @@ async function redimensionar(dataUrl, max = 1024) {
   });
 }
 
+/* Soma horas a um horário "HH:MM", devolvendo também "HH:MM" (usado para sugerir o término
+   da vistoria a partir do horário desejado pelo cliente — continua editável depois). */
+function somarHora(hhmm, horas) {
+  if (!hhmm || !/^\d{1,2}:\d{2}$/.test(hhmm)) return "";
+  const [h, m] = hhmm.split(":").map(Number);
+  const total = (h * 60 + m + horas * 60 + 24 * 60) % (24 * 60);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
 async function gerarComIA({ nota, fotos, local }) {
   const content = [];
   for (const f of fotos.slice(0, 2)) {
@@ -691,7 +700,12 @@ function AppInterno({ session, onLogout }) {
       ...d,
       contratante: { ...d.contratante, nome: cli.nome || d.contratante.nome, cpf: cli.cpf || d.contratante.cpf },
       imovel: { ...d.imovel, construtora: cli.construtora || d.imovel.construtora, empreendimento: cli.empreendimento || d.imovel.empreendimento, unidade: cli.blocoTorre || d.imovel.unidade, endereco: cli.endereco || d.imovel.endereco },
-      vistoria: { ...d.vistoria, data: cli.dataDesejada || d.vistoria.data, inicio: cli.horarioDesejado || d.vistoria.inicio },
+      vistoria: {
+        ...d.vistoria,
+        data: cli.dataDesejada || d.vistoria.data,
+        inicio: cli.horarioDesejado || d.vistoria.inicio,
+        termino: cli.horarioDesejado ? somarHora(cli.horarioDesejado, 1) : d.vistoria.termino,
+      },
     }));
     setClienteAtualId(cli.id);
     if (!cli.atendido) updCliente(cli.id, { atendido: true });
@@ -706,6 +720,7 @@ function AppInterno({ session, onLogout }) {
   const setFotoCliente = (foto) => setDados((d) => ({ ...d, fotoCliente: foto }));
   const enviarParaGerencia = async () => {
     if (!clienteAtualId) { notify("Selecione um cliente cadastrado em \"Dados do laudo\" antes de enviar."); return; }
+    if (!dados.fotoCliente) { notify("Anexe a foto com o cliente antes de enviar (obrigatória)."); return; }
     setEnviandoParaGerencia(true);
     try {
       const itensComprimidos = await Promise.all(itens.map(async (item) => ({
@@ -1419,9 +1434,9 @@ function AbaDados({ dados, setD, setTexto, setFotoCliente, clientes = [], preenc
         </Grid>
       </Card>
 
-      <Card icon={Camera} titulo="Foto com o cliente (opcional)">
+      <Card icon={Camera} titulo="Foto com o cliente (obrigatória)">
         <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
-          Uma foto sua com o cliente durante a vistoria. Aparece na última página do laudo final (como agradecimento) e na página de acompanhamento do cliente.
+          Uma foto sua com o cliente durante a vistoria. Necessária para enviar o laudo para a gerência. Aparece na última página do laudo final (como agradecimento) e na página de acompanhamento do cliente.
         </p>
         {dados.fotoCliente ? (
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
