@@ -244,13 +244,16 @@ const PAGAMENTO_OPCOES = ["Pendente", "Pago", "Parcial"];
 const VISTORIA_OPCOES = ["Agendada", "Concluída", "Cancelada"];
 const TIPO_ART_OPCOES = ["Individual", "Coletiva"];
 
-/* ---------- Status do CLIENTE (status_cliente) — só estes 3, nesta ordem, sempre automático ----------
+/* ---------- Status do CLIENTE (status_cliente) — sempre automático, nunca editado manualmente ----------
    O cliente NUNCA vê status internos de gerência/documentação (STATUS_INTERNO_OPCOES abaixo).
-   Muda sozinho: "Agendado" -> "Laudo em análise" quando o vistoriador finaliza a vistoria
-   (POST /api/vistoria/finalizar) -> "Laudo enviado por e-mail" quando a gerência aprova
-   (POST /api/docs/:id/aprovar, que já gera o PDF e envia o e-mail). */
-const STATUS_ATENDIMENTO_OPCOES = ["Agendado", "Laudo em análise", "Laudo enviado por e-mail"];
+   Antes de existir um "docs", quem manda é clientes.status: "Em análise" (cadastro acabou de
+   chegar, aguardando o Atendimento aprovar) -> "Agendado" (Atendimento aprovou o agendamento).
+   Depois que a vistoria é finalizada, o docs.status_cliente assume: "Agendado" -> "Laudo em análise"
+   quando o vistoriador finaliza a vistoria (POST /api/vistoria/finalizar) -> "Laudo enviado por
+   e-mail" quando a gerência aprova (POST /api/docs/:id/aprovar, que já gera o PDF e envia o e-mail). */
+const STATUS_ATENDIMENTO_OPCOES = ["Em análise", "Agendado", "Laudo em análise", "Laudo enviado por e-mail"];
 const STATUS_ATENDIMENTO_INFO = {
+  "Em análise": "Recebemos seu cadastro e ele está em análise pelo nosso setor de Atendimento. Em breve confirmaremos seu agendamento.",
   "Agendado": "Recebemos sua solicitação e sua vistoria está agendada. Em breve nossa equipe entrará em contato.",
   "Laudo em análise": "Sua vistoria foi realizada e o laudo está em análise pela nossa equipe técnica.",
   "Laudo enviado por e-mail": "Seu laudo foi aprovado e enviado para o e-mail cadastrado. Verifique sua caixa de entrada (e o spam).",
@@ -262,19 +265,21 @@ const STATUS_INTERNO_OPCOES = ["Agendado", "Em vistoria", "Laudo em elaboração
 /* ---------- Perfis de acesso (agora definidos pelo backend/login, não escolhidos na tela) ----------
    vistoriador   -> só enxerga o módulo Laudos (não vê Documentação nem Gerência)
    documentacao  -> só enxerga o módulo Documentação
-   comercial     -> só enxerga o módulo Clientes (cadastro, agendamento, acompanhamento)
-   qualidade     -> só enxerga o módulo Qualidade (avaliações dos clientes)
+   atendimento   -> enxerga Clientes (cadastro, agendamento, acompanhamento, aprovação) e Qualidade
+                    (aprova agendamento/feedback — item 3.24; substitui o antigo perfil "comercial")
+   qualidade     -> enxerga o módulo Qualidade, mas só leitura (não aprova nada — isso agora é
+                    exclusivo do Atendimento; ver "podeAgir" nos componentes de Qualidade)
    gerencia      -> acesso restrito, mas enxerga tudo (incl. financeiro)
    O cadastro/acompanhamento de Cliente em si continua sendo uma tela pública separada, sem login.
 ------------------------------------------------------------------ */
 const MODULOS_POR_PERFIL = {
   vistoriador: ["laudos"],
   documentacao: ["documentacao"],
-  comercial: ["clientes"],
+  atendimento: ["clientes", "qualidade"],
   qualidade: ["qualidade"],
   gerencia: ["laudos", "documentacao", "gerencia", "clientes", "qualidade"],
 };
-const PERFIL_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", comercial: "Comercial", qualidade: "Qualidade", gerencia: "Gerência" };
+const PERFIL_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", qualidade: "Qualidade", gerencia: "Gerência" };
 
 const novoRegistroDoc = () => ({
   id: `doc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -546,7 +551,7 @@ function AppInterno({ session, onLogout }) {
   const [avaliacoes, setAvaliacoes] = useState([]);
   const [avaliacoesCarregando, setAvaliacoesCarregando] = useState(false);
   const carregarAvaliacoes = async () => {
-    if (perfil !== "qualidade" && perfil !== "gerencia") return;
+    if (perfil !== "qualidade" && perfil !== "gerencia" && perfil !== "atendimento") return;
     setAvaliacoesCarregando(true);
     try {
       const r = await apiFetch("/api/avaliacoes", { token });
@@ -696,7 +701,7 @@ function AppInterno({ session, onLogout }) {
   const [usuarios, setUsuarios] = useState([]);
   const [usuariosCarregando, setUsuariosCarregando] = useState(false);
   const carregarUsuarios = async () => {
-    if (perfil !== "gerencia" && perfil !== "qualidade") return;
+    if (perfil !== "gerencia" && perfil !== "qualidade" && perfil !== "atendimento") return;
     setUsuariosCarregando(true);
     try {
       const r = await apiFetch("/api/users", { token });
@@ -954,7 +959,8 @@ function AppInterno({ session, onLogout }) {
         )}
         {abaTop === "qualidade" && (
           <AbaQualidade sub={abaQualidade} avaliacoes={avaliacoes} carregando={avaliacoesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
-            clientes={clientes} clientesCarregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} preencherComCliente={preencherComCliente} />
+            clientes={clientes} clientesCarregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} preencherComCliente={preencherComCliente}
+            podeAgir={perfil === "atendimento" || perfil === "gerencia"} />
         )}
         {abaTop === "gerencia" && (
           <AbaGerencia sub={abaGerencia} docs={docs} clientes={clientes} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
@@ -1469,18 +1475,23 @@ function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [] })
   );
 }
 
-function AbaQualidade({ sub = "analise", clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao }) {
+function AbaQualidade({ sub = "analise", clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, podeAgir = false }) {
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <CardIndicadoresQualidade clientes={clientes} docs={docs} avaliacoes={avaliacoes} />
-      {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} />}
-      {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao} />}
-      {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} carregando={clientesCarregando} updCliente={updCliente} notify={notify} />}
+      {!podeAgir && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#EAF2FB", color: AZUL_MARINHO, borderRadius: 8, padding: "8px 12px", fontSize: 12.5 }}>
+          <Info size={14} /> Modo leitura — aprovar agendamento, encaminhar técnico e aprovar feedback agora é exclusivo do perfil Atendimento.
+        </div>
+      )}
+      {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} />}
+      {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao} podeAgir={podeAgir} />}
+      {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} carregando={clientesCarregando} updCliente={updCliente} notify={notify} podeAgir={podeAgir} />}
     </div>
   );
 }
 
-function AbaQualidadeFeedback({ avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao }) {
+function AbaQualidadeFeedback({ avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, podeAgir = false }) {
   const [busca, setBusca] = useState("");
   const total = avaliacoes.length;
   const media = total ? (avaliacoes.reduce((s, a) => s + a.nota, 0) / total) : 0;
@@ -1530,7 +1541,7 @@ function AbaQualidadeFeedback({ avaliacoes, carregando, docs, docsCarregando, ap
                   </div>
                   {a.empreendimento && <div style={{ fontSize: 12, color: "#65758b", marginBottom: 6 }}>{a.empreendimento}</div>}
                   {a.comentario && <div style={{ fontSize: 13.5, color: "#334", background: CINZA_CLARO, borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>{a.comentario}</div>}
-                  {aprovarAvaliacao && (
+                  {podeAgir && aprovarAvaliacao ? (
                     a.aprovado ? (
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
                         <span style={{ fontSize: 12, color: "#2E7D32", fontWeight: 600 }}>✓ Exibida na página inicial</span>
@@ -1541,6 +1552,10 @@ function AbaQualidadeFeedback({ avaliacoes, carregando, docs, docsCarregando, ap
                         <Check size={14} /> Aprovar para a página inicial
                       </button>
                     )
+                  ) : (
+                    <span style={{ fontSize: 12, color: a.aprovado ? "#2E7D32" : "#8593a8", fontWeight: a.aprovado ? 600 : 400 }}>
+                      {a.aprovado ? "✓ Exibida na página inicial" : "Somente leitura — o Atendimento decide isso."}
+                    </span>
                   )}
                 </div>
               ))}
@@ -1600,7 +1615,7 @@ function conflitosDeHorario(cliente, todos) {
 }
 
 /* ================= Qualidade · Análise: valida agendamento antes de liberar (checa cruzamento de horário) ================= */
-function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, notify }) {
+function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, notify, podeAgir = false }) {
   const [mesRef, setMesRef] = useState(() => { const h = new Date(); return new Date(h.getFullYear(), h.getMonth(), 1); });
   const [diaSelecionado, setDiaSelecionado] = useState(null);
 
@@ -1669,12 +1684,17 @@ function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, notify }) 
                 </div>
               )}
               <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                {!podeAgir && <span style={{ fontSize: 12, color: "#8593a8" }}>Somente leitura — o Atendimento decide isso.</span>}
+                {podeAgir && (
+                <>
                 <button className="btn-solid" style={{ width: "auto", padding: "8px 16px" }} onClick={() => aprovar(c)}>
                   <Check size={15} /> Aprovar agendamento
                 </button>
                 <button className="btn-ghost" style={{ color: "#C62828", background: "#FCEAEA" }} onClick={() => cancelar(c)}>
                   <X size={15} /> Cancelar agendamento
                 </button>
+                </>
+                )}
               </div>
             </div>
           );
@@ -1708,7 +1728,7 @@ function CardVistoriaResumo({ c, aberto, onToggle, children }) {
 /* Sub-aba Vistoria: agrupa por status (pendente de agendamento / já agendada / já
    realizada), com busca e cards resumidos que expandem ao clicar — antes mostrava
    tudo (formulário completo) de uma vez pra cada cliente, o que ficava confuso. */
-function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify }) {
+function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false }) {
   const [busca, setBusca] = useState("");
   const [abertoId, setAbertoId] = useState(null);
   const [form, setForm] = useState({});
@@ -1767,17 +1787,21 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
                       <Grid>
                         <div style={cell(false)}>
                           <label style={lab}>Vistoriador</label>
-                          <select style={inp} value={valorCampo(c, "vistoriadorId", "")} onChange={(e) => setCampo(c.id, "vistoriadorId", e.target.value)}>
+                          <select style={inp} value={valorCampo(c, "vistoriadorId", "")} onChange={(e) => setCampo(c.id, "vistoriadorId", e.target.value)} disabled={!podeAgir}>
                             <option value="">selecionar…</option>
                             {vistoriadores.map((v) => <option key={v.id} value={v.id}>{v.nome}</option>)}
                           </select>
                         </div>
-                        <Field label="Data" type="date" value={valorCampo(c, "dataDesejada", c.dataDesejada)} onChange={(v) => setCampo(c.id, "dataDesejada", v)} />
-                        <Field label="Horário" type="time" value={valorCampo(c, "horarioDesejado", c.horarioDesejado)} onChange={(v) => setCampo(c.id, "horarioDesejado", v)} />
+                        <Field label="Data" type="date" value={valorCampo(c, "dataDesejada", c.dataDesejada)} onChange={(v) => setCampo(c.id, "dataDesejada", v)} disabled={!podeAgir} />
+                        <Field label="Horário" type="time" value={valorCampo(c, "horarioDesejado", c.horarioDesejado)} onChange={(v) => setCampo(c.id, "horarioDesejado", v)} disabled={!podeAgir} />
                       </Grid>
-                      <button className="btn-solid" style={{ marginTop: 10, width: "auto", padding: "8px 16px" }} onClick={() => confirmar(c)}>
-                        <Check size={15} /> Confirmar agendamento
-                      </button>
+                      {podeAgir ? (
+                        <button className="btn-solid" style={{ marginTop: 10, width: "auto", padding: "8px 16px" }} onClick={() => confirmar(c)}>
+                          <Check size={15} /> Confirmar agendamento
+                        </button>
+                      ) : (
+                        <span style={{ fontSize: 12, color: "#8593a8" }}>Somente leitura — o Atendimento decide isso.</span>
+                      )}
                     </>
                   ) : (
                     <div style={{ fontSize: 13, color: "#4a5a70", display: "grid", gap: 4 }}>
@@ -2995,12 +3019,12 @@ function AbaGerencia({ sub = "visao-geral", docs, clientes = [], carregando, ass
   );
 }
 
-const ROLE_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", comercial: "Comercial", qualidade: "Qualidade", gerencia: "Gerência" };
+const ROLE_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", qualidade: "Qualidade", gerencia: "Gerência" };
 const ROLE_DESCRICAO = {
   vistoriador: "Só acessa Laudos. Sem acesso a Documentação nem Gerência.",
   documentacao: "Só acessa Documentação/TRT. Sem acesso a Laudos nem Gerência.",
-  comercial: "Só acessa Clientes: cadastro, agendamento e acompanhamento.",
-  qualidade: "Só acessa Qualidade: avaliações que os clientes deixaram.",
+  atendimento: "Acessa Clientes (cadastro, agendamento, aprovação e encaminhamento ao técnico) e Qualidade (aprova avaliações que entram na vitrine).",
+  qualidade: "Só acessa Qualidade, em modo leitura: acompanha avaliações e agendamentos, mas não aprova nada — isso é do Atendimento.",
   gerencia: "Acesso completo: Laudos, Documentação, Clientes, Qualidade, Gerência e financeiro.",
 };
 
@@ -4133,8 +4157,8 @@ const Grid = ({ children }) => <div style={{ display: "grid", gridTemplateColumn
 const cell = (full) => ({ display: "flex", flexDirection: "column", gap: 5, gridColumn: full ? "1 / -1" : "auto" });
 const lab = { fontSize: 12, fontWeight: 600, color: "#5a6a80" };
 const inp = { padding: "9px 11px", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, fontSize: 14, outline: "none", background: "#fff", fontFamily: "inherit" };
-function Field({ label, value, onChange, type = "text", full }) {
-  return (<div style={cell(full)}><label style={lab}>{label}</label><input type={type} style={inp} value={value} onChange={(e) => onChange(e.target.value)} /></div>);
+function Field({ label, value, onChange, type = "text", full, disabled }) {
+  return (<div style={cell(full)}><label style={lab}>{label}</label><input type={type} style={inp} value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled} /></div>);
 }
 function Area({ label, value, onChange, rows = 3, placeholder }) {
   return (<div style={{ ...cell(true), marginTop: 12 }}><label style={lab}>{label}</label><textarea rows={rows} style={{ ...inp, resize: "vertical", lineHeight: 1.5 }} value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} /></div>);
