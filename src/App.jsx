@@ -4,7 +4,7 @@ import {
   Building2, User, ClipboardList, ChevronDown, ChevronRight, ChevronLeft, Check,
   AlertTriangle, CircleAlert, Info, Copy, Sparkles, Loader2,
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
-  TrendingUp, Percent, Send, CalendarDays, Eye, Mail
+  TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, LockOpen
 } from "lucide-react";
 
 /* ============================================================
@@ -73,6 +73,12 @@ function etapaAtualCliente(cliente, docs = []) {
 /* Converte um registro de preço de vistoria por empreendimento vindo do banco (snake_case) */
 function mapPrecoDaApi(p) {
   return { id: p.id, empreendimento: p.empreendimento || "", precoVistoria: Number(p.preco_vistoria) || 0, atualizadoEm: p.atualizado_em || null };
+}
+/* Mascara um CPF/CNPJ deixando visível só o início e o fim (ex.: 123.***.***-45) */
+function mascararCpf(cpf) {
+  const digitos = (cpf || "").replace(/\D/g, "");
+  if (digitos.length !== 11) return cpf || "—";
+  return `${digitos.slice(0, 3)}.***.***-${digitos.slice(9)}`;
 }
 const LOGO_FN_BASE64 = "data:image/png;base64,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";
 
@@ -238,13 +244,16 @@ const PAGAMENTO_OPCOES = ["Pendente", "Pago", "Parcial"];
 const VISTORIA_OPCOES = ["Agendada", "Concluída", "Cancelada"];
 const TIPO_ART_OPCOES = ["Individual", "Coletiva"];
 
-/* ---------- Status do CLIENTE (status_cliente) — só estes 3, nesta ordem, sempre automático ----------
+/* ---------- Status do CLIENTE (status_cliente) — sempre automático, nunca editado manualmente ----------
    O cliente NUNCA vê status internos de gerência/documentação (STATUS_INTERNO_OPCOES abaixo).
-   Muda sozinho: "Agendado" -> "Laudo em análise" quando o vistoriador finaliza a vistoria
-   (POST /api/vistoria/finalizar) -> "Laudo enviado por e-mail" quando a gerência aprova
-   (POST /api/docs/:id/aprovar, que já gera o PDF e envia o e-mail). */
-const STATUS_ATENDIMENTO_OPCOES = ["Agendado", "Laudo em análise", "Laudo enviado por e-mail"];
+   Antes de existir um "docs", quem manda é clientes.status: "Em análise" (cadastro acabou de
+   chegar, aguardando o Atendimento aprovar) -> "Agendado" (Atendimento aprovou o agendamento).
+   Depois que a vistoria é finalizada, o docs.status_cliente assume: "Agendado" -> "Laudo em análise"
+   quando o vistoriador finaliza a vistoria (POST /api/vistoria/finalizar) -> "Laudo enviado por
+   e-mail" quando a gerência aprova (POST /api/docs/:id/aprovar, que já gera o PDF e envia o e-mail). */
+const STATUS_ATENDIMENTO_OPCOES = ["Em análise", "Agendado", "Laudo em análise", "Laudo enviado por e-mail"];
 const STATUS_ATENDIMENTO_INFO = {
+  "Em análise": "Recebemos seu cadastro e ele está em análise pelo nosso setor de Atendimento. Em breve confirmaremos seu agendamento.",
   "Agendado": "Recebemos sua solicitação e sua vistoria está agendada. Em breve nossa equipe entrará em contato.",
   "Laudo em análise": "Sua vistoria foi realizada e o laudo está em análise pela nossa equipe técnica.",
   "Laudo enviado por e-mail": "Seu laudo foi aprovado e enviado para o e-mail cadastrado. Verifique sua caixa de entrada (e o spam).",
@@ -256,19 +265,21 @@ const STATUS_INTERNO_OPCOES = ["Agendado", "Em vistoria", "Laudo em elaboração
 /* ---------- Perfis de acesso (agora definidos pelo backend/login, não escolhidos na tela) ----------
    vistoriador   -> só enxerga o módulo Laudos (não vê Documentação nem Gerência)
    documentacao  -> só enxerga o módulo Documentação
-   comercial     -> só enxerga o módulo Clientes (cadastro, agendamento, acompanhamento)
-   qualidade     -> só enxerga o módulo Qualidade (avaliações dos clientes)
+   atendimento   -> enxerga Clientes (cadastro, agendamento, acompanhamento, aprovação) e Qualidade
+                    (aprova agendamento/feedback — item 3.24; substitui o antigo perfil "comercial")
+   qualidade     -> enxerga o módulo Qualidade, mas só leitura (não aprova nada — isso agora é
+                    exclusivo do Atendimento; ver "podeAgir" nos componentes de Qualidade)
    gerencia      -> acesso restrito, mas enxerga tudo (incl. financeiro)
    O cadastro/acompanhamento de Cliente em si continua sendo uma tela pública separada, sem login.
 ------------------------------------------------------------------ */
 const MODULOS_POR_PERFIL = {
   vistoriador: ["laudos"],
   documentacao: ["documentacao"],
-  comercial: ["clientes"],
+  atendimento: ["clientes", "qualidade"],
   qualidade: ["qualidade"],
   gerencia: ["laudos", "documentacao", "gerencia", "clientes", "qualidade"],
 };
-const PERFIL_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", comercial: "Comercial", qualidade: "Qualidade", gerencia: "Gerência" };
+const PERFIL_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", qualidade: "Qualidade", gerencia: "Gerência" };
 
 const novoRegistroDoc = () => ({
   id: `doc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -471,6 +482,9 @@ function AppInterno({ session, onLogout }) {
   const [dados, setDados] = useState(DADOS_INICIAIS);
   const [itens, setItens] = useState([novoItem()]);
   const [clienteAtualId, setClienteAtualId] = useState(null); // id do cliente carregado no laudo em edição — necessário para "Enviar para gerência"
+  const [laudoBloqueado, setLaudoBloqueado] = useState(false); // trava local após envio à gerência — evita edição acidental do que já foi emitido
+  const [confirmandoDesbloqueio, setConfirmandoDesbloqueio] = useState(false);
+  useEffect(() => { setLaudoBloqueado(false); }, [clienteAtualId]);
   const [rascunhos, setRascunhos] = useState([]);
   const [toast, setToast] = useState("");
   const [showLoad, setShowLoad] = useState(false);
@@ -537,7 +551,7 @@ function AppInterno({ session, onLogout }) {
   const [avaliacoes, setAvaliacoes] = useState([]);
   const [avaliacoesCarregando, setAvaliacoesCarregando] = useState(false);
   const carregarAvaliacoes = async () => {
-    if (perfil !== "qualidade" && perfil !== "gerencia") return;
+    if (perfil !== "qualidade" && perfil !== "gerencia" && perfil !== "atendimento") return;
     setAvaliacoesCarregando(true);
     try {
       const r = await apiFetch("/api/avaliacoes", { token });
@@ -687,7 +701,7 @@ function AppInterno({ session, onLogout }) {
   const [usuarios, setUsuarios] = useState([]);
   const [usuariosCarregando, setUsuariosCarregando] = useState(false);
   const carregarUsuarios = async () => {
-    if (perfil !== "gerencia" && perfil !== "qualidade") return;
+    if (perfil !== "gerencia" && perfil !== "qualidade" && perfil !== "atendimento") return;
     setUsuariosCarregando(true);
     try {
       const r = await apiFetch("/api/users", { token });
@@ -752,10 +766,12 @@ function AppInterno({ session, onLogout }) {
         body: { clienteId: clienteAtualId, dados: dadosComprimidos, itens: itensComprimidos },
       });
       notify("Laudo enviado para a gerência ✓");
+      setLaudoBloqueado(true);
       carregarDocs();
     } catch (e) { notify(`Não foi possível enviar para a gerência: ${e.message}`); }
     setEnviandoParaGerencia(false);
   };
+  const desbloquearLaudo = () => { setLaudoBloqueado(false); setConfirmandoDesbloqueio(false); notify("Laudo desbloqueado para correção — envie novamente para a gerência depois de ajustar."); };
 
   /* ---- rascunhos de laudo em andamento: guardados só neste navegador (não vão para o banco da equipe) ---- */
   const temStorage = typeof window !== "undefined" && window.storage;
@@ -812,6 +828,7 @@ function AppInterno({ session, onLogout }) {
     files.forEach((f) => {
       const reader = new FileReader();
       reader.onload = (e) => updItem(id, { fotos: [...(itens.find((x) => x.id === id)?.fotos || item.fotos), e.target.result] });
+      reader.onerror = () => notify(`Não foi possível carregar a foto "${f.name}". Tente novamente.`);
       reader.readAsDataURL(f);
     });
   };
@@ -855,8 +872,8 @@ function AppInterno({ session, onLogout }) {
               <button className="btn-ghost" onClick={() => { setShowLoad(true); listarRascunhos(); }}><FolderOpen size={15} /> Abrir</button>
               <button className="btn-ghost" onClick={salvarRascunho}><Save size={15} /> Salvar</button>
               <button className="btn-solid" onClick={() => { setAba("laudo"); setTimeout(imprimir, 300); }}><Printer size={15} /> Gerar PDF</button>
-              <button className="btn-solid" style={{ background: AZUL_MARINHO }} onClick={enviarParaGerencia} disabled={enviandoParaGerencia}>
-                {enviandoParaGerencia ? <Loader2 size={15} className="spin" /> : <Send size={15} />} Enviar para gerência
+              <button className="btn-solid" style={{ background: AZUL_MARINHO }} onClick={enviarParaGerencia} disabled={enviandoParaGerencia || laudoBloqueado} title={laudoBloqueado ? "Este laudo já foi enviado — desbloqueie para corrigir e reenviar" : ""}>
+                {enviandoParaGerencia ? <Loader2 size={15} className="spin" /> : laudoBloqueado ? <Lock size={15} /> : <Send size={15} />} {laudoBloqueado ? "Laudo enviado" : "Enviar para gerência"}
               </button>
             </>
           )}
@@ -869,11 +886,11 @@ function AppInterno({ session, onLogout }) {
         </div>
 
         {/* Navegação de módulos (filtrada pelo perfil de acesso) */}
-        <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, borderTop: "1px solid rgba(255,255,255,.12)" }}>
+        <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, borderTop: "1px solid rgba(255,255,255,.12)", overflowX: "auto" }}>
           {[["laudos", "Laudos", FileText], ["documentacao", "Documentação", ClipboardCheck], ["clientes", "Clientes", Users], ["qualidade", "Qualidade", Star], ["gerencia", "Gerência", BarChart3]]
             .filter(([k]) => modulosPermitidos.includes(k))
             .map(([k, label, Icon]) => (
-              <button key={k} onClick={() => setAbaTop(k)} className="tab" style={{ borderBottomColor: abaTop === k ? "#fff" : "transparent", color: abaTop === k ? "#fff" : "rgba(255,255,255,.55)" }}>
+              <button key={k} onClick={() => setAbaTop(k)} className="tab" style={{ borderBottomColor: abaTop === k ? "#fff" : "transparent", color: abaTop === k ? "#fff" : "rgba(255,255,255,.55)", whiteSpace: "nowrap", flexShrink: 0 }}>
                 <Icon size={15} /> {label}
               </button>
             ))}
@@ -881,11 +898,11 @@ function AppInterno({ session, onLogout }) {
 
         {/* Sub-navegação (somente dentro do módulo Laudos) */}
         {abaTop === "laudos" && (
-          <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)" }}>
+          <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
             {[["dados", "Dados do laudo", ClipboardList], ["itens", `Vistoria (${totalItens})`, Camera], ["laudo", "Laudo final", FileText],
               ...((perfil === "vistoriador" || perfil === "gerencia") ? [["agenda", "Minha agenda", CalendarDays]] : [])]
               .map(([k, label, Icon]) => (
-                <button key={k} onClick={() => setAba(k)} className="tab" style={{ borderBottomColor: aba === k ? AZUL_MEDIO : "transparent", color: aba === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13 }}>
+                <button key={k} onClick={() => setAba(k)} className="tab" style={{ borderBottomColor: aba === k ? AZUL_MEDIO : "transparent", color: aba === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
                   <Icon size={15} /> {label}
                 </button>
               ))}
@@ -894,9 +911,9 @@ function AppInterno({ session, onLogout }) {
 
         {/* Sub-navegação (somente dentro do módulo Gerência) */}
         {abaTop === "gerencia" && (
-          <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)" }}>
+          <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
             {[["visao-geral", "Visão geral", LayoutGrid], ["parceiros", "Parceiros e Afiliados", Users], ["financeiro", "Financeiro", DollarSign]].map(([k, label, Icon]) => (
-              <button key={k} onClick={() => setAbaGerencia(k)} className="tab" style={{ borderBottomColor: abaGerencia === k ? AZUL_MEDIO : "transparent", color: abaGerencia === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13 }}>
+              <button key={k} onClick={() => setAbaGerencia(k)} className="tab" style={{ borderBottomColor: abaGerencia === k ? AZUL_MEDIO : "transparent", color: abaGerencia === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
                 <Icon size={15} /> {label}
               </button>
             ))}
@@ -905,9 +922,9 @@ function AppInterno({ session, onLogout }) {
 
         {/* Sub-navegação (somente dentro do módulo Qualidade) */}
         {abaTop === "qualidade" && (
-          <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)" }}>
+          <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
             {[["analise", "Análise", ClipboardCheck], ["vistoria", "Vistoria", CalendarDays], ["feedback", "Feedback", Star]].map(([k, label, Icon]) => (
-              <button key={k} onClick={() => setAbaQualidade(k)} className="tab" style={{ borderBottomColor: abaQualidade === k ? AZUL_MEDIO : "transparent", color: abaQualidade === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13 }}>
+              <button key={k} onClick={() => setAbaQualidade(k)} className="tab" style={{ borderBottomColor: abaQualidade === k ? AZUL_MEDIO : "transparent", color: abaQualidade === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
                 <Icon size={15} /> {label}
               </button>
             ))}
@@ -919,11 +936,15 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "laudos" && <NotificacoesClientes clientes={clientes} preencherComCliente={preencherComCliente} style={{ marginBottom: 18 }} />}
         {abaTop === "documentacao" && <FaixaIndicadoresGerais docs={docs} clientes={clientes} modo="art" style={{ marginBottom: 18 }} />}
 
-        {abaTop === "laudos" && aba === "dados" && <AbaDados dados={dados} setD={setD} setTexto={setTexto} clientes={clientes} preencherComCliente={preencherComCliente} docs={docs} updDoc={updDoc} notify={notify} token={token} />}
+        {abaTop === "laudos" && aba === "dados" && (
+          <AbaDados dados={dados} setD={setD} setTexto={setTexto} clientes={clientes} preencherComCliente={preencherComCliente} docs={docs} updDoc={updDoc} notify={notify} token={token}
+            bloqueado={laudoBloqueado} onPedirDesbloqueio={() => setConfirmandoDesbloqueio(true)} />
+        )}
         {abaTop === "laudos" && aba === "itens" && (
           <AbaItens itens={itens} setItens={setItens} updItem={updItem} escolherPatologia={escolherPatologia}
             addFotos={addFotos} removerFoto={removerFoto} contagem={contagem}
-            fotoCliente={dados.fotoCliente} setFotoCliente={setFotoCliente} notify={notify} setAba={setAba} />
+            fotoCliente={dados.fotoCliente} setFotoCliente={setFotoCliente} notify={notify} setAba={setAba}
+            bloqueado={laudoBloqueado} onPedirDesbloqueio={() => setConfirmandoDesbloqueio(true)} />
         )}
         {abaTop === "laudos" && aba === "laudo" && <Laudo dados={dados} itens={itens} contagem={contagem} totalItens={totalItens} assinatura={assinatura} />}
         {abaTop === "laudos" && aba === "agenda" && (perfil === "vistoriador" || perfil === "gerencia") && (
@@ -934,11 +955,12 @@ function AppInterno({ session, onLogout }) {
           <AbaDocumentacao docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={docsCarregando} notify={notify} />
         )}
         {abaTop === "clientes" && (
-          <AbaClientesComercial clientes={clientes} carregando={clientesCarregando} atualizarCliente={updCliente} notify={notify} docs={docs} />
+          <AbaClientesComercial clientes={clientes} carregando={clientesCarregando} atualizarCliente={updCliente} notify={notify} docs={docs} perfil={perfil} />
         )}
         {abaTop === "qualidade" && (
           <AbaQualidade sub={abaQualidade} avaliacoes={avaliacoes} carregando={avaliacoesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
-            clientes={clientes} clientesCarregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} preencherComCliente={preencherComCliente} />
+            clientes={clientes} clientesCarregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} preencherComCliente={preencherComCliente}
+            podeAgir={perfil === "atendimento" || perfil === "gerencia"} />
         )}
         {abaTop === "gerencia" && (
           <AbaGerencia sub={abaGerencia} docs={docs} clientes={clientes} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
@@ -967,6 +989,10 @@ function AppInterno({ session, onLogout }) {
       )}
 
       {toast && <div className="no-print" style={toastStyle}><Check size={15} /> {toast}</div>}
+
+      <ConfirmModal aberto={confirmandoDesbloqueio} titulo="Desbloquear laudo para correção"
+        mensagem="Este laudo já foi enviado para a gerência e está travado. Desbloquear permite editar os dados e itens novamente, mas a correção precisa ser reenviada para valer. Deseja continuar?"
+        onConfirm={desbloquearLaudo} onCancel={() => setConfirmandoDesbloqueio(false)} />
     </div>
   );
 }
@@ -1196,10 +1222,13 @@ function KanbanClientes({ clientes, docs, onAbrir }) {
   );
 }
 
-function AbaClientesComercial({ clientes, carregando, atualizarCliente, notify, docs = [] }) {
+function AbaClientesComercial({ clientes, carregando, atualizarCliente, notify, docs = [], perfil }) {
   const [busca, setBusca] = useState("");
   const [editando, setEditando] = useState(null); // cópia do cliente em edição
   const [visualizacao, setVisualizacao] = useState("kanban"); // "kanban" | "tabela"
+  const [cpfsRevelados, setCpfsRevelados] = useState({}); // { [clienteId]: true } — revelação é por sessão, não persiste
+  const podeVerCpfDireto = perfil === "gerencia";
+  const alternarCpfRevelado = (id) => setCpfsRevelados((s) => ({ ...s, [id]: !s[id] }));
 
   const filtrados = clientes.filter((c) =>
     !busca || `${c.nome} ${c.empreendimento} ${c.construtora}`.toLowerCase().includes(busca.toLowerCase())
@@ -1266,7 +1295,27 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, notify, 
                 {filtrados.map((c) => (
                   <tr key={c.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
                     <td style={{ padding: "8px 10px", fontWeight: 600 }}>{c.nome}<div style={{ fontWeight: 400, fontSize: 12, color: "#8593a8" }}>{c.telefone}</div></td>
-                    <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{c.cpf || "—"}</td>
+                    <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+                      {c.cpf ? (
+                        podeVerCpfDireto || cpfsRevelados[c.id] ? (
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                            {c.cpf}
+                            {!podeVerCpfDireto && (
+                              <button className="icon-btn" style={{ padding: 2 }} title="Ocultar CPF" onClick={() => alternarCpfRevelado(c.id)}>
+                                <EyeOff size={13} color="#8593a8" />
+                              </button>
+                            )}
+                          </span>
+                        ) : (
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                            {mascararCpf(c.cpf)}
+                            <button className="icon-btn" style={{ padding: 2 }} title="Revelar CPF completo" onClick={() => alternarCpfRevelado(c.id)}>
+                              <Eye size={13} color={AZUL_MEDIO} />
+                            </button>
+                          </span>
+                        )
+                      ) : "—"}
+                    </td>
                     <td style={{ padding: "8px 10px" }}>{c.empreendimento || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}</td>
                     <td style={{ padding: "8px 10px" }}>{c.servico || "—"}</td>
                     <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
@@ -1426,18 +1475,23 @@ function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [] })
   );
 }
 
-function AbaQualidade({ sub = "analise", clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao }) {
+function AbaQualidade({ sub = "analise", clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, podeAgir = false }) {
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <CardIndicadoresQualidade clientes={clientes} docs={docs} avaliacoes={avaliacoes} />
-      {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} />}
-      {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao} />}
-      {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} carregando={clientesCarregando} updCliente={updCliente} notify={notify} />}
+      {!podeAgir && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#EAF2FB", color: AZUL_MARINHO, borderRadius: 8, padding: "8px 12px", fontSize: 12.5 }}>
+          <Info size={14} /> Modo leitura — aprovar agendamento, encaminhar técnico e aprovar feedback agora é exclusivo do perfil Atendimento.
+        </div>
+      )}
+      {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} />}
+      {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao} podeAgir={podeAgir} />}
+      {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} carregando={clientesCarregando} updCliente={updCliente} notify={notify} podeAgir={podeAgir} />}
     </div>
   );
 }
 
-function AbaQualidadeFeedback({ avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao }) {
+function AbaQualidadeFeedback({ avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, podeAgir = false }) {
   const [busca, setBusca] = useState("");
   const total = avaliacoes.length;
   const media = total ? (avaliacoes.reduce((s, a) => s + a.nota, 0) / total) : 0;
@@ -1487,7 +1541,7 @@ function AbaQualidadeFeedback({ avaliacoes, carregando, docs, docsCarregando, ap
                   </div>
                   {a.empreendimento && <div style={{ fontSize: 12, color: "#65758b", marginBottom: 6 }}>{a.empreendimento}</div>}
                   {a.comentario && <div style={{ fontSize: 13.5, color: "#334", background: CINZA_CLARO, borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>{a.comentario}</div>}
-                  {aprovarAvaliacao && (
+                  {podeAgir && aprovarAvaliacao ? (
                     a.aprovado ? (
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
                         <span style={{ fontSize: 12, color: "#2E7D32", fontWeight: 600 }}>✓ Exibida na página inicial</span>
@@ -1498,6 +1552,10 @@ function AbaQualidadeFeedback({ avaliacoes, carregando, docs, docsCarregando, ap
                         <Check size={14} /> Aprovar para a página inicial
                       </button>
                     )
+                  ) : (
+                    <span style={{ fontSize: 12, color: a.aprovado ? "#2E7D32" : "#8593a8", fontWeight: a.aprovado ? 600 : 400 }}>
+                      {a.aprovado ? "✓ Exibida na página inicial" : "Somente leitura — o Atendimento decide isso."}
+                    </span>
                   )}
                 </div>
               ))}
@@ -1557,7 +1615,7 @@ function conflitosDeHorario(cliente, todos) {
 }
 
 /* ================= Qualidade · Análise: valida agendamento antes de liberar (checa cruzamento de horário) ================= */
-function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, notify }) {
+function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, notify, podeAgir = false }) {
   const [mesRef, setMesRef] = useState(() => { const h = new Date(); return new Date(h.getFullYear(), h.getMonth(), 1); });
   const [diaSelecionado, setDiaSelecionado] = useState(null);
 
@@ -1626,12 +1684,17 @@ function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, notify }) 
                 </div>
               )}
               <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                {!podeAgir && <span style={{ fontSize: 12, color: "#8593a8" }}>Somente leitura — o Atendimento decide isso.</span>}
+                {podeAgir && (
+                <>
                 <button className="btn-solid" style={{ width: "auto", padding: "8px 16px" }} onClick={() => aprovar(c)}>
                   <Check size={15} /> Aprovar agendamento
                 </button>
                 <button className="btn-ghost" style={{ color: "#C62828", background: "#FCEAEA" }} onClick={() => cancelar(c)}>
                   <X size={15} /> Cancelar agendamento
                 </button>
+                </>
+                )}
               </div>
             </div>
           );
@@ -1665,7 +1728,7 @@ function CardVistoriaResumo({ c, aberto, onToggle, children }) {
 /* Sub-aba Vistoria: agrupa por status (pendente de agendamento / já agendada / já
    realizada), com busca e cards resumidos que expandem ao clicar — antes mostrava
    tudo (formulário completo) de uma vez pra cada cliente, o que ficava confuso. */
-function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify }) {
+function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false }) {
   const [busca, setBusca] = useState("");
   const [abertoId, setAbertoId] = useState(null);
   const [form, setForm] = useState({});
@@ -1724,17 +1787,21 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
                       <Grid>
                         <div style={cell(false)}>
                           <label style={lab}>Vistoriador</label>
-                          <select style={inp} value={valorCampo(c, "vistoriadorId", "")} onChange={(e) => setCampo(c.id, "vistoriadorId", e.target.value)}>
+                          <select style={inp} value={valorCampo(c, "vistoriadorId", "")} onChange={(e) => setCampo(c.id, "vistoriadorId", e.target.value)} disabled={!podeAgir}>
                             <option value="">selecionar…</option>
                             {vistoriadores.map((v) => <option key={v.id} value={v.id}>{v.nome}</option>)}
                           </select>
                         </div>
-                        <Field label="Data" type="date" value={valorCampo(c, "dataDesejada", c.dataDesejada)} onChange={(v) => setCampo(c.id, "dataDesejada", v)} />
-                        <Field label="Horário" type="time" value={valorCampo(c, "horarioDesejado", c.horarioDesejado)} onChange={(v) => setCampo(c.id, "horarioDesejado", v)} />
+                        <Field label="Data" type="date" value={valorCampo(c, "dataDesejada", c.dataDesejada)} onChange={(v) => setCampo(c.id, "dataDesejada", v)} disabled={!podeAgir} />
+                        <Field label="Horário" type="time" value={valorCampo(c, "horarioDesejado", c.horarioDesejado)} onChange={(v) => setCampo(c.id, "horarioDesejado", v)} disabled={!podeAgir} />
                       </Grid>
-                      <button className="btn-solid" style={{ marginTop: 10, width: "auto", padding: "8px 16px" }} onClick={() => confirmar(c)}>
-                        <Check size={15} /> Confirmar agendamento
-                      </button>
+                      {podeAgir ? (
+                        <button className="btn-solid" style={{ marginTop: 10, width: "auto", padding: "8px 16px" }} onClick={() => confirmar(c)}>
+                          <Check size={15} /> Confirmar agendamento
+                        </button>
+                      ) : (
+                        <span style={{ fontSize: 12, color: "#8593a8" }}>Somente leitura — o Atendimento decide isso.</span>
+                      )}
                     </>
                   ) : (
                     <div style={{ fontSize: 13, color: "#4a5a70", display: "grid", gap: 4 }}>
@@ -1845,11 +1912,21 @@ function CardAndamentoAtendimento({ cpf, docs = [], updDoc, notify, token }) {
   );
 }
 
-function AbaDados({ dados, setD, setTexto, clientes = [], preencherComCliente, docs = [], updDoc, notify, token }) {
+function AbaDados({ dados, setD, setTexto, clientes = [], preencherComCliente, docs = [], updDoc, notify, token, bloqueado, onPedirDesbloqueio }) {
   const [clienteSel, setClienteSel] = useState("");
 
   return (
-    <div style={{ display: "grid", gap: 16 }}>
+    <div>
+      {bloqueado && (
+        <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 10, background: "#FFF4E0", border: "1px solid #f0c987", borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
+          <Lock size={16} color="#B26A00" />
+          <span style={{ fontSize: 13, color: "#7a4e00", flex: 1 }}>Este laudo já foi enviado para a gerência e está travado contra edição.</span>
+          <button className="btn-ghost" style={{ color: "#B26A00", background: "#fff", padding: "6px 12px" }} onClick={onPedirDesbloqueio}>
+            <LockOpen size={14} /> Desbloquear para correção
+          </button>
+        </div>
+      )}
+      <div style={{ display: "grid", gap: 16, pointerEvents: bloqueado ? "none" : "auto", opacity: bloqueado ? 0.55 : 1 }}>
       {clientes.length > 0 && (
         <Card icon={Users} titulo="Preencher com cadastro do cliente">
           <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
@@ -1914,12 +1991,13 @@ function AbaDados({ dados, setD, setTexto, clientes = [], preencherComCliente, d
         <Area label="Metodologia" value={dados.textos.metodologia} onChange={(v) => setTexto("metodologia", v)} rows={4} />
         <Area label="Encerramento" value={dados.textos.encerramento} onChange={(v) => setTexto("encerramento", v)} rows={4} />
       </Colapsavel>
+      </div>
     </div>
   );
 }
 
 /* ================= Aba: Itens ================= */
-function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, fotoCliente, setFotoCliente, notify, setAba }) {
+function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, fotoCliente, setFotoCliente, notify, setAba, bloqueado, onPedirDesbloqueio }) {
   const fotoClienteRef = useRef();
   const handleFotoCliente = (file) => {
     if (!file) return;
@@ -1930,11 +2008,22 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
       notify("Foto registrada ✓ — indo para o laudo final");
       if (setAba) setAba("laudo");
     };
+    reader.onerror = () => notify("Não foi possível carregar a foto. Verifique sua conexão e tente novamente.");
     reader.readAsDataURL(file);
   };
 
   return (
     <div>
+      {bloqueado && (
+        <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 10, background: "#FFF4E0", border: "1px solid #f0c987", borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
+          <Lock size={16} color="#B26A00" />
+          <span style={{ fontSize: 13, color: "#7a4e00", flex: 1 }}>Este laudo já foi enviado para a gerência e está travado contra edição.</span>
+          <button className="btn-ghost" style={{ color: "#B26A00", background: "#fff", padding: "6px 12px" }} onClick={onPedirDesbloqueio}>
+            <LockOpen size={14} /> Desbloquear para correção
+          </button>
+        </div>
+      )}
+      <div style={{ pointerEvents: bloqueado ? "none" : "auto", opacity: bloqueado ? 0.55 : 1 }}>
       <div style={{ marginBottom: 16 }}>
         <Card icon={Camera} titulo="Foto com o cliente (obrigatória)">
           <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
@@ -1982,6 +2071,7 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
       <button className="btn-add" onClick={() => setItens((l) => [...l, novoItem()])}>
         <Plus size={17} /> Adicionar item de vistoria
       </button>
+      </div>
     </div>
   );
 }
@@ -1990,6 +2080,7 @@ function ItemCard({ item, num, onChange, onPatologia, onFotos, onRemoveFoto, onD
   const fileRef = useRef();
   const [iaLoad, setIaLoad] = useState(false);
   const [iaErro, setIaErro] = useState("");
+  const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
   const m = sevMeta[item.severidade];
 
   const rodarIA = async () => {
@@ -2015,7 +2106,7 @@ function ItemCard({ item, num, onChange, onPatologia, onFotos, onRemoveFoto, onD
         <strong style={{ fontSize: 15 }}>Item {num}</strong>
         {item.patologia && <span style={{ fontSize: 12, color: "#65758b" }}>· {item.patologia}</span>}
         <div style={{ flex: 1 }} />
-        <button className="icon-btn" onClick={onDelete}><Trash2 size={16} color="#c62828" /></button>
+        <button className="icon-btn" onClick={() => setConfirmandoExclusao(true)}><Trash2 size={16} color="#c62828" /></button>
       </div>
 
       <Grid>
@@ -2072,6 +2163,10 @@ function ItemCard({ item, num, onChange, onPatologia, onFotos, onRemoveFoto, onD
 
       <Area label="Descrição técnica" value={item.descricao} onChange={(v) => onChange({ descricao: v })} rows={3} placeholder="Verifica-se..." />
       <Area label="Recomendação técnica" value={item.recomendacao} onChange={(v) => onChange({ recomendacao: v })} rows={2} placeholder="Recomenda-se..." />
+
+      <ConfirmModal aberto={confirmandoExclusao} titulo="Excluir item"
+        mensagem={`Tem certeza que deseja excluir o Item ${num}${item.patologia ? ` (${item.patologia})` : ""}? Essa ação não pode ser desfeita.`}
+        onConfirm={() => { onDelete(); setConfirmandoExclusao(false); }} onCancel={() => setConfirmandoExclusao(false)} />
     </div>
   );
 }
@@ -2268,10 +2363,31 @@ function Selo({ valor }) {
   return <span style={{ background: s.bg, color: s.cor, padding: "3px 9px", borderRadius: 20, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>{valor}</span>;
 }
 
+/* ================= Confirmação de exclusão (reutilizável) ================= */
+function ConfirmModal({ aberto, titulo = "Confirmar exclusão", mensagem = "Tem certeza que deseja excluir? Essa ação não pode ser desfeita.", onConfirm, onCancel }) {
+  if (!aberto) return null;
+  return (
+    <div className="no-print" style={overlay} onClick={onCancel}>
+      <div style={{ ...modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+          <AlertTriangle size={20} color="#c62828" />
+          <strong>{titulo}</strong>
+        </div>
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 18px" }}>{mensagem}</p>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={onCancel}>Cancelar</button>
+          <button className="btn-solid" style={{ background: "#c62828" }} onClick={onConfirm}>Excluir</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify }) {
   const [editando, setEditando] = useState(null); // registro (cópia) em edição, ou null
   const [filtroVistoria, setFiltroVistoria] = useState("");
   const [busca, setBusca] = useState("");
+  const [removendo, setRemovendo] = useState(null);
 
   const filtrados = docs.filter((d) => {
     if (filtroVistoria && d.vistoria !== filtroVistoria) return false;
@@ -2337,7 +2453,7 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify }) {
                     </td>
                     <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
                       <button className="icon-btn" onClick={() => abrirEdicao(d)}><Edit3 size={15} color={AZUL_MEDIO} /></button>
-                      <button className="icon-btn" onClick={() => delDoc(d.id)}><Trash2 size={15} color="#c62828" /></button>
+                      <button className="icon-btn" onClick={() => setRemovendo(d)}><Trash2 size={15} color="#c62828" /></button>
                     </td>
                   </tr>
                 ))}
@@ -2396,6 +2512,10 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify }) {
           </div>
         </div>
       )}
+
+      <ConfirmModal aberto={!!removendo} titulo="Excluir registro"
+        mensagem={removendo ? `Tem certeza que deseja excluir o registro de "${removendo.cliente || "cliente sem nome"}"? Essa ação não pode ser desfeita.` : ""}
+        onConfirm={() => { delDoc(removendo.id); setRemovendo(null); }} onCancel={() => setRemovendo(null)} />
     </div>
   );
 }
@@ -2695,6 +2815,7 @@ function CardPrecoEmpreendimento({ precos, carregando, salvarPreco, removerPreco
   const [salvando, setSalvando] = useState(false);
   const [editandoId, setEditandoId] = useState(null);
   const [editandoValor, setEditandoValor] = useState("");
+  const [removendo, setRemovendo] = useState(null);
 
   const empreendimentosConhecidos = [...new Set(clientes.map((c) => c.empreendimento?.trim()).filter(Boolean))].sort();
 
@@ -2759,7 +2880,7 @@ function CardPrecoEmpreendimento({ precos, carregando, salvarPreco, removerPreco
                     ) : (
                       <>
                         <button className="icon-btn" onClick={() => iniciarEdicao(p)}><Edit3 size={15} color={AZUL_MEDIO} /></button>
-                        <button className="icon-btn" onClick={() => removerPreco(p.id)}><Trash2 size={15} color="#c62828" /></button>
+                        <button className="icon-btn" onClick={() => setRemovendo(p)}><Trash2 size={15} color="#c62828" /></button>
                       </>
                     )}
                   </td>
@@ -2769,6 +2890,10 @@ function CardPrecoEmpreendimento({ precos, carregando, salvarPreco, removerPreco
           </table>
         </div>
       )}
+
+      <ConfirmModal aberto={!!removendo} titulo="Excluir preço"
+        mensagem={removendo ? `Tem certeza que deseja excluir o preço cadastrado para "${removendo.empreendimento}"? Essa ação não pode ser desfeita.` : ""}
+        onConfirm={() => { removerPreco(removendo.id); setRemovendo(null); }} onCancel={() => setRemovendo(null)} />
     </Card>
   );
 }
@@ -2894,12 +3019,12 @@ function AbaGerencia({ sub = "visao-geral", docs, clientes = [], carregando, ass
   );
 }
 
-const ROLE_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", comercial: "Comercial", qualidade: "Qualidade", gerencia: "Gerência" };
+const ROLE_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", qualidade: "Qualidade", gerencia: "Gerência" };
 const ROLE_DESCRICAO = {
   vistoriador: "Só acessa Laudos. Sem acesso a Documentação nem Gerência.",
   documentacao: "Só acessa Documentação/TRT. Sem acesso a Laudos nem Gerência.",
-  comercial: "Só acessa Clientes: cadastro, agendamento e acompanhamento.",
-  qualidade: "Só acessa Qualidade: avaliações que os clientes deixaram.",
+  atendimento: "Acessa Clientes (cadastro, agendamento, aprovação e encaminhamento ao técnico) e Qualidade (aprova avaliações que entram na vitrine).",
+  qualidade: "Só acessa Qualidade, em modo leitura: acompanha avaliações e agendamentos, mas não aprova nada — isso é do Atendimento.",
   gerencia: "Acesso completo: Laudos, Documentação, Clientes, Qualidade, Gerência e financeiro.",
 };
 
@@ -2908,6 +3033,14 @@ function CardUsuarios({ usuarios, carregando, criarUsuario, atualizarUsuario, ex
   const [salvando, setSalvando] = useState(false);
   const [resetandoId, setResetandoId] = useState(null);
   const [novaSenha, setNovaSenha] = useState("");
+  const [busca, setBusca] = useState("");
+  const [filtroPapel, setFiltroPapel] = useState("");
+
+  const usuariosFiltrados = usuarios.filter((u) => {
+    if (filtroPapel && u.role !== filtroPapel) return false;
+    if (busca && !`${u.nome} ${u.email}`.toLowerCase().includes(busca.toLowerCase())) return false;
+    return true;
+  });
 
   const abrirNovo = () => setNovo({ nome: "", email: "", senha: "", role: "vistoriador" });
 
@@ -2931,9 +3064,14 @@ function CardUsuarios({ usuarios, carregando, criarUsuario, atualizarUsuario, ex
     try { await atualizarUsuario(id, { senha: novaSenha }); setResetandoId(null); setNovaSenha(""); }
     catch (e) { notify(`Erro: ${e.message}`); }
   };
-  const remover = async (u) => {
+  const [removendo, setRemovendo] = useState(null);
+  const pedirRemocao = (u) => {
     if (u.id === usuarioAtualId) { notify("Você não pode remover o próprio usuário logado"); return; }
-    try { await excluirUsuario(u.id); } catch (e) { notify(`Erro: ${e.message}`); }
+    setRemovendo(u);
+  };
+  const remover = async () => {
+    try { await excluirUsuario(removendo.id); } catch (e) { notify(`Erro: ${e.message}`); }
+    setRemovendo(null);
   };
 
   return (
@@ -2941,12 +3079,23 @@ function CardUsuarios({ usuarios, carregando, criarUsuario, atualizarUsuario, ex
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
         Cada pessoa entra com o próprio e-mail e senha. O papel definido aqui é o que controla o que ela enxerga — não é escolhido por ela.
       </p>
-      <button className="btn-add" style={{ width: "auto", padding: "9px 16px", marginBottom: 14 }} onClick={abrirNovo}><Plus size={16} /> Novo usuário</button>
+      <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+        <button className="btn-add" style={{ width: "auto", padding: "9px 16px" }} onClick={abrirNovo}><Plus size={16} /> Novo usuário</button>
+        <div style={{ position: "relative", flex: 1, minWidth: 200 }}>
+          <Search size={14} color="#8593a8" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
+          <input style={{ ...inp, paddingLeft: 30 }} placeholder="Buscar por nome ou e-mail…" value={busca} onChange={(e) => setBusca(e.target.value)} />
+        </div>
+        <select style={{ ...inp, width: "auto", minWidth: 160 }} value={filtroPapel} onChange={(e) => setFiltroPapel(e.target.value)}>
+          <option value="">Todos os papéis</option>
+          {Object.entries(ROLE_LABEL).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+        </select>
+      </div>
 
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
       {!carregando && usuarios.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum usuário além de você ainda.</p>}
+      {!carregando && usuarios.length > 0 && usuariosFiltrados.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum usuário encontrado com esses filtros.</p>}
 
-      {usuarios.length > 0 && (
+      {usuariosFiltrados.length > 0 && (
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
@@ -2957,7 +3106,7 @@ function CardUsuarios({ usuarios, carregando, criarUsuario, atualizarUsuario, ex
               </tr>
             </thead>
             <tbody>
-              {usuarios.map((u) => (
+              {usuariosFiltrados.map((u) => (
                 <tr key={u.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
                   <td style={{ padding: "8px 10px", fontWeight: 600 }}>
                     {u.nome}{u.id === usuarioAtualId && <span style={{ color: "#8593a8", fontWeight: 400 }}> (você)</span>}
@@ -2973,14 +3122,14 @@ function CardUsuarios({ usuarios, carregando, criarUsuario, atualizarUsuario, ex
                     <Selo valor={u.ativo ? "Concluída" : "Cancelada"} />
                   </td>
                   <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
-                    <button className="icon-btn" onClick={() => alternarAtivo(u)} title={u.ativo ? "Desativar" : "Reativar"} disabled={u.id === usuarioAtualId}>
-                      {u.ativo ? <X size={15} color="#c62828" /> : <Check size={15} color="#2E7D32" />}
+                    <button className="icon-btn" onClick={() => alternarAtivo(u)} title={u.ativo ? "Desativar acesso" : "Reativar acesso"} disabled={u.id === usuarioAtualId}>
+                      {u.ativo ? <UserX size={15} color="#c62828" /> : <UserCheck size={15} color="#2E7D32" />}
                     </button>
                     <button className="icon-btn" onClick={() => { setResetandoId(u.id); setNovaSenha(""); }} title="Redefinir senha">
                       <Edit3 size={15} color={AZUL_MEDIO} />
                     </button>
                     {u.id !== usuarioAtualId && (
-                      <button className="icon-btn" onClick={() => remover(u)} title="Remover"><Trash2 size={15} color="#c62828" /></button>
+                      <button className="icon-btn" onClick={() => pedirRemocao(u)} title="Remover"><Trash2 size={15} color="#c62828" /></button>
                     )}
                   </td>
                 </tr>
@@ -3044,6 +3193,10 @@ function CardUsuarios({ usuarios, carregando, criarUsuario, atualizarUsuario, ex
           </div>
         </div>
       )}
+
+      <ConfirmModal aberto={!!removendo} titulo="Remover usuário"
+        mensagem={removendo ? `Tem certeza que deseja remover "${removendo.nome}"? Essa ação não pode ser desfeita.` : ""}
+        onConfirm={remover} onCancel={() => setRemovendo(null)} />
     </Card>
   );
 }
@@ -4004,8 +4157,8 @@ const Grid = ({ children }) => <div style={{ display: "grid", gridTemplateColumn
 const cell = (full) => ({ display: "flex", flexDirection: "column", gap: 5, gridColumn: full ? "1 / -1" : "auto" });
 const lab = { fontSize: 12, fontWeight: 600, color: "#5a6a80" };
 const inp = { padding: "9px 11px", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, fontSize: 14, outline: "none", background: "#fff", fontFamily: "inherit" };
-function Field({ label, value, onChange, type = "text", full }) {
-  return (<div style={cell(full)}><label style={lab}>{label}</label><input type={type} style={inp} value={value} onChange={(e) => onChange(e.target.value)} /></div>);
+function Field({ label, value, onChange, type = "text", full, disabled }) {
+  return (<div style={cell(full)}><label style={lab}>{label}</label><input type={type} style={inp} value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled} /></div>);
 }
 function Area({ label, value, onChange, rows = 3, placeholder }) {
   return (<div style={{ ...cell(true), marginTop: 12 }}><label style={lab}>{label}</label><textarea rows={rows} style={{ ...inp, resize: "vertical", lineHeight: 1.5 }} value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} /></div>);
@@ -4052,5 +4205,12 @@ const estilos = `
     body { background:#fff !important; }
     main { padding:0 !important; max-width:100% !important; }
     .laudo-print { border:none !important; border-radius:0 !important; }
+  }
+  @media (max-width: 640px) {
+    .icon-btn { padding:8px; }
+    .btn-ghost, .btn-solid, .btn-mini { padding:9px 12px; font-size:13px; }
+    .tab { padding:10px 11px; font-size:13px; }
+    table { font-size:12.5px; }
+    input, select, textarea { font-size:16px; } /* evita zoom automático em iOS ao focar o campo */
   }
 `;
