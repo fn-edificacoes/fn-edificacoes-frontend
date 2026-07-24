@@ -265,10 +265,11 @@ const STATUS_INTERNO_OPCOES = ["Agendado", "Em vistoria", "Laudo em elaboração
 /* ---------- Perfis de acesso (agora definidos pelo backend/login, não escolhidos na tela) ----------
    vistoriador   -> só enxerga o módulo Laudos (não vê Documentação nem Gerência)
    documentacao  -> só enxerga o módulo Documentação
-   atendimento   -> enxerga Clientes (cadastro, agendamento, acompanhamento, aprovação) e Qualidade
+   atendimento   -> enxerga Clientes (cadastro, agendamento, acompanhamento, aprovação) e Agendamento
                     (aprova agendamento/feedback — item 3.24; substitui o antigo perfil "comercial")
-   qualidade     -> enxerga o módulo Qualidade, mas só leitura (não aprova nada — isso agora é
-                    exclusivo do Atendimento; ver "podeAgir" nos componentes de Qualidade)
+   qualidade     -> enxerga o módulo Agendamento (chave interna "qualidade"), mas só leitura (não
+                    aprova nada — isso agora é exclusivo do Atendimento; ver "podeAgir" nos
+                    componentes de Agendamento)
    gerencia      -> acesso restrito, mas enxerga tudo (incl. financeiro)
    O cadastro/acompanhamento de Cliente em si continua sendo uma tela pública separada, sem login.
 ------------------------------------------------------------------ */
@@ -279,7 +280,32 @@ const MODULOS_POR_PERFIL = {
   qualidade: ["qualidade"],
   gerencia: ["laudos", "documentacao", "gerencia", "clientes", "qualidade"],
 };
-const PERFIL_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", qualidade: "Qualidade", gerencia: "Gerência" };
+const PERFIL_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", qualidade: "Agendamento", gerencia: "Gerência" };
+
+/* ---------- Cor fixa por técnico (vistoriador) no calendário do Agendamento ----------
+   Não existe campo "cor"/"sigla" cadastrado no técnico (nem no front, nem no backend).
+   Pra não inventar campo novo no banco, a cor é calculada de forma determinística a
+   partir do id do vistoriador — nunca sorteada — então a mesma pessoa sempre recebe a
+   mesma cor em qualquer dia. A paleta tem só as 5 cores testadas p/ contraste 4.5:1 com
+   texto branco; com mais de 5 técnicos ela se repete (ver aviso na tela de Usuários). */
+const PALETA_TECNICOS = ["#2159C7", "#0F7259", "#B85E10", "#6E36BE", "#C01F52"];
+function hashTexto(txt) {
+  let h = 0;
+  const s = String(txt ?? "");
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+function corDoTecnico(id) {
+  return PALETA_TECNICOS[hashTexto(id) % PALETA_TECNICOS.length];
+}
+/* Sigla de até 2 letras a partir do nome (ex.: "Carlos Mendes" -> "CM"). Sempre exibida
+   junto da cor — acessibilidade: quem não distingue cor lê a sigla (nunca cor sozinha). */
+function siglaDoNome(nome) {
+  const partes = String(nome || "").trim().split(/\s+/).filter(Boolean);
+  if (partes.length === 0) return "—";
+  if (partes.length === 1) return partes[0].slice(0, 2).toUpperCase();
+  return (partes[0][0] + partes[partes.length - 1][0]).toUpperCase();
+}
 
 const novoRegistroDoc = () => ({
   id: `doc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -479,6 +505,7 @@ function AppInterno({ session, onLogout }) {
   const [aba, setAba] = useState("dados");
   const [abaGerencia, setAbaGerencia] = useState("visao-geral"); // "visao-geral" | "parceiros" | "financeiro"
   const [abaQualidade, setAbaQualidade] = useState("analise"); // "analise" | "vistoria" | "feedback"
+  const [agendarAgoraId, setAgendarAgoraId] = useState(null); // id do cliente recém-aprovado, pra abrir direto o card dele em "Vistoria"
   const [dados, setDados] = useState(DADOS_INICIAIS);
   const [itens, setItens] = useState([novoItem()]);
   const [clienteAtualId, setClienteAtualId] = useState(null); // id do cliente carregado no laudo em edição — necessário para "Enviar para gerência"
@@ -541,6 +568,12 @@ function AppInterno({ session, onLogout }) {
     setClientesCarregando(false);
   };
   useEffect(() => { carregarClientes(); }, []);
+  // Novo cadastro (feito na tela pública) precisa aparecer no bloco de aprovação do
+  // Agendamento sem precisar recarregar a página — busca de novo a cada 20s.
+  useEffect(() => {
+    const t = setInterval(carregarClientes, 20000);
+    return () => clearInterval(t);
+  }, []);
   const updCliente = async (id, patch) => {
     setClientes((atual) => atual.map((c) => (c.id === id ? { ...c, ...patch } : c)));
     try { await apiFetch(`/api/clientes/${id}`, { method: "PATCH", token, body: patch }); }
@@ -887,7 +920,7 @@ function AppInterno({ session, onLogout }) {
 
         {/* Navegação de módulos (filtrada pelo perfil de acesso) */}
         <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, borderTop: "1px solid rgba(255,255,255,.12)", overflowX: "auto" }}>
-          {[["laudos", "Laudos", FileText], ["documentacao", "Documentação", ClipboardCheck], ["clientes", "Clientes", Users], ["qualidade", "Qualidade", Star], ["gerencia", "Gerência", BarChart3]]
+          {[["laudos", "Laudos", FileText], ["documentacao", "Documentação", ClipboardCheck], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["gerencia", "Gerência", BarChart3]]
             .filter(([k]) => modulosPermitidos.includes(k))
             .map(([k, label, Icon]) => (
               <button key={k} onClick={() => setAbaTop(k)} className="tab" style={{ borderBottomColor: abaTop === k ? "#fff" : "transparent", color: abaTop === k ? "#fff" : "rgba(255,255,255,.55)", whiteSpace: "nowrap", flexShrink: 0 }}>
@@ -958,8 +991,9 @@ function AppInterno({ session, onLogout }) {
           <AbaClientesComercial clientes={clientes} carregando={clientesCarregando} atualizarCliente={updCliente} notify={notify} docs={docs} perfil={perfil} />
         )}
         {abaTop === "qualidade" && (
-          <AbaQualidade sub={abaQualidade} avaliacoes={avaliacoes} carregando={avaliacoesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
+          <AbaQualidade sub={abaQualidade} setSub={setAbaQualidade} avaliacoes={avaliacoes} carregando={avaliacoesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
             clientes={clientes} clientesCarregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} preencherComCliente={preencherComCliente}
+            agendarAgoraId={agendarAgoraId} setAgendarAgoraId={setAgendarAgoraId}
             podeAgir={perfil === "atendimento" || perfil === "gerencia"} />
         )}
         {abaTop === "gerencia" && (
@@ -1123,7 +1157,7 @@ function CalendarioVistoriador({ agenda = [], carregando, clientes = [], preench
     <div style={{ display: "grid", gap: 16 }}>
       <Card icon={CalendarDays} titulo="Minha agenda">
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-          Vistorias atribuídas a você. Clique num dia do calendário pra ver só os agendamentos daquela data. Apenas consulta — a atribuição e o agendamento são feitos pela Qualidade/Gerência.
+          Vistorias atribuídas a você. Clique num dia do calendário pra ver só os agendamentos daquela data. Apenas consulta — a atribuição e o agendamento são feitos pelo Agendamento/Gerência.
         </p>
 
         <CalendarioMensal porData={porData} mesRef={mesRef} setMesRef={setMesRef} diaSelecionado={diaSelecionado} setDiaSelecionado={setDiaSelecionado} />
@@ -1435,7 +1469,7 @@ function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [] })
   const media = totalAvaliacoes ? (avaliacoes.reduce((s, a) => s + a.nota, 0) / totalAvaliacoes) : 0;
 
   return (
-    <Card icon={LayoutGrid} titulo="Indicadores da Qualidade">
+    <Card icon={LayoutGrid} titulo="Indicadores do Agendamento">
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 20 }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>Clientes por etapa do fluxo</div>
@@ -1475,7 +1509,11 @@ function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [] })
   );
 }
 
-function AbaQualidade({ sub = "analise", clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, podeAgir = false }) {
+function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, agendarAgoraId, setAgendarAgoraId, podeAgir = false }) {
+  const irParaAgendamento = (clienteId) => {
+    setAgendarAgoraId(clienteId);
+    setSub("vistoria");
+  };
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <CardIndicadoresQualidade clientes={clientes} docs={docs} avaliacoes={avaliacoes} />
@@ -1484,9 +1522,9 @@ function AbaQualidade({ sub = "analise", clientes, clientesCarregando, updClient
           <Info size={14} /> Modo leitura — aprovar agendamento, encaminhar técnico e aprovar feedback agora é exclusivo do perfil Atendimento.
         </div>
       )}
-      {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} />}
+      {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} abrirAutomaticoId={agendarAgoraId} aoAbrirAutomatico={() => setAgendarAgoraId(null)} />}
       {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao} podeAgir={podeAgir} />}
-      {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} carregando={clientesCarregando} updCliente={updCliente} notify={notify} podeAgir={podeAgir} />}
+      {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} onAgendarAgora={irParaAgendamento} />}
     </div>
   );
 }
@@ -1614,93 +1652,387 @@ function conflitosDeHorario(cliente, todos) {
   });
 }
 
-/* ================= Qualidade · Análise: valida agendamento antes de liberar (checa cruzamento de horário) ================= */
-function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, notify, podeAgir = false }) {
-  const [mesRef, setMesRef] = useState(() => { const h = new Date(); return new Date(h.getFullYear(), h.getMonth(), 1); });
-  const [diaSelecionado, setDiaSelecionado] = useState(null);
-
-  // Todos os agendamentos (qualquer status), pra dar visão completa da agenda no calendário
-  // e ajudar a enxergar cruzamento de horário antes de aprovar.
-  const porDataTodos = clientes.reduce((acc, c) => {
-    if (!c.dataDesejada) return acc;
-    (acc[c.dataDesejada] = acc[c.dataDesejada] || []).push(c);
-    return acc;
-  }, {});
-
-  const pendentesTodos = clientes.filter((c) => c.status === "Em análise");
-  const pendentes = diaSelecionado ? pendentesTodos.filter((c) => c.dataDesejada === diaSelecionado) : pendentesTodos;
-  const outrosNoDia = diaSelecionado ? (porDataTodos[diaSelecionado] || []).filter((c) => c.status !== "Em análise") : [];
-
-  const aprovar = async (c) => {
-    try { await updCliente(c.id, { status: "Agendamento aprovado" }); notify("Agendamento aprovado ✓"); }
-    catch (e) { notify(`Erro: ${e.message}`); }
-  };
-  const cancelar = async (c) => {
-    try { await updCliente(c.id, { status: "Cancelado" }); notify("Agendamento cancelado"); }
-    catch (e) { notify(`Erro: ${e.message}`); }
-  };
+/* ================= Bloco de aprovação de clientes (item 2 do Agendamento) =================
+   Fica acima do calendário. Só cliente "aprovado" pode ser agendado (status "Agendamento
+   aprovado"); "Recusar" reaproveita o status "Cancelado" já existente no fluxo — não existe
+   (nem no backend) um status "Recusado" à parte. */
+function CardClientePendente({ c, todos, podeAgir, onAprovar, onRecusar }) {
+  const conflitos = conflitosDeHorario(c, todos);
   return (
-    <Card icon={ClipboardCheck} titulo={`Aguardando análise (${pendentesTodos.length})`}>
-      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-        Confira se não há cruzamento de horário com outro agendamento antes de aprovar. Clique num dia do calendário pra ver a agenda completa daquela data.
-      </p>
-
-      <CalendarioMensal porData={porDataTodos} mesRef={mesRef} setMesRef={setMesRef} diaSelecionado={diaSelecionado} setDiaSelecionado={setDiaSelecionado} />
-
-      {diaSelecionado && (
-        <div style={{ marginBottom: 14 }}>
-          <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, marginBottom: 10 }} onClick={() => setDiaSelecionado(null)}>
-            <X size={14} /> Ver todos os dias
+    <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, minWidth: 250, maxWidth: 270, flexShrink: 0, display: "flex", flexDirection: "column", gap: 5 }}>
+      <strong style={{ fontSize: 14 }}>{c.nome}</strong>
+      <div style={{ fontSize: 12, color: "#65758b" }}>{mascararCpf(c.cpf)}</div>
+      <div style={{ fontSize: 12, color: "#65758b" }}>{c.endereco || c.empreendimento || "Endereço não informado"}</div>
+      <div style={{ fontSize: 12, color: AZUL_MARINHO, fontWeight: 700 }}>{c.servico}</div>
+      <div style={{ fontSize: 12, color: "#4a5a70" }}>
+        {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""}
+      </div>
+      <div style={{ fontSize: 11, color: "#8593a8" }}>
+        Cadastrado em {c.criadoEm ? new Date(c.criadoEm).toLocaleDateString("pt-BR") : "—"}
+      </div>
+      {conflitos.length > 0 && (
+        <div style={{ background: "#FFF4E0", color: "#B26A00", padding: "6px 8px", borderRadius: 8, fontSize: 11.5 }}>
+          <AlertTriangle size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />
+          Cruza com {conflitos.length} outro(s) no mesmo horário: {conflitos.map((x) => x.nome).join(", ")}
+        </div>
+      )}
+      {podeAgir ? (
+        <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+          <button className="btn-solid" style={{ flex: 1, padding: "7px 10px", fontSize: 12.5 }} onClick={() => onAprovar(c)}>
+            <Check size={13} /> Aprovar
           </button>
-          {outrosNoDia.length > 0 && (
-            <div style={{ background: "#EAF2FB", borderRadius: 8, padding: 10, fontSize: 12.5, color: AZUL_MARINHO }}>
-              <strong>Já agendados nesse dia:</strong> {outrosNoDia.map((c) => `${c.nome} (${c.horarioDesejado || "sem horário"})`).join(", ")}
-            </div>
-          )}
+          <button className="btn-ghost" style={{ flex: 1, color: "#C62828", background: "#FCEAEA", padding: "7px 10px", fontSize: 12.5 }} onClick={() => onRecusar(c)}>
+            <X size={13} /> Recusar
+          </button>
+        </div>
+      ) : (
+        <span style={{ fontSize: 11.5, color: "#8593a8", marginTop: 4 }}>Somente leitura — o Atendimento decide isso.</span>
+      )}
+    </div>
+  );
+}
+
+function BlocoAprovacaoClientes({ clientes = [], carregando, podeAgir, onAprovar, onRecusar, clienteAprovado, onAgendarAgora, onFecharAviso }) {
+  const pendentes = clientes.filter((c) => c.status === "Em análise");
+
+  if (!carregando && pendentes.length === 0 && !clienteAprovado) {
+    return (
+      <div style={{ fontSize: 12.5, color: "#8593a8", padding: "4px 2px" }}>
+        Nenhum cliente aguardando aprovação.
+      </div>
+    );
+  }
+
+  return (
+    <Card icon={ClipboardList} titulo={pendentes.length > 0 ? `${pendentes.length} aguardando aprovação` : "Aprovação de clientes"}>
+      {clienteAprovado && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", background: "#E6F4EA", color: "#2E7D32", borderRadius: 8, padding: "8px 12px", fontSize: 13, marginBottom: 12 }}>
+          <span><Check size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} /> Cliente aprovado: {clienteAprovado.nome}</span>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn-solid" style={{ width: "auto", padding: "6px 12px", fontSize: 12.5 }} onClick={() => onAgendarAgora(clienteAprovado.id)}>Agendar agora</button>
+            <button className="icon-btn" onClick={onFecharAviso}><X size={14} /></button>
+          </div>
+        </div>
+      )}
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && pendentes.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum cliente aguardando aprovação.</p>}
+      {pendentes.length > 0 && (
+        <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
+          {pendentes.map((c) => (
+            <CardClientePendente key={c.id} c={c} todos={clientes} podeAgir={podeAgir} onAprovar={onAprovar} onRecusar={onRecusar} />
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/* ================= Calendário interativo do Agendamento (item 3 e 4) =================
+   Mostra, por dia: número (destaque hoje), faixa de presença por técnico (ordem fixa) e
+   até 3 barras de agendamento coloridas por técnico com sigla + horário + cliente. Clicar
+   num dia abre o painel lateral com a agenda completa daquele dia. */
+function CalendarioAgendamento({ clientes = [], vistoriadores = [], mesRef, setMesRef, diaSelecionado, setDiaSelecionado, filtroTecnicos, aoTrocarFiltro }) {
+  const ano = mesRef.getFullYear(), mes = mesRef.getMonth();
+  const primeiroDiaSemana = new Date(ano, mes, 1).getDay();
+  const totalDias = new Date(ano, mes + 1, 0).getDate();
+  const hojeISO = paraChaveISO(new Date());
+  const gridRef = useRef(null);
+
+  const agendadosPorDia = {};
+  clientes.forEach((c) => {
+    if (c.status !== "Vistoria agendada" || !c.dataDesejada || !c.vistoriadorId) return;
+    if (filtroTecnicos && filtroTecnicos.size > 0 && !filtroTecnicos.has(c.vistoriadorId)) return;
+    (agendadosPorDia[c.dataDesejada] = agendadosPorDia[c.dataDesejada] || []).push(c);
+  });
+
+  const celulas = [];
+  for (let i = 0; i < primeiroDiaSemana; i++) celulas.push(null);
+  for (let dia = 1; dia <= totalDias; dia++) celulas.push(dia);
+
+  return (
+    <div>
+      {vistoriadores.length > 0 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+          {vistoriadores.map((v) => {
+            const ativo = !filtroTecnicos || filtroTecnicos.size === 0 || filtroTecnicos.has(v.id);
+            const cor = corDoTecnico(v.id);
+            return (
+              <button key={v.id} className="chip-tecnico" onClick={() => aoTrocarFiltro(v.id)}
+                aria-pressed={ativo}
+                style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px 5px 5px", borderRadius: 20, border: `1.5px solid ${cor}`, background: ativo ? cor : "#fff", color: ativo ? "#fff" : cor, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                <span style={{ width: 18, height: 18, borderRadius: "50%", background: ativo ? "rgba(255,255,255,.25)" : cor, color: "#fff", display: "grid", placeItems: "center", fontSize: 9 }}>{siglaDoNome(v.nome)}</span>
+                {v.nome}
+              </button>
+            );
+          })}
         </div>
       )}
 
-      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
-      {!carregando && pendentesTodos.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum cadastro aguardando análise.</p>}
-      {!carregando && pendentesTodos.length > 0 && pendentes.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum cadastro aguardando análise nesse dia.</p>}
-      <div style={{ display: "grid", gap: 10 }}>
-        {pendentes.map((c) => {
-          const conflitos = conflitosDeHorario(c, clientes);
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+        <button className="icon-btn" onClick={() => setMesRef(new Date(ano, mes - 1, 1))} aria-label="Mês anterior"><ChevronLeft size={18} /></button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <strong style={{ fontSize: 14, color: AZUL_MARINHO, textTransform: "capitalize" }}>
+            {mesRef.toLocaleDateString("pt-BR", { month: "long", year: "numeric" })}
+          </strong>
+          <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, padding: "5px 10px", fontSize: 12 }}
+            onClick={() => { const h = new Date(); setMesRef(new Date(h.getFullYear(), h.getMonth(), 1)); setDiaSelecionado(paraChaveISO(h)); }}>
+            Hoje
+          </button>
+        </div>
+        <button className="icon-btn" onClick={() => setMesRef(new Date(ano, mes + 1, 1))} aria-label="Próximo mês"><ChevronRight size={18} /></button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, fontSize: 11, color: "#8593a8", textAlign: "center", marginBottom: 4 }}>
+        {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((d) => <div key={d}>{d}</div>)}
+      </div>
+      <div ref={gridRef} style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+        {celulas.map((dia, i) => {
+          if (dia === null) return <div key={`vazio-${i}`} />;
+          const chave = paraChaveISO(new Date(ano, mes, dia));
+          const doDia = agendadosPorDia[chave] || [];
+          const selecionado = diaSelecionado === chave;
+          const hoje = chave === hojeISO;
           return (
-            <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-                <div>
-                  <strong style={{ fontSize: 14 }}>{c.nome}</strong>
-                  <div style={{ fontSize: 12, color: "#65758b" }}>{c.empreendimento || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}</div>
-                </div>
-                <div style={{ fontSize: 13, textAlign: "right" }}>
-                  {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""}
-                </div>
-              </div>
-              {conflitos.length > 0 && (
-                <div style={{ marginTop: 8, background: "#FFF4E0", color: "#B26A00", padding: "8px 10px", borderRadius: 8, fontSize: 12.5 }}>
-                  <AlertTriangle size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
-                  Cruza com {conflitos.length} outro(s) agendamento(s) no mesmo horário: {conflitos.map((x) => x.nome).join(", ")}
+            <button key={chave} className="dia-cel" data-dia-idx={i}
+              onKeyDown={(e) => {
+                const passos = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[e.key];
+                if (!passos) return;
+                e.preventDefault();
+                gridRef.current?.querySelector(`[data-dia-idx="${i + passos}"]`)?.focus();
+              }}
+              onClick={() => setDiaSelecionado(selecionado ? null : chave)}
+              style={{
+                minHeight: 76, border: selecionado ? `2px solid ${AZUL_MEDIO}` : `1px solid ${CINZA_BORDA}`, borderRadius: 8,
+                background: hoje ? CINZA_CLARO : "#fff", cursor: "pointer", display: "flex", flexDirection: "column",
+                alignItems: "stretch", gap: 3, padding: 4, textAlign: "left",
+              }}>
+              <span style={{ fontSize: 12, fontWeight: hoje ? 800 : 600, color: hoje ? AZUL_MARINHO : "#1a2330" }}>{dia}</span>
+              {vistoriadores.length > 0 && (
+                <div style={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+                  {vistoriadores.map((v) => {
+                    const presente = doDia.some((c) => c.vistoriadorId === v.id);
+                    return <span key={v.id} title={`${v.nome}${presente ? " — tem vistoria" : " — livre"}`} style={{ width: 7, height: 7, borderRadius: 2, background: presente ? corDoTecnico(v.id) : "#E3E8EF", flexShrink: 0 }} />;
+                  })}
                 </div>
               )}
-              <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                {!podeAgir && <span style={{ fontSize: 12, color: "#8593a8" }}>Somente leitura — o Atendimento decide isso.</span>}
-                {podeAgir && (
-                <>
-                <button className="btn-solid" style={{ width: "auto", padding: "8px 16px" }} onClick={() => aprovar(c)}>
-                  <Check size={15} /> Aprovar agendamento
-                </button>
-                <button className="btn-ghost" style={{ color: "#C62828", background: "#FCEAEA" }} onClick={() => cancelar(c)}>
-                  <X size={15} /> Cancelar agendamento
-                </button>
-                </>
-                )}
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                {doDia.slice(0, 3).map((c) => (
+                  <div key={c.id} style={{ background: corDoTecnico(c.vistoriadorId), color: "#fff", borderRadius: 4, padding: "1px 4px", fontSize: 9, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {siglaDoNome(vistoriadores.find((v) => v.id === c.vistoriadorId)?.nome)} {c.horarioDesejado || ""} {(c.nome || "").split(" ")[0]}
+                  </div>
+                ))}
+                {doDia.length > 3 && <div style={{ fontSize: 9, color: AZUL_MARINHO, fontWeight: 700 }}>+{doDia.length - 3}</div>}
               </div>
-            </div>
+            </button>
           );
         })}
       </div>
-    </Card>
+    </div>
+  );
+}
+
+/* Painel lateral: agenda completa do dia clicado + atalho pra agendar uma nova vistoria. */
+function PainelDiaAgendamento({ diaISO, clientes = [], vistoriadores = [], onFechar, onAgendarNovo, podeAgir }) {
+  const dataFmt = new Date(`${diaISO}T00:00:00`).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
+  const agenda = clientes.filter((c) => c.status === "Vistoria agendada").sort((a, b) => (a.horarioDesejado || "").localeCompare(b.horarioDesejado || ""));
+  const nomeVistoriador = (id) => vistoriadores.find((v) => v.id === id)?.nome || "—";
+
+  return (
+    <div className="no-print" style={{ ...overlay, justifyItems: "end" }} onClick={onFechar}>
+      <div className="painel-lateral" style={{ ...modal, maxWidth: 420, height: "100%", maxHeight: "100%", overflowY: "auto", borderRadius: 0 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <strong style={{ textTransform: "capitalize", fontSize: 15 }}>{dataFmt}</strong>
+          <button className="icon-btn" onClick={onFechar}><X size={18} /></button>
+        </div>
+
+        {agenda.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "26px 10px" }}>
+            <p style={{ color: "#8593a8", fontSize: 14, marginBottom: 14 }}>Nenhuma vistoria neste dia.</p>
+            {podeAgir && (
+              <button className="btn-solid" style={{ width: "auto", padding: "9px 16px", margin: "0 auto" }} onClick={onAgendarNovo}>
+                <Plus size={15} /> Agendar a primeira
+              </button>
+            )}
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "grid", gap: 10, marginBottom: 16 }}>
+              {agenda.map((c) => (
+                <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                    <span style={{ background: corDoTecnico(c.vistoriadorId), color: "#fff", borderRadius: 6, padding: "2px 7px", fontSize: 11, fontWeight: 800 }}>{siglaDoNome(nomeVistoriador(c.vistoriadorId))}</span>
+                    <strong style={{ fontSize: 14 }}>{c.horarioDesejado || "sem horário"}</strong>
+                  </div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700 }}>{c.nome}</div>
+                  <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.endereco || c.empreendimento || "—"}</div>
+                  <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.servico}</div>
+                  <div style={{ fontSize: 12, color: "#65758b" }}>Técnico: {nomeVistoriador(c.vistoriadorId)}</div>
+                  <div style={{ marginTop: 6 }}><Selo valor={c.status} /></div>
+                </div>
+              ))}
+            </div>
+            {podeAgir && (
+              <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }} onClick={onAgendarNovo}>
+                <Plus size={15} /> Agendar vistoria
+              </button>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* Formulário "Agendar vistoria": escolhe um cliente já aprovado + técnico + data/hora.
+   Bloqueia o envio se o técnico já tiver outra vistoria confirmada no mesmo horário. */
+function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesAprovados = [], todosClientes = [], onFechar, onConfirmar }) {
+  const [clienteId, setClienteId] = useState("");
+  const [vistoriadorId, setVistoriadorId] = useState("");
+  const [data, setData] = useState(diaInicial || "");
+  const [hora, setHora] = useState("");
+  const [erro, setErro] = useState("");
+  const [salvando, setSalvando] = useState(false);
+
+  const clienteEscolhido = clientesAprovados.find((c) => c.id === clienteId);
+
+  const confirmar = async () => {
+    setErro("");
+    if (!clienteId) { setErro("Escolha o cliente aprovado."); return; }
+    if (!vistoriadorId) { setErro("Escolha o técnico responsável."); return; }
+    if (!data || !hora) { setErro("Preencha data e horário."); return; }
+    const conflito = todosClientes.find((c) =>
+      c.id !== clienteId && c.status === "Vistoria agendada" &&
+      c.vistoriadorId === vistoriadorId && c.dataDesejada === data && c.horarioDesejado === hora
+    );
+    if (conflito) {
+      const nomeTecnico = vistoriadores.find((v) => v.id === vistoriadorId)?.nome || "O técnico";
+      setErro(`${nomeTecnico} já tem vistoria às ${hora}. Escolha outro horário ou outro técnico.`);
+      return;
+    }
+    setSalvando(true);
+    await onConfirmar({ clienteId, vistoriadorId, dataDesejada: data, horarioDesejado: hora });
+    setSalvando(false);
+  };
+
+  return (
+    <div className="no-print" style={overlay} onClick={onFechar}>
+      <div style={{ ...modal, maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <strong>Agendar vistoria</strong>
+          <button className="icon-btn" onClick={onFechar}><X size={16} /></button>
+        </div>
+
+        <div style={{ display: "grid", gap: 12 }}>
+          <div style={cell(true)}>
+            <label style={lab}>Cliente aprovado</label>
+            <select style={inp} value={clienteId} onChange={(e) => setClienteId(e.target.value)}>
+              <option value="">selecionar…</option>
+              {clientesAprovados.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.empreendimento ? ` · ${c.empreendimento}` : ""}</option>)}
+            </select>
+            {clientesAprovados.length === 0 && <span style={{ fontSize: 12, color: "#8593a8" }}>Nenhum cliente aprovado aguardando agendamento.</span>}
+          </div>
+          {clienteEscolhido && (
+            <div style={{ fontSize: 12.5, color: "#65758b" }}>
+              {clienteEscolhido.servico} · {clienteEscolhido.endereco || clienteEscolhido.empreendimento || "sem endereço"}
+            </div>
+          )}
+          <div style={cell(true)}>
+            <label style={lab}>Técnico</label>
+            <select style={inp} value={vistoriadorId} onChange={(e) => setVistoriadorId(e.target.value)}>
+              <option value="">selecionar…</option>
+              {vistoriadores.map((v) => <option key={v.id} value={v.id}>{siglaDoNome(v.nome)} · {v.nome}</option>)}
+            </select>
+          </div>
+          <Grid>
+            <Field label="Data" type="date" value={data} onChange={setData} />
+            <Field label="Horário" type="time" value={hora} onChange={setHora} />
+          </Grid>
+
+          {erro && (
+            <div style={{ background: "#FCEAEA", color: "#C62828", padding: "8px 10px", borderRadius: 8, fontSize: 12.5 }}>
+              <AlertTriangle size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} /> {erro}
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+          <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={onFechar}>Cancelar</button>
+          <button className="btn-solid" onClick={confirmar} disabled={salvando}>{salvando ? "Agendando…" : "Confirmar agendamento"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================= Agendamento · Análise: aprovação de clientes + calendário operacional ================= */
+function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, onAgendarAgora }) {
+  const [mesRef, setMesRef] = useState(() => { const h = new Date(); return new Date(h.getFullYear(), h.getMonth(), 1); });
+  const [diaSelecionado, setDiaSelecionado] = useState(null);
+  const [filtroTecnicos, setFiltroTecnicos] = useState(() => new Set());
+  const [clienteAprovado, setClienteAprovado] = useState(null);
+  const [agendando, setAgendando] = useState(null); // { dataDesejada } quando o form "Agendar vistoria" está aberto
+
+  const vistoriadores = usuarios.filter((u) => u.role === "vistoriador" && u.ativo);
+  const aprovadosSemVistoria = clientes.filter((c) => c.status === "Agendamento aprovado");
+  const doDiaSelecionado = diaSelecionado ? clientes.filter((c) => c.dataDesejada === diaSelecionado) : [];
+
+  const aprovar = async (c) => {
+    try {
+      await updCliente(c.id, { status: "Agendamento aprovado" });
+      setClienteAprovado(c);
+      notify("Agendamento aprovado ✓");
+    } catch (e) { notify(`Erro: ${e.message}`); }
+  };
+  const recusar = async (c) => {
+    try { await updCliente(c.id, { status: "Cancelado" }); notify("Cadastro recusado"); }
+    catch (e) { notify(`Erro: ${e.message}`); }
+  };
+  const toggleFiltroTecnico = (id) => {
+    setFiltroTecnicos((atual) => {
+      const novo = new Set(atual);
+      if (novo.has(id)) novo.delete(id); else novo.add(id);
+      return novo;
+    });
+  };
+  const aoClicarAgendarAgora = (clienteId) => {
+    setClienteAprovado(null);
+    onAgendarAgora?.(clienteId);
+  };
+  const confirmarAgendamento = async (dados) => {
+    try {
+      await updCliente(dados.clienteId, { vistoriadorId: dados.vistoriadorId, dataDesejada: dados.dataDesejada, horarioDesejado: dados.horarioDesejado, status: "Vistoria agendada" });
+      notify("Vistoria agendada ✓");
+      setAgendando(null);
+    } catch (e) { notify(`Erro: ${e.message}`); }
+  };
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <BlocoAprovacaoClientes clientes={clientes} carregando={carregando} podeAgir={podeAgir}
+        onAprovar={aprovar} onRecusar={recusar}
+        clienteAprovado={clienteAprovado} onAgendarAgora={aoClicarAgendarAgora} onFecharAviso={() => setClienteAprovado(null)} />
+
+      <Card icon={CalendarDays} titulo="Calendário de vistorias">
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+          Veja quem está vistoriando o quê em cada dia. Clique num dia pra ver a agenda completa e agendar uma nova vistoria.
+        </p>
+        <CalendarioAgendamento clientes={clientes} vistoriadores={vistoriadores}
+          mesRef={mesRef} setMesRef={setMesRef} diaSelecionado={diaSelecionado} setDiaSelecionado={setDiaSelecionado}
+          filtroTecnicos={filtroTecnicos} aoTrocarFiltro={toggleFiltroTecnico} />
+      </Card>
+
+      {diaSelecionado && (
+        <PainelDiaAgendamento diaISO={diaSelecionado} clientes={doDiaSelecionado} vistoriadores={vistoriadores} podeAgir={podeAgir}
+          onFechar={() => setDiaSelecionado(null)}
+          onAgendarNovo={() => setAgendando({ dataDesejada: diaSelecionado })} />
+      )}
+
+      {agendando && (
+        <FormAgendarVistoria diaInicial={agendando.dataDesejada} vistoriadores={vistoriadores}
+          clientesAprovados={aprovadosSemVistoria} todosClientes={clientes}
+          onFechar={() => setAgendando(null)} onConfirmar={confirmarAgendamento} />
+      )}
+    </div>
   );
 }
 
@@ -1728,11 +2060,20 @@ function CardVistoriaResumo({ c, aberto, onToggle, children }) {
 /* Sub-aba Vistoria: agrupa por status (pendente de agendamento / já agendada / já
    realizada), com busca e cards resumidos que expandem ao clicar — antes mostrava
    tudo (formulário completo) de uma vez pra cada cliente, o que ficava confuso. */
-function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false }) {
+function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, abrirAutomaticoId = null, aoAbrirAutomatico }) {
   const [busca, setBusca] = useState("");
   const [abertoId, setAbertoId] = useState(null);
   const [form, setForm] = useState({});
   const vistoriadores = usuarios.filter((u) => u.role === "vistoriador" && u.ativo);
+
+  // Veio do atalho "Agendar agora" (aprovação em Análise) — abre o card já direto.
+  useEffect(() => {
+    if (abrirAutomaticoId) {
+      setAbertoId(abrirAutomaticoId);
+      setBusca("");
+      aoAbrirAutomatico?.();
+    }
+  }, [abrirAutomaticoId]);
 
   const temDoc = (c) => {
     const cpfLimpo = (c.cpf || "").replace(/\D/g, "");
@@ -2725,7 +3066,7 @@ function AbaGerenciaVisaoGeral({ docs, clientes, carregando, assinatura, salvarA
 
       <CardCadastrosClientes clientes={clientes} />
 
-      <Card icon={Star} titulo="Qualidade — avaliações dos clientes">
+      <Card icon={Star} titulo="Agendamento — avaliações dos clientes">
         {avaliacoesCarregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
         {!avaliacoesCarregando && avaliacoes.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhuma avaliação recebida ainda.</p>}
         {avaliacoes.length > 0 && (() => {
@@ -2736,7 +3077,7 @@ function AbaGerenciaVisaoGeral({ docs, clientes, carregando, assinatura, salvarA
                 <div style={{ fontSize: 30, fontWeight: 800, color: AZUL_MARINHO, lineHeight: 1 }}>{media.toFixed(1)}</div>
                 <Estrelas valor={Math.round(media)} tamanho={16} />
               </div>
-              <div style={{ fontSize: 13, color: "#65758b" }}>{avaliacoes.length} avaliação(ões) recebida(s). Veja os comentários completos na aba Qualidade.</div>
+              <div style={{ fontSize: 13, color: "#65758b" }}>{avaliacoes.length} avaliação(ões) recebida(s). Veja os comentários completos na aba Agendamento.</div>
             </div>
           );
         })()}
@@ -3019,13 +3360,13 @@ function AbaGerencia({ sub = "visao-geral", docs, clientes = [], carregando, ass
   );
 }
 
-const ROLE_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", qualidade: "Qualidade", gerencia: "Gerência" };
+const ROLE_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", qualidade: "Agendamento", gerencia: "Gerência" };
 const ROLE_DESCRICAO = {
   vistoriador: "Só acessa Laudos. Sem acesso a Documentação nem Gerência.",
   documentacao: "Só acessa Documentação/TRT. Sem acesso a Laudos nem Gerência.",
-  atendimento: "Acessa Clientes (cadastro, agendamento, aprovação e encaminhamento ao técnico) e Qualidade (aprova avaliações que entram na vitrine).",
-  qualidade: "Só acessa Qualidade, em modo leitura: acompanha avaliações e agendamentos, mas não aprova nada — isso é do Atendimento.",
-  gerencia: "Acesso completo: Laudos, Documentação, Clientes, Qualidade, Gerência e financeiro.",
+  atendimento: "Acessa Clientes (cadastro, agendamento, aprovação e encaminhamento ao técnico) e Agendamento (aprova avaliações que entram na vitrine).",
+  qualidade: "Só acessa Agendamento, em modo leitura: acompanha avaliações e agendamentos, mas não aprova nada — isso é do Atendimento.",
+  gerencia: "Acesso completo: Laudos, Documentação, Clientes, Agendamento, Gerência e financeiro.",
 };
 
 function CardUsuarios({ usuarios, carregando, criarUsuario, atualizarUsuario, excluirUsuario, notify, usuarioAtualId }) {
@@ -4200,6 +4541,13 @@ const estilos = `
   .foto-x { position:absolute; top:3px; right:3px; background:rgba(198,40,40,.92); color:#fff; border:none; border-radius:50%; width:20px; height:20px; display:grid; place-items:center; cursor:pointer; }
   select, input, textarea { font-family:inherit; }
   input:focus, textarea:focus, select:focus { border-color:${AZUL_MEDIO}; }
+  .dia-cel:focus-visible, .chip-tecnico:focus-visible { outline: 2.5px solid ${AZUL_MARINHO}; outline-offset: 2px; }
+  .painel-lateral { animation: entra-painel .18s ease-out; }
+  @keyframes entra-painel { from { transform: translateX(24px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    .painel-lateral { animation: none !important; }
+    .spin { animation: none !important; }
+  }
   @media print {
     .no-print { display:none !important; }
     body { background:#fff !important; }
