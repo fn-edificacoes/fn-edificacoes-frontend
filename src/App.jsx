@@ -1510,9 +1510,16 @@ function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [] })
 }
 
 function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, agendarAgoraId, setAgendarAgoraId, podeAgir = false }) {
+  const [diaParaAbrir, setDiaParaAbrir] = useState(null); // data (ISO) que o calendário da Análise deve abrir já selecionada
   const irParaAgendamento = (clienteId) => {
     setAgendarAgoraId(clienteId);
     setSub("vistoria");
+  };
+  // Confirmou a vistoria na sub-aba Vistoria -> volta pra Análise já com o calendário
+  // no mês certo e o painel do dia aberto, sem precisar navegar manualmente.
+  const aoConfirmarVistoria = (dataISO) => {
+    setDiaParaAbrir(dataISO);
+    setSub("analise");
   };
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -1522,9 +1529,9 @@ function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, u
           <Info size={14} /> Modo leitura — aprovar agendamento, encaminhar técnico e aprovar feedback agora é exclusivo do perfil Atendimento.
         </div>
       )}
-      {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} abrirAutomaticoId={agendarAgoraId} aoAbrirAutomatico={() => setAgendarAgoraId(null)} />}
+      {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} abrirAutomaticoId={agendarAgoraId} aoAbrirAutomatico={() => setAgendarAgoraId(null)} aoConfirmar={aoConfirmarVistoria} />}
       {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao} podeAgir={podeAgir} />}
-      {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} onAgendarAgora={irParaAgendamento} />}
+      {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} onAgendarAgora={irParaAgendamento} diaParaAbrir={diaParaAbrir} aoAbrirDia={() => setDiaParaAbrir(null)} />}
     </div>
   );
 }
@@ -1738,10 +1745,12 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], mesRef, setM
   const hojeISO = paraChaveISO(new Date());
   const gridRef = useRef(null);
 
+  // Mostra todo cliente já cadastrado com data desejada (não só quem já tem técnico
+  // confirmado) — "Cancelado" fica de fora por não ser mais um compromisso ativo.
   const agendadosPorDia = {};
   clientes.forEach((c) => {
-    if (c.status !== "Vistoria agendada" || !c.dataDesejada || !c.vistoriadorId) return;
-    if (filtroTecnicos && filtroTecnicos.size > 0 && !filtroTecnicos.has(c.vistoriadorId)) return;
+    if (!c.dataDesejada || c.status === "Cancelado") return;
+    if (filtroTecnicos && filtroTecnicos.size > 0 && !filtroTecnicos.has(String(c.vistoriadorId))) return;
     (agendadosPorDia[c.dataDesejada] = agendadosPorDia[c.dataDesejada] || []).push(c);
   });
 
@@ -1754,10 +1763,10 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], mesRef, setM
       {vistoriadores.length > 0 && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
           {vistoriadores.map((v) => {
-            const ativo = !filtroTecnicos || filtroTecnicos.size === 0 || filtroTecnicos.has(v.id);
+            const ativo = !filtroTecnicos || filtroTecnicos.size === 0 || filtroTecnicos.has(String(v.id));
             const cor = corDoTecnico(v.id);
             return (
-              <button key={v.id} className="chip-tecnico" onClick={() => aoTrocarFiltro(v.id)}
+              <button key={v.id} className="chip-tecnico" onClick={() => aoTrocarFiltro(String(v.id))}
                 aria-pressed={ativo}
                 style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px 5px 5px", borderRadius: 20, border: `1.5px solid ${cor}`, background: ativo ? cor : "#fff", color: ativo ? "#fff" : cor, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
                 <span style={{ width: 18, height: 18, borderRadius: "50%", background: ativo ? "rgba(255,255,255,.25)" : cor, color: "#fff", display: "grid", placeItems: "center", fontSize: 9 }}>{siglaDoNome(v.nome)}</span>
@@ -1810,17 +1819,22 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], mesRef, setM
               {vistoriadores.length > 0 && (
                 <div style={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
                   {vistoriadores.map((v) => {
-                    const presente = doDia.some((c) => c.vistoriadorId === v.id);
+                    const presente = doDia.some((c) => c.status === "Vistoria agendada" && String(c.vistoriadorId) === String(v.id));
                     return <span key={v.id} title={`${v.nome}${presente ? " — tem vistoria" : " — livre"}`} style={{ width: 7, height: 7, borderRadius: 2, background: presente ? corDoTecnico(v.id) : "#E3E8EF", flexShrink: 0 }} />;
                   })}
                 </div>
               )}
               <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                {doDia.slice(0, 3).map((c) => (
-                  <div key={c.id} style={{ background: corDoTecnico(c.vistoriadorId), color: "#fff", borderRadius: 4, padding: "1px 4px", fontSize: 9, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {siglaDoNome(vistoriadores.find((v) => v.id === c.vistoriadorId)?.nome)} {c.horarioDesejado || ""} {(c.nome || "").split(" ")[0]}
-                  </div>
-                ))}
+                {doDia.slice(0, 3).map((c) => {
+                  const tecnico = vistoriadores.find((v) => String(v.id) === String(c.vistoriadorId));
+                  const cor = tecnico ? corDoTecnico(tecnico.id) : "#8593a8";
+                  const sigla = tecnico ? siglaDoNome(tecnico.nome) : "—";
+                  return (
+                    <div key={c.id} style={{ background: cor, color: "#fff", borderRadius: 4, padding: "1px 4px", fontSize: 9, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {sigla} {c.horarioDesejado || ""} {(c.nome || "").split(" ")[0]}
+                    </div>
+                  );
+                })}
                 {doDia.length > 3 && <div style={{ fontSize: 9, color: AZUL_MARINHO, fontWeight: 700 }}>+{doDia.length - 3}</div>}
               </div>
             </button>
@@ -1834,8 +1848,10 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], mesRef, setM
 /* Painel lateral: agenda completa do dia clicado + atalho pra agendar uma nova vistoria. */
 function PainelDiaAgendamento({ diaISO, clientes = [], vistoriadores = [], onFechar, onAgendarNovo, podeAgir }) {
   const dataFmt = new Date(`${diaISO}T00:00:00`).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
-  const agenda = clientes.filter((c) => c.status === "Vistoria agendada").sort((a, b) => (a.horarioDesejado || "").localeCompare(b.horarioDesejado || ""));
-  const nomeVistoriador = (id) => vistoriadores.find((v) => v.id === id)?.nome || "—";
+  // Mostra todo cliente já cadastrado com vistoria desejada nesse dia, não só os que já
+  // têm técnico confirmado — "Cancelado" fica de fora por não ser mais um compromisso ativo.
+  const agenda = clientes.filter((c) => c.status !== "Cancelado").sort((a, b) => (a.horarioDesejado || "").localeCompare(b.horarioDesejado || ""));
+  const nomeVistoriador = (id) => vistoriadores.find((v) => String(v.id) === String(id))?.nome || null;
 
   return (
     <div className="no-print" style={{ ...overlay, justifyItems: "end" }} onClick={onFechar}>
@@ -1857,19 +1873,24 @@ function PainelDiaAgendamento({ diaISO, clientes = [], vistoriadores = [], onFec
         ) : (
           <>
             <div style={{ display: "grid", gap: 10, marginBottom: 16 }}>
-              {agenda.map((c) => (
-                <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
-                    <span style={{ background: corDoTecnico(c.vistoriadorId), color: "#fff", borderRadius: 6, padding: "2px 7px", fontSize: 11, fontWeight: 800 }}>{siglaDoNome(nomeVistoriador(c.vistoriadorId))}</span>
-                    <strong style={{ fontSize: 14 }}>{c.horarioDesejado || "sem horário"}</strong>
+              {agenda.map((c) => {
+                const nomeTecnico = nomeVistoriador(c.vistoriadorId);
+                return (
+                  <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                      <span style={{ background: nomeTecnico ? corDoTecnico(c.vistoriadorId) : "#EEF1F5", color: nomeTecnico ? "#fff" : "#65758b", borderRadius: 6, padding: "2px 7px", fontSize: 11, fontWeight: 800 }}>
+                        {nomeTecnico ? siglaDoNome(nomeTecnico) : "—"}
+                      </span>
+                      <strong style={{ fontSize: 14 }}>{c.horarioDesejado || "sem horário"}</strong>
+                    </div>
+                    <div style={{ fontSize: 13.5, fontWeight: 700 }}>{c.nome}</div>
+                    <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.endereco || c.empreendimento || "—"}</div>
+                    <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.servico}</div>
+                    <div style={{ fontSize: 12, color: "#65758b" }}>Técnico: {nomeTecnico || "ainda não atribuído"}</div>
+                    <div style={{ marginTop: 6 }}><Selo valor={c.status} /></div>
                   </div>
-                  <div style={{ fontSize: 13.5, fontWeight: 700 }}>{c.nome}</div>
-                  <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.endereco || c.empreendimento || "—"}</div>
-                  <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.servico}</div>
-                  <div style={{ fontSize: 12, color: "#65758b" }}>Técnico: {nomeVistoriador(c.vistoriadorId)}</div>
-                  <div style={{ marginTop: 6 }}><Selo valor={c.status} /></div>
-                </div>
-              ))}
+                );
+              })}
             </div>
             {podeAgir && (
               <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }} onClick={onAgendarNovo}>
@@ -1905,7 +1926,7 @@ function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesAprovados
       c.vistoriadorId === vistoriadorId && c.dataDesejada === data && c.horarioDesejado === hora
     );
     if (conflito) {
-      const nomeTecnico = vistoriadores.find((v) => v.id === vistoriadorId)?.nome || "O técnico";
+      const nomeTecnico = vistoriadores.find((v) => String(v.id) === String(vistoriadorId))?.nome || "O técnico";
       setErro(`${nomeTecnico} já tem vistoria às ${hora}. Escolha outro horário ou outro técnico.`);
       return;
     }
@@ -1965,7 +1986,7 @@ function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesAprovados
 }
 
 /* ================= Agendamento · Análise: aprovação de clientes + calendário operacional ================= */
-function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, onAgendarAgora }) {
+function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, onAgendarAgora, diaParaAbrir, aoAbrirDia }) {
   const [mesRef, setMesRef] = useState(() => { const h = new Date(); return new Date(h.getFullYear(), h.getMonth(), 1); });
   const [diaSelecionado, setDiaSelecionado] = useState(null);
   const [filtroTecnicos, setFiltroTecnicos] = useState(() => new Set());
@@ -1975,6 +1996,17 @@ function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, usuarios =
   const vistoriadores = usuarios.filter((u) => u.role === "vistoriador" && u.ativo);
   const aprovadosSemVistoria = clientes.filter((c) => c.status === "Agendamento aprovado");
   const doDiaSelecionado = diaSelecionado ? clientes.filter((c) => c.dataDesejada === diaSelecionado) : [];
+
+  // Veio de uma confirmação de vistoria feita na sub-aba Vistoria — pula direto pro
+  // mês/dia certo e já abre o painel lateral, sem precisar navegar manualmente.
+  useEffect(() => {
+    if (diaParaAbrir) {
+      const [ano, mes] = diaParaAbrir.split("-").map(Number);
+      setMesRef(new Date(ano, mes - 1, 1));
+      setDiaSelecionado(diaParaAbrir);
+      aoAbrirDia?.();
+    }
+  }, [diaParaAbrir]);
 
   const aprovar = async (c) => {
     try {
@@ -2060,7 +2092,7 @@ function CardVistoriaResumo({ c, aberto, onToggle, children }) {
 /* Sub-aba Vistoria: agrupa por status (pendente de agendamento / já agendada / já
    realizada), com busca e cards resumidos que expandem ao clicar — antes mostrava
    tudo (formulário completo) de uma vez pra cada cliente, o que ficava confuso. */
-function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, abrirAutomaticoId = null, aoAbrirAutomatico }) {
+function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, abrirAutomaticoId = null, aoAbrirAutomatico, aoConfirmar }) {
   const [busca, setBusca] = useState("");
   const [abertoId, setAbertoId] = useState(null);
   const [form, setForm] = useState({});
@@ -2097,10 +2129,11 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
     try {
       await updCliente(c.id, { vistoriadorId, dataDesejada, horarioDesejado, status: "Vistoria agendada" });
       notify("Vistoria agendada ✓ — já aparece na agenda do técnico");
+      if (dataDesejada) aoConfirmar?.(dataDesejada);
     } catch (e) { notify(`Erro: ${e.message}`); }
   };
 
-  const nomeVistoriador = (id) => vistoriadores.find((v) => v.id === id)?.nome || usuarios.find((u) => u.id === id)?.nome || "—";
+  const nomeVistoriador = (id) => vistoriadores.find((v) => String(v.id) === String(id))?.nome || usuarios.find((u) => String(u.id) === String(id))?.nome || "—";
 
   const grupos = [
     { chave: "pendente", titulo: "Aguardando agendamento", lista: pendentes },
