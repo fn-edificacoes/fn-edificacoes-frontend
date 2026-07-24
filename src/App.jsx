@@ -1907,27 +1907,28 @@ function PainelDiaAgendamento({ diaISO, clientes = [], vistoriadores = [], onFec
 /* Formulário "Agendar vistoria": escolhe um cliente já aprovado + técnico + data/hora.
    Bloqueia o envio se o técnico já tiver outra vistoria confirmada no mesmo horário. */
 function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesAprovados = [], todosClientes = [], onFechar, onConfirmar }) {
+  const listaClientes = diaInicial ? clientesAprovados.filter((c) => c.dataDesejada === diaInicial) : clientesAprovados;
   const [clienteId, setClienteId] = useState("");
   const [vistoriadorId, setVistoriadorId] = useState("");
-  const [data, setData] = useState(diaInicial || "");
-  const [hora, setHora] = useState("");
   const [erro, setErro] = useState("");
   const [salvando, setSalvando] = useState(false);
 
-  const clienteEscolhido = clientesAprovados.find((c) => c.id === clienteId);
+  const clienteEscolhido = listaClientes.find((c) => c.id === clienteId);
+  const data = clienteEscolhido?.dataDesejada || "";
+  const hora = clienteEscolhido?.horarioDesejado || "";
 
   const confirmar = async () => {
     setErro("");
     if (!clienteId) { setErro("Escolha o cliente aprovado."); return; }
     if (!vistoriadorId) { setErro("Escolha o técnico responsável."); return; }
-    if (!data || !hora) { setErro("Preencha data e horário."); return; }
+    if (!data || !hora) { setErro("Este cliente não definiu data/horário no cadastro."); return; }
     const conflito = todosClientes.find((c) =>
       c.id !== clienteId && c.status === "Vistoria agendada" &&
       c.vistoriadorId === vistoriadorId && c.dataDesejada === data && c.horarioDesejado === hora
     );
     if (conflito) {
       const nomeTecnico = vistoriadores.find((v) => String(v.id) === String(vistoriadorId))?.nome || "O técnico";
-      setErro(`${nomeTecnico} já tem vistoria às ${hora}. Escolha outro horário ou outro técnico.`);
+      setErro(`${nomeTecnico} já tem vistoria às ${hora}. Escolha outro técnico.`);
       return;
     }
     setSalvando(true);
@@ -1948,9 +1949,9 @@ function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesAprovados
             <label style={lab}>Cliente aprovado</label>
             <select style={inp} value={clienteId} onChange={(e) => setClienteId(e.target.value)}>
               <option value="">selecionar…</option>
-              {clientesAprovados.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.empreendimento ? ` · ${c.empreendimento}` : ""}</option>)}
+              {listaClientes.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.empreendimento ? ` · ${c.empreendimento}` : ""}</option>)}
             </select>
-            {clientesAprovados.length === 0 && <span style={{ fontSize: 12, color: "#8593a8" }}>Nenhum cliente aprovado aguardando agendamento.</span>}
+            {listaClientes.length === 0 && <span style={{ fontSize: 12, color: "#8593a8" }}>Nenhum cliente aprovado aguardando agendamento{diaInicial ? " neste dia" : ""}.</span>}
           </div>
           {clienteEscolhido && (
             <div style={{ fontSize: 12.5, color: "#65758b" }}>
@@ -1965,8 +1966,14 @@ function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesAprovados
             </select>
           </div>
           <Grid>
-            <Field label="Data" type="date" value={data} onChange={setData} />
-            <Field label="Horário" type="time" value={hora} onChange={setHora} />
+            <div style={cell(false)}>
+              <label style={lab}>Data (definida pelo cliente)</label>
+              <div style={{ ...inp, background: CINZA_CLARO, color: "#4a5a70" }}>{data ? data.split("-").reverse().join("/") : "não definida"}</div>
+            </div>
+            <div style={cell(false)}>
+              <label style={lab}>Horário (definido pelo cliente)</label>
+              <div style={{ ...inp, background: CINZA_CLARO, color: "#4a5a70" }}>{hora || "não definido"}</div>
+            </div>
           </Grid>
 
           {erro && (
@@ -2123,13 +2130,21 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
 
   const confirmar = async (c) => {
     const vistoriadorId = valorCampo(c, "vistoriadorId", "");
-    const dataDesejada = valorCampo(c, "dataDesejada", c.dataDesejada);
-    const horarioDesejado = valorCampo(c, "horarioDesejado", c.horarioDesejado);
     if (!vistoriadorId) { notify("Escolha o vistoriador responsável"); return; }
+    if (!c.dataDesejada || !c.horarioDesejado) { notify("Este cliente não definiu data/horário no cadastro."); return; }
+    const conflito = clientes.find((o) =>
+      o.id !== c.id && o.status === "Vistoria agendada" &&
+      o.vistoriadorId === vistoriadorId && o.dataDesejada === c.dataDesejada && o.horarioDesejado === c.horarioDesejado
+    );
+    if (conflito) {
+      const nomeTecnico = vistoriadores.find((v) => String(v.id) === String(vistoriadorId))?.nome || "O técnico";
+      notify(`${nomeTecnico} já tem vistoria às ${c.horarioDesejado}. Escolha outro técnico.`);
+      return;
+    }
     try {
-      await updCliente(c.id, { vistoriadorId, dataDesejada, horarioDesejado, status: "Vistoria agendada" });
+      await updCliente(c.id, { vistoriadorId, status: "Vistoria agendada" });
       notify("Vistoria agendada ✓ — já aparece na agenda do técnico");
-      if (dataDesejada) aoConfirmar?.(dataDesejada);
+      aoConfirmar?.(c.dataDesejada);
     } catch (e) { notify(`Erro: ${e.message}`); }
   };
 
@@ -2166,8 +2181,14 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
                             {vistoriadores.map((v) => <option key={v.id} value={v.id}>{v.nome}</option>)}
                           </select>
                         </div>
-                        <Field label="Data" type="date" value={valorCampo(c, "dataDesejada", c.dataDesejada)} onChange={(v) => setCampo(c.id, "dataDesejada", v)} disabled={!podeAgir} />
-                        <Field label="Horário" type="time" value={valorCampo(c, "horarioDesejado", c.horarioDesejado)} onChange={(v) => setCampo(c.id, "horarioDesejado", v)} disabled={!podeAgir} />
+                        <div style={cell(false)}>
+                          <label style={lab}>Data (definida pelo cliente)</label>
+                          <div style={{ ...inp, background: CINZA_CLARO, color: "#4a5a70" }}>{c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "não definida"}</div>
+                        </div>
+                        <div style={cell(false)}>
+                          <label style={lab}>Horário (definido pelo cliente)</label>
+                          <div style={{ ...inp, background: CINZA_CLARO, color: "#4a5a70" }}>{c.horarioDesejado || "não definido"}</div>
+                        </div>
                       </Grid>
                       {podeAgir ? (
                         <button className="btn-solid" style={{ marginTop: 10, width: "auto", padding: "8px 16px" }} onClick={() => confirmar(c)}>
