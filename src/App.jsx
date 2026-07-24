@@ -1662,11 +1662,17 @@ function AbaQualidadeFeedback({ avaliacoes, carregando, docs, docsCarregando, ap
                       </div>
                     )
                   ) : (
-                    podeAgir && solicitarExclusaoAvaliacao && (
-                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${CINZA_BORDA}` }}>
-                        <button className="btn-ghost" style={{ color: "#C62828", padding: "4px 10px" }} onClick={() => solicitarExclusaoAvaliacao(a.id)}>
-                          <Trash2 size={13} /> Solicitar exclusão
-                        </button>
+                    podeAgir && (
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${CINZA_BORDA}`, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {ehGerencia ? (
+                          <button className="btn-ghost" style={{ color: "#C62828", padding: "4px 10px" }} onClick={() => excluirAvaliacao(a.id)}>
+                            <Trash2 size={13} /> Apagar avaliação
+                          </button>
+                        ) : (
+                          <button className="btn-ghost" style={{ color: "#C62828", padding: "4px 10px" }} onClick={() => solicitarExclusaoAvaliacao(a.id)}>
+                            <Trash2 size={13} /> Solicitar exclusão
+                          </button>
+                        )}
                       </div>
                     )
                   )}
