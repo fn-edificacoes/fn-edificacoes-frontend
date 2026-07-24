@@ -598,6 +598,22 @@ function AppInterno({ session, onLogout }) {
     try { await apiFetch(`/api/avaliacoes/${id}/aprovar`, { method: "PATCH", token, body: { aprovado } }); }
     catch (e) { notify(`Não foi possível atualizar: ${e.message}`); carregarAvaliacoes(); }
   };
+  /* Atendimento só pede a exclusão; quem decide se apaga de vez é a Gerência. */
+  const solicitarExclusaoAvaliacao = async (id) => {
+    setAvaliacoes((atual) => atual.map((a) => (a.id === id ? { ...a, exclusao_solicitada: true } : a)));
+    try { await apiFetch(`/api/avaliacoes/${id}/solicitar-exclusao`, { method: "PATCH", token }); notify("Exclusão solicitada à gerência"); }
+    catch (e) { notify(`Não foi possível solicitar: ${e.message}`); carregarAvaliacoes(); }
+  };
+  const manterAvaliacao = async (id) => {
+    setAvaliacoes((atual) => atual.map((a) => (a.id === id ? { ...a, exclusao_solicitada: false } : a)));
+    try { await apiFetch(`/api/avaliacoes/${id}/cancelar-exclusao`, { method: "PATCH", token }); notify("Avaliação mantida"); }
+    catch (e) { notify(`Não foi possível atualizar: ${e.message}`); carregarAvaliacoes(); }
+  };
+  const excluirAvaliacao = async (id) => {
+    setAvaliacoes((atual) => atual.filter((a) => a.id !== id));
+    try { await apiFetch(`/api/avaliacoes/${id}`, { method: "DELETE", token }); notify("Avaliação excluída"); }
+    catch (e) { notify(`Não foi possível excluir: ${e.message}`); carregarAvaliacoes(); }
+  };
 
   /* ---- Parceiros/Afiliados: homologação (somente perfil Gerência) ---- */
   const [parceiros, setParceiros] = useState([]);
@@ -992,12 +1008,13 @@ function AppInterno({ session, onLogout }) {
         )}
         {abaTop === "qualidade" && (
           <AbaQualidade sub={abaQualidade} setSub={setAbaQualidade} avaliacoes={avaliacoes} carregando={avaliacoesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
+            solicitarExclusaoAvaliacao={solicitarExclusaoAvaliacao} manterAvaliacao={manterAvaliacao} excluirAvaliacao={excluirAvaliacao}
             clientes={clientes} clientesCarregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} preencherComCliente={preencherComCliente}
             agendarAgoraId={agendarAgoraId} setAgendarAgoraId={setAgendarAgoraId}
-            podeAgir={perfil === "atendimento" || perfil === "gerencia"} />
+            podeAgir={perfil === "atendimento" || perfil === "gerencia"} ehGerencia={perfil === "gerencia"} />
         )}
         {abaTop === "gerencia" && (
-          <AbaGerencia sub={abaGerencia} docs={docs} clientes={clientes} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
+          <AbaGerencia sub={abaGerencia} docs={docs} clientes={clientes} updCliente={updCliente} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
             usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={session.usuario.id}
             avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
             parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
@@ -1509,7 +1526,7 @@ function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [] })
   );
 }
 
-function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, agendarAgoraId, setAgendarAgoraId, podeAgir = false }) {
+function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, agendarAgoraId, setAgendarAgoraId, podeAgir = false, ehGerencia = false }) {
   const [diaParaAbrir, setDiaParaAbrir] = useState(null); // data (ISO) que o calendário da Análise deve abrir já selecionada
   const irParaAgendamento = (clienteId) => {
     setAgendarAgoraId(clienteId);
@@ -1530,13 +1547,14 @@ function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, u
         </div>
       )}
       {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} abrirAutomaticoId={agendarAgoraId} aoAbrirAutomatico={() => setAgendarAgoraId(null)} aoConfirmar={aoConfirmarVistoria} />}
-      {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao} podeAgir={podeAgir} />}
+      {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
+        solicitarExclusaoAvaliacao={solicitarExclusaoAvaliacao} manterAvaliacao={manterAvaliacao} excluirAvaliacao={excluirAvaliacao} podeAgir={podeAgir} ehGerencia={ehGerencia} />}
       {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} onAgendarAgora={irParaAgendamento} diaParaAbrir={diaParaAbrir} aoAbrirDia={() => setDiaParaAbrir(null)} />}
     </div>
   );
 }
 
-function AbaQualidadeFeedback({ avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, podeAgir = false }) {
+function AbaQualidadeFeedback({ avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, podeAgir = false, ehGerencia = false }) {
   const [busca, setBusca] = useState("");
   const total = avaliacoes.length;
   const media = total ? (avaliacoes.reduce((s, a) => s + a.nota, 0) / total) : 0;
@@ -1586,21 +1604,45 @@ function AbaQualidadeFeedback({ avaliacoes, carregando, docs, docsCarregando, ap
                   </div>
                   {a.empreendimento && <div style={{ fontSize: 12, color: "#65758b", marginBottom: 6 }}>{a.empreendimento}</div>}
                   {a.comentario && <div style={{ fontSize: 13.5, color: "#334", background: CINZA_CLARO, borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>{a.comentario}</div>}
-                  {podeAgir && aprovarAvaliacao ? (
-                    a.aprovado ? (
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-                        <span style={{ fontSize: 12, color: "#2E7D32", fontWeight: 600 }}>✓ Exibida na página inicial</span>
-                        <button className="btn-ghost" style={{ color: "#C62828", padding: "4px 10px" }} onClick={() => aprovarAvaliacao(a.id, false)}>Remover da vitrine</button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    {podeAgir && aprovarAvaliacao ? (
+                      a.aprovado ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                          <span style={{ fontSize: 12, color: "#2E7D32", fontWeight: 600 }}>✓ Exibida na página inicial</span>
+                          <button className="btn-ghost" style={{ color: "#C62828", padding: "4px 10px" }} onClick={() => aprovarAvaliacao(a.id, false)}>Remover da vitrine</button>
+                        </div>
+                      ) : (
+                        <button className="btn-ghost" style={{ color: AZUL_MEDIO, padding: "4px 10px", marginTop: 4 }} onClick={() => aprovarAvaliacao(a.id, true)}>
+                          <Check size={14} /> Aprovar para a página inicial
+                        </button>
+                      )
+                    ) : (
+                      <span style={{ fontSize: 12, color: a.aprovado ? "#2E7D32" : "#8593a8", fontWeight: a.aprovado ? 600 : 400 }}>
+                        {a.aprovado ? "✓ Exibida na página inicial" : "Somente leitura — o Atendimento decide isso."}
+                      </span>
+                    )}
+                  </div>
+
+                  {a.exclusao_solicitada ? (
+                    ehGerencia ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${CINZA_BORDA}`, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 12, color: "#B26A00", fontWeight: 600 }}><AlertTriangle size={12} style={{ verticalAlign: "-1px", marginRight: 3 }} />Exclusão solicitada pelo Atendimento</span>
+                        <button className="btn-ghost" style={{ color: "#C62828", padding: "4px 10px" }} onClick={() => excluirAvaliacao(a.id)}>Apagar avaliação</button>
+                        <button className="btn-ghost" style={{ color: AZUL_MEDIO, padding: "4px 10px" }} onClick={() => manterAvaliacao(a.id)}>Manter avaliação</button>
                       </div>
                     ) : (
-                      <button className="btn-ghost" style={{ color: AZUL_MEDIO, padding: "4px 10px", marginTop: 4 }} onClick={() => aprovarAvaliacao(a.id, true)}>
-                        <Check size={14} /> Aprovar para a página inicial
-                      </button>
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${CINZA_BORDA}` }}>
+                        <span style={{ fontSize: 12, color: "#B26A00", fontWeight: 600 }}><AlertTriangle size={12} style={{ verticalAlign: "-1px", marginRight: 3 }} />Exclusão solicitada — aguardando decisão da Gerência</span>
+                      </div>
                     )
                   ) : (
-                    <span style={{ fontSize: 12, color: a.aprovado ? "#2E7D32" : "#8593a8", fontWeight: a.aprovado ? 600 : 400 }}>
-                      {a.aprovado ? "✓ Exibida na página inicial" : "Somente leitura — o Atendimento decide isso."}
-                    </span>
+                    podeAgir && solicitarExclusaoAvaliacao && (
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${CINZA_BORDA}` }}>
+                        <button className="btn-ghost" style={{ color: "#C62828", padding: "4px 10px" }} onClick={() => solicitarExclusaoAvaliacao(a.id)}>
+                          <Trash2 size={13} /> Solicitar exclusão
+                        </button>
+                      </div>
+                    )
                   )}
                 </div>
               ))}
@@ -1846,7 +1888,7 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], mesRef, setM
 }
 
 /* Painel lateral: agenda completa do dia clicado + atalho pra agendar uma nova vistoria. */
-function PainelDiaAgendamento({ diaISO, clientes = [], vistoriadores = [], onFechar, onAgendarNovo, podeAgir }) {
+function PainelDiaAgendamento({ diaISO, clientes = [], vistoriadores = [], onFechar, onAgendarNovo, podeAgir, updCliente, notify }) {
   const dataFmt = new Date(`${diaISO}T00:00:00`).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
   // Mostra todo cliente já cadastrado com vistoria desejada nesse dia, não só os que já
   // têm técnico confirmado — "Cancelado" fica de fora por não ser mais um compromisso ativo.
@@ -1887,7 +1929,15 @@ function PainelDiaAgendamento({ diaISO, clientes = [], vistoriadores = [], onFec
                     <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.endereco || c.empreendimento || "—"}</div>
                     <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.servico}</div>
                     <div style={{ fontSize: 12, color: "#65758b" }}>Técnico: {nomeTecnico || "ainda não atribuído"}</div>
-                    <div style={{ marginTop: 6 }}><Selo valor={c.status} /></div>
+                    <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <Selo valor={c.status} />
+                      {podeAgir && c.status === "Vistoria agendada" && (
+                        <button className="btn-ghost" style={{ color: "#C62828", padding: "3px 8px", fontSize: 12 }}
+                          onClick={async () => { await updCliente(c.id, { status: "Cancelamento solicitado" }); notify("Cancelamento solicitado à gerência"); }}>
+                          Cancelar vistoria
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -2062,6 +2112,7 @@ function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, usuarios =
 
       {diaSelecionado && (
         <PainelDiaAgendamento diaISO={diaSelecionado} clientes={doDiaSelecionado} vistoriadores={vistoriadores} podeAgir={podeAgir}
+          updCliente={updCliente} notify={notify}
           onFechar={() => setDiaSelecionado(null)}
           onAgendarNovo={() => setAgendando({ dataDesejada: diaSelecionado })} />
       )}
@@ -2204,6 +2255,14 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
                       <div><strong>Construtora:</strong> {c.construtora || "—"}</div>
                       <div><strong>Vistoriador:</strong> {nomeVistoriador(c.vistoriadorId)}</div>
                       <div><strong>Status:</strong> <Selo valor={etapaAtualCliente(c, docs)} /></div>
+                      {g.chave === "agendada" && (
+                        podeAgir ? (
+                          <button className="btn-ghost" style={{ color: "#C62828", padding: "4px 10px", width: "auto", marginTop: 4 }}
+                            onClick={async () => { await updCliente(c.id, { status: "Cancelamento solicitado" }); notify("Cancelamento solicitado à gerência"); }}>
+                            <Trash2 size={13} /> Cancelar vistoria
+                          </button>
+                        ) : null
+                      )}
                     </div>
                   )}
                 </CardVistoriaResumo>
@@ -2752,6 +2811,8 @@ const STATUS_COR = {
   "Em vistoria": { cor: "#B26A00", bg: "#FFF4E0" },
   "Laudo em elaboração": { cor: "#B26A00", bg: "#FFF4E0" },
   "Laudo pronto": { cor: "#2E7D32", bg: "#E6F4EA" },
+  // status do cliente (clientes.status) — cancelamento pedido pelo Atendimento, aguardando a Gerência
+  "Cancelamento solicitado": { cor: "#B26A00", bg: "#FFF4E0" },
 };
 function Selo({ valor }) {
   const s = STATUS_COR[valor] || { cor: "#65758b", bg: "#EEF1F5" };
@@ -3097,7 +3158,49 @@ function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, a
   );
 }
 
-function AbaGerenciaVisaoGeral({ docs, clientes, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo }) {
+/* Atendimento pediu pra cancelar uma vistoria já agendada — só a Gerência decide se
+   apaga o compromisso de vez (libera o horário) ou mantém como estava. */
+function CardCancelamentosPendentes({ clientes = [], usuarios = [], updCliente, notify }) {
+  const pendentes = clientes.filter((c) => c.status === "Cancelamento solicitado");
+  const nomeVistoriador = (id) => usuarios.find((u) => String(u.id) === String(id))?.nome || "—";
+
+  const apagar = async (c) => {
+    try { await updCliente(c.id, { status: "Cancelado" }); notify("Vistoria cancelada ✓"); }
+    catch (e) { notify(`Erro: ${e.message}`); }
+  };
+  const manter = async (c) => {
+    try { await updCliente(c.id, { status: "Vistoria agendada" }); notify("Agendamento mantido"); }
+    catch (e) { notify(`Erro: ${e.message}`); }
+  };
+
+  if (pendentes.length === 0) return null;
+
+  return (
+    <Card icon={AlertTriangle} titulo={`Cancelamentos de vistoria pendentes (${pendentes.length})`}>
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        O Atendimento pediu para cancelar estas vistorias já agendadas. Decida se apaga o compromisso ou mantém como estava.
+      </p>
+      <div style={{ display: "grid", gap: 10 }}>
+        {pendentes.map((c) => (
+          <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>{c.nome}</div>
+              <div style={{ fontSize: 12.5, color: "#65758b" }}>
+                {c.empreendimento || c.endereco || "—"} · {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""} · técnico: {nomeVistoriador(c.vistoriadorId)}
+              </div>
+            </div>
+            <button className="btn-ghost" style={{ color: "#C62828", background: CINZA_CLARO }} onClick={() => apagar(c)}>
+              <Trash2 size={14} /> Apagar
+            </button>
+            <button className="btn-solid" onClick={() => manter(c)}>Manter agendamento</button>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo }) {
   const porVistoria = docs.reduce((acc, d) => { acc[d.vistoria] = (acc[d.vistoria] || 0) + 1; return acc; }, {});
   const porStatusProducao = docs.reduce((acc, d) => { acc[d.statusProducao] = (acc[d.statusProducao] || 0) + 1; return acc; }, {});
   const totalRegistrosDocs = docs.length;
@@ -3115,6 +3218,8 @@ function AbaGerenciaVisaoGeral({ docs, clientes, carregando, assinatura, salvarA
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando indicadores…</p>}
 
       <CardLaudosPendentes laudosPendentes={laudosPendentes} carregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} assinatura={assinatura} notify={notify} />
+
+      <CardCancelamentosPendentes clientes={clientes} usuarios={usuarios} updCliente={updCliente} notify={notify} />
 
       <CardIndicadoresGerais docs={docs} clientes={clientes} />
 
@@ -3399,7 +3504,7 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, clientes = [], carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, removerPreco, laudosPendentes, laudosPendentesCarregando, aprovarLaudo }) {
+function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, removerPreco, laudosPendentes, laudosPendentesCarregando, aprovarLaudo }) {
   if (sub === "parceiros") {
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} vales={vales} valesCarregando={valesCarregando} notify={notify} />;
   }
@@ -3407,7 +3512,7 @@ function AbaGerencia({ sub = "visao-geral", docs, clientes = [], carregando, ass
     return <AbaGerenciaFinanceiro docs={docs} clientes={clientes} precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} removerPreco={removerPreco} notify={notify} />;
   }
   return (
-    <AbaGerenciaVisaoGeral docs={docs} clientes={clientes} carregando={carregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
+    <AbaGerenciaVisaoGeral docs={docs} clientes={clientes} updCliente={updCliente} carregando={carregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
       usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={usuarioAtualId}
       avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
       laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} />
