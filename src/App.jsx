@@ -579,6 +579,12 @@ function AppInterno({ session, onLogout }) {
     try { await apiFetch(`/api/clientes/${id}`, { method: "PATCH", token, body: patch }); }
     catch (e) { notify(`Não foi possível atualizar cliente: ${e.message}`); }
   };
+  /* Exclusão definitiva — só Gerência tem essa opção na tela. */
+  const delCliente = async (id) => {
+    setClientes((atual) => atual.filter((c) => c.id !== id));
+    try { await apiFetch(`/api/clientes/${id}`, { method: "DELETE", token }); notify("Cliente excluído"); }
+    catch (e) { notify(`Não foi possível excluir: ${e.message}`); carregarClientes(); }
+  };
 
   /* ---- Qualidade: avaliações que os clientes deixaram (nota + comentário) ---- */
   const [avaliacoes, setAvaliacoes] = useState([]);
@@ -1004,7 +1010,7 @@ function AppInterno({ session, onLogout }) {
           <AbaDocumentacao docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={docsCarregando} notify={notify} />
         )}
         {abaTop === "clientes" && (
-          <AbaClientesComercial clientes={clientes} carregando={clientesCarregando} atualizarCliente={updCliente} notify={notify} docs={docs} perfil={perfil} />
+          <AbaClientesComercial clientes={clientes} carregando={clientesCarregando} atualizarCliente={updCliente} excluirCliente={delCliente} notify={notify} docs={docs} perfil={perfil} />
         )}
         {abaTop === "qualidade" && (
           <AbaQualidade sub={abaQualidade} setSub={setAbaQualidade} avaliacoes={avaliacoes} carregando={avaliacoesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
@@ -1273,12 +1279,14 @@ function KanbanClientes({ clientes, docs, onAbrir }) {
   );
 }
 
-function AbaClientesComercial({ clientes, carregando, atualizarCliente, notify, docs = [], perfil }) {
+function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirCliente, notify, docs = [], perfil }) {
   const [busca, setBusca] = useState("");
   const [editando, setEditando] = useState(null); // cópia do cliente em edição
   const [visualizacao, setVisualizacao] = useState("kanban"); // "kanban" | "tabela"
   const [cpfsRevelados, setCpfsRevelados] = useState({}); // { [clienteId]: true } — revelação é por sessão, não persiste
+  const [confirmandoExclusao, setConfirmandoExclusao] = useState(null); // cliente a excluir definitivamente
   const podeVerCpfDireto = perfil === "gerencia";
+  const podeExcluir = perfil === "gerencia";
   const alternarCpfRevelado = (id) => setCpfsRevelados((s) => ({ ...s, [id]: !s[id] }));
 
   const filtrados = clientes.filter((c) =>
@@ -1292,6 +1300,12 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, notify, 
       setEditando(null);
       notify("Cliente atualizado ✓");
     } catch (e) { notify(`Erro: ${e.message}`); }
+  };
+  const confirmarExclusao = async () => {
+    const c = confirmandoExclusao;
+    setConfirmandoExclusao(null);
+    if (editando?.id === c.id) setEditando(null);
+    try { await excluirCliente(c.id); } catch (e) { notify(`Erro: ${e.message}`); }
   };
 
   const contagemPorEtapa = {};
@@ -1418,13 +1432,25 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, notify, 
               </div>
             </Grid>
             <Area label="Observações" value={editando.observacoes} onChange={(v) => setEditando({ ...editando, observacoes: v })} rows={2} />
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setEditando(null)}>Cancelar</button>
-              <button className="btn-solid" onClick={salvar}><Save size={15} /> Salvar</button>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
+              {podeExcluir ? (
+                <button className="btn-ghost" style={{ color: "#C62828" }} onClick={() => setConfirmandoExclusao(editando)}>
+                  <Trash2 size={15} /> Excluir cliente
+                </button>
+              ) : <span />}
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setEditando(null)}>Cancelar</button>
+                <button className="btn-solid" onClick={salvar}><Save size={15} /> Salvar</button>
+              </div>
             </div>
           </div>
         </div>
       )}
+
+      <ConfirmModal aberto={!!confirmandoExclusao}
+        titulo="Excluir cliente"
+        mensagem={`Tem certeza que deseja excluir o cadastro de "${confirmandoExclusao?.nome || ""}"? Essa ação não pode ser desfeita.`}
+        onConfirm={confirmarExclusao} onCancel={() => setConfirmandoExclusao(null)} />
     </div>
   );
 }
