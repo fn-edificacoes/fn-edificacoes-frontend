@@ -70,6 +70,20 @@ function etapaAtualCliente(cliente, docs = []) {
   if (doc) return doc.statusCliente || "Agendado";
   return cliente.status || "Em análise";
 }
+/* As 4 etapas operacionais do fluxo de vistoria, na ordem em que acontecem. Diferente de
+   etapaAtualCliente (que detalha também o pós-vistoria: laudo, e-mail), aqui o objetivo é
+   só responder "quantas vistorias estão em cada fase do trabalho de campo". */
+const ETAPAS_VISTORIA = ["Solicitação de vistoria", "Vistoria agendada", "Em vistoria", "Vistoriado"];
+function etapaVistoriaCliente(cliente, docs = []) {
+  const cpfLimpo = (cliente.cpf || "").replace(/\D/g, "");
+  const doc = cpfLimpo ? docs.find((d) => (d.cpf || "").replace(/\D/g, "") === cpfLimpo) : null;
+  // Assim que existe um doc, a vistoria já foi finalizada pelo técnico e virou laudo.
+  if (doc) return "Vistoriado";
+  if (cliente.status === "Em vistoria") return "Em vistoria";
+  if (cliente.status === "Vistoria agendada") return "Vistoria agendada";
+  if (cliente.status === "Cancelado" || cliente.status === "Cancelamento solicitado") return null;
+  return "Solicitação de vistoria";
+}
 /* Converte um registro de preço de vistoria por empreendimento vindo do banco (snake_case) */
 function mapPrecoDaApi(p) {
   return { id: p.id, empreendimento: p.empreendimento || "", precoVistoria: Number(p.preco_vistoria) || 0, atualizadoEm: p.atualizado_em || null };
@@ -796,7 +810,12 @@ function AppInterno({ session, onLogout }) {
       },
     }));
     setClienteAtualId(cli.id);
-    if (!cli.atendido) updCliente(cli.id, { atendido: true });
+    // "Iniciar vistoria" (agenda do técnico) marca o cliente como em campo; abrir o cadastro
+    // por outros caminhos só marca como atendido, sem mexer na etapa do fluxo.
+    const patch = {};
+    if (!cli.atendido) patch.atendido = true;
+    if (irParaItens && cli.status === "Vistoria agendada") patch.status = "Em vistoria";
+    if (Object.keys(patch).length > 0) updCliente(cli.id, patch);
     if (irParaItens) { setAbaTop("laudos"); setAba("itens"); }
     notify("Dados do cliente aplicados ao laudo ✓");
   };
@@ -1235,7 +1254,7 @@ function CalendarioVistoriador({ agenda = [], carregando, clientes = [], preench
 /* ================= Aba: Clientes (perfil Comercial) ================= */
 /* Ordem das colunas do Kanban — mesmas etapas do status dinâmico (etapaAtualCliente),
    só numa ordem lógica de pipeline em vez da ordem que aparecem nos dados. */
-const ETAPA_ORDEM = ["Em análise", "Agendamento aprovado", "Vistoria agendada", "Agendado", "Laudo em análise", "Laudo enviado por e-mail", "Cancelado"];
+const ETAPA_ORDEM = ["Em análise", "Agendamento aprovado", "Vistoria agendada", "Em vistoria", "Agendado", "Laudo em análise", "Laudo enviado por e-mail", "Cancelado"];
 
 function KanbanClientes({ clientes, docs, onAbrir }) {
   const porEtapa = {};
@@ -1503,7 +1522,7 @@ function LinhaDoTempo({ doc, avaliacao }) {
    clientes, status do bloco ART Documentações, e média das avaliações dos clientes. */
 function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [] }) {
   const porEtapa = {};
-  clientes.forEach((c) => { const et = etapaAtualCliente(c, docs); porEtapa[et] = (porEtapa[et] || 0) + 1; });
+  clientes.forEach((c) => { const et = etapaVistoriaCliente(c, docs); if (et) porEtapa[et] = (porEtapa[et] || 0) + 1; });
 
   const porStatusProducao = {};
   docs.forEach((d) => { porStatusProducao[d.statusProducao] = (porStatusProducao[d.statusProducao] || 0) + 1; });
@@ -1517,17 +1536,16 @@ function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [] })
         <div>
           <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>Clientes por etapa do fluxo</div>
           <div style={{ display: "grid", gap: 6 }}>
-            {Object.keys(porEtapa).length === 0 && <span style={{ fontSize: 13, color: "#8593a8" }}>Nenhum cliente ainda.</span>}
-            {Object.entries(porEtapa).map(([etapa, qtd]) => (
+            {ETAPAS_VISTORIA.map((etapa) => (
               <div key={etapa} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <Selo valor={etapa} />
-                <strong style={{ fontSize: 13 }}>{qtd}</strong>
+                <strong style={{ fontSize: 13 }}>{porEtapa[etapa] || 0}</strong>
               </div>
             ))}
           </div>
         </div>
         <div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>ART Documentações por status</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>ART/TRT Documentações por status</div>
           <div style={{ display: "grid", gap: 6 }}>
             {STATUS_PRODUCAO_OPCOES.map((s) => (
               <div key={s} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1893,7 +1911,7 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], mesRef, setM
               {vistoriadores.length > 0 && (
                 <div style={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
                   {vistoriadores.map((v) => {
-                    const presente = doDia.some((c) => c.status === "Vistoria agendada" && String(c.vistoriadorId) === String(v.id));
+                    const presente = doDia.some((c) => (c.status === "Vistoria agendada" || c.status === "Em vistoria") && String(c.vistoriadorId) === String(v.id));
                     return <span key={v.id} title={`${v.nome}${presente ? " — tem vistoria" : " — livre"}`} style={{ width: 7, height: 7, borderRadius: 2, background: presente ? corDoTecnico(v.id) : "#E3E8EF", flexShrink: 0 }} />;
                   })}
                 </div>
@@ -2204,9 +2222,10 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
   const termo = busca.trim().toLowerCase();
   const combina = (c) => !termo || `${c.nome} ${c.empreendimento}`.toLowerCase().includes(termo);
 
+  const emAgenda = (c) => c.status === "Vistoria agendada" || c.status === "Em vistoria";
   const pendentes = clientes.filter((c) => c.status === "Agendamento aprovado" && combina(c));
-  const agendadas = clientes.filter((c) => c.status === "Vistoria agendada" && !temDoc(c) && combina(c));
-  const realizadas = clientes.filter((c) => c.status === "Vistoria agendada" && temDoc(c) && combina(c));
+  const agendadas = clientes.filter((c) => emAgenda(c) && !temDoc(c) && combina(c));
+  const realizadas = clientes.filter((c) => emAgenda(c) && temDoc(c) && combina(c));
 
   const setCampo = (id, campo, valor) => setForm((f) => ({ ...f, [id]: { ...f[id], [campo]: valor } }));
   const valorCampo = (c, campo, padrao) => form[c.id]?.[campo] ?? padrao;
@@ -4090,6 +4109,9 @@ STATUS_COR["Vistoria agendada"] = { cor: "#6A3FB2", bg: "#F1EBFB" };
 STATUS_COR["Laudo em análise"] = { cor: "#B26A00", bg: "#FFF4E0" };
 STATUS_COR["Laudo enviado por e-mail"] = { cor: "#2E7D32", bg: "#E6F4EA" };
 STATUS_COR["Cancelado"] = { cor: "#C62828", bg: "#FCEAEA" };
+/* Etapas operacionais da vistoria (ETAPAS_VISTORIA), usadas nos indicadores do Agendamento. */
+STATUS_COR["Solicitação de vistoria"] = { cor: "#65758b", bg: "#EEF1F5" };
+STATUS_COR["Vistoriado"] = { cor: "#2E7D32", bg: "#E6F4EA" };
 
 function safeParseArray(v) {
   if (Array.isArray(v)) return v;
