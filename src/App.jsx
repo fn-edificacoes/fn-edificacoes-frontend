@@ -70,6 +70,20 @@ function etapaAtualCliente(cliente, docs = []) {
   if (doc) return doc.statusCliente || "Agendado";
   return cliente.status || "Em análise";
 }
+/* As 4 etapas operacionais do fluxo de vistoria, na ordem em que acontecem. Diferente de
+   etapaAtualCliente (que detalha também o pós-vistoria: laudo, e-mail), aqui o objetivo é
+   só responder "quantas vistorias estão em cada fase do trabalho de campo". */
+const ETAPAS_VISTORIA = ["Solicitação de vistoria", "Vistoria agendada", "Em vistoria", "Vistoriado"];
+function etapaVistoriaCliente(cliente, docs = []) {
+  const cpfLimpo = (cliente.cpf || "").replace(/\D/g, "");
+  const doc = cpfLimpo ? docs.find((d) => (d.cpf || "").replace(/\D/g, "") === cpfLimpo) : null;
+  // Assim que existe um doc, a vistoria já foi finalizada pelo técnico e virou laudo.
+  if (doc) return "Vistoriado";
+  if (cliente.status === "Em vistoria") return "Em vistoria";
+  if (cliente.status === "Vistoria agendada") return "Vistoria agendada";
+  if (cliente.status === "Cancelado" || cliente.status === "Cancelamento solicitado") return null;
+  return "Solicitação de vistoria";
+}
 /* Converte um registro de preço de vistoria por empreendimento vindo do banco (snake_case) */
 function mapPrecoDaApi(p) {
   return { id: p.id, empreendimento: p.empreendimento || "", precoVistoria: Number(p.preco_vistoria) || 0, atualizadoEm: p.atualizado_em || null };
@@ -579,6 +593,12 @@ function AppInterno({ session, onLogout }) {
     try { await apiFetch(`/api/clientes/${id}`, { method: "PATCH", token, body: patch }); }
     catch (e) { notify(`Não foi possível atualizar cliente: ${e.message}`); }
   };
+  /* Exclusão definitiva — só Gerência tem essa opção na tela. */
+  const delCliente = async (id) => {
+    setClientes((atual) => atual.filter((c) => c.id !== id));
+    try { await apiFetch(`/api/clientes/${id}`, { method: "DELETE", token }); notify("Cliente excluído"); }
+    catch (e) { notify(`Não foi possível excluir: ${e.message}`); carregarClientes(); }
+  };
 
   /* ---- Qualidade: avaliações que os clientes deixaram (nota + comentário) ---- */
   const [avaliacoes, setAvaliacoes] = useState([]);
@@ -597,6 +617,22 @@ function AppInterno({ session, onLogout }) {
     setAvaliacoes((atual) => atual.map((a) => (a.id === id ? { ...a, aprovado } : a)));
     try { await apiFetch(`/api/avaliacoes/${id}/aprovar`, { method: "PATCH", token, body: { aprovado } }); }
     catch (e) { notify(`Não foi possível atualizar: ${e.message}`); carregarAvaliacoes(); }
+  };
+  /* Atendimento só pede a exclusão; quem decide se apaga de vez é a Gerência. */
+  const solicitarExclusaoAvaliacao = async (id) => {
+    setAvaliacoes((atual) => atual.map((a) => (a.id === id ? { ...a, exclusao_solicitada: true } : a)));
+    try { await apiFetch(`/api/avaliacoes/${id}/solicitar-exclusao`, { method: "PATCH", token }); notify("Exclusão solicitada à gerência"); }
+    catch (e) { notify(`Não foi possível solicitar: ${e.message}`); carregarAvaliacoes(); }
+  };
+  const manterAvaliacao = async (id) => {
+    setAvaliacoes((atual) => atual.map((a) => (a.id === id ? { ...a, exclusao_solicitada: false } : a)));
+    try { await apiFetch(`/api/avaliacoes/${id}/cancelar-exclusao`, { method: "PATCH", token }); notify("Avaliação mantida"); }
+    catch (e) { notify(`Não foi possível atualizar: ${e.message}`); carregarAvaliacoes(); }
+  };
+  const excluirAvaliacao = async (id) => {
+    setAvaliacoes((atual) => atual.filter((a) => a.id !== id));
+    try { await apiFetch(`/api/avaliacoes/${id}`, { method: "DELETE", token }); notify("Avaliação excluída"); }
+    catch (e) { notify(`Não foi possível excluir: ${e.message}`); carregarAvaliacoes(); }
   };
 
   /* ---- Parceiros/Afiliados: homologação (somente perfil Gerência) ---- */
@@ -774,7 +810,12 @@ function AppInterno({ session, onLogout }) {
       },
     }));
     setClienteAtualId(cli.id);
-    if (!cli.atendido) updCliente(cli.id, { atendido: true });
+    // "Iniciar vistoria" (agenda do técnico) marca o cliente como em campo; abrir o cadastro
+    // por outros caminhos só marca como atendido, sem mexer na etapa do fluxo.
+    const patch = {};
+    if (!cli.atendido) patch.atendido = true;
+    if (irParaItens && cli.status === "Vistoria agendada") patch.status = "Em vistoria";
+    if (Object.keys(patch).length > 0) updCliente(cli.id, patch);
     if (irParaItens) { setAbaTop("laudos"); setAba("itens"); }
     notify("Dados do cliente aplicados ao laudo ✓");
   };
@@ -988,16 +1029,17 @@ function AppInterno({ session, onLogout }) {
           <AbaDocumentacao docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={docsCarregando} notify={notify} />
         )}
         {abaTop === "clientes" && (
-          <AbaClientesComercial clientes={clientes} carregando={clientesCarregando} atualizarCliente={updCliente} notify={notify} docs={docs} perfil={perfil} />
+          <AbaClientesComercial clientes={clientes} carregando={clientesCarregando} atualizarCliente={updCliente} excluirCliente={delCliente} notify={notify} docs={docs} perfil={perfil} />
         )}
         {abaTop === "qualidade" && (
           <AbaQualidade sub={abaQualidade} setSub={setAbaQualidade} avaliacoes={avaliacoes} carregando={avaliacoesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
+            solicitarExclusaoAvaliacao={solicitarExclusaoAvaliacao} manterAvaliacao={manterAvaliacao} excluirAvaliacao={excluirAvaliacao}
             clientes={clientes} clientesCarregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} preencherComCliente={preencherComCliente}
             agendarAgoraId={agendarAgoraId} setAgendarAgoraId={setAgendarAgoraId}
-            podeAgir={perfil === "atendimento" || perfil === "gerencia"} />
+            podeAgir={perfil === "atendimento" || perfil === "gerencia"} ehGerencia={perfil === "gerencia"} />
         )}
         {abaTop === "gerencia" && (
-          <AbaGerencia sub={abaGerencia} docs={docs} clientes={clientes} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
+          <AbaGerencia sub={abaGerencia} docs={docs} clientes={clientes} updCliente={updCliente} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
             usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={session.usuario.id}
             avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
             parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
@@ -1212,7 +1254,7 @@ function CalendarioVistoriador({ agenda = [], carregando, clientes = [], preench
 /* ================= Aba: Clientes (perfil Comercial) ================= */
 /* Ordem das colunas do Kanban — mesmas etapas do status dinâmico (etapaAtualCliente),
    só numa ordem lógica de pipeline em vez da ordem que aparecem nos dados. */
-const ETAPA_ORDEM = ["Em análise", "Agendamento aprovado", "Vistoria agendada", "Agendado", "Laudo em análise", "Laudo enviado por e-mail", "Cancelado"];
+const ETAPA_ORDEM = ["Em análise", "Agendamento aprovado", "Vistoria agendada", "Em vistoria", "Agendado", "Laudo em análise", "Laudo enviado por e-mail", "Cancelado"];
 
 function KanbanClientes({ clientes, docs, onAbrir }) {
   const porEtapa = {};
@@ -1256,12 +1298,14 @@ function KanbanClientes({ clientes, docs, onAbrir }) {
   );
 }
 
-function AbaClientesComercial({ clientes, carregando, atualizarCliente, notify, docs = [], perfil }) {
+function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirCliente, notify, docs = [], perfil }) {
   const [busca, setBusca] = useState("");
   const [editando, setEditando] = useState(null); // cópia do cliente em edição
   const [visualizacao, setVisualizacao] = useState("kanban"); // "kanban" | "tabela"
   const [cpfsRevelados, setCpfsRevelados] = useState({}); // { [clienteId]: true } — revelação é por sessão, não persiste
+  const [confirmandoExclusao, setConfirmandoExclusao] = useState(null); // cliente a excluir definitivamente
   const podeVerCpfDireto = perfil === "gerencia";
+  const podeExcluir = perfil === "gerencia";
   const alternarCpfRevelado = (id) => setCpfsRevelados((s) => ({ ...s, [id]: !s[id] }));
 
   const filtrados = clientes.filter((c) =>
@@ -1275,6 +1319,12 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, notify, 
       setEditando(null);
       notify("Cliente atualizado ✓");
     } catch (e) { notify(`Erro: ${e.message}`); }
+  };
+  const confirmarExclusao = async () => {
+    const c = confirmandoExclusao;
+    setConfirmandoExclusao(null);
+    if (editando?.id === c.id) setEditando(null);
+    try { await excluirCliente(c.id); } catch (e) { notify(`Erro: ${e.message}`); }
   };
 
   const contagemPorEtapa = {};
@@ -1401,13 +1451,25 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, notify, 
               </div>
             </Grid>
             <Area label="Observações" value={editando.observacoes} onChange={(v) => setEditando({ ...editando, observacoes: v })} rows={2} />
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setEditando(null)}>Cancelar</button>
-              <button className="btn-solid" onClick={salvar}><Save size={15} /> Salvar</button>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
+              {podeExcluir ? (
+                <button className="btn-ghost" style={{ color: "#C62828" }} onClick={() => setConfirmandoExclusao(editando)}>
+                  <Trash2 size={15} /> Excluir cliente
+                </button>
+              ) : <span />}
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setEditando(null)}>Cancelar</button>
+                <button className="btn-solid" onClick={salvar}><Save size={15} /> Salvar</button>
+              </div>
             </div>
           </div>
         </div>
       )}
+
+      <ConfirmModal aberto={!!confirmandoExclusao}
+        titulo="Excluir cliente"
+        mensagem={`Tem certeza que deseja excluir o cadastro de "${confirmandoExclusao?.nome || ""}"? Essa ação não pode ser desfeita.`}
+        onConfirm={confirmarExclusao} onCancel={() => setConfirmandoExclusao(null)} />
     </div>
   );
 }
@@ -1460,7 +1522,7 @@ function LinhaDoTempo({ doc, avaliacao }) {
    clientes, status do bloco ART Documentações, e média das avaliações dos clientes. */
 function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [] }) {
   const porEtapa = {};
-  clientes.forEach((c) => { const et = etapaAtualCliente(c, docs); porEtapa[et] = (porEtapa[et] || 0) + 1; });
+  clientes.forEach((c) => { const et = etapaVistoriaCliente(c, docs); if (et) porEtapa[et] = (porEtapa[et] || 0) + 1; });
 
   const porStatusProducao = {};
   docs.forEach((d) => { porStatusProducao[d.statusProducao] = (porStatusProducao[d.statusProducao] || 0) + 1; });
@@ -1474,17 +1536,16 @@ function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [] })
         <div>
           <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>Clientes por etapa do fluxo</div>
           <div style={{ display: "grid", gap: 6 }}>
-            {Object.keys(porEtapa).length === 0 && <span style={{ fontSize: 13, color: "#8593a8" }}>Nenhum cliente ainda.</span>}
-            {Object.entries(porEtapa).map(([etapa, qtd]) => (
+            {ETAPAS_VISTORIA.map((etapa) => (
               <div key={etapa} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <Selo valor={etapa} />
-                <strong style={{ fontSize: 13 }}>{qtd}</strong>
+                <strong style={{ fontSize: 13 }}>{porEtapa[etapa] || 0}</strong>
               </div>
             ))}
           </div>
         </div>
         <div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>ART Documentações por status</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>ART/TRT Documentações por status</div>
           <div style={{ display: "grid", gap: 6 }}>
             {STATUS_PRODUCAO_OPCOES.map((s) => (
               <div key={s} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1509,10 +1570,17 @@ function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [] })
   );
 }
 
-function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, agendarAgoraId, setAgendarAgoraId, podeAgir = false }) {
+function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, agendarAgoraId, setAgendarAgoraId, podeAgir = false, ehGerencia = false }) {
+  const [diaParaAbrir, setDiaParaAbrir] = useState(null); // data (ISO) que o calendário da Análise deve abrir já selecionada
   const irParaAgendamento = (clienteId) => {
     setAgendarAgoraId(clienteId);
     setSub("vistoria");
+  };
+  // Confirmou a vistoria na sub-aba Vistoria -> volta pra Análise já com o calendário
+  // no mês certo e o painel do dia aberto, sem precisar navegar manualmente.
+  const aoConfirmarVistoria = (dataISO) => {
+    setDiaParaAbrir(dataISO);
+    setSub("analise");
   };
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -1522,14 +1590,15 @@ function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, u
           <Info size={14} /> Modo leitura — aprovar agendamento, encaminhar técnico e aprovar feedback agora é exclusivo do perfil Atendimento.
         </div>
       )}
-      {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} abrirAutomaticoId={agendarAgoraId} aoAbrirAutomatico={() => setAgendarAgoraId(null)} />}
-      {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao} podeAgir={podeAgir} />}
-      {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} onAgendarAgora={irParaAgendamento} />}
+      {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} abrirAutomaticoId={agendarAgoraId} aoAbrirAutomatico={() => setAgendarAgoraId(null)} aoConfirmar={aoConfirmarVistoria} />}
+      {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
+        solicitarExclusaoAvaliacao={solicitarExclusaoAvaliacao} manterAvaliacao={manterAvaliacao} excluirAvaliacao={excluirAvaliacao} podeAgir={podeAgir} ehGerencia={ehGerencia} />}
+      {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} onAgendarAgora={irParaAgendamento} diaParaAbrir={diaParaAbrir} aoAbrirDia={() => setDiaParaAbrir(null)} />}
     </div>
   );
 }
 
-function AbaQualidadeFeedback({ avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, podeAgir = false }) {
+function AbaQualidadeFeedback({ avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, podeAgir = false, ehGerencia = false }) {
   const [busca, setBusca] = useState("");
   const total = avaliacoes.length;
   const media = total ? (avaliacoes.reduce((s, a) => s + a.nota, 0) / total) : 0;
@@ -1579,21 +1648,51 @@ function AbaQualidadeFeedback({ avaliacoes, carregando, docs, docsCarregando, ap
                   </div>
                   {a.empreendimento && <div style={{ fontSize: 12, color: "#65758b", marginBottom: 6 }}>{a.empreendimento}</div>}
                   {a.comentario && <div style={{ fontSize: 13.5, color: "#334", background: CINZA_CLARO, borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>{a.comentario}</div>}
-                  {podeAgir && aprovarAvaliacao ? (
-                    a.aprovado ? (
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-                        <span style={{ fontSize: 12, color: "#2E7D32", fontWeight: 600 }}>✓ Exibida na página inicial</span>
-                        <button className="btn-ghost" style={{ color: "#C62828", padding: "4px 10px" }} onClick={() => aprovarAvaliacao(a.id, false)}>Remover da vitrine</button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    {podeAgir && aprovarAvaliacao ? (
+                      a.aprovado ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                          <span style={{ fontSize: 12, color: "#2E7D32", fontWeight: 600 }}>✓ Exibida na página inicial</span>
+                          <button className="btn-ghost" style={{ color: "#C62828", padding: "4px 10px" }} onClick={() => aprovarAvaliacao(a.id, false)}>Remover da vitrine</button>
+                        </div>
+                      ) : (
+                        <button className="btn-ghost" style={{ color: AZUL_MEDIO, padding: "4px 10px", marginTop: 4 }} onClick={() => aprovarAvaliacao(a.id, true)}>
+                          <Check size={14} /> Aprovar para a página inicial
+                        </button>
+                      )
+                    ) : (
+                      <span style={{ fontSize: 12, color: a.aprovado ? "#2E7D32" : "#8593a8", fontWeight: a.aprovado ? 600 : 400 }}>
+                        {a.aprovado ? "✓ Exibida na página inicial" : "Somente leitura — o Atendimento decide isso."}
+                      </span>
+                    )}
+                  </div>
+
+                  {a.exclusao_solicitada ? (
+                    ehGerencia ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${CINZA_BORDA}`, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 12, color: "#B26A00", fontWeight: 600 }}><AlertTriangle size={12} style={{ verticalAlign: "-1px", marginRight: 3 }} />Exclusão solicitada pelo Atendimento</span>
+                        <button className="btn-ghost" style={{ color: "#C62828", padding: "4px 10px" }} onClick={() => excluirAvaliacao(a.id)}>Apagar avaliação</button>
+                        <button className="btn-ghost" style={{ color: AZUL_MEDIO, padding: "4px 10px" }} onClick={() => manterAvaliacao(a.id)}>Manter avaliação</button>
                       </div>
                     ) : (
-                      <button className="btn-ghost" style={{ color: AZUL_MEDIO, padding: "4px 10px", marginTop: 4 }} onClick={() => aprovarAvaliacao(a.id, true)}>
-                        <Check size={14} /> Aprovar para a página inicial
-                      </button>
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${CINZA_BORDA}` }}>
+                        <span style={{ fontSize: 12, color: "#B26A00", fontWeight: 600 }}><AlertTriangle size={12} style={{ verticalAlign: "-1px", marginRight: 3 }} />Exclusão solicitada — aguardando decisão da Gerência</span>
+                      </div>
                     )
                   ) : (
-                    <span style={{ fontSize: 12, color: a.aprovado ? "#2E7D32" : "#8593a8", fontWeight: a.aprovado ? 600 : 400 }}>
-                      {a.aprovado ? "✓ Exibida na página inicial" : "Somente leitura — o Atendimento decide isso."}
-                    </span>
+                    podeAgir && (
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${CINZA_BORDA}`, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {ehGerencia ? (
+                          <button className="btn-ghost" style={{ color: "#C62828", padding: "4px 10px" }} onClick={() => excluirAvaliacao(a.id)}>
+                            <Trash2 size={13} /> Apagar avaliação
+                          </button>
+                        ) : (
+                          <button className="btn-ghost" style={{ color: "#C62828", padding: "4px 10px" }} onClick={() => solicitarExclusaoAvaliacao(a.id)}>
+                            <Trash2 size={13} /> Solicitar exclusão
+                          </button>
+                        )}
+                      </div>
+                    )
                   )}
                 </div>
               ))}
@@ -1738,10 +1837,12 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], mesRef, setM
   const hojeISO = paraChaveISO(new Date());
   const gridRef = useRef(null);
 
+  // Mostra todo cliente já cadastrado com data desejada (não só quem já tem técnico
+  // confirmado) — "Cancelado" fica de fora por não ser mais um compromisso ativo.
   const agendadosPorDia = {};
   clientes.forEach((c) => {
-    if (c.status !== "Vistoria agendada" || !c.dataDesejada || !c.vistoriadorId) return;
-    if (filtroTecnicos && filtroTecnicos.size > 0 && !filtroTecnicos.has(c.vistoriadorId)) return;
+    if (!c.dataDesejada || c.status === "Cancelado") return;
+    if (filtroTecnicos && filtroTecnicos.size > 0 && !filtroTecnicos.has(String(c.vistoriadorId))) return;
     (agendadosPorDia[c.dataDesejada] = agendadosPorDia[c.dataDesejada] || []).push(c);
   });
 
@@ -1754,10 +1855,10 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], mesRef, setM
       {vistoriadores.length > 0 && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
           {vistoriadores.map((v) => {
-            const ativo = !filtroTecnicos || filtroTecnicos.size === 0 || filtroTecnicos.has(v.id);
+            const ativo = !filtroTecnicos || filtroTecnicos.size === 0 || filtroTecnicos.has(String(v.id));
             const cor = corDoTecnico(v.id);
             return (
-              <button key={v.id} className="chip-tecnico" onClick={() => aoTrocarFiltro(v.id)}
+              <button key={v.id} className="chip-tecnico" onClick={() => aoTrocarFiltro(String(v.id))}
                 aria-pressed={ativo}
                 style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px 5px 5px", borderRadius: 20, border: `1.5px solid ${cor}`, background: ativo ? cor : "#fff", color: ativo ? "#fff" : cor, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
                 <span style={{ width: 18, height: 18, borderRadius: "50%", background: ativo ? "rgba(255,255,255,.25)" : cor, color: "#fff", display: "grid", placeItems: "center", fontSize: 9 }}>{siglaDoNome(v.nome)}</span>
@@ -1810,17 +1911,22 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], mesRef, setM
               {vistoriadores.length > 0 && (
                 <div style={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
                   {vistoriadores.map((v) => {
-                    const presente = doDia.some((c) => c.vistoriadorId === v.id);
+                    const presente = doDia.some((c) => (c.status === "Vistoria agendada" || c.status === "Em vistoria") && String(c.vistoriadorId) === String(v.id));
                     return <span key={v.id} title={`${v.nome}${presente ? " — tem vistoria" : " — livre"}`} style={{ width: 7, height: 7, borderRadius: 2, background: presente ? corDoTecnico(v.id) : "#E3E8EF", flexShrink: 0 }} />;
                   })}
                 </div>
               )}
               <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                {doDia.slice(0, 3).map((c) => (
-                  <div key={c.id} style={{ background: corDoTecnico(c.vistoriadorId), color: "#fff", borderRadius: 4, padding: "1px 4px", fontSize: 9, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {siglaDoNome(vistoriadores.find((v) => v.id === c.vistoriadorId)?.nome)} {c.horarioDesejado || ""} {(c.nome || "").split(" ")[0]}
-                  </div>
-                ))}
+                {doDia.slice(0, 3).map((c) => {
+                  const tecnico = vistoriadores.find((v) => String(v.id) === String(c.vistoriadorId));
+                  const cor = tecnico ? corDoTecnico(tecnico.id) : "#8593a8";
+                  const sigla = tecnico ? siglaDoNome(tecnico.nome) : "—";
+                  return (
+                    <div key={c.id} style={{ background: cor, color: "#fff", borderRadius: 4, padding: "1px 4px", fontSize: 9, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {sigla} {c.horarioDesejado || ""} {(c.nome || "").split(" ")[0]}
+                    </div>
+                  );
+                })}
                 {doDia.length > 3 && <div style={{ fontSize: 9, color: AZUL_MARINHO, fontWeight: 700 }}>+{doDia.length - 3}</div>}
               </div>
             </button>
@@ -1832,10 +1938,12 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], mesRef, setM
 }
 
 /* Painel lateral: agenda completa do dia clicado + atalho pra agendar uma nova vistoria. */
-function PainelDiaAgendamento({ diaISO, clientes = [], vistoriadores = [], onFechar, onAgendarNovo, podeAgir }) {
+function PainelDiaAgendamento({ diaISO, clientes = [], vistoriadores = [], onFechar, onAgendarNovo, podeAgir, updCliente, notify }) {
   const dataFmt = new Date(`${diaISO}T00:00:00`).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
-  const agenda = clientes.filter((c) => c.status === "Vistoria agendada").sort((a, b) => (a.horarioDesejado || "").localeCompare(b.horarioDesejado || ""));
-  const nomeVistoriador = (id) => vistoriadores.find((v) => v.id === id)?.nome || "—";
+  // Mostra todo cliente já cadastrado com vistoria desejada nesse dia, não só os que já
+  // têm técnico confirmado — "Cancelado" fica de fora por não ser mais um compromisso ativo.
+  const agenda = clientes.filter((c) => c.status !== "Cancelado").sort((a, b) => (a.horarioDesejado || "").localeCompare(b.horarioDesejado || ""));
+  const nomeVistoriador = (id) => vistoriadores.find((v) => String(v.id) === String(id))?.nome || null;
 
   return (
     <div className="no-print" style={{ ...overlay, justifyItems: "end" }} onClick={onFechar}>
@@ -1857,19 +1965,32 @@ function PainelDiaAgendamento({ diaISO, clientes = [], vistoriadores = [], onFec
         ) : (
           <>
             <div style={{ display: "grid", gap: 10, marginBottom: 16 }}>
-              {agenda.map((c) => (
-                <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
-                    <span style={{ background: corDoTecnico(c.vistoriadorId), color: "#fff", borderRadius: 6, padding: "2px 7px", fontSize: 11, fontWeight: 800 }}>{siglaDoNome(nomeVistoriador(c.vistoriadorId))}</span>
-                    <strong style={{ fontSize: 14 }}>{c.horarioDesejado || "sem horário"}</strong>
+              {agenda.map((c) => {
+                const nomeTecnico = nomeVistoriador(c.vistoriadorId);
+                return (
+                  <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                      <span style={{ background: nomeTecnico ? corDoTecnico(c.vistoriadorId) : "#EEF1F5", color: nomeTecnico ? "#fff" : "#65758b", borderRadius: 6, padding: "2px 7px", fontSize: 11, fontWeight: 800 }}>
+                        {nomeTecnico ? siglaDoNome(nomeTecnico) : "—"}
+                      </span>
+                      <strong style={{ fontSize: 14 }}>{c.horarioDesejado || "sem horário"}</strong>
+                    </div>
+                    <div style={{ fontSize: 13.5, fontWeight: 700 }}>{c.nome}</div>
+                    <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.endereco || c.empreendimento || "—"}</div>
+                    <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.servico}</div>
+                    <div style={{ fontSize: 12, color: "#65758b" }}>Técnico: {nomeTecnico || "ainda não atribuído"}</div>
+                    <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <Selo valor={c.status} />
+                      {podeAgir && c.status === "Vistoria agendada" && (
+                        <button className="btn-ghost" style={{ color: "#C62828", padding: "3px 8px", fontSize: 12 }}
+                          onClick={async () => { await updCliente(c.id, { status: "Cancelamento solicitado" }); notify("Cancelamento solicitado à gerência"); }}>
+                          Cancelar vistoria
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div style={{ fontSize: 13.5, fontWeight: 700 }}>{c.nome}</div>
-                  <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.endereco || c.empreendimento || "—"}</div>
-                  <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.servico}</div>
-                  <div style={{ fontSize: 12, color: "#65758b" }}>Técnico: {nomeVistoriador(c.vistoriadorId)}</div>
-                  <div style={{ marginTop: 6 }}><Selo valor={c.status} /></div>
-                </div>
-              ))}
+                );
+              })}
             </div>
             {podeAgir && (
               <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }} onClick={onAgendarNovo}>
@@ -1886,27 +2007,28 @@ function PainelDiaAgendamento({ diaISO, clientes = [], vistoriadores = [], onFec
 /* Formulário "Agendar vistoria": escolhe um cliente já aprovado + técnico + data/hora.
    Bloqueia o envio se o técnico já tiver outra vistoria confirmada no mesmo horário. */
 function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesAprovados = [], todosClientes = [], onFechar, onConfirmar }) {
+  const listaClientes = diaInicial ? clientesAprovados.filter((c) => c.dataDesejada === diaInicial) : clientesAprovados;
   const [clienteId, setClienteId] = useState("");
   const [vistoriadorId, setVistoriadorId] = useState("");
-  const [data, setData] = useState(diaInicial || "");
-  const [hora, setHora] = useState("");
   const [erro, setErro] = useState("");
   const [salvando, setSalvando] = useState(false);
 
-  const clienteEscolhido = clientesAprovados.find((c) => c.id === clienteId);
+  const clienteEscolhido = listaClientes.find((c) => c.id === clienteId);
+  const data = clienteEscolhido?.dataDesejada || "";
+  const hora = clienteEscolhido?.horarioDesejado || "";
 
   const confirmar = async () => {
     setErro("");
     if (!clienteId) { setErro("Escolha o cliente aprovado."); return; }
     if (!vistoriadorId) { setErro("Escolha o técnico responsável."); return; }
-    if (!data || !hora) { setErro("Preencha data e horário."); return; }
+    if (!data || !hora) { setErro("Este cliente não definiu data/horário no cadastro."); return; }
     const conflito = todosClientes.find((c) =>
       c.id !== clienteId && c.status === "Vistoria agendada" &&
       c.vistoriadorId === vistoriadorId && c.dataDesejada === data && c.horarioDesejado === hora
     );
     if (conflito) {
-      const nomeTecnico = vistoriadores.find((v) => v.id === vistoriadorId)?.nome || "O técnico";
-      setErro(`${nomeTecnico} já tem vistoria às ${hora}. Escolha outro horário ou outro técnico.`);
+      const nomeTecnico = vistoriadores.find((v) => String(v.id) === String(vistoriadorId))?.nome || "O técnico";
+      setErro(`${nomeTecnico} já tem vistoria às ${hora}. Escolha outro técnico.`);
       return;
     }
     setSalvando(true);
@@ -1927,9 +2049,9 @@ function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesAprovados
             <label style={lab}>Cliente aprovado</label>
             <select style={inp} value={clienteId} onChange={(e) => setClienteId(e.target.value)}>
               <option value="">selecionar…</option>
-              {clientesAprovados.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.empreendimento ? ` · ${c.empreendimento}` : ""}</option>)}
+              {listaClientes.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.empreendimento ? ` · ${c.empreendimento}` : ""}</option>)}
             </select>
-            {clientesAprovados.length === 0 && <span style={{ fontSize: 12, color: "#8593a8" }}>Nenhum cliente aprovado aguardando agendamento.</span>}
+            {listaClientes.length === 0 && <span style={{ fontSize: 12, color: "#8593a8" }}>Nenhum cliente aprovado aguardando agendamento{diaInicial ? " neste dia" : ""}.</span>}
           </div>
           {clienteEscolhido && (
             <div style={{ fontSize: 12.5, color: "#65758b" }}>
@@ -1944,8 +2066,14 @@ function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesAprovados
             </select>
           </div>
           <Grid>
-            <Field label="Data" type="date" value={data} onChange={setData} />
-            <Field label="Horário" type="time" value={hora} onChange={setHora} />
+            <div style={cell(false)}>
+              <label style={lab}>Data (definida pelo cliente)</label>
+              <div style={{ ...inp, background: CINZA_CLARO, color: "#4a5a70" }}>{data ? data.split("-").reverse().join("/") : "não definida"}</div>
+            </div>
+            <div style={cell(false)}>
+              <label style={lab}>Horário (definido pelo cliente)</label>
+              <div style={{ ...inp, background: CINZA_CLARO, color: "#4a5a70" }}>{hora || "não definido"}</div>
+            </div>
           </Grid>
 
           {erro && (
@@ -1965,7 +2093,7 @@ function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesAprovados
 }
 
 /* ================= Agendamento · Análise: aprovação de clientes + calendário operacional ================= */
-function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, onAgendarAgora }) {
+function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, onAgendarAgora, diaParaAbrir, aoAbrirDia }) {
   const [mesRef, setMesRef] = useState(() => { const h = new Date(); return new Date(h.getFullYear(), h.getMonth(), 1); });
   const [diaSelecionado, setDiaSelecionado] = useState(null);
   const [filtroTecnicos, setFiltroTecnicos] = useState(() => new Set());
@@ -1975,6 +2103,17 @@ function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, usuarios =
   const vistoriadores = usuarios.filter((u) => u.role === "vistoriador" && u.ativo);
   const aprovadosSemVistoria = clientes.filter((c) => c.status === "Agendamento aprovado");
   const doDiaSelecionado = diaSelecionado ? clientes.filter((c) => c.dataDesejada === diaSelecionado) : [];
+
+  // Veio de uma confirmação de vistoria feita na sub-aba Vistoria — pula direto pro
+  // mês/dia certo e já abre o painel lateral, sem precisar navegar manualmente.
+  useEffect(() => {
+    if (diaParaAbrir) {
+      const [ano, mes] = diaParaAbrir.split("-").map(Number);
+      setMesRef(new Date(ano, mes - 1, 1));
+      setDiaSelecionado(diaParaAbrir);
+      aoAbrirDia?.();
+    }
+  }, [diaParaAbrir]);
 
   const aprovar = async (c) => {
     try {
@@ -2023,6 +2162,7 @@ function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, usuarios =
 
       {diaSelecionado && (
         <PainelDiaAgendamento diaISO={diaSelecionado} clientes={doDiaSelecionado} vistoriadores={vistoriadores} podeAgir={podeAgir}
+          updCliente={updCliente} notify={notify}
           onFechar={() => setDiaSelecionado(null)}
           onAgendarNovo={() => setAgendando({ dataDesejada: diaSelecionado })} />
       )}
@@ -2060,7 +2200,7 @@ function CardVistoriaResumo({ c, aberto, onToggle, children }) {
 /* Sub-aba Vistoria: agrupa por status (pendente de agendamento / já agendada / já
    realizada), com busca e cards resumidos que expandem ao clicar — antes mostrava
    tudo (formulário completo) de uma vez pra cada cliente, o que ficava confuso. */
-function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, abrirAutomaticoId = null, aoAbrirAutomatico }) {
+function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, abrirAutomaticoId = null, aoAbrirAutomatico, aoConfirmar }) {
   const [busca, setBusca] = useState("");
   const [abertoId, setAbertoId] = useState(null);
   const [form, setForm] = useState({});
@@ -2082,25 +2222,35 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
   const termo = busca.trim().toLowerCase();
   const combina = (c) => !termo || `${c.nome} ${c.empreendimento}`.toLowerCase().includes(termo);
 
+  const emAgenda = (c) => c.status === "Vistoria agendada" || c.status === "Em vistoria";
   const pendentes = clientes.filter((c) => c.status === "Agendamento aprovado" && combina(c));
-  const agendadas = clientes.filter((c) => c.status === "Vistoria agendada" && !temDoc(c) && combina(c));
-  const realizadas = clientes.filter((c) => c.status === "Vistoria agendada" && temDoc(c) && combina(c));
+  const agendadas = clientes.filter((c) => emAgenda(c) && !temDoc(c) && combina(c));
+  const realizadas = clientes.filter((c) => emAgenda(c) && temDoc(c) && combina(c));
 
   const setCampo = (id, campo, valor) => setForm((f) => ({ ...f, [id]: { ...f[id], [campo]: valor } }));
   const valorCampo = (c, campo, padrao) => form[c.id]?.[campo] ?? padrao;
 
   const confirmar = async (c) => {
     const vistoriadorId = valorCampo(c, "vistoriadorId", "");
-    const dataDesejada = valorCampo(c, "dataDesejada", c.dataDesejada);
-    const horarioDesejado = valorCampo(c, "horarioDesejado", c.horarioDesejado);
     if (!vistoriadorId) { notify("Escolha o vistoriador responsável"); return; }
+    if (!c.dataDesejada || !c.horarioDesejado) { notify("Este cliente não definiu data/horário no cadastro."); return; }
+    const conflito = clientes.find((o) =>
+      o.id !== c.id && o.status === "Vistoria agendada" &&
+      o.vistoriadorId === vistoriadorId && o.dataDesejada === c.dataDesejada && o.horarioDesejado === c.horarioDesejado
+    );
+    if (conflito) {
+      const nomeTecnico = vistoriadores.find((v) => String(v.id) === String(vistoriadorId))?.nome || "O técnico";
+      notify(`${nomeTecnico} já tem vistoria às ${c.horarioDesejado}. Escolha outro técnico.`);
+      return;
+    }
     try {
-      await updCliente(c.id, { vistoriadorId, dataDesejada, horarioDesejado, status: "Vistoria agendada" });
+      await updCliente(c.id, { vistoriadorId, status: "Vistoria agendada" });
       notify("Vistoria agendada ✓ — já aparece na agenda do técnico");
+      aoConfirmar?.(c.dataDesejada);
     } catch (e) { notify(`Erro: ${e.message}`); }
   };
 
-  const nomeVistoriador = (id) => vistoriadores.find((v) => v.id === id)?.nome || usuarios.find((u) => u.id === id)?.nome || "—";
+  const nomeVistoriador = (id) => vistoriadores.find((v) => String(v.id) === String(id))?.nome || usuarios.find((u) => String(u.id) === String(id))?.nome || "—";
 
   const grupos = [
     { chave: "pendente", titulo: "Aguardando agendamento", lista: pendentes },
@@ -2133,8 +2283,14 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
                             {vistoriadores.map((v) => <option key={v.id} value={v.id}>{v.nome}</option>)}
                           </select>
                         </div>
-                        <Field label="Data" type="date" value={valorCampo(c, "dataDesejada", c.dataDesejada)} onChange={(v) => setCampo(c.id, "dataDesejada", v)} disabled={!podeAgir} />
-                        <Field label="Horário" type="time" value={valorCampo(c, "horarioDesejado", c.horarioDesejado)} onChange={(v) => setCampo(c.id, "horarioDesejado", v)} disabled={!podeAgir} />
+                        <div style={cell(false)}>
+                          <label style={lab}>Data (definida pelo cliente)</label>
+                          <div style={{ ...inp, background: CINZA_CLARO, color: "#4a5a70" }}>{c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "não definida"}</div>
+                        </div>
+                        <div style={cell(false)}>
+                          <label style={lab}>Horário (definido pelo cliente)</label>
+                          <div style={{ ...inp, background: CINZA_CLARO, color: "#4a5a70" }}>{c.horarioDesejado || "não definido"}</div>
+                        </div>
                       </Grid>
                       {podeAgir ? (
                         <button className="btn-solid" style={{ marginTop: 10, width: "auto", padding: "8px 16px" }} onClick={() => confirmar(c)}>
@@ -2150,6 +2306,14 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
                       <div><strong>Construtora:</strong> {c.construtora || "—"}</div>
                       <div><strong>Vistoriador:</strong> {nomeVistoriador(c.vistoriadorId)}</div>
                       <div><strong>Status:</strong> <Selo valor={etapaAtualCliente(c, docs)} /></div>
+                      {g.chave === "agendada" && (
+                        podeAgir ? (
+                          <button className="btn-ghost" style={{ color: "#C62828", padding: "4px 10px", width: "auto", marginTop: 4 }}
+                            onClick={async () => { await updCliente(c.id, { status: "Cancelamento solicitado" }); notify("Cancelamento solicitado à gerência"); }}>
+                            <Trash2 size={13} /> Cancelar vistoria
+                          </button>
+                        ) : null
+                      )}
                     </div>
                   )}
                 </CardVistoriaResumo>
@@ -2698,6 +2862,8 @@ const STATUS_COR = {
   "Em vistoria": { cor: "#B26A00", bg: "#FFF4E0" },
   "Laudo em elaboração": { cor: "#B26A00", bg: "#FFF4E0" },
   "Laudo pronto": { cor: "#2E7D32", bg: "#E6F4EA" },
+  // status do cliente (clientes.status) — cancelamento pedido pelo Atendimento, aguardando a Gerência
+  "Cancelamento solicitado": { cor: "#B26A00", bg: "#FFF4E0" },
 };
 function Selo({ valor }) {
   const s = STATUS_COR[valor] || { cor: "#65758b", bg: "#EEF1F5" };
@@ -3043,7 +3209,49 @@ function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, a
   );
 }
 
-function AbaGerenciaVisaoGeral({ docs, clientes, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo }) {
+/* Atendimento pediu pra cancelar uma vistoria já agendada — só a Gerência decide se
+   apaga o compromisso de vez (libera o horário) ou mantém como estava. */
+function CardCancelamentosPendentes({ clientes = [], usuarios = [], updCliente, notify }) {
+  const pendentes = clientes.filter((c) => c.status === "Cancelamento solicitado");
+  const nomeVistoriador = (id) => usuarios.find((u) => String(u.id) === String(id))?.nome || "—";
+
+  const apagar = async (c) => {
+    try { await updCliente(c.id, { status: "Cancelado" }); notify("Vistoria cancelada ✓"); }
+    catch (e) { notify(`Erro: ${e.message}`); }
+  };
+  const manter = async (c) => {
+    try { await updCliente(c.id, { status: "Vistoria agendada" }); notify("Agendamento mantido"); }
+    catch (e) { notify(`Erro: ${e.message}`); }
+  };
+
+  if (pendentes.length === 0) return null;
+
+  return (
+    <Card icon={AlertTriangle} titulo={`Cancelamentos de vistoria pendentes (${pendentes.length})`}>
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        O Atendimento pediu para cancelar estas vistorias já agendadas. Decida se apaga o compromisso ou mantém como estava.
+      </p>
+      <div style={{ display: "grid", gap: 10 }}>
+        {pendentes.map((c) => (
+          <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>{c.nome}</div>
+              <div style={{ fontSize: 12.5, color: "#65758b" }}>
+                {c.empreendimento || c.endereco || "—"} · {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""} · técnico: {nomeVistoriador(c.vistoriadorId)}
+              </div>
+            </div>
+            <button className="btn-ghost" style={{ color: "#C62828", background: CINZA_CLARO }} onClick={() => apagar(c)}>
+              <Trash2 size={14} /> Apagar
+            </button>
+            <button className="btn-solid" onClick={() => manter(c)}>Manter agendamento</button>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo }) {
   const porVistoria = docs.reduce((acc, d) => { acc[d.vistoria] = (acc[d.vistoria] || 0) + 1; return acc; }, {});
   const porStatusProducao = docs.reduce((acc, d) => { acc[d.statusProducao] = (acc[d.statusProducao] || 0) + 1; return acc; }, {});
   const totalRegistrosDocs = docs.length;
@@ -3061,6 +3269,8 @@ function AbaGerenciaVisaoGeral({ docs, clientes, carregando, assinatura, salvarA
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando indicadores…</p>}
 
       <CardLaudosPendentes laudosPendentes={laudosPendentes} carregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} assinatura={assinatura} notify={notify} />
+
+      <CardCancelamentosPendentes clientes={clientes} usuarios={usuarios} updCliente={updCliente} notify={notify} />
 
       <CardIndicadoresGerais docs={docs} clientes={clientes} />
 
@@ -3345,7 +3555,7 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, clientes = [], carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, removerPreco, laudosPendentes, laudosPendentesCarregando, aprovarLaudo }) {
+function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, removerPreco, laudosPendentes, laudosPendentesCarregando, aprovarLaudo }) {
   if (sub === "parceiros") {
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} vales={vales} valesCarregando={valesCarregando} notify={notify} />;
   }
@@ -3353,7 +3563,7 @@ function AbaGerencia({ sub = "visao-geral", docs, clientes = [], carregando, ass
     return <AbaGerenciaFinanceiro docs={docs} clientes={clientes} precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} removerPreco={removerPreco} notify={notify} />;
   }
   return (
-    <AbaGerenciaVisaoGeral docs={docs} clientes={clientes} carregando={carregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
+    <AbaGerenciaVisaoGeral docs={docs} clientes={clientes} updCliente={updCliente} carregando={carregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
       usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={usuarioAtualId}
       avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
       laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} />
@@ -3899,6 +4109,9 @@ STATUS_COR["Vistoria agendada"] = { cor: "#6A3FB2", bg: "#F1EBFB" };
 STATUS_COR["Laudo em análise"] = { cor: "#B26A00", bg: "#FFF4E0" };
 STATUS_COR["Laudo enviado por e-mail"] = { cor: "#2E7D32", bg: "#E6F4EA" };
 STATUS_COR["Cancelado"] = { cor: "#C62828", bg: "#FCEAEA" };
+/* Etapas operacionais da vistoria (ETAPAS_VISTORIA), usadas nos indicadores do Agendamento. */
+STATUS_COR["Solicitação de vistoria"] = { cor: "#65758b", bg: "#EEF1F5" };
+STATUS_COR["Vistoriado"] = { cor: "#2E7D32", bg: "#E6F4EA" };
 
 function safeParseArray(v) {
   if (Array.isArray(v)) return v;
