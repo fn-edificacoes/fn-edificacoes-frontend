@@ -36,6 +36,24 @@ async function apiFetch(caminho, { method = "GET", body, token } = {}) {
   return dados;
 }
 
+/* Registra um acesso ao sistema, uma vez por aba do navegador (por área). O identificador é
+   aleatório e mora só no navegador da pessoa — serve para separar "acessos" de "visitantes",
+   nunca para identificar alguém. Se der qualquer problema, apenas não conta: o acesso do
+   usuário nunca pode quebrar por causa da métrica. */
+function registrarAcesso(area) {
+  try {
+    const chaveSessao = `fn_acesso_registrado:${area}`;
+    if (sessionStorage.getItem(chaveSessao)) return;
+    let visitanteId = localStorage.getItem("fn_visitante_id");
+    if (!visitanteId) {
+      visitanteId = crypto.randomUUID?.() || `v_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      localStorage.setItem("fn_visitante_id", visitanteId);
+    }
+    sessionStorage.setItem(chaveSessao, "1");
+    apiFetch("/api/acessos", { method: "POST", body: { visitanteId, area } }).catch(() => {});
+  } catch { /* navegador sem storage (aba anônima restrita, etc.) — só não conta */ }
+}
+
 /* Converte um registro de Documentação vindo do banco (snake_case) para o formato usado no app (camelCase) */
 function mapDocDaApi(d) {
   return {
@@ -536,6 +554,10 @@ export default function App() {
   const [mostrarLogin, setMostrarLogin] = useState(false);
   const [mostrarCadastroParceiro, setMostrarCadastroParceiro] = useState(false);
 
+  // Conta o acesso uma vez por aba: "portal" quando é o site público, "equipe" quando
+  // alguém entra logado. Precisa ficar antes dos returns abaixo (regra dos hooks).
+  useEffect(() => { registrarAcesso(session ? "equipe" : "portal"); }, [!!session]);
+
   if (!session) {
     if (mostrarCadastroParceiro) {
       return <TelaCadastroParceiro onVoltar={() => setMostrarCadastroParceiro(false)} />;
@@ -774,6 +796,21 @@ function AppInterno({ session, onLogout }) {
       return false;
     }
   };
+
+  /* ---- Acessos ao sistema (indicador da Gerência) ---- */
+  const [acessos, setAcessos] = useState(null);
+  const [acessosCarregando, setAcessosCarregando] = useState(false);
+  useEffect(() => {
+    if (perfil !== "gerencia") return;
+    (async () => {
+      setAcessosCarregando(true);
+      try {
+        const r = await apiFetch("/api/acessos/resumo", { token });
+        setAcessos(r);
+      } catch (e) { notify(`Não foi possível carregar os acessos: ${e.message}`); }
+      setAcessosCarregando(false);
+    })();
+  }, []);
 
   /* ---- Laudos aguardando aprovação da Gerência ---- */
   const [laudosPendentes, setLaudosPendentes] = useState([]);
@@ -1120,7 +1157,8 @@ function AppInterno({ session, onLogout }) {
             parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
             vales={vales} valesCarregando={valesCarregando}
             precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
-            laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} />
+            laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo}
+            acessos={acessos} acessosCarregando={acessosCarregando} />
         )}
       </main>
 
@@ -3615,7 +3653,83 @@ function CardCancelamentosPendentes({ clientes = [], usuarios = [], updCliente, 
   );
 }
 
-function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo }) {
+/* Quantas pessoas abriram o sistema. "Acessos" conta cada vez que alguém abriu;
+   "visitantes" conta navegadores diferentes (uma pessoa que volta várias vezes conta 1). */
+function CardAcessos({ dados, carregando }) {
+  const r = dados?.resumo;
+  const porDia = dados?.porDia || [];
+  const porArea = dados?.porArea || [];
+
+  const nomeArea = { portal: "Portal do cliente", equipe: "Área da equipe" };
+  const maxDia = Math.max(1, ...porDia.map((d) => d.acessos));
+  const ultimos = porDia.slice(-14);
+
+  const Numero = ({ titulo, acessos, visitantes, destaque }) => (
+    <div>
+      <div style={{ fontSize: 12.5, color: "#65758b", marginBottom: 4 }}>{titulo}</div>
+      <div style={{ fontSize: destaque ? 30 : 22, fontWeight: 800, color: AZUL_MARINHO, lineHeight: 1 }}>{acessos ?? 0}</div>
+      <div style={{ fontSize: 11.5, color: "#8593a8", marginTop: 3 }}>{visitantes ?? 0} pessoa(s)</div>
+    </div>
+  );
+
+  return (
+    <Card icon={TrendingUp} titulo="Acessos ao sistema">
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Quantas vezes o link foi aberto e quantas pessoas diferentes abriram. A contagem é anônima —
+        o sistema não guarda IP nem nada que identifique quem acessou.
+      </p>
+
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && !r && <p style={{ color: "#8593a8", fontSize: 14 }}>Ainda não há acessos registrados.</p>}
+
+      {r && (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 16, marginBottom: 18 }}>
+            <Numero titulo="Hoje" acessos={r.acessos_hoje} visitantes={r.visitantes_hoje} destaque />
+            <Numero titulo="Últimos 7 dias" acessos={r.acessos_7d} visitantes={r.visitantes_7d} />
+            <Numero titulo="Últimos 30 dias" acessos={r.acessos_30d} visitantes={r.visitantes_30d} />
+            <Numero titulo="Desde o início" acessos={r.acessos} visitantes={r.visitantes} />
+          </div>
+
+          {ultimos.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>Últimos dias</div>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 90 }}>
+                {ultimos.map((d) => {
+                  const dia = new Date(`${String(d.dia).slice(0, 10)}T00:00:00`);
+                  return (
+                    <div key={d.dia} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}
+                      title={`${dia.toLocaleDateString("pt-BR")} — ${d.acessos} acesso(s), ${d.visitantes} pessoa(s)`}>
+                      <div style={{ fontSize: 9.5, color: "#65758b", fontWeight: 700 }}>{d.acessos}</div>
+                      <div style={{ width: "100%", height: `${Math.round((d.acessos / maxDia) * 58)}px`, minHeight: 3, background: AZUL_MEDIO, borderRadius: 3 }} />
+                      <div style={{ fontSize: 9, color: "#8593a8" }}>{dia.getDate()}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {porArea.length > 0 && (
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>Por área</div>
+              <div style={{ display: "grid", gap: 6 }}>
+                {porArea.map((a) => (
+                  <div key={a.area} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13 }}>
+                    <span style={{ color: "#4a5a70" }}>{nomeArea[a.area] || a.area}</span>
+                    <span><strong>{a.acessos}</strong> <span style={{ color: "#8593a8", fontSize: 12 }}>· {a.visitantes} pessoa(s)</span></span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
+function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, acessos, acessosCarregando }) {
   const porVistoria = docs.reduce((acc, d) => { acc[d.vistoria] = (acc[d.vistoria] || 0) + 1; return acc; }, {});
   const porStatusProducao = docs.reduce((acc, d) => { acc[d.statusProducao] = (acc[d.statusProducao] || 0) + 1; return acc; }, {});
   const totalRegistrosDocs = docs.length;
@@ -3635,6 +3749,8 @@ function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, carregando, assinat
       <CardLaudosPendentes laudosPendentes={laudosPendentes} carregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} assinatura={assinatura} notify={notify} />
 
       <CardCancelamentosPendentes clientes={clientes} usuarios={usuarios} updCliente={updCliente} notify={notify} />
+
+      <CardAcessos dados={acessos} carregando={acessosCarregando} />
 
       <CardIndicadoresGerais docs={docs} clientes={clientes} />
 
@@ -3992,7 +4108,7 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo }) {
+function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, acessos, acessosCarregando }) {
   if (sub === "parceiros") {
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} vales={vales} valesCarregando={valesCarregando} notify={notify} />;
   }
@@ -4003,7 +4119,8 @@ function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, car
     <AbaGerenciaVisaoGeral docs={docs} clientes={clientes} updCliente={updCliente} carregando={carregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
       usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={usuarioAtualId}
       avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
-      laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} />
+      laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo}
+      acessos={acessos} acessosCarregando={acessosCarregando} />
   );
 }
 
