@@ -88,7 +88,12 @@ function etapaVistoriaCliente(cliente, docs = []) {
 }
 /* Converte um registro de preço de vistoria por empreendimento vindo do banco (snake_case) */
 function mapPrecoDaApi(p) {
-  return { id: p.id, empreendimento: p.empreendimento || "", precoVistoria: Number(p.preco_vistoria) || 0, atualizadoEm: p.atualizado_em || null };
+  return {
+    id: p.id, empreendimento: p.empreendimento || "",
+    precoVistoria: Number(p.preco_vistoria) || 0,
+    precoDocumentacao: Number(p.preco_documentacao) || 0,
+    atualizadoEm: p.atualizado_em || null,
+  };
 }
 /* Mascara um CPF/CNPJ deixando visível só o início e o fim (ex.: 123.***.***-45) */
 function mascararCpf(cpf) {
@@ -722,8 +727,20 @@ function AppInterno({ session, onLogout }) {
   /* ---- Preço de vistoria por empreendimento (alimenta o Financeiro) ---- */
   const [precos, setPrecos] = useState([]);
   const [precosCarregando, setPrecosCarregando] = useState(false);
+  /* Lista oficial de empreendimentos (vem da planilha do Drive, tabela empreendimentos_ref).
+     É ela que a Gerência usa para fixar os preços — em vez de digitar o nome na mão. */
+  const [empreendimentosRef, setEmpreendimentosRef] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await apiFetch("/api/empreendimentos-ref");
+        setEmpreendimentosRef(r.empreendimentos || []);
+      } catch { /* sem a lista, o card de preços mostra só o que já foi cadastrado */ }
+    })();
+  }, []);
   const carregarPrecos = async () => {
-    if (perfil !== "gerencia") return;
+    // Documentação também lê (só leitura), pra ver o valor fixado pela Gerência.
+    if (perfil !== "gerencia" && perfil !== "documentacao") return;
     setPrecosCarregando(true);
     try {
       const r = await apiFetch("/api/precos-empreendimento", { token });
@@ -732,9 +749,10 @@ function AppInterno({ session, onLogout }) {
     setPrecosCarregando(false);
   };
   useEffect(() => { carregarPrecos(); }, []);
-  const salvarPreco = async (empreendimento, precoVistoria) => {
+  /* precos: { precoVistoria?, precoDocumentacao? } — o que não vier mantém o valor atual. */
+  const salvarPreco = async (empreendimento, precos) => {
     try {
-      const r = await apiFetch("/api/precos-empreendimento", { method: "POST", token, body: { empreendimento, precoVistoria } });
+      const r = await apiFetch("/api/precos-empreendimento", { method: "POST", token, body: { empreendimento, ...precos } });
       setPrecos((atual) => {
         const existe = atual.some((p) => p.id === r.id);
         const item = mapPrecoDaApi(r);
@@ -745,12 +763,6 @@ function AppInterno({ session, onLogout }) {
       notify(`Não foi possível salvar o preço: ${e.message}`);
       return false;
     }
-  };
-  const removerPreco = async (id) => {
-    try {
-      await apiFetch(`/api/precos-empreendimento/${id}`, { method: "DELETE", token });
-      setPrecos((atual) => atual.filter((p) => p.id !== id));
-    } catch (e) { notify(`Não foi possível remover o preço: ${e.message}`); }
   };
 
   /* ---- Laudos aguardando aprovação da Gerência ---- */
@@ -1073,7 +1085,7 @@ function AppInterno({ session, onLogout }) {
 
         {abaTop === "documentacao" && (
           <AbaDocumentacao docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={docsCarregando} notify={notify} clientes={clientes} updCliente={updCliente} perfil={perfil}
-            documentosArt={documentosArt} enviarDocumentoArt={enviarDocumentoArt} excluirDocumentoArt={excluirDocumentoArt} />
+            documentosArt={documentosArt} enviarDocumentoArt={enviarDocumentoArt} excluirDocumentoArt={excluirDocumentoArt} precos={precos} />
         )}
         {abaTop === "clientes" && (
           <AbaClientesComercial clientes={clientes} carregando={clientesCarregando} atualizarCliente={updCliente} excluirCliente={delCliente} notify={notify} docs={docs} perfil={perfil} />
@@ -1091,7 +1103,7 @@ function AppInterno({ session, onLogout }) {
             avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
             parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
             vales={vales} valesCarregando={valesCarregando}
-            precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} removerPreco={removerPreco}
+            precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
             laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} />
         )}
       </main>
@@ -3021,7 +3033,7 @@ function ConfirmModal({ aberto, titulo = "Confirmar exclusão", mensagem = "Tem 
 /* Anexo dos dois documentos finais de um cliente de Documentação ART/TRT. O arquivo vai
    para o Drive (via backend) e o status do cliente só vira "Documentação concluída" quando
    os dois estão anexados — é aí que ele consegue baixar pelo portal. */
-function CardDocumentosArt({ cliente, documentos = [], enviarDocumento, excluirDocumento, notify }) {
+function CardDocumentosArt({ cliente, documentos = [], precoDocumentacao = 0, enviarDocumento, excluirDocumento, notify }) {
   const [enviandoTipo, setEnviandoTipo] = useState(null);
   const doTipo = (tipo) => documentos.find((d) => d.tipo === tipo);
   const completo = TIPOS_DOCUMENTO_ART.every((t) => doTipo(t));
@@ -3052,7 +3064,16 @@ function CardDocumentosArt({ cliente, documentos = [], enviarDocumento, excluirD
             {cliente.telefone ? ` · ${cliente.telefone}` : ""}
           </div>
         </div>
-        <Selo valor={completo ? STATUS_DOC_CONCLUIDA : STATUS_DOC_PROCESSANDO} />
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          {/* Valor fixado pela Gerência para o empreendimento deste cliente. */}
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 11, color: "#8593a8" }}>Valor do serviço</div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: precoDocumentacao ? AZUL_MARINHO : "#B26A00" }}>
+              {precoDocumentacao ? fmtReal(precoDocumentacao) : "sem preço fixado"}
+            </div>
+          </div>
+          <Selo valor={completo ? STATUS_DOC_CONCLUIDA : STATUS_DOC_PROCESSANDO} />
+        </div>
       </div>
 
       <div style={{ display: "grid", gap: 8 }}>
@@ -3092,7 +3113,7 @@ function CardDocumentosArt({ cliente, documentos = [], enviarDocumento, excluirD
   );
 }
 
-function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, clientes = [], updCliente, perfil, documentosArt = [], enviarDocumentoArt, excluirDocumentoArt }) {
+function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, clientes = [], updCliente, perfil, documentosArt = [], enviarDocumentoArt, excluirDocumentoArt, precos = [] }) {
   const [editando, setEditando] = useState(null); // registro (cópia) em edição, ou null
   const [filtroVistoria, setFiltroVistoria] = useState("");
   const [busca, setBusca] = useState("");
@@ -3149,6 +3170,7 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, cli
             {clientesArt.map((c) => (
               <CardDocumentosArt key={c.id} cliente={c}
                 documentos={documentosArt.filter((d) => d.clienteId === c.id)}
+                precoDocumentacao={precos.find((p) => p.empreendimento === (c.empreendimento || "").trim())?.precoDocumentacao || 0}
                 enviarDocumento={enviarDocumentoArt} excluirDocumento={excluirDocumentoArt} notify={notify} />
             ))}
           </div>
@@ -3596,125 +3618,186 @@ function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceir
 }
 
 /* ---- Gerência · Financeiro ---- */
-function CardPrecoEmpreendimento({ precos, carregando, salvarPreco, removerPreco, clientes, notify }) {
-  const [novoEmpreendimento, setNovoEmpreendimento] = useState("");
-  const [novoPreco, setNovoPreco] = useState("");
+/* Uma linha da tabela de preços: o empreendimento vem da lista oficial (planilha do Drive)
+   e a Gerência fixa os dois valores — vistoria e documentação ART/TRT. */
+function LinhaPrecoEmpreendimento({ empreendimento, construtora, preco, salvarPreco, notify }) {
+  const [editando, setEditando] = useState(false);
+  const [vistoria, setVistoria] = useState("");
+  const [documentacao, setDocumentacao] = useState("");
   const [salvando, setSalvando] = useState(false);
-  const [editandoId, setEditandoId] = useState(null);
-  const [editandoValor, setEditandoValor] = useState("");
-  const [removendo, setRemovendo] = useState(null);
 
-  const empreendimentosConhecidos = [...new Set(clientes.map((c) => c.empreendimento?.trim()).filter(Boolean))].sort();
-
-  const adicionar = async () => {
-    if (!novoEmpreendimento.trim()) { notify("Informe o empreendimento"); return; }
-    const preco = Number(novoPreco);
-    if (!Number.isFinite(preco) || preco < 0) { notify("Informe um preço de vistoria válido"); return; }
+  const abrir = () => {
+    setVistoria(preco ? String(preco.precoVistoria) : "");
+    setDocumentacao(preco ? String(preco.precoDocumentacao) : "");
+    setEditando(true);
+  };
+  const confirmar = async () => {
+    const corpo = {};
+    if (vistoria !== "") corpo.precoVistoria = Number(vistoria);
+    if (documentacao !== "") corpo.precoDocumentacao = Number(documentacao);
+    if (Object.keys(corpo).length === 0) { notify("Informe pelo menos um preço"); return; }
+    if (Object.values(corpo).some((v) => !Number.isFinite(v) || v < 0)) { notify("Informe valores válidos"); return; }
     setSalvando(true);
-    const ok = await salvarPreco(novoEmpreendimento.trim(), preco);
-    if (ok) { setNovoEmpreendimento(""); setNovoPreco(""); notify("Preço salvo ✓"); }
+    const ok = await salvarPreco(empreendimento, corpo);
     setSalvando(false);
+    if (ok) { setEditando(false); notify("Preço salvo ✓"); }
   };
-  const iniciarEdicao = (p) => { setEditandoId(p.id); setEditandoValor(String(p.precoVistoria)); };
-  const salvarEdicao = async (p) => {
-    const preco = Number(editandoValor);
-    if (!Number.isFinite(preco) || preco < 0) { notify("Informe um preço de vistoria válido"); return; }
-    const ok = await salvarPreco(p.empreendimento, preco);
-    if (ok) { setEditandoId(null); notify("Preço atualizado ✓"); }
-  };
+
+  const semPreco = !preco || (!preco.precoVistoria && !preco.precoDocumentacao);
+  return (
+    <tr style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+      <td style={{ padding: "8px 10px" }}>
+        <div style={{ fontWeight: 600 }}>{empreendimento}</div>
+        {construtora && <div style={{ fontSize: 11.5, color: "#8593a8" }}>{construtora}</div>}
+      </td>
+      <td style={{ padding: "8px 10px" }}>
+        {editando
+          ? <input type="number" min="0" step="0.01" style={{ ...inp, width: 120, padding: "5px 8px" }} placeholder="0,00" value={vistoria} onChange={(e) => setVistoria(e.target.value)} autoFocus />
+          : (preco?.precoVistoria ? fmtReal(preco.precoVistoria) : <span style={{ color: "#9AA6B5" }}>—</span>)}
+      </td>
+      <td style={{ padding: "8px 10px" }}>
+        {editando
+          ? <input type="number" min="0" step="0.01" style={{ ...inp, width: 120, padding: "5px 8px" }} placeholder="0,00" value={documentacao} onChange={(e) => setDocumentacao(e.target.value)} />
+          : (preco?.precoDocumentacao ? fmtReal(preco.precoDocumentacao) : <span style={{ color: "#9AA6B5" }}>—</span>)}
+      </td>
+      <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+        {editando ? (
+          <>
+            <button className="icon-btn" onClick={confirmar} disabled={salvando}>
+              {salvando ? <Loader2 size={15} className="spin" /> : <Check size={15} color="#2E7D32" />}
+            </button>
+            <button className="icon-btn" onClick={() => setEditando(false)}><X size={15} /></button>
+          </>
+        ) : (
+          <button className="icon-btn" title={semPreco ? "Definir preços" : "Editar preços"} onClick={abrir}>
+            <Edit3 size={15} color={AZUL_MEDIO} />
+          </button>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+function CardPrecoEmpreendimento({ precos, carregando, salvarPreco, empreendimentosRef = [], clientes = [], notify }) {
+  const [busca, setBusca] = useState("");
+  const [soComPreco, setSoComPreco] = useState(false);
+
+  /* A lista de empreendimentos vem da planilha do Drive (empreendimentos_ref). Junta com
+     qualquer empreendimento que já tenha preço salvo ou que apareça em cadastros de cliente,
+     pra não sumir nada que já estava em uso antes desta tela existir. */
+  const porNome = new Map();
+  empreendimentosRef.forEach((e) => {
+    const nome = (e.empreendimento || "").trim();
+    if (nome && !porNome.has(nome)) porNome.set(nome, e.construtora || "");
+  });
+  precos.forEach((p) => { if (p.empreendimento && !porNome.has(p.empreendimento)) porNome.set(p.empreendimento, ""); });
+  clientes.forEach((c) => {
+    const nome = (c.empreendimento || "").trim();
+    if (nome && !porNome.has(nome)) porNome.set(nome, c.construtora || "");
+  });
+
+  const precoPorNome = {};
+  precos.forEach((p) => { precoPorNome[p.empreendimento] = p; });
+
+  const termo = busca.trim().toLowerCase();
+  const linhas = [...porNome.entries()]
+    .map(([empreendimento, construtora]) => ({ empreendimento, construtora, preco: precoPorNome[empreendimento] }))
+    .filter((l) => !termo || `${l.empreendimento} ${l.construtora}`.toLowerCase().includes(termo))
+    .filter((l) => !soComPreco || (l.preco && (l.preco.precoVistoria || l.preco.precoDocumentacao)))
+    .sort((a, b) => a.empreendimento.localeCompare(b.empreendimento, "pt-BR"));
+
+  const comPreco = [...porNome.keys()].filter((n) => precoPorNome[n] && (precoPorNome[n].precoVistoria || precoPorNome[n].precoDocumentacao)).length;
 
   return (
-    <Card icon={DollarSign} titulo="Preço de vistoria por empreendimento">
+    <Card icon={DollarSign} titulo="Preços por empreendimento">
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-        Cadastre o valor da vistoria de cada empreendimento. Esse preço alimenta automaticamente o cálculo de receita de vistoria abaixo.
+        Empreendimentos da lista oficial (planilha do Drive). Defina o valor da vistoria e o da documentação ART/TRT —
+        o setor de Documentação vê o preço fixado aqui ao trabalhar no serviço, e os valores alimentam a receita no Financeiro.
       </p>
-      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-        <input list="empreendimentos-conhecidos" style={{ ...inp, flex: 1, minWidth: 200 }} placeholder="Empreendimento" value={novoEmpreendimento} onChange={(e) => setNovoEmpreendimento(e.target.value)} />
-        <datalist id="empreendimentos-conhecidos">{empreendimentosConhecidos.map((e) => <option key={e} value={e} />)}</datalist>
-        <input style={{ ...inp, width: 140 }} type="number" min="0" step="0.01" placeholder="Preço (R$)" value={novoPreco} onChange={(e) => setNovoPreco(e.target.value)} />
-        <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }} onClick={adicionar} disabled={salvando}>
-          {salvando ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} Salvar
-        </button>
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+        <input style={{ ...inp, flex: 1, minWidth: 200 }} placeholder="Buscar empreendimento ou construtora…" value={busca} onChange={(e) => setBusca(e.target.value)} />
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "#4a5a70", cursor: "pointer" }}>
+          <input type="checkbox" checked={soComPreco} onChange={(e) => setSoComPreco(e.target.checked)} />
+          Só com preço definido
+        </label>
+        <span style={{ fontSize: 12.5, color: "#8593a8" }}>{comPreco} de {porNome.size} com preço</span>
       </div>
 
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
-      {!carregando && precos.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum preço cadastrado ainda.</p>}
-      {precos.length > 0 && (
-        <div style={{ overflowX: "auto" }}>
+      {!carregando && linhas.length === 0 && (
+        <p style={{ color: "#8593a8", fontSize: 14 }}>
+          {porNome.size === 0 ? "A lista de empreendimentos ainda não foi carregada." : "Nenhum empreendimento encontrado com esse filtro."}
+        </p>
+      )}
+      {linhas.length > 0 && (
+        <div style={{ overflowX: "auto", maxHeight: 480, overflowY: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ background: CINZA_CLARO }}>
-                {["Empreendimento", "Preço da vistoria", ""].map((h) => (
-                  <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}` }}>{h}</th>
+                {["Empreendimento", "Vistoria", "Documentação ART/TRT", ""].map((h) => (
+                  <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}`, position: "sticky", top: 0, background: CINZA_CLARO }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {precos.map((p) => (
-                <tr key={p.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
-                  <td style={{ padding: "8px 10px", fontWeight: 600 }}>{p.empreendimento}</td>
-                  <td style={{ padding: "8px 10px" }}>
-                    {editandoId === p.id
-                      ? <input type="number" min="0" step="0.01" style={{ ...inp, width: 120, padding: "5px 8px" }} value={editandoValor} onChange={(e) => setEditandoValor(e.target.value)} autoFocus />
-                      : fmtReal(p.precoVistoria)}
-                  </td>
-                  <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
-                    {editandoId === p.id ? (
-                      <>
-                        <button className="icon-btn" onClick={() => salvarEdicao(p)}><Check size={15} color="#2E7D32" /></button>
-                        <button className="icon-btn" onClick={() => setEditandoId(null)}><X size={15} /></button>
-                      </>
-                    ) : (
-                      <>
-                        <button className="icon-btn" onClick={() => iniciarEdicao(p)}><Edit3 size={15} color={AZUL_MEDIO} /></button>
-                        <button className="icon-btn" onClick={() => setRemovendo(p)}><Trash2 size={15} color="#c62828" /></button>
-                      </>
-                    )}
-                  </td>
-                </tr>
+              {linhas.map((l) => (
+                <LinhaPrecoEmpreendimento key={l.empreendimento} empreendimento={l.empreendimento} construtora={l.construtora}
+                  preco={l.preco} salvarPreco={salvarPreco} notify={notify} />
               ))}
             </tbody>
           </table>
         </div>
       )}
-
-      <ConfirmModal aberto={!!removendo} titulo="Excluir preço"
-        mensagem={removendo ? `Tem certeza que deseja excluir o preço cadastrado para "${removendo.empreendimento}"? Essa ação não pode ser desfeita.` : ""}
-        onConfirm={() => { removerPreco(removendo.id); setRemovendo(null); }} onCancel={() => setRemovendo(null)} />
     </Card>
   );
 }
-function CardReceitaVistoriaEstimada({ precos, clientes }) {
-  const precoPorEmpreendimento = {};
-  precos.forEach((p) => { precoPorEmpreendimento[p.empreendimento] = p.precoVistoria; });
+/* Receita estimada por empreendimento, somando os dois serviços: vistorias já atendidas
+   (preço de vistoria) e documentações ART/TRT concluídas (preço de documentação). */
+function CardReceitaEstimada({ precos, clientes }) {
+  const precoPorNome = {};
+  precos.forEach((p) => { precoPorNome[p.empreendimento] = p; });
 
-  const vistoriasAtendidas = clientes.filter((c) => c.servico === SERVICO_VISTORIA && c.atendido);
   const porEmpreendimento = {};
-  vistoriasAtendidas.forEach((c) => {
+  const registrar = (c, campo, campoQtd) => {
     const k = c.empreendimento?.trim() || "(sem empreendimento)";
-    const temPreco = Object.prototype.hasOwnProperty.call(precoPorEmpreendimento, k);
-    if (!porEmpreendimento[k]) porEmpreendimento[k] = { qtd: 0, receita: 0, temPreco };
-    porEmpreendimento[k].qtd += 1;
-    porEmpreendimento[k].receita += temPreco ? precoPorEmpreendimento[k] : 0;
+    if (!porEmpreendimento[k]) porEmpreendimento[k] = { vistorias: 0, documentacoes: 0, receita: 0, faltaPreco: false };
+    porEmpreendimento[k][campoQtd] += 1;
+    const valor = Number(precoPorNome[k]?.[campo]) || 0;
+    if (valor > 0) porEmpreendimento[k].receita += valor;
+    else porEmpreendimento[k].faltaPreco = true;
+  };
+
+  clientes.forEach((c) => {
+    if (c.status === "Cancelado") return;
+    if (ehServicoDocumentacao(c)) {
+      // Só conta depois que a documentação foi entregue.
+      if (c.status === STATUS_DOC_CONCLUIDA) registrar(c, "precoDocumentacao", "documentacoes");
+    } else if (c.servico === SERVICO_VISTORIA && c.atendido) {
+      registrar(c, "precoVistoria", "vistorias");
+    }
   });
 
   const linhas = Object.entries(porEmpreendimento).sort((a, b) => b[1].receita - a[1].receita);
   const totalReceita = linhas.reduce((s, [, v]) => s + v.receita, 0);
-  const semPreco = linhas.filter(([, v]) => !v.temPreco);
+  const totalVistorias = linhas.reduce((s, [, v]) => s + v.vistorias, 0);
+  const totalDocs = linhas.reduce((s, [, v]) => s + v.documentacoes, 0);
+  const semPreco = linhas.filter(([, v]) => v.faltaPreco);
 
   return (
-    <Card icon={TrendingUp} titulo="Receita de vistoria estimada (por empreendimento)">
+    <Card icon={TrendingUp} titulo="Receita estimada por empreendimento">
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-        Calculada automaticamente: preço cadastrado × quantidade de vistorias já atendidas em cada empreendimento.
+        Calculada automaticamente com os preços fixados acima: vistorias já atendidas × preço de vistoria,
+        mais documentações ART/TRT já concluídas × preço de documentação.
       </p>
-      {linhas.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhuma vistoria atendida ainda.</p>}
+      {linhas.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum serviço concluído ainda.</p>}
       {linhas.length > 0 && (
         <>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: CINZA_CLARO }}>
-                  {["Empreendimento", "Vistorias atendidas", "Receita"].map((h) => (
+                  {["Empreendimento", "Vistorias", "Documentações", "Receita"].map((h) => (
                     <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}` }}>{h}</th>
                   ))}
                 </tr>
@@ -3723,21 +3806,24 @@ function CardReceitaVistoriaEstimada({ precos, clientes }) {
                 {linhas.map(([nome, v]) => (
                   <tr key={nome} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
                     <td style={{ padding: "8px 10px", fontWeight: 600 }}>{nome}</td>
-                    <td style={{ padding: "8px 10px" }}>{v.qtd}</td>
-                    <td style={{ padding: "8px 10px", color: v.temPreco ? AZUL_MARINHO : "#B26A00", fontWeight: v.temPreco ? 700 : 400 }}>
-                      {v.temPreco ? fmtReal(v.receita) : "sem preço cadastrado"}
+                    <td style={{ padding: "8px 10px" }}>{v.vistorias || "—"}</td>
+                    <td style={{ padding: "8px 10px" }}>{v.documentacoes || "—"}</td>
+                    <td style={{ padding: "8px 10px", color: AZUL_MARINHO, fontWeight: 700 }}>
+                      {fmtReal(v.receita)}
+                      {v.faltaPreco && <span style={{ color: "#B26A00", fontWeight: 400, fontSize: 11.5 }}> · falta preço</span>}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${CINZA_BORDA}`, fontSize: 14 }}>
-            <strong style={{ color: AZUL_MARINHO }}>Total estimado: </strong>{fmtReal(totalReceita)}
+          <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${CINZA_BORDA}`, fontSize: 14, display: "flex", gap: 18, flexWrap: "wrap" }}>
+            <span><strong style={{ color: AZUL_MARINHO }}>Total estimado: </strong>{fmtReal(totalReceita)}</span>
+            <span style={{ color: "#65758b", fontSize: 13 }}>{totalVistorias} vistoria(s) · {totalDocs} documentação(ões)</span>
           </div>
           {semPreco.length > 0 && (
             <div style={{ marginTop: 10, background: "#FFF4E0", color: "#B26A00", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>
-              {semPreco.length} empreendimento(s) sem preço cadastrado — a receita desses ainda não está sendo contabilizada no total.
+              {semPreco.length} empreendimento(s) com serviço concluído mas sem preço fixado — esses valores ainda não entram no total.
             </div>
           )}
         </>
@@ -3745,7 +3831,7 @@ function CardReceitaVistoriaEstimada({ precos, clientes }) {
     </Card>
   );
 }
-function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salvarPreco, removerPreco, notify }) {
+function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salvarPreco, empreendimentosRef = [], notify }) {
   const somaCampo = (campo, filtro) => docs.filter(filtro).reduce((s, d) => s + (Number(d[campo]) || 0), 0);
   const pago = (d) => d.pagamento === "Pago";
   const naoPago = (d) => d.pagamento !== "Pago";
@@ -3784,19 +3870,19 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
         </div>
       </Card>
 
-      <CardPrecoEmpreendimento precos={precos} carregando={precosCarregando} salvarPreco={salvarPreco} removerPreco={removerPreco} clientes={clientes} notify={notify} />
+      <CardPrecoEmpreendimento precos={precos} carregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef} clientes={clientes} notify={notify} />
 
-      <CardReceitaVistoriaEstimada precos={precos} clientes={clientes} />
+      <CardReceitaEstimada precos={precos} clientes={clientes} />
     </div>
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, removerPreco, laudosPendentes, laudosPendentesCarregando, aprovarLaudo }) {
+function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo }) {
   if (sub === "parceiros") {
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} vales={vales} valesCarregando={valesCarregando} notify={notify} />;
   }
   if (sub === "financeiro") {
-    return <AbaGerenciaFinanceiro docs={docs} clientes={clientes} precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} removerPreco={removerPreco} notify={notify} />;
+    return <AbaGerenciaFinanceiro docs={docs} clientes={clientes} precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef} notify={notify} />;
   }
   return (
     <AbaGerenciaVisaoGeral docs={docs} clientes={clientes} updCliente={updCliente} carregando={carregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
