@@ -2541,9 +2541,18 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
     (!filtroEtapa || etapaVistoriaCliente(c, docs) === filtroEtapa);
 
   const emAgenda = (c) => c.status === "Vistoria agendada" || c.status === "Em vistoria";
-  const pendentes = clientes.filter((c) => c.status === "Agendamento aprovado" && combina(c));
-  const agendadas = clientes.filter((c) => emAgenda(c) && !temDoc(c) && combina(c));
-  const realizadas = clientes.filter((c) => emAgenda(c) && temDoc(c) && combina(c));
+  /* Da data mais próxima para a mais distante; quem ainda não tem data vai para o fim
+     (a API devolve por ordem de cadastro, que não ajuda a organizar o dia a dia). */
+  const porDataMaisProxima = (a, b) => {
+    if (!a.dataDesejada && !b.dataDesejada) return (a.nome || "").localeCompare(b.nome || "", "pt-BR");
+    if (!a.dataDesejada) return 1;
+    if (!b.dataDesejada) return -1;
+    return `${a.dataDesejada} ${a.horarioDesejado || ""}`.localeCompare(`${b.dataDesejada} ${b.horarioDesejado || ""}`);
+  };
+
+  const pendentes = clientes.filter((c) => c.status === "Agendamento aprovado" && combina(c)).sort(porDataMaisProxima);
+  const agendadas = clientes.filter((c) => emAgenda(c) && !temDoc(c) && combina(c)).sort(porDataMaisProxima);
+  const realizadas = clientes.filter((c) => emAgenda(c) && temDoc(c) && combina(c)).sort(porDataMaisProxima);
 
   const setCampo = (id, campo, valor) => setForm((f) => ({ ...f, [id]: { ...f[id], [campo]: valor } }));
   const valorCampo = (c, campo, padrao) => form[c.id]?.[campo] ?? padrao;
