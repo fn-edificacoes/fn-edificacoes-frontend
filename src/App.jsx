@@ -341,6 +341,17 @@ const SERVICO_OPCOES = ["Vistoria de entrega de chaves", "Documentação ART/TRT
 const SERVICO_DOCUMENTACAO = SERVICO_OPCOES[1];
 const ehServicoDocumentacao = (c) => c?.servico === SERVICO_DOCUMENTACAO;
 
+/* Etapa usada na aba Clientes: as mesmas 4 etapas dos "Indicadores do Agendamento", mais
+   as situações que ficam fora do fluxo de vistoria (documentação ART/TRT e cancelamentos).
+   Sem esses extras, esses cadastros sumiriam da lista — aqui a visão precisa ser completa. */
+const ETAPAS_CLIENTE = [...ETAPAS_VISTORIA, SERVICO_DOCUMENTACAO, "Cancelamento solicitado", "Cancelado"];
+function etapaClienteCompleta(cliente, docs = []) {
+  if (ehServicoDocumentacao(cliente)) return SERVICO_DOCUMENTACAO;
+  if (cliente.status === "Cancelamento solicitado") return "Cancelamento solicitado";
+  if (cliente.status === "Cancelado") return "Cancelado";
+  return etapaVistoriaCliente(cliente, docs) || "Solicitação de vistoria";
+}
+
 const novoCadastroCliente = () => ({
   id: `cli_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
   nome: "", cpf: "", telefone: "", email: "",
@@ -1258,17 +1269,16 @@ function CalendarioVistoriador({ agenda = [], carregando, clientes = [], preench
 }
 
 /* ================= Aba: Clientes (perfil Comercial) ================= */
-/* Ordem das colunas do Kanban — mesmas etapas do status dinâmico (etapaAtualCliente),
-   só numa ordem lógica de pipeline em vez da ordem que aparecem nos dados. */
-const ETAPA_ORDEM = ["Em análise", "Agendamento aprovado", "Vistoria agendada", "Em vistoria", "Agendado", "Laudo em análise", "Laudo enviado por e-mail", "Cancelado"];
+/* A ordem das colunas do Kanban e dos contadores vem de ETAPAS_CLIENTE, que segue as mesmas
+   etapas dos "Indicadores do Agendamento". */
 
 function KanbanClientes({ clientes, docs, onAbrir }) {
   const porEtapa = {};
   clientes.forEach((c) => {
-    const et = etapaAtualCliente(c, docs);
+    const et = etapaClienteCompleta(c, docs);
     (porEtapa[et] = porEtapa[et] || []).push(c);
   });
-  const etapas = [...ETAPA_ORDEM.filter((e) => porEtapa[e]), ...Object.keys(porEtapa).filter((e) => !ETAPA_ORDEM.includes(e))];
+  const etapas = [...ETAPAS_CLIENTE.filter((e) => porEtapa[e]), ...Object.keys(porEtapa).filter((e) => !ETAPAS_CLIENTE.includes(e))];
 
   return (
     <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 8 }}>
@@ -1333,17 +1343,20 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
     try { await excluirCliente(c.id); } catch (e) { notify(`Erro: ${e.message}`); }
   };
 
+  // Mesmas etapas dos "Indicadores do Agendamento", na mesma ordem, mais os casos fora do
+  // fluxo de vistoria (ART/TRT e cancelados) — ver ETAPAS_CLIENTE.
   const contagemPorEtapa = {};
-  clientes.forEach((c) => { const et = etapaAtualCliente(c, docs); contagemPorEtapa[et] = (contagemPorEtapa[et] || 0) + 1; });
+  clientes.forEach((c) => { const et = etapaClienteCompleta(c, docs); contagemPorEtapa[et] = (contagemPorEtapa[et] || 0) + 1; });
+  const etapasComClientes = ETAPAS_CLIENTE.filter((e) => contagemPorEtapa[e]);
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      {Object.keys(contagemPorEtapa).length > 0 && (
+      {etapasComClientes.length > 0 && (
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {Object.entries(contagemPorEtapa).map(([etapa, qtd]) => (
+          {etapasComClientes.map((etapa) => (
             <div key={etapa} style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "8px 12px" }}>
               <Selo valor={etapa} />
-              <strong style={{ fontSize: 14 }}>{qtd}</strong>
+              <strong style={{ fontSize: 14 }}>{contagemPorEtapa[etapa]}</strong>
             </div>
           ))}
         </div>
@@ -1411,7 +1424,7 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
                     <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
                       {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""}
                     </td>
-                    <td style={{ padding: "8px 10px" }}><Selo valor={etapaAtualCliente(c, docs)} /></td>
+                    <td style={{ padding: "8px 10px" }}><Selo valor={etapaClienteCompleta(c, docs)} /></td>
                     <td style={{ padding: "8px 10px" }}>
                       <button className="icon-btn" onClick={() => abrirEdicao(c)}><Edit3 size={15} color={AZUL_MEDIO} /></button>
                     </td>
@@ -4227,6 +4240,8 @@ STATUS_COR["Cancelado"] = { cor: "#C62828", bg: "#FCEAEA" };
 /* Etapas operacionais da vistoria (ETAPAS_VISTORIA), usadas nos indicadores do Agendamento. */
 STATUS_COR["Solicitação de vistoria"] = { cor: "#65758b", bg: "#EEF1F5" };
 STATUS_COR["Vistoriado"] = { cor: "#2E7D32", bg: "#E6F4EA" };
+/* Etapa extra da aba Clientes: cadastro que não passa por vistoria (ver ETAPAS_CLIENTE). */
+STATUS_COR["Documentação ART/TRT"] = { cor: "#0F766E", bg: "#E3F3F1" };
 
 function safeParseArray(v) {
   if (Array.isArray(v)) return v;
