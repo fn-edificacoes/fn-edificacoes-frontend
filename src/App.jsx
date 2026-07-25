@@ -58,6 +58,7 @@ function mapClienteDaApi(c) {
     observacoes: c.observacoes || "", atendido: !!c.atendido,
     status: c.status || "Em análise", cep: c.cep || "", vistoriadorId: c.vistoriador_id || "",
     precisaCadastroEmpreendimento: !!c.precisa_cadastro_empreendimento,
+    pagamento: c.pagamento || "Pendente",
   };
 }
 /* Etapa atual de um cliente no fluxo completo (cadastro → análise → vistoria → laudo → feedback).
@@ -88,7 +89,12 @@ function etapaVistoriaCliente(cliente, docs = []) {
 }
 /* Converte um registro de preço de vistoria por empreendimento vindo do banco (snake_case) */
 function mapPrecoDaApi(p) {
-  return { id: p.id, empreendimento: p.empreendimento || "", precoVistoria: Number(p.preco_vistoria) || 0, atualizadoEm: p.atualizado_em || null };
+  return {
+    id: p.id, empreendimento: p.empreendimento || "",
+    precoVistoria: Number(p.preco_vistoria) || 0,
+    precoDocumentacao: Number(p.preco_documentacao) || 0,
+    atualizadoEm: p.atualizado_em || null,
+  };
 }
 /* Mascara um CPF/CNPJ deixando visível só o início e o fim (ex.: 123.***.***-45) */
 function mascararCpf(cpf) {
@@ -351,6 +357,15 @@ const ehServicoDocumentacao = (c) => c?.servico === SERVICO_DOCUMENTACAO;
    as situações que ficam fora do fluxo de vistoria (documentação ART/TRT e cancelamentos).
    Sem esses extras, esses cadastros sumiriam da lista — aqui a visão precisa ser completa. */
 const ETAPAS_CLIENTE = [...ETAPAS_VISTORIA, SERVICO_DOCUMENTACAO, "Cancelamento solicitado", "Cancelado"];
+
+/* Fluxo do ponto de vista do técnico, na agenda dele. "Concluída" só depois que ele manda o
+   laudo pra gerência — começar a vistoria não conclui nada. */
+const ETAPAS_TECNICO = ["Agendada", "Em vistoria", "Concluída"];
+function etapaTecnico(item) {
+  if (item?.laudo_enviado) return "Concluída";
+  if (item?.status === "Em vistoria") return "Em vistoria";
+  return "Agendada";
+}
 function etapaClienteCompleta(cliente, docs = []) {
   if (ehServicoDocumentacao(cliente)) return SERVICO_DOCUMENTACAO;
   if (cliente.status === "Cancelamento solicitado") return "Cancelamento solicitado";
@@ -722,8 +737,20 @@ function AppInterno({ session, onLogout }) {
   /* ---- Preço de vistoria por empreendimento (alimenta o Financeiro) ---- */
   const [precos, setPrecos] = useState([]);
   const [precosCarregando, setPrecosCarregando] = useState(false);
+  /* Lista oficial de empreendimentos (vem da planilha do Drive, tabela empreendimentos_ref).
+     É ela que a Gerência usa para fixar os preços — em vez de digitar o nome na mão. */
+  const [empreendimentosRef, setEmpreendimentosRef] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await apiFetch("/api/empreendimentos-ref");
+        setEmpreendimentosRef(r.empreendimentos || []);
+      } catch { /* sem a lista, o card de preços mostra só o que já foi cadastrado */ }
+    })();
+  }, []);
   const carregarPrecos = async () => {
-    if (perfil !== "gerencia") return;
+    // Documentação também lê (só leitura), pra ver o valor fixado pela Gerência.
+    if (perfil !== "gerencia" && perfil !== "documentacao") return;
     setPrecosCarregando(true);
     try {
       const r = await apiFetch("/api/precos-empreendimento", { token });
@@ -732,9 +759,10 @@ function AppInterno({ session, onLogout }) {
     setPrecosCarregando(false);
   };
   useEffect(() => { carregarPrecos(); }, []);
-  const salvarPreco = async (empreendimento, precoVistoria) => {
+  /* precos: { precoVistoria?, precoDocumentacao? } — o que não vier mantém o valor atual. */
+  const salvarPreco = async (empreendimento, precos) => {
     try {
-      const r = await apiFetch("/api/precos-empreendimento", { method: "POST", token, body: { empreendimento, precoVistoria } });
+      const r = await apiFetch("/api/precos-empreendimento", { method: "POST", token, body: { empreendimento, ...precos } });
       setPrecos((atual) => {
         const existe = atual.some((p) => p.id === r.id);
         const item = mapPrecoDaApi(r);
@@ -745,12 +773,6 @@ function AppInterno({ session, onLogout }) {
       notify(`Não foi possível salvar o preço: ${e.message}`);
       return false;
     }
-  };
-  const removerPreco = async (id) => {
-    try {
-      await apiFetch(`/api/precos-empreendimento/${id}`, { method: "DELETE", token });
-      setPrecos((atual) => atual.filter((p) => p.id !== id));
-    } catch (e) { notify(`Não foi possível remover o preço: ${e.message}`); }
   };
 
   /* ---- Laudos aguardando aprovação da Gerência ---- */
@@ -782,16 +804,22 @@ function AppInterno({ session, onLogout }) {
   /* ---- Calendário do vistoriador: agendamentos atribuídos a ele ---- */
   const [agendaVistoriador, setAgendaVistoriador] = useState([]);
   const [agendaVistoriadorCarregando, setAgendaVistoriadorCarregando] = useState(false);
-  const carregarAgendaVistoriador = async () => {
+  const carregarAgendaVistoriador = async ({ silencioso = false } = {}) => {
     if (perfil !== "vistoriador" && perfil !== "gerencia") return;
-    setAgendaVistoriadorCarregando(true);
+    if (!silencioso) setAgendaVistoriadorCarregando(true);
     try {
       const r = await apiFetch("/api/clientes/minha-agenda", { token });
       setAgendaVistoriador(r.agenda || []);
-    } catch (e) { notify(`Não foi possível carregar sua agenda: ${e.message}`); }
-    setAgendaVistoriadorCarregando(false);
+    } catch (e) { if (!silencioso) notify(`Não foi possível carregar sua agenda: ${e.message}`); }
+    if (!silencioso) setAgendaVistoriadorCarregando(false);
   };
-  useEffect(() => { carregarAgendaVistoriador(); }, []);
+  useEffect(() => {
+    carregarAgendaVistoriador();
+    // Recarrega em segundo plano pra que uma vistoria cancelada pela Gerência suma da
+    // agenda do técnico sem ele precisar recarregar a página.
+    const t = setInterval(() => carregarAgendaVistoriador({ silencioso: true }), 20000);
+    return () => clearInterval(t);
+  }, []);
 
   /* ---- Assinatura digital da Gerência (via API real) ---- */
   const [assinatura, setAssinatura] = useState(null); // { imagem, nome }
@@ -1073,7 +1101,7 @@ function AppInterno({ session, onLogout }) {
 
         {abaTop === "documentacao" && (
           <AbaDocumentacao docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={docsCarregando} notify={notify} clientes={clientes} updCliente={updCliente} perfil={perfil}
-            documentosArt={documentosArt} enviarDocumentoArt={enviarDocumentoArt} excluirDocumentoArt={excluirDocumentoArt} />
+            documentosArt={documentosArt} enviarDocumentoArt={enviarDocumentoArt} excluirDocumentoArt={excluirDocumentoArt} precos={precos} />
         )}
         {abaTop === "clientes" && (
           <AbaClientesComercial clientes={clientes} carregando={clientesCarregando} atualizarCliente={updCliente} excluirCliente={delCliente} notify={notify} docs={docs} perfil={perfil} />
@@ -1091,7 +1119,7 @@ function AppInterno({ session, onLogout }) {
             avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
             parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
             vales={vales} valesCarregando={valesCarregando}
-            precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} removerPreco={removerPreco}
+            precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
             laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} />
         )}
       </main>
@@ -1226,11 +1254,66 @@ function CalendarioMensal({ porData, mesRef, setMesRef, diaSelecionado, setDiaSe
   );
 }
 
+/* Linha do tempo da vistoria como o técnico enxerga: Agendada → Em vistoria → Concluída
+   (concluída = laudo já enviado para a gerência). Mesmo formato usado no Agendamento. */
+function LinhaDoTempoTecnico({ etapaAtual }) {
+  const indiceAtual = ETAPAS_TECNICO.indexOf(etapaAtual);
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 0, marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${CINZA_BORDA}` }}>
+      {ETAPAS_TECNICO.map((label, i) => (
+        <React.Fragment key={label}>
+          <EtapaTempo label={label} cor={STATUS_COR[label]?.cor || AZUL_MEDIO} ativa={indiceAtual >= 0 && i <= indiceAtual} />
+          {i < ETAPAS_TECNICO.length - 1 && <div style={{ height: 2, background: "#D8DEE7", flex: 0.6, marginTop: 6 }} />}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
+/* Resumo da agenda do técnico: quantas vistorias em cada etapa do fluxo dele. */
+function CardIndicadoresTecnico({ agenda = [] }) {
+  const porEtapa = {};
+  agenda.forEach((a) => { const e = etapaTecnico(a); porEtapa[e] = (porEtapa[e] || 0) + 1; });
+  const hojeISO = paraChaveISO(new Date());
+  const hoje = agenda.filter((a) => a.data_desejada === hojeISO).length;
+
+  return (
+    <Card icon={LayoutGrid} titulo="Minhas vistorias">
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 16 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>Por etapa</div>
+          <div style={{ display: "grid", gap: 6 }}>
+            {ETAPAS_TECNICO.map((etapa) => (
+              <div key={etapa} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <Selo valor={etapa} />
+                <strong style={{ fontSize: 13 }}>{porEtapa[etapa] || 0}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>Hoje</div>
+          <div style={{ fontSize: 30, fontWeight: 800, color: AZUL_MARINHO, lineHeight: 1 }}>{hoje}</div>
+          <div style={{ fontSize: 12, color: "#65758b", marginTop: 4 }}>vistoria(s) marcada(s) para hoje</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>Total atribuído</div>
+          <div style={{ fontSize: 30, fontWeight: 800, color: AZUL_MARINHO, lineHeight: 1 }}>{agenda.length}</div>
+          <div style={{ fontSize: 12, color: "#65758b", marginTop: 4 }}>encaminhadas pelo Atendimento</div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function CalendarioVistoriador({ agenda = [], carregando, clientes = [], preencherComCliente }) {
   const [mesRef, setMesRef] = useState(() => { const h = new Date(); return new Date(h.getFullYear(), h.getMonth(), 1); });
   const [diaSelecionado, setDiaSelecionado] = useState(null);
 
+  // O backend já exclui cancelados; aqui é só proteção contra dados carregados antes do
+  // cancelamento (a agenda não fica recarregando sozinha).
   const porData = agenda.reduce((acc, a) => {
+    if (a.status === "Cancelado" || a.status === "Cancelamento solicitado") return acc;
     const k = a.data_desejada || "(sem data)";
     (acc[k] = acc[k] || []).push(a);
     return acc;
@@ -1244,9 +1327,12 @@ function CalendarioVistoriador({ agenda = [], carregando, clientes = [], preench
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
+      <CardIndicadoresTecnico agenda={agenda} />
+
       <Card icon={CalendarDays} titulo="Minha agenda">
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-          Vistorias atribuídas a você. Clique num dia do calendário pra ver só os agendamentos daquela data. Apenas consulta — a atribuição e o agendamento são feitos pelo Agendamento/Gerência.
+          Vistorias que o Atendimento encaminhou para você. Clique num dia do calendário pra ver só os agendamentos daquela data.
+          Uma vistoria só fica "Concluída" depois que você envia o laudo para a gerência.
         </p>
 
         <CalendarioMensal porData={porData} mesRef={mesRef} setMesRef={setMesRef} diaSelecionado={diaSelecionado} setDiaSelecionado={setDiaSelecionado} />
@@ -1268,26 +1354,29 @@ function CalendarioVistoriador({ agenda = [], carregando, clientes = [], preench
             </div>
             <div style={{ display: "grid", gap: 10 }}>
               {porData[data].map((a) => (
-                <div key={a.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                  <div style={{ width: 56, textAlign: "center", flexShrink: 0, fontSize: 15, fontWeight: 800, color: AZUL_MEDIO }}>
-                    {a.horario_desejado || "—"}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 180 }}>
-                    <div style={{ fontWeight: 700, fontSize: 14 }}>{a.nome}</div>
-                    <div style={{ fontSize: 12.5, color: "#65758b" }}>
-                      {a.servico}{a.empreendimento ? ` · ${a.empreendimento}` : ""}{a.bloco_torre ? ` (${a.bloco_torre})` : ""}
+                <div key={a.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ width: 56, textAlign: "center", flexShrink: 0, fontSize: 15, fontWeight: 800, color: AZUL_MEDIO }}>
+                      {a.horario_desejado || "—"}
                     </div>
+                    <div style={{ flex: 1, minWidth: 180 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>{a.nome}</div>
+                      <div style={{ fontSize: 12.5, color: "#65758b" }}>
+                        {a.servico}{a.empreendimento ? ` · ${a.empreendimento}` : ""}{a.bloco_torre ? ` (${a.bloco_torre})` : ""}
+                      </div>
+                    </div>
+                    <Selo valor={etapaTecnico(a)} />
+                    {preencherComCliente && !a.laudo_enviado && (
+                      <button className="btn-solid" style={{ width: "auto", padding: "8px 14px" }}
+                        onClick={() => {
+                          const cli = clientes.find((c) => c.id === a.id);
+                          if (cli) preencherComCliente(cli, { irParaItens: true });
+                        }}>
+                        <Check size={14} /> {a.status === "Em vistoria" ? "Continuar vistoria" : "Iniciar vistoria"}
+                      </button>
+                    )}
                   </div>
-                  <Selo valor={a.atendido ? "Concluída" : "Agendada"} />
-                  {preencherComCliente && (
-                    <button className="btn-solid" style={{ width: "auto", padding: "8px 14px" }}
-                      onClick={() => {
-                        const cli = clientes.find((c) => c.id === a.id);
-                        if (cli) preencherComCliente(cli, { irParaItens: true });
-                      }}>
-                      <Check size={14} /> Iniciar vistoria
-                    </button>
-                  )}
+                  <LinhaDoTempoTecnico etapaAtual={etapaTecnico(a)} />
                 </div>
               ))}
             </div>
@@ -1572,7 +1661,7 @@ function LinhaDoTempo({ etapaAtual }) {
 /* Dispatcher das 3 sub-abas do setor Qualidade (mesmo padrão de "sub" já usado em AbaGerencia). */
 /* Dashboard de indicadores visível nas 3 sub-abas de Qualidade: etapa do fluxo dos
    clientes, status do bloco ART Documentações, e média das avaliações dos clientes. */
-function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [] }) {
+function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [], filtroEtapa, aoTrocarEtapa }) {
   const porEtapa = {};
   clientes.forEach((c) => { const et = etapaVistoriaCliente(c, docs); if (et) porEtapa[et] = (porEtapa[et] || 0) + 1; });
 
@@ -1586,14 +1675,35 @@ function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [] })
     <Card icon={LayoutGrid} titulo="Indicadores do Agendamento">
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 20 }}>
         <div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>Clientes por etapa do fluxo</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO }}>Clientes por etapa do fluxo</div>
+            {filtroEtapa && (
+              <button className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO, padding: "2px 8px", fontSize: 11.5 }}
+                onClick={() => aoTrocarEtapa(null)}>
+                <X size={11} /> Limpar
+              </button>
+            )}
+          </div>
+          {/* Clicar numa etapa filtra a lista logo abaixo; clicar de novo na mesma limpa. */}
           <div style={{ display: "grid", gap: 6 }}>
-            {ETAPAS_VISTORIA.map((etapa) => (
-              <div key={etapa} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <Selo valor={etapa} />
-                <strong style={{ fontSize: 13 }}>{porEtapa[etapa] || 0}</strong>
-              </div>
-            ))}
+            {ETAPAS_VISTORIA.map((etapa) => {
+              const ativo = filtroEtapa === etapa;
+              const clicavel = !!aoTrocarEtapa;
+              return (
+                <button key={etapa} onClick={() => clicavel && aoTrocarEtapa(ativo ? null : etapa)}
+                  aria-pressed={ativo} disabled={!clicavel}
+                  title={clicavel ? (ativo ? "Clique para mostrar todas" : `Mostrar só: ${etapa}`) : undefined}
+                  style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, width: "100%",
+                    background: ativo ? "#EAF2FB" : "transparent",
+                    border: `1.5px solid ${ativo ? AZUL_MEDIO : "transparent"}`,
+                    borderRadius: 8, padding: "3px 6px", cursor: clicavel ? "pointer" : "default", textAlign: "left",
+                  }}>
+                  <Selo valor={etapa} />
+                  <strong style={{ fontSize: 13, color: ativo ? AZUL_MARINHO : "inherit" }}>{porEtapa[etapa] || 0}</strong>
+                </button>
+              );
+            })}
           </div>
         </div>
         <div>
@@ -1624,6 +1734,9 @@ function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [] })
 
 function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, agendarAgoraId, setAgendarAgoraId, podeAgir = false, ehGerencia = false }) {
   const [diaParaAbrir, setDiaParaAbrir] = useState(null); // data (ISO) que o calendário da Análise deve abrir já selecionada
+  // Etapa escolhida nos indicadores — filtra a lista da sub-aba aberta. Fica aqui (e não em
+  // cada sub-aba) pra que o filtro continue valendo ao trocar de sub-aba.
+  const [filtroEtapa, setFiltroEtapa] = useState(null);
   const irParaAgendamento = (clienteId) => {
     setAgendarAgoraId(clienteId);
     setSub("vistoria");
@@ -1636,21 +1749,22 @@ function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, u
   };
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <CardIndicadoresQualidade clientes={clientes} docs={docs} avaliacoes={avaliacoes} />
+      <CardIndicadoresQualidade clientes={clientes} docs={docs} avaliacoes={avaliacoes}
+        filtroEtapa={filtroEtapa} aoTrocarEtapa={setFiltroEtapa} />
       {!podeAgir && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#EAF2FB", color: AZUL_MARINHO, borderRadius: 8, padding: "8px 12px", fontSize: 12.5 }}>
           <Info size={14} /> Modo leitura — aprovar agendamento, encaminhar técnico e aprovar feedback agora é exclusivo do perfil Atendimento.
         </div>
       )}
-      {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} abrirAutomaticoId={agendarAgoraId} aoAbrirAutomatico={() => setAgendarAgoraId(null)} aoConfirmar={aoConfirmarVistoria} />}
+      {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} abrirAutomaticoId={agendarAgoraId} aoAbrirAutomatico={() => setAgendarAgoraId(null)} aoConfirmar={aoConfirmarVistoria} filtroEtapa={filtroEtapa} />}
       {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} clientes={clientes} clientesCarregando={clientesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
-        solicitarExclusaoAvaliacao={solicitarExclusaoAvaliacao} manterAvaliacao={manterAvaliacao} excluirAvaliacao={excluirAvaliacao} podeAgir={podeAgir} ehGerencia={ehGerencia} />}
-      {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} onAgendarAgora={irParaAgendamento} diaParaAbrir={diaParaAbrir} aoAbrirDia={() => setDiaParaAbrir(null)} />}
+        solicitarExclusaoAvaliacao={solicitarExclusaoAvaliacao} manterAvaliacao={manterAvaliacao} excluirAvaliacao={excluirAvaliacao} podeAgir={podeAgir} ehGerencia={ehGerencia} filtroEtapa={filtroEtapa} />}
+      {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} onAgendarAgora={irParaAgendamento} diaParaAbrir={diaParaAbrir} aoAbrirDia={() => setDiaParaAbrir(null)} filtroEtapa={filtroEtapa} aoTrocarEtapa={setFiltroEtapa} />}
     </div>
   );
 }
 
-function AbaQualidadeFeedback({ avaliacoes, carregando, clientes = [], clientesCarregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, podeAgir = false, ehGerencia = false }) {
+function AbaQualidadeFeedback({ avaliacoes, carregando, clientes = [], clientesCarregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, podeAgir = false, ehGerencia = false, filtroEtapa = null }) {
   const [busca, setBusca] = useState("");
   const total = avaliacoes.length;
   const media = total ? (avaliacoes.reduce((s, a) => s + a.nota, 0) / total) : 0;
@@ -1670,7 +1784,9 @@ function AbaQualidadeFeedback({ avaliacoes, carregando, clientes = [], clientesC
   clientes.forEach((c) => {
     if (termo && !`${c.nome} ${c.empreendimento}`.toLowerCase().includes(termo)) return;
     const etapa = etapaVistoriaCliente(c, docs);
-    if (etapa) (clientesPorEtapa[etapa] = clientesPorEtapa[etapa] || []).push(c);
+    if (!etapa) return;
+    if (filtroEtapa && etapa !== filtroEtapa) return; // filtro vindo do clique nos indicadores
+    (clientesPorEtapa[etapa] = clientesPorEtapa[etapa] || []).push(c);
   });
   const totalAcompanhamento = Object.values(clientesPorEtapa).reduce((s, l) => s + l.length, 0);
 
@@ -1920,13 +2036,10 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
   // Mostra todo cliente já cadastrado com data desejada (não só quem já tem técnico
   // confirmado) — "Cancelado" fica de fora por não ser mais um compromisso ativo.
   const agendadosPorDia = {};
-  const contagemPorEtapa = {};
   clientes.forEach((c) => {
     if (!c.dataDesejada || c.status === "Cancelado" || ehServicoDocumentacao(c)) return;
     if (filtroTecnicos && filtroTecnicos.size > 0 && !filtroTecnicos.has(String(c.vistoriadorId))) return;
-    const etapa = etapaVistoriaCliente(c, docs);
-    if (etapa) contagemPorEtapa[etapa] = (contagemPorEtapa[etapa] || 0) + 1;
-    if (filtroEtapa && etapa !== filtroEtapa) return;
+    if (filtroEtapa && etapaVistoriaCliente(c, docs) !== filtroEtapa) return;
     (agendadosPorDia[c.dataDesejada] = agendadosPorDia[c.dataDesejada] || []).push(c);
   });
 
@@ -1936,24 +2049,16 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
 
   return (
     <div>
-      {/* Filtro por etapa: clicar de novo na mesma etapa limpa o filtro. */}
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10, alignItems: "center" }}>
-        <span style={{ fontSize: 12, color: "#8593a8", fontWeight: 600, marginRight: 2 }}>Etapa:</span>
-        <button onClick={() => aoTrocarEtapa(null)} aria-pressed={!filtroEtapa}
-          style={{ padding: "5px 11px", borderRadius: 20, border: `1.5px solid ${filtroEtapa ? CINZA_BORDA : AZUL_MEDIO}`, background: filtroEtapa ? "#fff" : AZUL_MEDIO, color: filtroEtapa ? "#65758b" : "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-          Todas
-        </button>
-        {ETAPAS_VISTORIA.map((etapa) => {
-          const ativo = filtroEtapa === etapa;
-          const cor = STATUS_COR[etapa]?.cor || AZUL_MEDIO;
-          return (
-            <button key={etapa} onClick={() => aoTrocarEtapa(ativo ? null : etapa)} aria-pressed={ativo}
-              style={{ padding: "5px 11px", borderRadius: 20, border: `1.5px solid ${cor}`, background: ativo ? cor : "#fff", color: ativo ? "#fff" : cor, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-              {etapa} ({contagemPorEtapa[etapa] || 0})
-            </button>
-          );
-        })}
-      </div>
+      {/* Etapa filtrada pelo clique nos "Indicadores do Agendamento", acima. */}
+      {filtroEtapa && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, background: "#EAF2FB", borderRadius: 8, padding: "6px 10px", fontSize: 12.5, color: AZUL_MARINHO }}>
+          <Filter size={13} /> Mostrando só: <Selo valor={filtroEtapa} />
+          <button className="btn-ghost" style={{ color: AZUL_MEDIO, background: "#fff", padding: "2px 8px", fontSize: 11.5, marginLeft: "auto" }}
+            onClick={() => aoTrocarEtapa?.(null)}>
+            <X size={11} /> Limpar
+          </button>
+        </div>
+      )}
 
       {vistoriadores.length > 0 && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
@@ -1996,6 +2101,7 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
           const doDia = agendadosPorDia[chave] || [];
           const selecionado = diaSelecionado === chave;
           const hoje = chave === hojeISO;
+          const temAgendamento = doDia.length > 0;
           return (
             <button key={chave} className="dia-cel" data-dia-idx={i}
               onKeyDown={(e) => {
@@ -2005,12 +2111,25 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
                 gridRef.current?.querySelector(`[data-dia-idx="${i + passos}"]`)?.focus();
               }}
               onClick={() => setDiaSelecionado(selecionado ? null : chave)}
+              title={doDia.length > 0 ? `${doDia.length} vistoria(s) marcada(s) neste dia` : "Nenhuma vistoria marcada"}
               style={{
-                minHeight: 76, border: selecionado ? `2px solid ${AZUL_MEDIO}` : `1px solid ${CINZA_BORDA}`, borderRadius: 8,
-                background: hoje ? CINZA_CLARO : "#fff", cursor: "pointer", display: "flex", flexDirection: "column",
+                minHeight: 88,
+                // Dia com vistoria marcada fica visualmente destacado (fundo e borda azuis),
+                // pra dar pra bater o olho no mês e ver onde tem compromisso.
+                border: selecionado ? `2px solid ${AZUL_MEDIO}` : temAgendamento ? `1.5px solid ${AZUL_MEDIO}` : `1px solid ${CINZA_BORDA}`,
+                borderRadius: 8,
+                background: temAgendamento ? "#EAF2FB" : hoje ? CINZA_CLARO : "#fff",
+                cursor: "pointer", display: "flex", flexDirection: "column",
                 alignItems: "stretch", gap: 3, padding: 4, textAlign: "left",
               }}>
-              <span style={{ fontSize: 12, fontWeight: hoje ? 800 : 600, color: hoje ? AZUL_MARINHO : "#1a2330" }}>{dia}</span>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+                <span style={{ fontSize: 12, fontWeight: hoje ? 800 : 600, color: hoje ? AZUL_MARINHO : "#1a2330" }}>{dia}</span>
+                {temAgendamento && (
+                  <span style={{ background: AZUL_MEDIO, color: "#fff", borderRadius: 10, padding: "1px 6px", fontSize: 9, fontWeight: 800, whiteSpace: "nowrap" }}>
+                    {doDia.length} {doDia.length === 1 ? "vistoria" : "vistorias"}
+                  </span>
+                )}
+              </div>
               {vistoriadores.length > 0 && (
                 <div style={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
                   {vistoriadores.map((v) => {
@@ -2030,7 +2149,11 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
                     </div>
                   );
                 })}
-                {doDia.length > 3 && <div style={{ fontSize: 9, color: AZUL_MARINHO, fontWeight: 700 }}>+{doDia.length - 3}</div>}
+                {doDia.length > 3 && (
+                  <div style={{ fontSize: 9, color: AZUL_MARINHO, fontWeight: 700 }}>
+                    +{doDia.length - 3} {doDia.length - 3 === 1 ? "outra" : "outras"}
+                  </div>
+                )}
               </div>
             </button>
           );
@@ -2196,17 +2319,19 @@ function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesAprovados
 }
 
 /* ================= Agendamento · Análise: aprovação de clientes + calendário operacional ================= */
-function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, onAgendarAgora, diaParaAbrir, aoAbrirDia }) {
+function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, onAgendarAgora, diaParaAbrir, aoAbrirDia, filtroEtapa = null, aoTrocarEtapa }) {
   const [mesRef, setMesRef] = useState(() => { const h = new Date(); return new Date(h.getFullYear(), h.getMonth(), 1); });
   const [diaSelecionado, setDiaSelecionado] = useState(null);
   const [filtroTecnicos, setFiltroTecnicos] = useState(() => new Set());
-  const [filtroEtapa, setFiltroEtapa] = useState(null); // etapa de ETAPAS_VISTORIA, ou null p/ todas
   const [clienteAprovado, setClienteAprovado] = useState(null);
   const [agendando, setAgendando] = useState(null); // { dataDesejada } quando o form "Agendar vistoria" está aberto
 
   const vistoriadores = usuarios.filter((u) => u.role === "vistoriador" && u.ativo);
   const aprovadosSemVistoria = clientes.filter((c) => c.status === "Agendamento aprovado" && !ehServicoDocumentacao(c));
-  const doDiaSelecionado = diaSelecionado ? clientes.filter((c) => c.dataDesejada === diaSelecionado) : [];
+  // O painel do dia respeita o mesmo filtro de etapa aplicado ao calendário.
+  const doDiaSelecionado = diaSelecionado
+    ? clientes.filter((c) => c.dataDesejada === diaSelecionado && (!filtroEtapa || etapaVistoriaCliente(c, docs) === filtroEtapa))
+    : [];
 
   // Veio de uma confirmação de vistoria feita na sub-aba Vistoria — pula direto pro
   // mês/dia certo e já abre o painel lateral, sem precisar navegar manualmente.
@@ -2262,7 +2387,7 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
         <CalendarioAgendamento clientes={clientes} vistoriadores={vistoriadores} docs={docs}
           mesRef={mesRef} setMesRef={setMesRef} diaSelecionado={diaSelecionado} setDiaSelecionado={setDiaSelecionado}
           filtroTecnicos={filtroTecnicos} aoTrocarFiltro={toggleFiltroTecnico}
-          filtroEtapa={filtroEtapa} aoTrocarEtapa={setFiltroEtapa} />
+          filtroEtapa={filtroEtapa} aoTrocarEtapa={aoTrocarEtapa} />
       </Card>
 
       {diaSelecionado && (
@@ -2305,7 +2430,7 @@ function CardVistoriaResumo({ c, aberto, onToggle, children }) {
 /* Sub-aba Vistoria: agrupa por status (pendente de agendamento / já agendada / já
    realizada), com busca e cards resumidos que expandem ao clicar — antes mostrava
    tudo (formulário completo) de uma vez pra cada cliente, o que ficava confuso. */
-function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, abrirAutomaticoId = null, aoAbrirAutomatico, aoConfirmar }) {
+function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, abrirAutomaticoId = null, aoAbrirAutomatico, aoConfirmar, filtroEtapa = null }) {
   const [busca, setBusca] = useState("");
   const [abertoId, setAbertoId] = useState(null);
   const [form, setForm] = useState({});
@@ -2325,8 +2450,12 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
     return cpfLimpo && docs.some((d) => (d.cpf || "").replace(/\D/g, "") === cpfLimpo);
   };
   const termo = busca.trim().toLowerCase();
-  // Documentação ART/TRT não passa por vistoria — não aparece nesta aba.
-  const combina = (c) => (!termo || `${c.nome} ${c.empreendimento}`.toLowerCase().includes(termo)) && !ehServicoDocumentacao(c);
+  // Documentação ART/TRT não passa por vistoria — não aparece nesta aba. O filtroEtapa vem
+  // do clique nos indicadores acima.
+  const combina = (c) =>
+    (!termo || `${c.nome} ${c.empreendimento}`.toLowerCase().includes(termo)) &&
+    !ehServicoDocumentacao(c) &&
+    (!filtroEtapa || etapaVistoriaCliente(c, docs) === filtroEtapa);
 
   const emAgenda = (c) => c.status === "Vistoria agendada" || c.status === "Em vistoria";
   const pendentes = clientes.filter((c) => c.status === "Agendamento aprovado" && combina(c));
@@ -2999,7 +3128,7 @@ function ConfirmModal({ aberto, titulo = "Confirmar exclusão", mensagem = "Tem 
 /* Anexo dos dois documentos finais de um cliente de Documentação ART/TRT. O arquivo vai
    para o Drive (via backend) e o status do cliente só vira "Documentação concluída" quando
    os dois estão anexados — é aí que ele consegue baixar pelo portal. */
-function CardDocumentosArt({ cliente, documentos = [], enviarDocumento, excluirDocumento, notify }) {
+function CardDocumentosArt({ cliente, documentos = [], precoDocumentacao = 0, enviarDocumento, excluirDocumento, atualizarPagamento, notify }) {
   const [enviandoTipo, setEnviandoTipo] = useState(null);
   const doTipo = (tipo) => documentos.find((d) => d.tipo === tipo);
   const completo = TIPOS_DOCUMENTO_ART.every((t) => doTipo(t));
@@ -3030,7 +3159,16 @@ function CardDocumentosArt({ cliente, documentos = [], enviarDocumento, excluirD
             {cliente.telefone ? ` · ${cliente.telefone}` : ""}
           </div>
         </div>
-        <Selo valor={completo ? STATUS_DOC_CONCLUIDA : STATUS_DOC_PROCESSANDO} />
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          {/* Valor fixado pela Gerência para o empreendimento deste cliente. */}
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 11, color: "#8593a8" }}>Valor do serviço</div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: precoDocumentacao ? AZUL_MARINHO : "#B26A00" }}>
+              {precoDocumentacao ? fmtReal(precoDocumentacao) : "sem preço fixado"}
+            </div>
+          </div>
+          <Selo valor={completo ? STATUS_DOC_CONCLUIDA : STATUS_DOC_PROCESSANDO} />
+        </div>
       </div>
 
       <div style={{ display: "grid", gap: 8 }}>
@@ -3060,6 +3198,16 @@ function CardDocumentosArt({ cliente, documentos = [], enviarDocumento, excluirD
         })}
       </div>
 
+      {/* Pagamento é responsabilidade deste setor — por isso fica editável aqui. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${CINZA_BORDA}` }}>
+        <label style={{ ...lab, margin: 0 }}>Pagamento</label>
+        <select style={{ ...inp, width: "auto", padding: "6px 10px" }} value={cliente.pagamento || "Pendente"}
+          onChange={(e) => atualizarPagamento(cliente.id, e.target.value)}>
+          {PAGAMENTO_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
+        </select>
+        <Selo valor={cliente.pagamento || "Pendente"} />
+      </div>
+
       {!completo && (
         <div style={{ fontSize: 12, color: "#B26A00", marginTop: 8 }}>
           <AlertTriangle size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
@@ -3070,7 +3218,7 @@ function CardDocumentosArt({ cliente, documentos = [], enviarDocumento, excluirD
   );
 }
 
-function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, clientes = [], updCliente, perfil, documentosArt = [], enviarDocumentoArt, excluirDocumentoArt }) {
+function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, clientes = [], updCliente, perfil, documentosArt = [], enviarDocumentoArt, excluirDocumentoArt, precos = [] }) {
   const [editando, setEditando] = useState(null); // registro (cópia) em edição, ou null
   const [filtroVistoria, setFiltroVistoria] = useState("");
   const [busca, setBusca] = useState("");
@@ -3127,7 +3275,9 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, cli
             {clientesArt.map((c) => (
               <CardDocumentosArt key={c.id} cliente={c}
                 documentos={documentosArt.filter((d) => d.clienteId === c.id)}
-                enviarDocumento={enviarDocumentoArt} excluirDocumento={excluirDocumentoArt} notify={notify} />
+                precoDocumentacao={precos.find((p) => p.empreendimento === (c.empreendimento || "").trim())?.precoDocumentacao || 0}
+                enviarDocumento={enviarDocumentoArt} excluirDocumento={excluirDocumentoArt}
+                atualizarPagamento={(id, pagamento) => updCliente(id, { pagamento })} notify={notify} />
             ))}
           </div>
         </Card>
@@ -3574,125 +3724,192 @@ function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceir
 }
 
 /* ---- Gerência · Financeiro ---- */
-function CardPrecoEmpreendimento({ precos, carregando, salvarPreco, removerPreco, clientes, notify }) {
-  const [novoEmpreendimento, setNovoEmpreendimento] = useState("");
-  const [novoPreco, setNovoPreco] = useState("");
+/* Uma linha da tabela de preços: o empreendimento vem da lista oficial (planilha do Drive)
+   e a Gerência fixa os dois valores — vistoria e documentação ART/TRT. */
+function LinhaPrecoEmpreendimento({ empreendimento, construtora, preco, salvarPreco, notify }) {
+  const [editando, setEditando] = useState(false);
+  const [vistoria, setVistoria] = useState("");
+  const [documentacao, setDocumentacao] = useState("");
   const [salvando, setSalvando] = useState(false);
-  const [editandoId, setEditandoId] = useState(null);
-  const [editandoValor, setEditandoValor] = useState("");
-  const [removendo, setRemovendo] = useState(null);
 
-  const empreendimentosConhecidos = [...new Set(clientes.map((c) => c.empreendimento?.trim()).filter(Boolean))].sort();
-
-  const adicionar = async () => {
-    if (!novoEmpreendimento.trim()) { notify("Informe o empreendimento"); return; }
-    const preco = Number(novoPreco);
-    if (!Number.isFinite(preco) || preco < 0) { notify("Informe um preço de vistoria válido"); return; }
+  const abrir = () => {
+    setVistoria(preco ? String(preco.precoVistoria) : "");
+    setDocumentacao(preco ? String(preco.precoDocumentacao) : "");
+    setEditando(true);
+  };
+  const confirmar = async () => {
+    const corpo = {};
+    if (vistoria !== "") corpo.precoVistoria = Number(vistoria);
+    if (documentacao !== "") corpo.precoDocumentacao = Number(documentacao);
+    if (Object.keys(corpo).length === 0) { notify("Informe pelo menos um preço"); return; }
+    if (Object.values(corpo).some((v) => !Number.isFinite(v) || v < 0)) { notify("Informe valores válidos"); return; }
     setSalvando(true);
-    const ok = await salvarPreco(novoEmpreendimento.trim(), preco);
-    if (ok) { setNovoEmpreendimento(""); setNovoPreco(""); notify("Preço salvo ✓"); }
+    const ok = await salvarPreco(empreendimento, corpo);
     setSalvando(false);
+    if (ok) { setEditando(false); notify("Preço salvo ✓"); }
   };
-  const iniciarEdicao = (p) => { setEditandoId(p.id); setEditandoValor(String(p.precoVistoria)); };
-  const salvarEdicao = async (p) => {
-    const preco = Number(editandoValor);
-    if (!Number.isFinite(preco) || preco < 0) { notify("Informe um preço de vistoria válido"); return; }
-    const ok = await salvarPreco(p.empreendimento, preco);
-    if (ok) { setEditandoId(null); notify("Preço atualizado ✓"); }
-  };
+
+  const semPreco = !preco || (!preco.precoVistoria && !preco.precoDocumentacao);
+  return (
+    <tr style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+      <td style={{ padding: "8px 10px" }}>
+        <div style={{ fontWeight: 600 }}>{empreendimento}</div>
+        {construtora && <div style={{ fontSize: 11.5, color: "#8593a8" }}>{construtora}</div>}
+      </td>
+      <td style={{ padding: "8px 10px" }}>
+        {editando
+          ? <input type="number" min="0" step="0.01" style={{ ...inp, width: 120, padding: "5px 8px" }} placeholder="0,00" value={vistoria} onChange={(e) => setVistoria(e.target.value)} autoFocus />
+          : (preco?.precoVistoria ? fmtReal(preco.precoVistoria) : <span style={{ color: "#9AA6B5" }}>—</span>)}
+      </td>
+      <td style={{ padding: "8px 10px" }}>
+        {editando
+          ? <input type="number" min="0" step="0.01" style={{ ...inp, width: 120, padding: "5px 8px" }} placeholder="0,00" value={documentacao} onChange={(e) => setDocumentacao(e.target.value)} />
+          : (preco?.precoDocumentacao ? fmtReal(preco.precoDocumentacao) : <span style={{ color: "#9AA6B5" }}>—</span>)}
+      </td>
+      <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+        {editando ? (
+          <>
+            <button className="icon-btn" onClick={confirmar} disabled={salvando}>
+              {salvando ? <Loader2 size={15} className="spin" /> : <Check size={15} color="#2E7D32" />}
+            </button>
+            <button className="icon-btn" onClick={() => setEditando(false)}><X size={15} /></button>
+          </>
+        ) : (
+          <button className="icon-btn" title={semPreco ? "Definir preços" : "Editar preços"} onClick={abrir}>
+            <Edit3 size={15} color={AZUL_MEDIO} />
+          </button>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+function CardPrecoEmpreendimento({ precos, carregando, salvarPreco, empreendimentosRef = [], clientes = [], notify }) {
+  const [busca, setBusca] = useState("");
+  const [soComPreco, setSoComPreco] = useState(false);
+
+  /* A lista de empreendimentos vem da planilha do Drive (empreendimentos_ref). Junta com
+     qualquer empreendimento que já tenha preço salvo ou que apareça em cadastros de cliente,
+     pra não sumir nada que já estava em uso antes desta tela existir. */
+  const porNome = new Map();
+  empreendimentosRef.forEach((e) => {
+    const nome = (e.empreendimento || "").trim();
+    if (nome && !porNome.has(nome)) porNome.set(nome, e.construtora || "");
+  });
+  precos.forEach((p) => { if (p.empreendimento && !porNome.has(p.empreendimento)) porNome.set(p.empreendimento, ""); });
+  clientes.forEach((c) => {
+    const nome = (c.empreendimento || "").trim();
+    if (nome && !porNome.has(nome)) porNome.set(nome, c.construtora || "");
+  });
+
+  const precoPorNome = {};
+  precos.forEach((p) => { precoPorNome[p.empreendimento] = p; });
+
+  const termo = busca.trim().toLowerCase();
+  const linhas = [...porNome.entries()]
+    .map(([empreendimento, construtora]) => ({ empreendimento, construtora, preco: precoPorNome[empreendimento] }))
+    .filter((l) => !termo || `${l.empreendimento} ${l.construtora}`.toLowerCase().includes(termo))
+    .filter((l) => !soComPreco || (l.preco && (l.preco.precoVistoria || l.preco.precoDocumentacao)))
+    .sort((a, b) => a.empreendimento.localeCompare(b.empreendimento, "pt-BR"));
+
+  const comPreco = [...porNome.keys()].filter((n) => precoPorNome[n] && (precoPorNome[n].precoVistoria || precoPorNome[n].precoDocumentacao)).length;
 
   return (
-    <Card icon={DollarSign} titulo="Preço de vistoria por empreendimento">
+    <Card icon={DollarSign} titulo="Preços por empreendimento">
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-        Cadastre o valor da vistoria de cada empreendimento. Esse preço alimenta automaticamente o cálculo de receita de vistoria abaixo.
+        Empreendimentos da lista oficial (planilha do Drive). Defina o valor da vistoria e o da documentação ART/TRT —
+        o setor de Documentação vê o preço fixado aqui ao trabalhar no serviço, e os valores alimentam a receita no Financeiro.
       </p>
-      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-        <input list="empreendimentos-conhecidos" style={{ ...inp, flex: 1, minWidth: 200 }} placeholder="Empreendimento" value={novoEmpreendimento} onChange={(e) => setNovoEmpreendimento(e.target.value)} />
-        <datalist id="empreendimentos-conhecidos">{empreendimentosConhecidos.map((e) => <option key={e} value={e} />)}</datalist>
-        <input style={{ ...inp, width: 140 }} type="number" min="0" step="0.01" placeholder="Preço (R$)" value={novoPreco} onChange={(e) => setNovoPreco(e.target.value)} />
-        <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }} onClick={adicionar} disabled={salvando}>
-          {salvando ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} Salvar
-        </button>
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+        <input style={{ ...inp, flex: 1, minWidth: 200 }} placeholder="Buscar empreendimento ou construtora…" value={busca} onChange={(e) => setBusca(e.target.value)} />
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "#4a5a70", cursor: "pointer" }}>
+          <input type="checkbox" checked={soComPreco} onChange={(e) => setSoComPreco(e.target.checked)} />
+          Só com preço definido
+        </label>
+        <span style={{ fontSize: 12.5, color: "#8593a8" }}>{comPreco} de {porNome.size} com preço</span>
       </div>
 
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
-      {!carregando && precos.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum preço cadastrado ainda.</p>}
-      {precos.length > 0 && (
-        <div style={{ overflowX: "auto" }}>
+      {!carregando && linhas.length === 0 && (
+        <p style={{ color: "#8593a8", fontSize: 14 }}>
+          {porNome.size === 0 ? "A lista de empreendimentos ainda não foi carregada." : "Nenhum empreendimento encontrado com esse filtro."}
+        </p>
+      )}
+      {linhas.length > 0 && (
+        <div style={{ overflowX: "auto", maxHeight: 480, overflowY: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ background: CINZA_CLARO }}>
-                {["Empreendimento", "Preço da vistoria", ""].map((h) => (
-                  <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}` }}>{h}</th>
+                {["Empreendimento", "Vistoria", "Documentação ART/TRT", ""].map((h) => (
+                  <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}`, position: "sticky", top: 0, background: CINZA_CLARO }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {precos.map((p) => (
-                <tr key={p.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
-                  <td style={{ padding: "8px 10px", fontWeight: 600 }}>{p.empreendimento}</td>
-                  <td style={{ padding: "8px 10px" }}>
-                    {editandoId === p.id
-                      ? <input type="number" min="0" step="0.01" style={{ ...inp, width: 120, padding: "5px 8px" }} value={editandoValor} onChange={(e) => setEditandoValor(e.target.value)} autoFocus />
-                      : fmtReal(p.precoVistoria)}
-                  </td>
-                  <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
-                    {editandoId === p.id ? (
-                      <>
-                        <button className="icon-btn" onClick={() => salvarEdicao(p)}><Check size={15} color="#2E7D32" /></button>
-                        <button className="icon-btn" onClick={() => setEditandoId(null)}><X size={15} /></button>
-                      </>
-                    ) : (
-                      <>
-                        <button className="icon-btn" onClick={() => iniciarEdicao(p)}><Edit3 size={15} color={AZUL_MEDIO} /></button>
-                        <button className="icon-btn" onClick={() => setRemovendo(p)}><Trash2 size={15} color="#c62828" /></button>
-                      </>
-                    )}
-                  </td>
-                </tr>
+              {linhas.map((l) => (
+                <LinhaPrecoEmpreendimento key={l.empreendimento} empreendimento={l.empreendimento} construtora={l.construtora}
+                  preco={l.preco} salvarPreco={salvarPreco} notify={notify} />
               ))}
             </tbody>
           </table>
         </div>
       )}
-
-      <ConfirmModal aberto={!!removendo} titulo="Excluir preço"
-        mensagem={removendo ? `Tem certeza que deseja excluir o preço cadastrado para "${removendo.empreendimento}"? Essa ação não pode ser desfeita.` : ""}
-        onConfirm={() => { removerPreco(removendo.id); setRemovendo(null); }} onCancel={() => setRemovendo(null)} />
     </Card>
   );
 }
-function CardReceitaVistoriaEstimada({ precos, clientes }) {
-  const precoPorEmpreendimento = {};
-  precos.forEach((p) => { precoPorEmpreendimento[p.empreendimento] = p.precoVistoria; });
+/* Receita estimada por empreendimento, somando os dois serviços: vistorias já atendidas
+   (preço de vistoria) e documentações ART/TRT concluídas (preço de documentação). */
+function CardReceitaEstimada({ precos, clientes }) {
+  const precoPorNome = {};
+  precos.forEach((p) => { precoPorNome[p.empreendimento] = p; });
 
-  const vistoriasAtendidas = clientes.filter((c) => c.servico === SERVICO_VISTORIA && c.atendido);
   const porEmpreendimento = {};
-  vistoriasAtendidas.forEach((c) => {
+  const registrar = (c, campo, campoQtd) => {
     const k = c.empreendimento?.trim() || "(sem empreendimento)";
-    const temPreco = Object.prototype.hasOwnProperty.call(precoPorEmpreendimento, k);
-    if (!porEmpreendimento[k]) porEmpreendimento[k] = { qtd: 0, receita: 0, temPreco };
-    porEmpreendimento[k].qtd += 1;
-    porEmpreendimento[k].receita += temPreco ? precoPorEmpreendimento[k] : 0;
+    if (!porEmpreendimento[k]) porEmpreendimento[k] = { vistorias: 0, documentacoes: 0, receita: 0, recebido: 0, faltaPreco: false };
+    porEmpreendimento[k][campoQtd] += 1;
+    const valor = Number(precoPorNome[k]?.[campo]) || 0;
+    if (valor > 0) {
+      porEmpreendimento[k].receita += valor;
+      // "Parcial" não tem valor parcial cadastrado, então só "Pago" entra como recebido.
+      if (c.pagamento === "Pago") porEmpreendimento[k].recebido += valor;
+    } else {
+      porEmpreendimento[k].faltaPreco = true;
+    }
+  };
+
+  clientes.forEach((c) => {
+    if (c.status === "Cancelado") return;
+    if (ehServicoDocumentacao(c)) {
+      // Só conta depois que a documentação foi entregue.
+      if (c.status === STATUS_DOC_CONCLUIDA) registrar(c, "precoDocumentacao", "documentacoes");
+    } else if (c.servico === SERVICO_VISTORIA && c.atendido) {
+      registrar(c, "precoVistoria", "vistorias");
+    }
   });
 
   const linhas = Object.entries(porEmpreendimento).sort((a, b) => b[1].receita - a[1].receita);
   const totalReceita = linhas.reduce((s, [, v]) => s + v.receita, 0);
-  const semPreco = linhas.filter(([, v]) => !v.temPreco);
+  const totalRecebido = linhas.reduce((s, [, v]) => s + v.recebido, 0);
+  const totalVistorias = linhas.reduce((s, [, v]) => s + v.vistorias, 0);
+  const totalDocs = linhas.reduce((s, [, v]) => s + v.documentacoes, 0);
+  const semPreco = linhas.filter(([, v]) => v.faltaPreco);
 
   return (
-    <Card icon={TrendingUp} titulo="Receita de vistoria estimada (por empreendimento)">
+    <Card icon={TrendingUp} titulo="Receita estimada por empreendimento">
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-        Calculada automaticamente: preço cadastrado × quantidade de vistorias já atendidas em cada empreendimento.
+        Calculada automaticamente com os preços fixados acima: vistorias já atendidas × preço de vistoria,
+        mais documentações ART/TRT já concluídas × preço de documentação.
       </p>
-      {linhas.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhuma vistoria atendida ainda.</p>}
+      {linhas.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum serviço concluído ainda.</p>}
       {linhas.length > 0 && (
         <>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: CINZA_CLARO }}>
-                  {["Empreendimento", "Vistorias atendidas", "Receita"].map((h) => (
+                  {["Empreendimento", "Vistorias", "Documentações", "Receita", "Recebido"].map((h) => (
                     <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}` }}>{h}</th>
                   ))}
                 </tr>
@@ -3701,21 +3918,27 @@ function CardReceitaVistoriaEstimada({ precos, clientes }) {
                 {linhas.map(([nome, v]) => (
                   <tr key={nome} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
                     <td style={{ padding: "8px 10px", fontWeight: 600 }}>{nome}</td>
-                    <td style={{ padding: "8px 10px" }}>{v.qtd}</td>
-                    <td style={{ padding: "8px 10px", color: v.temPreco ? AZUL_MARINHO : "#B26A00", fontWeight: v.temPreco ? 700 : 400 }}>
-                      {v.temPreco ? fmtReal(v.receita) : "sem preço cadastrado"}
+                    <td style={{ padding: "8px 10px" }}>{v.vistorias || "—"}</td>
+                    <td style={{ padding: "8px 10px" }}>{v.documentacoes || "—"}</td>
+                    <td style={{ padding: "8px 10px", color: AZUL_MARINHO, fontWeight: 700 }}>
+                      {fmtReal(v.receita)}
+                      {v.faltaPreco && <span style={{ color: "#B26A00", fontWeight: 400, fontSize: 11.5 }}> · falta preço</span>}
+                    </td>
+                    <td style={{ padding: "8px 10px", color: v.recebido >= v.receita && v.receita > 0 ? "#2E7D32" : "#65758b", fontWeight: 600 }}>
+                      {fmtReal(v.recebido)}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${CINZA_BORDA}`, fontSize: 14 }}>
-            <strong style={{ color: AZUL_MARINHO }}>Total estimado: </strong>{fmtReal(totalReceita)}
+          <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${CINZA_BORDA}`, fontSize: 14, display: "flex", gap: 18, flexWrap: "wrap" }}>
+            <span><strong style={{ color: AZUL_MARINHO }}>Total estimado: </strong>{fmtReal(totalReceita)}</span>
+            <span style={{ color: "#65758b", fontSize: 13 }}>{totalVistorias} vistoria(s) · {totalDocs} documentação(ões)</span>
           </div>
           {semPreco.length > 0 && (
             <div style={{ marginTop: 10, background: "#FFF4E0", color: "#B26A00", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>
-              {semPreco.length} empreendimento(s) sem preço cadastrado — a receita desses ainda não está sendo contabilizada no total.
+              {semPreco.length} empreendimento(s) com serviço concluído mas sem preço fixado — esses valores ainda não entram no total.
             </div>
           )}
         </>
@@ -3723,7 +3946,7 @@ function CardReceitaVistoriaEstimada({ precos, clientes }) {
     </Card>
   );
 }
-function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salvarPreco, removerPreco, notify }) {
+function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salvarPreco, empreendimentosRef = [], notify }) {
   const somaCampo = (campo, filtro) => docs.filter(filtro).reduce((s, d) => s + (Number(d[campo]) || 0), 0);
   const pago = (d) => d.pagamento === "Pago";
   const naoPago = (d) => d.pagamento !== "Pago";
@@ -3762,19 +3985,19 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
         </div>
       </Card>
 
-      <CardPrecoEmpreendimento precos={precos} carregando={precosCarregando} salvarPreco={salvarPreco} removerPreco={removerPreco} clientes={clientes} notify={notify} />
+      <CardPrecoEmpreendimento precos={precos} carregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef} clientes={clientes} notify={notify} />
 
-      <CardReceitaVistoriaEstimada precos={precos} clientes={clientes} />
+      <CardReceitaEstimada precos={precos} clientes={clientes} />
     </div>
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, removerPreco, laudosPendentes, laudosPendentesCarregando, aprovarLaudo }) {
+function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo }) {
   if (sub === "parceiros") {
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} vales={vales} valesCarregando={valesCarregando} notify={notify} />;
   }
   if (sub === "financeiro") {
-    return <AbaGerenciaFinanceiro docs={docs} clientes={clientes} precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} removerPreco={removerPreco} notify={notify} />;
+    return <AbaGerenciaFinanceiro docs={docs} clientes={clientes} precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef} notify={notify} />;
   }
   return (
     <AbaGerenciaVisaoGeral docs={docs} clientes={clientes} updCliente={updCliente} carregando={carregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
