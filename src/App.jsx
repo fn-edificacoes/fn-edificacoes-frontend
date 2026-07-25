@@ -75,6 +75,8 @@ function etapaAtualCliente(cliente, docs = []) {
    só responder "quantas vistorias estão em cada fase do trabalho de campo". */
 const ETAPAS_VISTORIA = ["Solicitação de vistoria", "Vistoria agendada", "Em vistoria", "Vistoriado"];
 function etapaVistoriaCliente(cliente, docs = []) {
+  // Documentação ART/TRT não tem vistoria — fica fora deste fluxo (vai direto pra Documentação).
+  if (ehServicoDocumentacao(cliente)) return null;
   const cpfLimpo = (cliente.cpf || "").replace(/\D/g, "");
   const doc = cpfLimpo ? docs.find((d) => (d.cpf || "").replace(/\D/g, "") === cpfLimpo) : null;
   // Assim que existe um doc, a vistoria já foi finalizada pelo técnico e virou laudo.
@@ -334,6 +336,10 @@ const STATUS_PRODUCAO_OPCOES = ["Recebido", "Em produção", "Realizado"];
 
 /* ---------- Cliente (autocadastro e acompanhamento) ---------- */
 const SERVICO_OPCOES = ["Vistoria de entrega de chaves", "Documentação ART/TRT", "Outro"];
+/* Documentação ART/TRT não passa por vistoria: o cadastro vai direto para a área de
+   Documentação, sem aprovação nem agendamento no setor de Agendamento. */
+const SERVICO_DOCUMENTACAO = SERVICO_OPCOES[1];
+const ehServicoDocumentacao = (c) => c?.servico === SERVICO_DOCUMENTACAO;
 
 const novoCadastroCliente = () => ({
   id: `cli_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -1026,7 +1032,7 @@ function AppInterno({ session, onLogout }) {
         )}
 
         {abaTop === "documentacao" && (
-          <AbaDocumentacao docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={docsCarregando} notify={notify} />
+          <AbaDocumentacao docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={docsCarregando} notify={notify} clientes={clientes} updCliente={updCliente} />
         )}
         {abaTop === "clientes" && (
           <AbaClientesComercial clientes={clientes} carregando={clientesCarregando} atualizarCliente={updCliente} excluirCliente={delCliente} notify={notify} docs={docs} perfil={perfil} />
@@ -1498,13 +1504,16 @@ function EtapaTempo({ label, cor, ativa }) {
     </div>
   );
 }
-function LinhaDoTempo({ doc, avaliacao }) {
-  const etapas = [
-    { label: "Solicitado", cor: "#2E7D32", ativa: true },
-    { label: "Vistoria", cor: doc.vistoria === "Concluída" ? "#2E7D32" : doc.vistoria === "Cancelada" ? "#8593a8" : "#2C75B5", ativa: true },
-    { label: "ART Documentações", cor: doc.statusProducao === "Realizado" ? "#2E7D32" : "#B26A00", ativa: doc.statusProducao !== "Recebido" },
-    { label: "Avaliação", cor: "#F5A623", ativa: !!avaliacao },
-  ];
+/* Linha do tempo com as mesmas 4 etapas dos "Indicadores do Agendamento" (ETAPAS_VISTORIA),
+   pra que o acompanhamento conte a mesma história que os números lá de cima. As etapas já
+   percorridas ficam acesas; as que faltam, apagadas. */
+function LinhaDoTempo({ etapaAtual }) {
+  const indiceAtual = ETAPAS_VISTORIA.indexOf(etapaAtual);
+  const etapas = ETAPAS_VISTORIA.map((label, i) => ({
+    label,
+    cor: STATUS_COR[label]?.cor || AZUL_MEDIO,
+    ativa: indiceAtual >= 0 && i <= indiceAtual,
+  }));
   return (
     <div style={{ display: "flex", alignItems: "flex-start", gap: 0, marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${CINZA_BORDA}` }}>
       {etapas.map((e, i) => (
@@ -1591,14 +1600,14 @@ function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, u
         </div>
       )}
       {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} abrirAutomaticoId={agendarAgoraId} aoAbrirAutomatico={() => setAgendarAgoraId(null)} aoConfirmar={aoConfirmarVistoria} />}
-      {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
+      {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} clientes={clientes} clientesCarregando={clientesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
         solicitarExclusaoAvaliacao={solicitarExclusaoAvaliacao} manterAvaliacao={manterAvaliacao} excluirAvaliacao={excluirAvaliacao} podeAgir={podeAgir} ehGerencia={ehGerencia} />}
-      {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} onAgendarAgora={irParaAgendamento} diaParaAbrir={diaParaAbrir} aoAbrirDia={() => setDiaParaAbrir(null)} />}
+      {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} onAgendarAgora={irParaAgendamento} diaParaAbrir={diaParaAbrir} aoAbrirDia={() => setDiaParaAbrir(null)} />}
     </div>
   );
 }
 
-function AbaQualidadeFeedback({ avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, podeAgir = false, ehGerencia = false }) {
+function AbaQualidadeFeedback({ avaliacoes, carregando, clientes = [], clientesCarregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, podeAgir = false, ehGerencia = false }) {
   const [busca, setBusca] = useState("");
   const total = avaliacoes.length;
   const media = total ? (avaliacoes.reduce((s, a) => s + a.nota, 0) / total) : 0;
@@ -1606,11 +1615,21 @@ function AbaQualidadeFeedback({ avaliacoes, carregando, docs, docsCarregando, ap
 
   const avaliacaoPorDoc = {};
   avaliacoes.forEach((a) => { if (a.doc_id) avaliacaoPorDoc[a.doc_id] = a; });
+  const docDoCliente = (c) => {
+    const cpfLimpo = (c.cpf || "").replace(/\D/g, "");
+    return cpfLimpo ? docs.find((d) => (d.cpf || "").replace(/\D/g, "") === cpfLimpo) : null;
+  };
 
+  // Mesma fonte (clientes) e mesmas etapas usadas nos "Indicadores do Agendamento" logo acima,
+  // só que aqui listando quem está em cada etapa em vez de contar.
   const termo = busca.trim().toLowerCase();
-  const docsFiltrados = docs.filter((d) =>
-    !termo || `${d.cliente} ${d.empreendimento}`.toLowerCase().includes(termo)
-  );
+  const clientesPorEtapa = {};
+  clientes.forEach((c) => {
+    if (termo && !`${c.nome} ${c.empreendimento}`.toLowerCase().includes(termo)) return;
+    const etapa = etapaVistoriaCliente(c, docs);
+    if (etapa) (clientesPorEtapa[etapa] = clientesPorEtapa[etapa] || []).push(c);
+  });
+  const totalAcompanhamento = Object.values(clientesPorEtapa).reduce((s, l) => s + l.length, 0);
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -1703,29 +1722,47 @@ function AbaQualidadeFeedback({ avaliacoes, carregando, docs, docsCarregando, ap
 
       <Card icon={ClipboardCheck} titulo="Acompanhamento do atendimento — do início ao fim">
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
-          Veja em que etapa está cada atendimento: solicitação, vistoria, ART/TRT, relatório e, por fim, a avaliação do cliente.
+          Cada cliente separado pela etapa em que está agora — as mesmas etapas contadas nos indicadores acima.
         </p>
         <input style={{ ...inp, marginBottom: 14 }} placeholder="Buscar por cliente ou empreendimento…" value={busca} onChange={(e) => setBusca(e.target.value)} />
 
-        {docsCarregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
-        {!docsCarregando && docsFiltrados.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum atendimento encontrado.</p>}
+        {clientesCarregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+        {!clientesCarregando && totalAcompanhamento === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum atendimento encontrado.</p>}
 
-        <div style={{ display: "grid", gap: 14 }}>
-          {docsFiltrados.map((d) => (
-            <div key={d.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-                <strong style={{ fontSize: 14 }}>{d.cliente || "—"}</strong>
-                <span style={{ fontSize: 12, color: "#65758b" }}>{d.empreendimento}{d.blocoTorre ? ` · ${d.blocoTorre}` : ""}</span>
-              </div>
-              <LinhaDoTempo doc={d} avaliacao={avaliacaoPorDoc[d.id]} />
-              {avaliacaoPorDoc[d.id] && (
-                <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
-                  <Estrelas valor={avaliacaoPorDoc[d.id].nota} tamanho={13} />
-                  {avaliacaoPorDoc[d.id].comentario && <span style={{ fontSize: 12.5, color: "#65758b" }}>"{avaliacaoPorDoc[d.id].comentario}"</span>}
+        <div style={{ display: "grid", gap: 20 }}>
+          {ETAPAS_VISTORIA.map((etapa) => {
+            const daEtapa = clientesPorEtapa[etapa] || [];
+            if (daEtapa.length === 0) return null;
+            return (
+              <div key={etapa}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, borderBottom: `2px solid ${CINZA_CLARO}`, paddingBottom: 6 }}>
+                  <Selo valor={etapa} />
+                  <strong style={{ fontSize: 13, color: AZUL_MARINHO }}>{daEtapa.length}</strong>
                 </div>
-              )}
-            </div>
-          ))}
+                <div style={{ display: "grid", gap: 14 }}>
+                  {daEtapa.map((c) => {
+                    const doc = docDoCliente(c);
+                    const avaliacao = doc ? avaliacaoPorDoc[doc.id] : null;
+                    return (
+                      <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                          <strong style={{ fontSize: 14 }}>{c.nome || "—"}</strong>
+                          <span style={{ fontSize: 12, color: "#65758b" }}>{c.empreendimento}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}</span>
+                        </div>
+                        <LinhaDoTempo etapaAtual={etapa} />
+                        {avaliacao && (
+                          <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                            <Estrelas valor={avaliacao.nota} tamanho={13} />
+                            {avaliacao.comentario && <span style={{ fontSize: 12.5, color: "#65758b" }}>"{avaliacao.comentario}"</span>}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </Card>
     </div>
@@ -1792,7 +1829,7 @@ function CardClientePendente({ c, todos, podeAgir, onAprovar, onRecusar }) {
 }
 
 function BlocoAprovacaoClientes({ clientes = [], carregando, podeAgir, onAprovar, onRecusar, clienteAprovado, onAgendarAgora, onFecharAviso }) {
-  const pendentes = clientes.filter((c) => c.status === "Em análise");
+  const pendentes = clientes.filter((c) => c.status === "Em análise" && !ehServicoDocumentacao(c));
 
   if (!carregando && pendentes.length === 0 && !clienteAprovado) {
     return (
@@ -1830,7 +1867,7 @@ function BlocoAprovacaoClientes({ clientes = [], carregando, podeAgir, onAprovar
    Mostra, por dia: número (destaque hoje), faixa de presença por técnico (ordem fixa) e
    até 3 barras de agendamento coloridas por técnico com sigla + horário + cliente. Clicar
    num dia abre o painel lateral com a agenda completa daquele dia. */
-function CalendarioAgendamento({ clientes = [], vistoriadores = [], mesRef, setMesRef, diaSelecionado, setDiaSelecionado, filtroTecnicos, aoTrocarFiltro }) {
+function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], mesRef, setMesRef, diaSelecionado, setDiaSelecionado, filtroTecnicos, aoTrocarFiltro, filtroEtapa, aoTrocarEtapa }) {
   const ano = mesRef.getFullYear(), mes = mesRef.getMonth();
   const primeiroDiaSemana = new Date(ano, mes, 1).getDay();
   const totalDias = new Date(ano, mes + 1, 0).getDate();
@@ -1840,9 +1877,13 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], mesRef, setM
   // Mostra todo cliente já cadastrado com data desejada (não só quem já tem técnico
   // confirmado) — "Cancelado" fica de fora por não ser mais um compromisso ativo.
   const agendadosPorDia = {};
+  const contagemPorEtapa = {};
   clientes.forEach((c) => {
-    if (!c.dataDesejada || c.status === "Cancelado") return;
+    if (!c.dataDesejada || c.status === "Cancelado" || ehServicoDocumentacao(c)) return;
     if (filtroTecnicos && filtroTecnicos.size > 0 && !filtroTecnicos.has(String(c.vistoriadorId))) return;
+    const etapa = etapaVistoriaCliente(c, docs);
+    if (etapa) contagemPorEtapa[etapa] = (contagemPorEtapa[etapa] || 0) + 1;
+    if (filtroEtapa && etapa !== filtroEtapa) return;
     (agendadosPorDia[c.dataDesejada] = agendadosPorDia[c.dataDesejada] || []).push(c);
   });
 
@@ -1852,6 +1893,25 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], mesRef, setM
 
   return (
     <div>
+      {/* Filtro por etapa: clicar de novo na mesma etapa limpa o filtro. */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10, alignItems: "center" }}>
+        <span style={{ fontSize: 12, color: "#8593a8", fontWeight: 600, marginRight: 2 }}>Etapa:</span>
+        <button onClick={() => aoTrocarEtapa(null)} aria-pressed={!filtroEtapa}
+          style={{ padding: "5px 11px", borderRadius: 20, border: `1.5px solid ${filtroEtapa ? CINZA_BORDA : AZUL_MEDIO}`, background: filtroEtapa ? "#fff" : AZUL_MEDIO, color: filtroEtapa ? "#65758b" : "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+          Todas
+        </button>
+        {ETAPAS_VISTORIA.map((etapa) => {
+          const ativo = filtroEtapa === etapa;
+          const cor = STATUS_COR[etapa]?.cor || AZUL_MEDIO;
+          return (
+            <button key={etapa} onClick={() => aoTrocarEtapa(ativo ? null : etapa)} aria-pressed={ativo}
+              style={{ padding: "5px 11px", borderRadius: 20, border: `1.5px solid ${cor}`, background: ativo ? cor : "#fff", color: ativo ? "#fff" : cor, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+              {etapa} ({contagemPorEtapa[etapa] || 0})
+            </button>
+          );
+        })}
+      </div>
+
       {vistoriadores.length > 0 && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
           {vistoriadores.map((v) => {
@@ -1942,7 +2002,7 @@ function PainelDiaAgendamento({ diaISO, clientes = [], vistoriadores = [], onFec
   const dataFmt = new Date(`${diaISO}T00:00:00`).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
   // Mostra todo cliente já cadastrado com vistoria desejada nesse dia, não só os que já
   // têm técnico confirmado — "Cancelado" fica de fora por não ser mais um compromisso ativo.
-  const agenda = clientes.filter((c) => c.status !== "Cancelado").sort((a, b) => (a.horarioDesejado || "").localeCompare(b.horarioDesejado || ""));
+  const agenda = clientes.filter((c) => c.status !== "Cancelado" && !ehServicoDocumentacao(c)).sort((a, b) => (a.horarioDesejado || "").localeCompare(b.horarioDesejado || ""));
   const nomeVistoriador = (id) => vistoriadores.find((v) => String(v.id) === String(id))?.nome || null;
 
   return (
@@ -2093,15 +2153,16 @@ function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesAprovados
 }
 
 /* ================= Agendamento · Análise: aprovação de clientes + calendário operacional ================= */
-function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, onAgendarAgora, diaParaAbrir, aoAbrirDia }) {
+function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, onAgendarAgora, diaParaAbrir, aoAbrirDia }) {
   const [mesRef, setMesRef] = useState(() => { const h = new Date(); return new Date(h.getFullYear(), h.getMonth(), 1); });
   const [diaSelecionado, setDiaSelecionado] = useState(null);
   const [filtroTecnicos, setFiltroTecnicos] = useState(() => new Set());
+  const [filtroEtapa, setFiltroEtapa] = useState(null); // etapa de ETAPAS_VISTORIA, ou null p/ todas
   const [clienteAprovado, setClienteAprovado] = useState(null);
   const [agendando, setAgendando] = useState(null); // { dataDesejada } quando o form "Agendar vistoria" está aberto
 
   const vistoriadores = usuarios.filter((u) => u.role === "vistoriador" && u.ativo);
-  const aprovadosSemVistoria = clientes.filter((c) => c.status === "Agendamento aprovado");
+  const aprovadosSemVistoria = clientes.filter((c) => c.status === "Agendamento aprovado" && !ehServicoDocumentacao(c));
   const doDiaSelecionado = diaSelecionado ? clientes.filter((c) => c.dataDesejada === diaSelecionado) : [];
 
   // Veio de uma confirmação de vistoria feita na sub-aba Vistoria — pula direto pro
@@ -2155,9 +2216,10 @@ function AbaQualidadeAnalise({ clientes = [], carregando, updCliente, usuarios =
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
           Veja quem está vistoriando o quê em cada dia. Clique num dia pra ver a agenda completa e agendar uma nova vistoria.
         </p>
-        <CalendarioAgendamento clientes={clientes} vistoriadores={vistoriadores}
+        <CalendarioAgendamento clientes={clientes} vistoriadores={vistoriadores} docs={docs}
           mesRef={mesRef} setMesRef={setMesRef} diaSelecionado={diaSelecionado} setDiaSelecionado={setDiaSelecionado}
-          filtroTecnicos={filtroTecnicos} aoTrocarFiltro={toggleFiltroTecnico} />
+          filtroTecnicos={filtroTecnicos} aoTrocarFiltro={toggleFiltroTecnico}
+          filtroEtapa={filtroEtapa} aoTrocarEtapa={setFiltroEtapa} />
       </Card>
 
       {diaSelecionado && (
@@ -2220,7 +2282,8 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
     return cpfLimpo && docs.some((d) => (d.cpf || "").replace(/\D/g, "") === cpfLimpo);
   };
   const termo = busca.trim().toLowerCase();
-  const combina = (c) => !termo || `${c.nome} ${c.empreendimento}`.toLowerCase().includes(termo);
+  // Documentação ART/TRT não passa por vistoria — não aparece nesta aba.
+  const combina = (c) => (!termo || `${c.nome} ${c.empreendimento}`.toLowerCase().includes(termo)) && !ehServicoDocumentacao(c);
 
   const emAgenda = (c) => c.status === "Vistoria agendada" || c.status === "Em vistoria";
   const pendentes = clientes.filter((c) => c.status === "Agendamento aprovado" && combina(c));
@@ -2890,7 +2953,7 @@ function ConfirmModal({ aberto, titulo = "Confirmar exclusão", mensagem = "Tem 
   );
 }
 
-function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify }) {
+function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, clientes = [], updCliente }) {
   const [editando, setEditando] = useState(null); // registro (cópia) em edição, ou null
   const [filtroVistoria, setFiltroVistoria] = useState("");
   const [busca, setBusca] = useState("");
@@ -2902,6 +2965,20 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify }) {
     return true;
   });
 
+  /* Cadastros de "Documentação ART/TRT" vêm direto do portal do cliente pra cá (pulam o
+     Agendamento, porque não têm vistoria). Ficam nesta fila até virarem um registro. */
+  const temRegistro = (c) => {
+    const cpfLimpo = (c.cpf || "").replace(/\D/g, "");
+    return cpfLimpo && docs.some((d) => (d.cpf || "").replace(/\D/g, "") === cpfLimpo);
+  };
+  const solicitacoesDoc = clientes.filter((c) => ehServicoDocumentacao(c) && c.status !== "Cancelado" && !temRegistro(c));
+
+  const abrirComCliente = (c) => setEditando({
+    ...novoRegistroDoc(),
+    cliente: c.nome || "", cpf: c.cpf || "",
+    empreendimento: c.empreendimento || "", blocoTorre: c.blocoTorre || "",
+    observacoes: c.observacoes || "",
+  });
   const abrirNovo = () => setEditando(novoRegistroDoc());
   const abrirEdicao = (d) => setEditando({ ...d });
   const salvar = () => {
@@ -2919,6 +2996,30 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify }) {
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
+      {solicitacoesDoc.length > 0 && (
+        <Card icon={ClipboardList} titulo={`Solicitações de ART/TRT aguardando registro (${solicitacoesDoc.length})`}>
+          <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+            Clientes que pediram Documentação ART/TRT pelo portal. Como não têm vistoria, vêm direto pra cá, sem passar pelo Agendamento. Clique em "Criar registro" pra abrir o cadastro já preenchido.
+          </p>
+          <div style={{ display: "grid", gap: 10 }}>
+            {solicitacoesDoc.map((c) => (
+              <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{c.nome}</div>
+                  <div style={{ fontSize: 12.5, color: "#65758b" }}>
+                    {c.empreendimento || c.endereco || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}
+                    {c.telefone ? ` · ${c.telefone}` : ""}
+                  </div>
+                </div>
+                <button className="btn-solid" style={{ width: "auto", padding: "8px 14px" }} onClick={() => abrirComCliente(c)}>
+                  <Plus size={14} /> Criar registro
+                </button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <Card icon={ClipboardCheck} titulo="ART Documentações — controle de vistorias e documentação">
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
           <input style={{ ...inp, flex: 1, minWidth: 200 }} placeholder="Buscar por cliente ou empreendimento…" value={busca} onChange={(e) => setBusca(e.target.value)} />
