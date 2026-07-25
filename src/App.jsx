@@ -21,6 +21,11 @@ const CINZA_BORDA = "#D8DEE7";
 // Troque pela URL do seu serviço no Render, se for diferente:
 const API_URL = "https://fn-edificacoes-api.onrender.com";
 
+/* Caminho da logo montado a partir da base do site: na raiz (Netlify/Vercel) vira
+   "/logo-...png" e no GitHub Pages, "/fn-edificacoes-frontend/logo-...png". Caminho
+   absoluto fixo quebrava no Pages, que serve o site dentro de uma subpasta. */
+const LOGO_URL = `${import.meta.env.BASE_URL}logo-fn-transparente.png`;
+
 async function apiFetch(caminho, { method = "GET", body, token } = {}) {
   const resp = await fetch(`${API_URL}${caminho}`, {
     method,
@@ -511,7 +516,7 @@ function TelaLogin({ onLogin, onVoltar }) {
     <div style={{ minHeight: "100vh", background: CINZA_CLARO, display: "grid", placeItems: "center", padding: 18, fontFamily: "'Inter', system-ui, sans-serif" }}>
       <div style={{ background: "#fff", borderRadius: 16, padding: "32px 30px", width: "100%", maxWidth: 380, boxShadow: "0 10px 30px rgba(18,51,91,.12)" }}>
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}>
-          <img src="/logo-fn-transparente.png" alt="FN Edificações" style={{ height: "clamp(56px, 14vw, 72px)", width: "auto" }} />
+          <img src={LOGO_URL} alt="FN Edificações" style={{ height: "clamp(56px, 14vw, 72px)", width: "auto" }} />
         </div>
         <h2 style={{ textAlign: "center", color: AZUL_MARINHO, fontSize: 18, margin: "0 0 4px" }}>Entrar no sistema</h2>
         <p style={{ textAlign: "center", color: "#65758b", fontSize: 13, margin: "0 0 20px" }}>Acesso da equipe FN Edificações</p>
@@ -553,7 +558,7 @@ function PortalCliente({ onIrParaLogin, onIrParaCadastroParceiro }) {
       <header style={{ background: AZUL_MARINHO, color: "#fff" }}>
         <div style={{ maxWidth: 720, margin: "0 auto", padding: "16px 18px", display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ width: "clamp(36px, 9vw, 44px)", height: "clamp(36px, 9vw, 44px)", borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
-            <img src="/logo-fn-transparente.png" alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+            <img src={LOGO_URL} alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
           </div>
           <div style={{ lineHeight: 1.1, flex: 1 }}>
             <div style={{ fontWeight: 700, fontSize: 15 }}>FN Edificações</div>
@@ -1067,7 +1072,7 @@ function AppInterno({ session, onLogout }) {
         <div style={{ maxWidth: 1080, margin: "0 auto", padding: "12px 18px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{ width: "clamp(36px, 9vw, 44px)", height: "clamp(36px, 9vw, 44px)", borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
-              <img src="/logo-fn-transparente.png" alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+              <img src={LOGO_URL} alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
             </div>
             <div style={{ lineHeight: 1.1 }}>
               <div style={{ fontWeight: 700, fontSize: 15 }}>FN Edificações</div>
@@ -4738,7 +4743,7 @@ function TelaCadastroParceiro({ onVoltar }) {
       <header style={{ background: AZUL_MARINHO, color: "#fff" }}>
         <div style={{ maxWidth: 720, margin: "0 auto", padding: "16px 18px", display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ width: "clamp(36px, 9vw, 44px)", height: "clamp(36px, 9vw, 44px)", borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
-            <img src="/logo-fn-transparente.png" alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+            <img src={LOGO_URL} alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
           </div>
           <div style={{ lineHeight: 1.1, flex: 1 }}>
             <div style={{ fontWeight: 700, fontSize: 15 }}>FN Edificações</div>
@@ -4933,7 +4938,7 @@ function PainelParceiro({ session, onLogout }) {
         <div style={{ maxWidth: 900, margin: "0 auto", padding: "12px 18px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{ width: "clamp(36px, 9vw, 44px)", height: "clamp(36px, 9vw, 44px)", borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
-              <img src="/logo-fn-transparente.png" alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+              <img src={LOGO_URL} alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
             </div>
             <div style={{ lineHeight: 1.1 }}>
               <div style={{ fontWeight: 700, fontSize: 15 }}>FN Edificações</div>
