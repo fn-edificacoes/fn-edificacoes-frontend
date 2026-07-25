@@ -1032,7 +1032,7 @@ function AppInterno({ session, onLogout }) {
         )}
 
         {abaTop === "documentacao" && (
-          <AbaDocumentacao docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={docsCarregando} notify={notify} clientes={clientes} updCliente={updCliente} />
+          <AbaDocumentacao docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={docsCarregando} notify={notify} clientes={clientes} updCliente={updCliente} perfil={perfil} />
         )}
         {abaTop === "clientes" && (
           <AbaClientesComercial clientes={clientes} carregando={clientesCarregando} atualizarCliente={updCliente} excluirCliente={delCliente} notify={notify} docs={docs} perfil={perfil} />
@@ -2953,13 +2953,27 @@ function ConfirmModal({ aberto, titulo = "Confirmar exclusão", mensagem = "Tem 
   );
 }
 
-function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, clientes = [], updCliente }) {
+function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, clientes = [], updCliente, perfil }) {
   const [editando, setEditando] = useState(null); // registro (cópia) em edição, ou null
   const [filtroVistoria, setFiltroVistoria] = useState("");
   const [busca, setBusca] = useState("");
   const [removendo, setRemovendo] = useState(null);
 
+  /* No perfil Documentação a tela mostra só o que é da alçada dele: registros de clientes
+     que pediram "Documentação ART/TRT". Registros de clientes de vistoria ficam de fora.
+     Registro sem cliente correspondente (criado na mão aqui) continua aparecendo.
+     Gerência enxerga tudo, como nas demais telas. */
+  const clientePorCpf = (cpf) => {
+    const cpfLimpo = (cpf || "").replace(/\D/g, "");
+    return cpfLimpo ? clientes.find((c) => (c.cpf || "").replace(/\D/g, "") === cpfLimpo) : null;
+  };
+  const soDocumentacao = perfil === "documentacao";
+
   const filtrados = docs.filter((d) => {
+    if (soDocumentacao) {
+      const cli = clientePorCpf(d.cpf);
+      if (cli && !ehServicoDocumentacao(cli)) return false;
+    }
     if (filtroVistoria && d.vistoria !== filtroVistoria) return false;
     if (busca && !(`${d.cliente} ${d.empreendimento}`.toLowerCase().includes(busca.toLowerCase()))) return false;
     return true;
