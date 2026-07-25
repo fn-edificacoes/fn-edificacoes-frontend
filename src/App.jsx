@@ -1572,7 +1572,7 @@ function LinhaDoTempo({ etapaAtual }) {
 /* Dispatcher das 3 sub-abas do setor Qualidade (mesmo padrão de "sub" já usado em AbaGerencia). */
 /* Dashboard de indicadores visível nas 3 sub-abas de Qualidade: etapa do fluxo dos
    clientes, status do bloco ART Documentações, e média das avaliações dos clientes. */
-function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [] }) {
+function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [], filtroEtapa, aoTrocarEtapa }) {
   const porEtapa = {};
   clientes.forEach((c) => { const et = etapaVistoriaCliente(c, docs); if (et) porEtapa[et] = (porEtapa[et] || 0) + 1; });
 
@@ -1586,14 +1586,35 @@ function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [] })
     <Card icon={LayoutGrid} titulo="Indicadores do Agendamento">
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 20 }}>
         <div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>Clientes por etapa do fluxo</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO }}>Clientes por etapa do fluxo</div>
+            {filtroEtapa && (
+              <button className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO, padding: "2px 8px", fontSize: 11.5 }}
+                onClick={() => aoTrocarEtapa(null)}>
+                <X size={11} /> Limpar
+              </button>
+            )}
+          </div>
+          {/* Clicar numa etapa filtra a lista logo abaixo; clicar de novo na mesma limpa. */}
           <div style={{ display: "grid", gap: 6 }}>
-            {ETAPAS_VISTORIA.map((etapa) => (
-              <div key={etapa} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <Selo valor={etapa} />
-                <strong style={{ fontSize: 13 }}>{porEtapa[etapa] || 0}</strong>
-              </div>
-            ))}
+            {ETAPAS_VISTORIA.map((etapa) => {
+              const ativo = filtroEtapa === etapa;
+              const clicavel = !!aoTrocarEtapa;
+              return (
+                <button key={etapa} onClick={() => clicavel && aoTrocarEtapa(ativo ? null : etapa)}
+                  aria-pressed={ativo} disabled={!clicavel}
+                  title={clicavel ? (ativo ? "Clique para mostrar todas" : `Mostrar só: ${etapa}`) : undefined}
+                  style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, width: "100%",
+                    background: ativo ? "#EAF2FB" : "transparent",
+                    border: `1.5px solid ${ativo ? AZUL_MEDIO : "transparent"}`,
+                    borderRadius: 8, padding: "3px 6px", cursor: clicavel ? "pointer" : "default", textAlign: "left",
+                  }}>
+                  <Selo valor={etapa} />
+                  <strong style={{ fontSize: 13, color: ativo ? AZUL_MARINHO : "inherit" }}>{porEtapa[etapa] || 0}</strong>
+                </button>
+              );
+            })}
           </div>
         </div>
         <div>
@@ -1624,6 +1645,9 @@ function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [] })
 
 function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, agendarAgoraId, setAgendarAgoraId, podeAgir = false, ehGerencia = false }) {
   const [diaParaAbrir, setDiaParaAbrir] = useState(null); // data (ISO) que o calendário da Análise deve abrir já selecionada
+  // Etapa escolhida nos indicadores — filtra a lista da sub-aba aberta. Fica aqui (e não em
+  // cada sub-aba) pra que o filtro continue valendo ao trocar de sub-aba.
+  const [filtroEtapa, setFiltroEtapa] = useState(null);
   const irParaAgendamento = (clienteId) => {
     setAgendarAgoraId(clienteId);
     setSub("vistoria");
@@ -1636,21 +1660,22 @@ function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, u
   };
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <CardIndicadoresQualidade clientes={clientes} docs={docs} avaliacoes={avaliacoes} />
+      <CardIndicadoresQualidade clientes={clientes} docs={docs} avaliacoes={avaliacoes}
+        filtroEtapa={filtroEtapa} aoTrocarEtapa={setFiltroEtapa} />
       {!podeAgir && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#EAF2FB", color: AZUL_MARINHO, borderRadius: 8, padding: "8px 12px", fontSize: 12.5 }}>
           <Info size={14} /> Modo leitura — aprovar agendamento, encaminhar técnico e aprovar feedback agora é exclusivo do perfil Atendimento.
         </div>
       )}
-      {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} abrirAutomaticoId={agendarAgoraId} aoAbrirAutomatico={() => setAgendarAgoraId(null)} aoConfirmar={aoConfirmarVistoria} />}
+      {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} abrirAutomaticoId={agendarAgoraId} aoAbrirAutomatico={() => setAgendarAgoraId(null)} aoConfirmar={aoConfirmarVistoria} filtroEtapa={filtroEtapa} />}
       {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} clientes={clientes} clientesCarregando={clientesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
-        solicitarExclusaoAvaliacao={solicitarExclusaoAvaliacao} manterAvaliacao={manterAvaliacao} excluirAvaliacao={excluirAvaliacao} podeAgir={podeAgir} ehGerencia={ehGerencia} />}
-      {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} onAgendarAgora={irParaAgendamento} diaParaAbrir={diaParaAbrir} aoAbrirDia={() => setDiaParaAbrir(null)} />}
+        solicitarExclusaoAvaliacao={solicitarExclusaoAvaliacao} manterAvaliacao={manterAvaliacao} excluirAvaliacao={excluirAvaliacao} podeAgir={podeAgir} ehGerencia={ehGerencia} filtroEtapa={filtroEtapa} />}
+      {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} onAgendarAgora={irParaAgendamento} diaParaAbrir={diaParaAbrir} aoAbrirDia={() => setDiaParaAbrir(null)} filtroEtapa={filtroEtapa} aoTrocarEtapa={setFiltroEtapa} />}
     </div>
   );
 }
 
-function AbaQualidadeFeedback({ avaliacoes, carregando, clientes = [], clientesCarregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, podeAgir = false, ehGerencia = false }) {
+function AbaQualidadeFeedback({ avaliacoes, carregando, clientes = [], clientesCarregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, podeAgir = false, ehGerencia = false, filtroEtapa = null }) {
   const [busca, setBusca] = useState("");
   const total = avaliacoes.length;
   const media = total ? (avaliacoes.reduce((s, a) => s + a.nota, 0) / total) : 0;
@@ -1670,7 +1695,9 @@ function AbaQualidadeFeedback({ avaliacoes, carregando, clientes = [], clientesC
   clientes.forEach((c) => {
     if (termo && !`${c.nome} ${c.empreendimento}`.toLowerCase().includes(termo)) return;
     const etapa = etapaVistoriaCliente(c, docs);
-    if (etapa) (clientesPorEtapa[etapa] = clientesPorEtapa[etapa] || []).push(c);
+    if (!etapa) return;
+    if (filtroEtapa && etapa !== filtroEtapa) return; // filtro vindo do clique nos indicadores
+    (clientesPorEtapa[etapa] = clientesPorEtapa[etapa] || []).push(c);
   });
   const totalAcompanhamento = Object.values(clientesPorEtapa).reduce((s, l) => s + l.length, 0);
 
@@ -1920,13 +1947,10 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
   // Mostra todo cliente já cadastrado com data desejada (não só quem já tem técnico
   // confirmado) — "Cancelado" fica de fora por não ser mais um compromisso ativo.
   const agendadosPorDia = {};
-  const contagemPorEtapa = {};
   clientes.forEach((c) => {
     if (!c.dataDesejada || c.status === "Cancelado" || ehServicoDocumentacao(c)) return;
     if (filtroTecnicos && filtroTecnicos.size > 0 && !filtroTecnicos.has(String(c.vistoriadorId))) return;
-    const etapa = etapaVistoriaCliente(c, docs);
-    if (etapa) contagemPorEtapa[etapa] = (contagemPorEtapa[etapa] || 0) + 1;
-    if (filtroEtapa && etapa !== filtroEtapa) return;
+    if (filtroEtapa && etapaVistoriaCliente(c, docs) !== filtroEtapa) return;
     (agendadosPorDia[c.dataDesejada] = agendadosPorDia[c.dataDesejada] || []).push(c);
   });
 
@@ -1936,24 +1960,16 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
 
   return (
     <div>
-      {/* Filtro por etapa: clicar de novo na mesma etapa limpa o filtro. */}
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10, alignItems: "center" }}>
-        <span style={{ fontSize: 12, color: "#8593a8", fontWeight: 600, marginRight: 2 }}>Etapa:</span>
-        <button onClick={() => aoTrocarEtapa(null)} aria-pressed={!filtroEtapa}
-          style={{ padding: "5px 11px", borderRadius: 20, border: `1.5px solid ${filtroEtapa ? CINZA_BORDA : AZUL_MEDIO}`, background: filtroEtapa ? "#fff" : AZUL_MEDIO, color: filtroEtapa ? "#65758b" : "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-          Todas
-        </button>
-        {ETAPAS_VISTORIA.map((etapa) => {
-          const ativo = filtroEtapa === etapa;
-          const cor = STATUS_COR[etapa]?.cor || AZUL_MEDIO;
-          return (
-            <button key={etapa} onClick={() => aoTrocarEtapa(ativo ? null : etapa)} aria-pressed={ativo}
-              style={{ padding: "5px 11px", borderRadius: 20, border: `1.5px solid ${cor}`, background: ativo ? cor : "#fff", color: ativo ? "#fff" : cor, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-              {etapa} ({contagemPorEtapa[etapa] || 0})
-            </button>
-          );
-        })}
-      </div>
+      {/* Etapa filtrada pelo clique nos "Indicadores do Agendamento", acima. */}
+      {filtroEtapa && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, background: "#EAF2FB", borderRadius: 8, padding: "6px 10px", fontSize: 12.5, color: AZUL_MARINHO }}>
+          <Filter size={13} /> Mostrando só: <Selo valor={filtroEtapa} />
+          <button className="btn-ghost" style={{ color: AZUL_MEDIO, background: "#fff", padding: "2px 8px", fontSize: 11.5, marginLeft: "auto" }}
+            onClick={() => aoTrocarEtapa?.(null)}>
+            <X size={11} /> Limpar
+          </button>
+        </div>
+      )}
 
       {vistoriadores.length > 0 && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
@@ -2196,17 +2212,19 @@ function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesAprovados
 }
 
 /* ================= Agendamento · Análise: aprovação de clientes + calendário operacional ================= */
-function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, onAgendarAgora, diaParaAbrir, aoAbrirDia }) {
+function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, onAgendarAgora, diaParaAbrir, aoAbrirDia, filtroEtapa = null, aoTrocarEtapa }) {
   const [mesRef, setMesRef] = useState(() => { const h = new Date(); return new Date(h.getFullYear(), h.getMonth(), 1); });
   const [diaSelecionado, setDiaSelecionado] = useState(null);
   const [filtroTecnicos, setFiltroTecnicos] = useState(() => new Set());
-  const [filtroEtapa, setFiltroEtapa] = useState(null); // etapa de ETAPAS_VISTORIA, ou null p/ todas
   const [clienteAprovado, setClienteAprovado] = useState(null);
   const [agendando, setAgendando] = useState(null); // { dataDesejada } quando o form "Agendar vistoria" está aberto
 
   const vistoriadores = usuarios.filter((u) => u.role === "vistoriador" && u.ativo);
   const aprovadosSemVistoria = clientes.filter((c) => c.status === "Agendamento aprovado" && !ehServicoDocumentacao(c));
-  const doDiaSelecionado = diaSelecionado ? clientes.filter((c) => c.dataDesejada === diaSelecionado) : [];
+  // O painel do dia respeita o mesmo filtro de etapa aplicado ao calendário.
+  const doDiaSelecionado = diaSelecionado
+    ? clientes.filter((c) => c.dataDesejada === diaSelecionado && (!filtroEtapa || etapaVistoriaCliente(c, docs) === filtroEtapa))
+    : [];
 
   // Veio de uma confirmação de vistoria feita na sub-aba Vistoria — pula direto pro
   // mês/dia certo e já abre o painel lateral, sem precisar navegar manualmente.
@@ -2262,7 +2280,7 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
         <CalendarioAgendamento clientes={clientes} vistoriadores={vistoriadores} docs={docs}
           mesRef={mesRef} setMesRef={setMesRef} diaSelecionado={diaSelecionado} setDiaSelecionado={setDiaSelecionado}
           filtroTecnicos={filtroTecnicos} aoTrocarFiltro={toggleFiltroTecnico}
-          filtroEtapa={filtroEtapa} aoTrocarEtapa={setFiltroEtapa} />
+          filtroEtapa={filtroEtapa} aoTrocarEtapa={aoTrocarEtapa} />
       </Card>
 
       {diaSelecionado && (
@@ -2305,7 +2323,7 @@ function CardVistoriaResumo({ c, aberto, onToggle, children }) {
 /* Sub-aba Vistoria: agrupa por status (pendente de agendamento / já agendada / já
    realizada), com busca e cards resumidos que expandem ao clicar — antes mostrava
    tudo (formulário completo) de uma vez pra cada cliente, o que ficava confuso. */
-function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, abrirAutomaticoId = null, aoAbrirAutomatico, aoConfirmar }) {
+function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, abrirAutomaticoId = null, aoAbrirAutomatico, aoConfirmar, filtroEtapa = null }) {
   const [busca, setBusca] = useState("");
   const [abertoId, setAbertoId] = useState(null);
   const [form, setForm] = useState({});
@@ -2325,8 +2343,12 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
     return cpfLimpo && docs.some((d) => (d.cpf || "").replace(/\D/g, "") === cpfLimpo);
   };
   const termo = busca.trim().toLowerCase();
-  // Documentação ART/TRT não passa por vistoria — não aparece nesta aba.
-  const combina = (c) => (!termo || `${c.nome} ${c.empreendimento}`.toLowerCase().includes(termo)) && !ehServicoDocumentacao(c);
+  // Documentação ART/TRT não passa por vistoria — não aparece nesta aba. O filtroEtapa vem
+  // do clique nos indicadores acima.
+  const combina = (c) =>
+    (!termo || `${c.nome} ${c.empreendimento}`.toLowerCase().includes(termo)) &&
+    !ehServicoDocumentacao(c) &&
+    (!filtroEtapa || etapaVistoriaCliente(c, docs) === filtroEtapa);
 
   const emAgenda = (c) => c.status === "Vistoria agendada" || c.status === "Em vistoria";
   const pendentes = clientes.filter((c) => c.status === "Agendamento aprovado" && combina(c));
