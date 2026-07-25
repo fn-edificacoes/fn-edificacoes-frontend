@@ -268,11 +268,17 @@ const TIPO_ART_OPCOES = ["Individual", "Coletiva"];
    quando o vistoriador finaliza a vistoria (POST /api/vistoria/finalizar) -> "Laudo enviado por
    e-mail" quando a gerência aprova (POST /api/docs/:id/aprovar, que já gera o PDF e envia o e-mail). */
 const STATUS_ATENDIMENTO_OPCOES = ["Em análise", "Agendado", "Laudo em análise", "Laudo enviado por e-mail"];
+/* Documentação ART/TRT tem fluxo próprio (sem vistoria): ver STATUS_DOC_* no backend. */
+const STATUS_DOC_PROCESSANDO = "Processando documentação";
+const STATUS_DOC_CONCLUIDA = "Documentação concluída";
+const TIPOS_DOCUMENTO_ART = ["Documentação assinada", "Placa de identificação de obra"];
 const STATUS_ATENDIMENTO_INFO = {
   "Em análise": "Recebemos seu cadastro e ele está em análise pelo nosso setor de Atendimento. Em breve confirmaremos seu agendamento.",
   "Agendado": "Recebemos sua solicitação e sua vistoria está agendada. Em breve nossa equipe entrará em contato.",
   "Laudo em análise": "Sua vistoria foi realizada e o laudo está em análise pela nossa equipe técnica.",
   "Laudo enviado por e-mail": "Seu laudo foi aprovado e enviado para o e-mail cadastrado. Verifique sua caixa de entrada (e o spam).",
+  [STATUS_DOC_PROCESSANDO]: "Recebemos seu cadastro e sua documentação ART/TRT está sendo processada pela nossa equipe.",
+  [STATUS_DOC_CONCLUIDA]: "Sua documentação está pronta! Baixe os arquivos na seção \"Baixar minha documentação ART/TRT\" desta página, informando CPF e e-mail.",
 };
 /* ---------- Status INTERNO (docs.status) — uso exclusivo da equipe (Documentação/Gerência),
    nunca mostrado ao cliente. Precisa bater exatamente com STATUS_ATENDIMENTO_VALIDOS do backend. */
@@ -615,6 +621,29 @@ function AppInterno({ session, onLogout }) {
     setClientes((atual) => atual.filter((c) => c.id !== id));
     try { await apiFetch(`/api/clientes/${id}`, { method: "DELETE", token }); notify("Cliente excluído"); }
     catch (e) { notify(`Não foi possível excluir: ${e.message}`); carregarClientes(); }
+  };
+
+  /* ---- Documentação ART/TRT: os dois arquivos finais de cada cliente (ficam no Drive) ---- */
+  const [documentosArt, setDocumentosArt] = useState([]);
+  const carregarDocumentosArt = async () => {
+    if (!["documentacao", "gerencia", "atendimento"].includes(perfil)) return;
+    try {
+      const r = await apiFetch("/api/documentos-art", { token });
+      setDocumentosArt(r.documentos || []);
+    } catch (e) { notify(`Não foi possível carregar documentos: ${e.message}`); }
+  };
+  useEffect(() => { carregarDocumentosArt(); }, []);
+  const enviarDocumentoArt = async (dados) => {
+    await apiFetch("/api/documentos-art", { method: "POST", token, body: dados });
+    notify("Documento anexado ✓");
+    await Promise.all([carregarDocumentosArt(), carregarClientes()]);
+  };
+  const excluirDocumentoArt = async (id) => {
+    try {
+      await apiFetch(`/api/documentos-art/${id}`, { method: "DELETE", token });
+      notify("Documento removido");
+      await Promise.all([carregarDocumentosArt(), carregarClientes()]);
+    } catch (e) { notify(`Não foi possível remover: ${e.message}`); }
   };
 
   /* ---- Qualidade: avaliações que os clientes deixaram (nota + comentário) ---- */
@@ -1043,7 +1072,8 @@ function AppInterno({ session, onLogout }) {
         )}
 
         {abaTop === "documentacao" && (
-          <AbaDocumentacao docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={docsCarregando} notify={notify} clientes={clientes} updCliente={updCliente} perfil={perfil} />
+          <AbaDocumentacao docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={docsCarregando} notify={notify} clientes={clientes} updCliente={updCliente} perfil={perfil}
+            documentosArt={documentosArt} enviarDocumentoArt={enviarDocumentoArt} excluirDocumentoArt={excluirDocumentoArt} />
         )}
         {abaTop === "clientes" && (
           <AbaClientesComercial clientes={clientes} carregando={clientesCarregando} atualizarCliente={updCliente} excluirCliente={delCliente} notify={notify} docs={docs} perfil={perfil} />
@@ -2966,7 +2996,81 @@ function ConfirmModal({ aberto, titulo = "Confirmar exclusão", mensagem = "Tem 
   );
 }
 
-function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, clientes = [], updCliente, perfil }) {
+/* Anexo dos dois documentos finais de um cliente de Documentação ART/TRT. O arquivo vai
+   para o Drive (via backend) e o status do cliente só vira "Documentação concluída" quando
+   os dois estão anexados — é aí que ele consegue baixar pelo portal. */
+function CardDocumentosArt({ cliente, documentos = [], enviarDocumento, excluirDocumento, notify }) {
+  const [enviandoTipo, setEnviandoTipo] = useState(null);
+  const doTipo = (tipo) => documentos.find((d) => d.tipo === tipo);
+  const completo = TIPOS_DOCUMENTO_ART.every((t) => doTipo(t));
+
+  const aoEscolherArquivo = async (tipo, arquivo) => {
+    if (!arquivo) return;
+    if (arquivo.size > 7 * 1024 * 1024) { notify("Arquivo muito grande (máx. 7 MB)."); return; }
+    setEnviandoTipo(tipo);
+    try {
+      const base64 = await new Promise((resolve, reject) => {
+        const leitor = new FileReader();
+        leitor.onload = () => resolve(leitor.result);
+        leitor.onerror = () => reject(new Error("Não foi possível ler o arquivo"));
+        leitor.readAsDataURL(arquivo);
+      });
+      await enviarDocumento({ clienteId: cliente.id, tipo, nomeArquivo: arquivo.name, mimeType: arquivo.type || "application/pdf", arquivoBase64: base64 });
+    } catch (e) { notify(`Erro ao anexar: ${e.message}`); }
+    setEnviandoTipo(null);
+  };
+
+  return (
+    <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>{cliente.nome}</div>
+          <div style={{ fontSize: 12.5, color: "#65758b" }}>
+            {cliente.empreendimento || cliente.endereco || "—"}{cliente.blocoTorre ? ` · ${cliente.blocoTorre}` : ""}
+            {cliente.telefone ? ` · ${cliente.telefone}` : ""}
+          </div>
+        </div>
+        <Selo valor={completo ? STATUS_DOC_CONCLUIDA : STATUS_DOC_PROCESSANDO} />
+      </div>
+
+      <div style={{ display: "grid", gap: 8 }}>
+        {TIPOS_DOCUMENTO_ART.map((tipo) => {
+          const doc = doTipo(tipo);
+          const enviando = enviandoTipo === tipo;
+          return (
+            <div key={tipo} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", background: CINZA_CLARO, borderRadius: 8, padding: "8px 10px" }}>
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: AZUL_MARINHO }}>{tipo}</div>
+                <div style={{ fontSize: 12, color: doc ? "#2E7D32" : "#8593a8" }}>
+                  {doc ? `✓ ${doc.nomeArquivo}` : "Nenhum arquivo anexado"}
+                </div>
+              </div>
+              <label className="btn-ghost" style={{ color: AZUL_MEDIO, background: "#fff", cursor: enviando ? "default" : "pointer", padding: "6px 12px", margin: 0 }}>
+                {enviando ? <Loader2 size={14} className="spin" /> : <Plus size={14} />} {doc ? "Substituir" : "Anexar"}
+                <input type="file" accept="application/pdf,image/*" style={{ display: "none" }} disabled={enviando}
+                  onChange={(e) => { aoEscolherArquivo(tipo, e.target.files?.[0]); e.target.value = ""; }} />
+              </label>
+              {doc && (
+                <button className="icon-btn" title="Remover anexo" onClick={() => excluirDocumento(doc.id)}>
+                  <Trash2 size={15} color="#c62828" />
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {!completo && (
+        <div style={{ fontSize: 12, color: "#B26A00", marginTop: 8 }}>
+          <AlertTriangle size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+          O cliente só consegue baixar depois que os dois documentos estiverem anexados.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, clientes = [], updCliente, perfil, documentosArt = [], enviarDocumentoArt, excluirDocumentoArt }) {
   const [editando, setEditando] = useState(null); // registro (cópia) em edição, ou null
   const [filtroVistoria, setFiltroVistoria] = useState("");
   const [busca, setBusca] = useState("");
@@ -2993,19 +3097,9 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, cli
   });
 
   /* Cadastros de "Documentação ART/TRT" vêm direto do portal do cliente pra cá (pulam o
-     Agendamento, porque não têm vistoria). Ficam nesta fila até virarem um registro. */
-  const temRegistro = (c) => {
-    const cpfLimpo = (c.cpf || "").replace(/\D/g, "");
-    return cpfLimpo && docs.some((d) => (d.cpf || "").replace(/\D/g, "") === cpfLimpo);
-  };
-  const solicitacoesDoc = clientes.filter((c) => ehServicoDocumentacao(c) && c.status !== "Cancelado" && !temRegistro(c));
+     Agendamento, porque não têm vistoria). É aqui que a equipe anexa os dois documentos. */
+  const clientesArt = clientes.filter((c) => ehServicoDocumentacao(c) && c.status !== "Cancelado");
 
-  const abrirComCliente = (c) => setEditando({
-    ...novoRegistroDoc(),
-    cliente: c.nome || "", cpf: c.cpf || "",
-    empreendimento: c.empreendimento || "", blocoTorre: c.blocoTorre || "",
-    observacoes: c.observacoes || "",
-  });
   const abrirNovo = () => setEditando(novoRegistroDoc());
   const abrirEdicao = (d) => setEditando({ ...d });
   const salvar = () => {
@@ -3023,25 +3117,17 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, cli
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      {solicitacoesDoc.length > 0 && (
-        <Card icon={ClipboardList} titulo={`Solicitações de ART/TRT aguardando registro (${solicitacoesDoc.length})`}>
+      {clientesArt.length > 0 && (
+        <Card icon={ClipboardList} titulo={`Documentação ART/TRT (${clientesArt.length})`}>
           <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-            Clientes que pediram Documentação ART/TRT pelo portal. Como não têm vistoria, vêm direto pra cá, sem passar pelo Agendamento. Clique em "Criar registro" pra abrir o cadastro já preenchido.
+            Clientes que pediram Documentação ART/TRT pelo portal — vêm direto pra cá, sem passar pelo Agendamento (não têm vistoria).
+            Anexe os dois documentos finais: eles ficam guardados no Drive e o cliente baixa pelo portal informando CPF e e-mail.
           </p>
-          <div style={{ display: "grid", gap: 10 }}>
-            {solicitacoesDoc.map((c) => (
-              <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                <div style={{ flex: 1, minWidth: 200 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{c.nome}</div>
-                  <div style={{ fontSize: 12.5, color: "#65758b" }}>
-                    {c.empreendimento || c.endereco || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}
-                    {c.telefone ? ` · ${c.telefone}` : ""}
-                  </div>
-                </div>
-                <button className="btn-solid" style={{ width: "auto", padding: "8px 14px" }} onClick={() => abrirComCliente(c)}>
-                  <Plus size={14} /> Criar registro
-                </button>
-              </div>
+          <div style={{ display: "grid", gap: 12 }}>
+            {clientesArt.map((c) => (
+              <CardDocumentosArt key={c.id} cliente={c}
+                documentos={documentosArt.filter((d) => d.clienteId === c.id)}
+                enviarDocumento={enviarDocumentoArt} excluirDocumento={excluirDocumentoArt} notify={notify} />
             ))}
           </div>
         </Card>
@@ -3970,6 +4056,63 @@ function AvaliarServico({ doc, notify }) {
   );
 }
 
+/* ================= Acesso do cliente aos documentos de ART/TRT (Google Drive) =================
+   Mesma proteção do laudo final: só libera depois de conferir CPF + e-mail cadastrados, e o
+   download é sempre proxy do backend com token curto. São dois arquivos (documentação
+   assinada e placa de identificação de obra). */
+function AcessoDocumentosArt({ cpf, notify }) {
+  const [aberto, setAberto] = useState(false);
+  const [email, setEmail] = useState("");
+  const [consultando, setConsultando] = useState(false);
+  const [documentos, setDocumentos] = useState(null); // null = ainda não confirmou o e-mail
+
+  const consultar = async () => {
+    if (!email.trim()) { notify("Informe seu e-mail cadastrado"); return; }
+    setConsultando(true);
+    try {
+      const r = await apiFetch("/api/documentos-art/consultar", { method: "POST", body: { cpf, email } });
+      setDocumentos(r.documentos || []);
+      if ((r.documentos || []).length === 0) notify("Ainda não há documentos disponíveis para esse e-mail.");
+    } catch (e) { notify(`Não foi possível confirmar: ${e.message}`); setDocumentos(null); }
+    setConsultando(false);
+  };
+
+  if (!aberto) {
+    return (
+      <button className="btn-ghost" style={{ marginTop: 10, color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setAberto(true)}>
+        <FileText size={14} /> Baixar minha documentação ART/TRT
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${CINZA_BORDA}` }}>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Confirme seu e-mail para acessar a documentação</div>
+      {!documentos && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input style={{ ...inp, flex: 1, minWidth: 180 }} type="email" placeholder="Seu e-mail cadastrado" value={email}
+            onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && consultar()} />
+          <button className="btn-solid" onClick={consultar} disabled={consultando}>{consultando ? "Confirmando…" : "Confirmar"}</button>
+        </div>
+      )}
+      {documentos && documentos.length === 0 && (
+        <p style={{ color: "#8593a8", fontSize: 13, margin: 0 }}>E-mail não confere ou os documentos ainda não foram anexados.</p>
+      )}
+      {documentos && documentos.length > 0 && (
+        <div style={{ display: "grid", gap: 8 }}>
+          {documentos.map((d) => (
+            <a key={d.id} href={`${API_URL}/api/documentos-art/download?token=${encodeURIComponent(d.tokenDownload)}`}
+              target="_blank" rel="noopener noreferrer" className="btn-solid" style={{ textDecoration: "none", justifyContent: "center" }}>
+              <FileText size={14} /> {d.tipo}
+            </a>
+          ))}
+          <p style={{ fontSize: 11, color: "#8593a8", margin: 0 }}>O link expira em alguns minutos por segurança — se der erro, confirme de novo.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ================= Acesso do cliente ao laudo final (armazenado no Google Drive) =================
    O Drive nunca fica público: o backend só libera o download depois de confirmar CPF + e-mail
    cadastrados, e devolve um link com token curto (expira em minutos) que faz o backend buscar
@@ -4064,6 +4207,11 @@ function AbaCliente({ notify }) {
   const setFMaiusc = (campo, v) => setForm((f) => ({ ...f, [campo]: v.toUpperCase() }));
   const setFCpf = (v) => setForm((f) => ({ ...f, cpf: v.replace(/\D/g, "").slice(0, 11) }));
 
+  // Confirmação de "cadastro realizado" mostrada acima do formulário depois do envio —
+  // guarda o serviço escolhido, porque o texto muda para Documentação ART/TRT (que já
+  // entra direto na fila da Documentação, sem agendamento).
+  const [cadastroRealizado, setCadastroRealizado] = useState(null);
+
   const enviar = async () => {
     if (!form.nome.trim() || !form.telefone.trim()) { notify("Informe pelo menos nome e telefone"); return; }
     if (form.cpf && form.cpf.length !== 11) { notify("O CPF deve ter 11 dígitos"); return; }
@@ -4076,9 +4224,10 @@ function AbaCliente({ notify }) {
         method: "POST",
         body: { ...form, construtora: construtoraFinal.toUpperCase(), empreendimento: empreendimentoFinal.toUpperCase(), precisaCadastroEmpreendimento },
       });
+      setCadastroRealizado(form.servico);
       setForm(novoCadastroCliente());
       setConstrutoraSel(""); setEmpreendimentoSel(""); setConstrutoraOutros(""); setEmpreendimentoOutros("");
-      notify("Cadastro enviado! Nossa equipe entrará em contato ✓");
+      notify("Cadastro realizado ✓");
     } catch (e) { notify(`Não foi possível enviar: ${e.message}`); }
     setEnviando(false);
   };
@@ -4097,6 +4246,21 @@ function AbaCliente({ notify }) {
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <Card icon={Users} titulo="Cadastre-se">
+        {cadastroRealizado && (
+          <div style={{ background: "#E6F4EA", border: "1px solid #A5D6B0", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#2E7D32", fontWeight: 700, fontSize: 14.5, marginBottom: 4 }}>
+              <Check size={16} /> Cadastro realizado!
+            </div>
+            <div style={{ fontSize: 13.5, color: "#33683c" }}>
+              {cadastroRealizado === SERVICO_DOCUMENTACAO
+                ? "Sua solicitação de Documentação ART/TRT já foi para a nossa equipe de Documentação. Acompanhe pelo seu CPF em \"Acompanhar meu atendimento\" — quando ficar pronta, você baixa os documentos por aqui mesmo."
+                : "Recebemos seus dados. Nossa equipe entra em contato para confirmar o atendimento. Acompanhe pelo seu CPF em \"Acompanhar meu atendimento\" logo abaixo."}
+            </div>
+            <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: "#fff", marginTop: 10, padding: "6px 12px" }} onClick={() => setCadastroRealizado(null)}>
+              Fazer outro cadastro
+            </button>
+          </div>
+        )}
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
           Preencha seus dados para agendar uma vistoria, laudo técnico ou outro serviço da FN Edificações. Nossa equipe entra em contato para confirmar o atendimento.
         </p>
@@ -4192,6 +4356,7 @@ function AbaCliente({ notify }) {
                     </div>
                   )}
                   {d.status === "Laudo enviado por e-mail" && <AcessoLaudoFinal cpf={cpfConsulta} notify={notify} />}
+                  {d.status === STATUS_DOC_CONCLUIDA && <AcessoDocumentosArt cpf={cpfConsulta} notify={notify} />}
                   <AvaliarServico doc={d} notify={notify} />
                 </div>
               );
@@ -4242,6 +4407,9 @@ STATUS_COR["Solicitação de vistoria"] = { cor: "#65758b", bg: "#EEF1F5" };
 STATUS_COR["Vistoriado"] = { cor: "#2E7D32", bg: "#E6F4EA" };
 /* Etapa extra da aba Clientes: cadastro que não passa por vistoria (ver ETAPAS_CLIENTE). */
 STATUS_COR["Documentação ART/TRT"] = { cor: "#0F766E", bg: "#E3F3F1" };
+/* Fluxo próprio da Documentação ART/TRT, visto também pelo cliente no acompanhamento. */
+STATUS_COR[STATUS_DOC_PROCESSANDO] = { cor: "#B26A00", bg: "#FFF4E0" };
+STATUS_COR[STATUS_DOC_CONCLUIDA] = { cor: "#2E7D32", bg: "#E6F4EA" };
 
 function safeParseArray(v) {
   if (Array.isArray(v)) return v;
