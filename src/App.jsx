@@ -509,6 +509,70 @@ function somarHora(hhmm, horas) {
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
+/* ---------- Monta o objeto que o modelo novo de laudo consome ----------
+   Estrutura documentada em modelo-laudo/AUTOMACAO.md: o modelo recebe este objeto e
+   refaz sozinho capa, indicadores, gráficos, quadro-resumo, fichas e conclusão. Aqui só
+   traduzimos o que o sistema já tem — nada de total, índice ou percentual, que o próprio
+   modelo calcula. */
+const SEVERIDADE_PARA_MODELO = { "Baixa": "baixa", "Média": "media", "Alta": "alta" };
+
+function formatarDataPorExtenso(iso) {
+  if (!iso) return "";
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("pt-BR", { day: "numeric", month: "long", year: "numeric" });
+}
+
+/* Protocolo legível e estável: FN-ano-mêsdia-unidade (ex.: FN-2026-0725-A602). */
+function gerarProtocolo(dados) {
+  const hoje = new Date();
+  const ano = hoje.getFullYear();
+  const mesDia = `${String(hoje.getMonth() + 1).padStart(2, "0")}${String(hoje.getDate()).padStart(2, "0")}`;
+  const unidade = (dados?.imovel?.unidade || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 6);
+  return `FN-${ano}-${mesDia}${unidade ? `-${unidade}` : ""}`;
+}
+
+function montarLaudoModelo(dados = {}, itens = []) {
+  const imovel = dados.imovel || {};
+  const vistoria = dados.vistoria || {};
+  const contratante = dados.contratante || {};
+  const rt = dados.rt || {};
+  const paraHora = (h) => (h ? h.replace(":", "h") : "");
+
+  return {
+    protocolo: gerarProtocolo(dados),
+    dataEmissao: formatarDataPorExtenso(new Date().toISOString().slice(0, 10)),
+    local: vistoria.cidade || "",
+    proprietario: contratante.nome || "",
+    cpf: contratante.cpf || "",
+    construtora: imovel.construtora || "",
+    empreendimento: imovel.empreendimento || "",
+    endereco: imovel.endereco || "",
+    unidade: imovel.unidade || "",
+    tipologia: imovel.tipologia || "",
+    areaPrivativa: imovel.areaPrivativa || "",
+    dataVistoria: vistoria.data ? vistoria.data.split("-").reverse().join("/") : "",
+    horaInicio: paraHora(vistoria.inicio),
+    horaFim: paraHora(vistoria.termino),
+    presentes: vistoria.presentes || "",
+    ambientesVistoriados: Number(vistoria.ambientesVistoriados) || 0,
+    responsavel: { nome: rt.nome || "", qualificacao: rt.qualificacao || "", registro: rt.registro || "" },
+    itens: itens.map((item, i) => ({
+      n: String(i + 1).padStart(2, "0"),
+      ambiente: item.local || "",
+      categoria: item.categoria || "",
+      severidade: SEVERIDADE_PARA_MODELO[item.severidade] || "media",
+      status: item.status || "pendente",
+      // Sem título preenchido, cai no nome da patologia — o modelo exige a linha.
+      titulo: (item.titulo || item.patologia || "").trim(),
+      descricao: item.descricao || "",
+      recomendacao: item.recomendacao || "",
+      norma: item.norma || "",
+      fotos: item.fotos || [],
+    })),
+  };
+}
+
 /* ================= Componente principal ================= */
 /* ================= Login da equipe ================= */
 function TelaLogin({ onLogin, onVoltar }) {
