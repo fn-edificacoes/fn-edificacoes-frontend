@@ -368,6 +368,33 @@ const STATUS_PRODUCAO_OPCOES = ["Recebido", "Em produção", "Realizado"];
 const SERVICO_OPCOES = ["Vistoria de entrega de chaves", "Documentação ART/TRT", "Outro"];
 /* Documentação ART/TRT não passa por vistoria: o cadastro vai direto para a área de
    Documentação, sem aprovação nem agendamento no setor de Agendamento. */
+/* Horário comercial de atendimento: 07:00 às 18:00, de meia em meia hora. O cliente escolhe
+   numa lista em vez de digitar, pra não marcar fora do expediente. */
+const HORARIOS_COMERCIAIS = (() => {
+  const lista = [];
+  for (let h = 7; h <= 18; h++) {
+    lista.push(`${String(h).padStart(2, "0")}:00`);
+    if (h !== 18) lista.push(`${String(h).padStart(2, "0")}:30`);
+  }
+  return lista;
+})();
+
+/* Nome: só letras (com acento) e espaço, sempre em maiúsculas. */
+const somenteLetras = (v) => (v || "").replace(/[^A-Za-zÀ-ÿ\s]/g, "").toUpperCase();
+
+/* Sugestões de e-mail: completa o domínio a partir do que a pessoa já digitou. */
+const DOMINIOS_EMAIL = ["gmail.com", "hotmail.com", "outlook.com", "yahoo.com.br", "icloud.com", "bol.com.br", "uol.com.br", "live.com"];
+function sugestoesEmail(valor) {
+  const v = (valor || "").trim();
+  if (!v) return [];
+  const [usuario, dominioParcial = ""] = v.split("@");
+  if (!usuario) return [];
+  const candidatos = v.includes("@")
+    ? DOMINIOS_EMAIL.filter((d) => d.startsWith(dominioParcial.toLowerCase()))
+    : DOMINIOS_EMAIL;
+  return candidatos.map((d) => `${usuario}@${d}`).slice(0, 6);
+}
+
 const SERVICO_DOCUMENTACAO = SERVICO_OPCOES[1];
 const ehServicoDocumentacao = (c) => c?.servico === SERVICO_DOCUMENTACAO;
 
@@ -1617,7 +1644,17 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
               <Field label="CEP" value={editando.cep} onChange={(v) => setEditando({ ...editando, cep: v })} />
               <Field label="Bloco / Apto" value={editando.blocoTorre} onChange={(v) => setEditando({ ...editando, blocoTorre: v })} />
               <Field label="Data desejada" type="date" value={editando.dataDesejada} onChange={(v) => setEditando({ ...editando, dataDesejada: v })} />
-              <Field label="Horário desejado" type="time" value={editando.horarioDesejado} onChange={(v) => setEditando({ ...editando, horarioDesejado: v })} />
+              <div style={cell(false)}>
+                <label style={lab}>Horário desejado</label>
+                <select style={inp} value={editando.horarioDesejado || ""} onChange={(e) => setEditando({ ...editando, horarioDesejado: e.target.value })}>
+                  <option value="">selecionar…</option>
+                  {/* Mantém um horário fora do comercial que já esteja salvo, pra não perder dado. */}
+                  {editando.horarioDesejado && !HORARIOS_COMERCIAIS.includes(editando.horarioDesejado) && (
+                    <option value={editando.horarioDesejado}>{editando.horarioDesejado} (fora do horário comercial)</option>
+                  )}
+                  {HORARIOS_COMERCIAIS.map((h) => <option key={h} value={h}>{h}</option>)}
+                </select>
+              </div>
               <div style={cell(true)}>
                 <label style={lab}>Status do agendamento</label>
                 <select style={inp} value={editando.atendido ? "1" : "0"} onChange={(e) => setEditando({ ...editando, atendido: e.target.value === "1" })}>
@@ -4611,10 +4648,19 @@ function AbaCliente({ notify }) {
               {SERVICO_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
             </select>
           </div>
-          <Field label="Nome completo" value={form.nome} onChange={(v) => setFMaiusc("nome", v)} full />
+          <Field label="Nome completo" value={form.nome} onChange={(v) => setF("nome", somenteLetras(v))} full />
           <Field label="CPF (11 dígitos)" value={form.cpf} onChange={setFCpf} />
           <Field label="Telefone / WhatsApp" value={form.telefone} onChange={(v) => setF("telefone", v.replace(/\D/g, "").slice(0, 11))} />
-          <Field label="E-mail" value={form.email} onChange={(v) => setF("email", v)} full />
+          {/* Sugere o domínio conforme digita (@gmail.com, @hotmail.com…), mas continua
+              aceitando qualquer e-mail escrito à mão. */}
+          <div style={cell(true)}>
+            <label style={lab}>E-mail</label>
+            <input list="sugestoes-email" style={inp} type="email" placeholder="seunome@gmail.com"
+              value={form.email} onChange={(e) => setF("email", e.target.value)} />
+            <datalist id="sugestoes-email">
+              {sugestoesEmail(form.email).map((s) => <option key={s} value={s} />)}
+            </datalist>
+          </div>
           <div style={cell(false)}>
             <label style={lab}>Construtora</label>
             <select style={inp} value={construtoraSel} onChange={(e) => { setConstrutoraSel(e.target.value); setEmpreendimentoSel(""); }}>
@@ -4643,7 +4689,14 @@ function AbaCliente({ notify }) {
           {form.servico === SERVICO_OPCOES[0] && (
             <>
               <Field label="Data desejada" type="date" value={form.dataDesejada} onChange={(v) => setF("dataDesejada", v)} />
-              <Field label="Horário desejado" type="time" value={form.horarioDesejado} onChange={(v) => setF("horarioDesejado", v)} />
+              <div style={cell(false)}>
+                <label style={lab}>Horário desejado</label>
+                <select style={inp} value={form.horarioDesejado} onChange={(e) => setF("horarioDesejado", e.target.value)}>
+                  <option value="">selecionar…</option>
+                  {HORARIOS_COMERCIAIS.map((h) => <option key={h} value={h}>{h}</option>)}
+                </select>
+                <span style={{ fontSize: 11.5, color: "#8593a8" }}>Atendemos das 07:00 às 18:00.</span>
+              </div>
             </>
           )}
         </Grid>
