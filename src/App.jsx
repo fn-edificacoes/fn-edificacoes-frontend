@@ -131,125 +131,165 @@ const LOGO_FN_BASE64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAAEsCA
 const BANCO = {
   rejunte: {
     label: "Rejunte",
+    categoria: "Revestimento cerâmico",
+    norma: "ABNT NBR 13753:1996 — assentamento e rejuntamento",
     sev: "Média",
     desc: "Verifica-se a execução irregular e desuniforme do rejuntamento cerâmico, apresentando falhas de preenchimento, variação de espessura e acabamento inadequado nas juntas entre as peças.",
     rec: "Recomenda-se a remoção do rejunte comprometido e a reaplicação com produto adequado, garantindo preenchimento uniforme, alinhamento e vedação das juntas conforme boas práticas construtivas.",
   },
   pintura: {
     label: "Pintura",
+    categoria: "Pintura e gesso",
+    norma: "ABNT NBR 13245:2011 — execução de pinturas",
     sev: "Baixa",
     desc: "Verifica-se acabamento de pintura executado de forma irregular e desuniforme, com presença de manchas, variação de tonalidade, escorrimentos e cobertura insuficiente da superfície.",
     rec: "Recomenda-se a correção do substrato e a reaplicação da pintura em demãos uniformes, assegurando cobertura homogênea e acabamento conforme especificação do memorial descritivo.",
   },
   gesso: {
     label: "Gesso / Forro",
+    categoria: "Pintura e gesso",
+    norma: "ABNT NBR 13867:1997 — revestimento interno com gesso",
     sev: "Média",
     desc: "Verifica-se a execução irregular do revestimento em gesso, apresentando fissuras superficiais, desníveis e acabamento desuniforme nas juntas e emendas.",
     rec: "Recomenda-se o tratamento das juntas, a correção dos desníveis e a regularização do acabamento, garantindo planicidade e uniformidade da superfície.",
   },
   silicone: {
     label: "Silicone / Vedação",
+    categoria: "Impermeabilização",
+    norma: "ABNT NBR 15575-1:2021 — estanqueidade à água",
     sev: "Média",
     desc: "Verifica-se aplicação irregular de silicone/vedante, com cordão descontínuo, excesso de material e falhas de aderência que comprometem a estanqueidade da junta.",
     rec: "Recomenda-se a remoção do vedante existente e a reaplicação de cordão contínuo e uniforme, assegurando a estanqueidade e o acabamento adequado da junta.",
   },
   porta: {
     label: "Portas / Fechaduras",
+    categoria: "Esquadrias e vidros",
+    norma: "ABNT NBR 15930-2:2022 — portas de madeira",
     sev: "Média",
     desc: "Verifica-se funcionamento inadequado do conjunto de porta, apresentando desalinhamento, folga excessiva e/ou fechadura com acionamento irregular.",
     rec: "Recomenda-se o ajuste do batente e das dobradiças, bem como a regulagem ou substituição da fechadura, garantindo o correto funcionamento e travamento.",
   },
   alizar: {
     label: "Alizares / Guarnições",
+    categoria: "Esquadrias e vidros",
+    norma: "ABNT NBR 15930-2:2022 — acabamento e fixação",
     sev: "Baixa",
     desc: "Verifica-se instalação irregular dos alizares/guarnições, com desalinhamento, frestas e fixação inadequada em relação ao vão.",
     rec: "Recomenda-se o reassentamento das guarnições, corrigindo o alinhamento e a fixação, com vedação das frestas remanescentes.",
   },
   esquadria: {
     label: "Esquadrias",
+    categoria: "Esquadrias e vidros",
+    norma: "ABNT NBR 10821-2:2017 — esquadrias externas",
     sev: "Média",
     desc: "Verifica-se irregularidade na instalação da esquadria, com aplicação inadequada de PU/vedação ao redor do vão, folgas e acabamento comprometido.",
     rec: "Recomenda-se a correção da fixação e da vedação perimetral da esquadria, assegurando estanqueidade, alinhamento e funcionamento adequado das folhas.",
   },
   vidro: {
     label: "Vidros",
+    categoria: "Esquadrias e vidros",
+    norma: "ABNT NBR 7199:2016 — vidros na construção civil",
     sev: "Média",
     desc: "Verifica-se a presença de vidro trincado/riscado e/ou fixação inadequada, com folgas nos baguetes e comprometimento da vedação.",
     rec: "Recomenda-se a substituição da peça danificada e a correção da fixação e vedação, conforme especificação técnica.",
   },
   pedra: {
     label: "Pedras / Bancadas",
+    categoria: "Pedras e bancadas",
+    norma: "ABNT NBR 15844:2015 — rochas ornamentais",
     sev: "Média",
     desc: "Verifica-se dano na superfície da pedra (bancada/soleira/peitoril), com trincas, lascas ou riscos que comprometem a integridade e o acabamento.",
     rec: "Recomenda-se o reparo ou a substituição da peça comprometida, garantindo nivelamento, acabamento e adequada fixação.",
   },
   vazamento: {
     label: "Vazamentos",
+    categoria: "Hidrossanitário",
+    norma: "ABNT NBR 5626:2020 — estanqueidade de peças de utilização",
     sev: "Alta",
     desc: "Verifica-se a ocorrência de vazamento na instalação hidráulica, evidenciado por umidade, gotejamento e/ou manchas nas superfícies adjacentes ao ponto.",
     rec: "Recomenda-se a identificação e correção imediata do ponto de vazamento, com teste de estanqueidade e recuperação das áreas afetadas.",
   },
   registro: {
     label: "Registros / Metais",
+    categoria: "Hidrossanitário",
+    norma: "ABNT NBR 5626:2020 — instalação de água fria",
     sev: "Média",
     desc: "Verifica-se funcionamento inadequado do registro/metal sanitário, apresentando vazamento, dificuldade de acionamento e/ou fixação insuficiente.",
     rec: "Recomenda-se o ajuste, reaperto ou substituição do componente, assegurando vedação e correto funcionamento.",
   },
   sifao: {
     label: "Sifões",
+    categoria: "Hidrossanitário",
+    norma: "ABNT NBR 8160:1999 — esgoto sanitário predial",
     sev: "Média",
     desc: "Verifica-se instalação inadequada do sifão, com ausência de fecho hídrico eficiente e/ou vazamentos nas conexões.",
     rec: "Recomenda-se a correção da instalação do sifão, garantindo a vedação das conexões e o adequado fecho hídrico.",
   },
   ralo: {
     label: "Ralos",
+    categoria: "Hidrossanitário",
+    norma: "ABNT NBR 8160:1999 — coleta e condução de efluentes",
     sev: "Média",
     desc: "Verifica-se execução irregular ao redor do ralo, com caimento inadequado, rejunte deficiente e/ou vedação comprometida, favorecendo o acúmulo de água.",
     rec: "Recomenda-se a correção do caimento e da vedação ao redor do ralo, assegurando o adequado escoamento e a estanqueidade da região.",
   },
   quadro: {
     label: "Quadro Elétrico",
+    categoria: "Elétrico",
+    norma: "ABNT NBR 5410:2004 — instalações elétricas de baixa tensão",
     sev: "Alta",
     desc: "Verifica-se irregularidade no quadro de distribuição, com identificação insuficiente dos circuitos, fixação inadequada e/ou ausência de dispositivos de proteção conforme previsto.",
     rec: "Recomenda-se a adequação do quadro elétrico, com identificação dos circuitos e verificação dos dispositivos de proteção conforme as normas vigentes.",
   },
   tomada: {
     label: "Tomadas / Interruptores",
+    categoria: "Elétrico",
+    norma: "ABNT NBR 5410:2004 — dispositivos de tomada",
     sev: "Média",
     desc: "Verifica-se instalação inadequada de tomada/interruptor, com fixação insuficiente, desalinhamento e/ou funcionamento irregular.",
     rec: "Recomenda-se a correção da fixação e a verificação do funcionamento do dispositivo, assegurando conformidade e segurança da instalação.",
   },
   ferrugem: {
     label: "Ferrugem / Oxidação",
+    categoria: "Serralheria e metais",
+    norma: "ABNT NBR 15575-1:2021 — durabilidade dos componentes",
     sev: "Média",
     desc: "Verifica-se a presença de processo de oxidação/ferrugem em elemento metálico, com comprometimento superficial e risco de evolução do quadro.",
     rec: "Recomenda-se o tratamento da superfície oxidada, com remoção da ferrugem e aplicação de proteção anticorrosiva adequada.",
   },
   fissura: {
     label: "Fissuras",
+    categoria: "Vedações e estrutura",
+    norma: "ABNT NBR 15575-4:2021 — fissuras em vedações verticais",
     sev: "Média",
     desc: "Verifica-se a presença de fissuras no revestimento/alvenaria, com abertura reduzida, decorrentes de acomodação e/ou movimentação dos elementos construtivos.",
     rec: "Recomenda-se o monitoramento e o tratamento das fissuras com material adequado, prevenindo infiltrações e a evolução do quadro patológico.",
   },
   trinca: {
     label: "Trincas",
+    categoria: "Vedações e estrutura",
+    norma: "ABNT NBR 15575-4:2021 — desempenho de vedações verticais",
     sev: "Alta",
     desc: "Verifica-se a presença de trincas com abertura significativa no elemento construtivo, indicando possível esforço estrutural ou movimentação relevante.",
     rec: "Recomenda-se avaliação técnica específica para identificação da causa, com posterior tratamento e monitoramento da manifestação.",
   },
   infiltracao: {
     label: "Infiltrações",
+    categoria: "Impermeabilização",
+    norma: "ABNT NBR 9575:2010 — projeto de impermeabilização",
     sev: "Alta",
     desc: "Verifica-se a ocorrência de infiltração, evidenciada por manchas de umidade, eflorescências e/ou desprendimento de revestimento na região afetada.",
     rec: "Recomenda-se a identificação da origem da infiltração e a execução dos reparos de impermeabilização, com recuperação das áreas comprometidas.",
   },
   impermeabilizacao: {
     label: "Impermeabilização",
+    categoria: "Impermeabilização",
+    norma: "ABNT NBR 9574:2008 — execução de impermeabilização",
     sev: "Alta",
     desc: "Verifica-se deficiência na impermeabilização da área, com sinais de umidade e comprometimento da estanqueidade do sistema.",
     rec: "Recomenda-se a revisão e/ou refação da impermeabilização conforme o sistema especificado, garantindo a estanqueidade da área.",
   },
-  outro: { label: "Outro (personalizado)", sev: "Média", desc: "Verifica-se ", rec: "Recomenda-se " },
+  outro: { label: "Outro (personalizado)", categoria: "Outros", norma: "", sev: "Média", desc: "Verifica-se ", rec: "Recomenda-se " },
 };
 
 const LOCAIS = ["Sala", "Cozinha", "Área de Serviço", "Quarto 01", "Quarto 02", "Suíte", "Banheiro Social", "Banheiro Suíte", "Lavabo", "Varanda", "Circulação", "Fachada"];
@@ -281,7 +321,20 @@ const sevMeta = {
 };
 
 let idCounter = 1;
-const novoItem = () => ({ id: idCounter++, local: "", tipo: "", patologia: "", severidade: "Média", descricao: "", recomendacao: "", nota: "", fotos: [] });
+/* Campos "categoria", "norma", "titulo" e "status" atendem o modelo novo de laudo:
+   os três primeiros vêm prontos do BANCO ao escolher a patologia; o status nasce
+   "pendente" e serve para acompanhar a construtora corrigindo (ver revistoria). */
+/* Situação de cada não conformidade — enum exigido pelo modelo de laudo. Marcar como
+   "corrigido" faz o índice de conformidade subir, o que permite reusar o mesmo laudo
+   para acompanhar a construtora ao longo dos reparos. */
+const STATUS_ITEM_OPCOES = [
+  { valor: "pendente", label: "Pendente" },
+  { valor: "corrigido", label: "Corrigido" },
+  { valor: "reincidente", label: "Reincidente" },
+];
+
+const novoItem = () => ({ id: idCounter++, local: "", tipo: "", patologia: "", categoria: "", norma: "",
+  titulo: "", status: "pendente", severidade: "Média", descricao: "", recomendacao: "", fotos: [] });
 
 /* ---------- Documentação / Gerência (registro de vistorias e TRT) ---------- */
 
@@ -432,20 +485,6 @@ const novoCadastroCliente = () => ({
   criadoEm: new Date().toISOString(),
 });
 
-/* ---------- IA redatora da FN (Claude na nuvem) ---------- */
-const SYSTEM_FN = `Você é o redator técnico oficial da FN Edificações, especialista em engenharia diagnóstica e vistorias imobiliárias.
-A partir da(s) foto(s) e/ou anotação de uma não conformidade, produza o registro técnico no padrão da FN.
-
-Regras de redação: linguagem técnica, objetiva, impessoal, em norma culta, sem opiniões nem linguagem informal.
-A "descricao" deve OBRIGATORIAMENTE iniciar por "Verifica-se". A "recomendacao" deve OBRIGATORIAMENTE iniciar por "Recomenda-se".
-Não invente detalhes que não estejam visíveis na foto ou na anotação. Seja conciso (2 a 4 linhas por campo).
-
-Classifique a "severidade" exatamente como uma destas: Baixa, Média ou Alta.
-Em "patologia", use um rótulo curto. Patologias recorrentes: Rejunte, Pintura, Gesso, Silicone, Portas/Fechaduras, Alizares, Esquadrias, Vidros, Pedras, Vazamentos, Registros, Sifões, Ralos, Quadro Elétrico, Tomadas, Ferrugem/Oxidação, Fissuras, Trincas, Infiltrações, Impermeabilização.
-
-Responda EXCLUSIVAMENTE com um objeto JSON válido, sem markdown, sem cercas de código, sem comentários, no formato exato:
-{"patologia":"...","severidade":"Baixa","descricao":"Verifica-se...","recomendacao":"Recomenda-se..."}`;
-
 async function redimensionar(dataUrl, max = 1024) {
   return new Promise((resolve) => {
     const img = new Image();
@@ -468,28 +507,6 @@ function somarHora(hhmm, horas) {
   const [h, m] = hhmm.split(":").map(Number);
   const total = (h * 60 + m + horas * 60 + 24 * 60) % (24 * 60);
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
-}
-
-async function gerarComIA({ nota, fotos, local }) {
-  const content = [];
-  for (const f of fotos.slice(0, 2)) {
-    const r = await redimensionar(f);
-    const [meta, b64] = r.split(",");
-    const media = (meta.match(/data:(.*?);/) || [])[1] || "image/jpeg";
-    content.push({ type: "image", source: { type: "base64", media_type: media, data: b64 } });
-  }
-  content.push({ type: "text", text: `Local: ${local || "não informado"}. Anotação do vistoriador: ${nota || "(sem anotação — analise a foto)"}. Gere o registro técnico da não conformidade no padrão FN.` });
-
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1000, system: SYSTEM_FN, messages: [{ role: "user", content }] }),
-  });
-  if (!resp.ok) throw new Error("Falha na chamada da IA (" + resp.status + ")");
-  const data = await resp.json();
-  const texto = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("").replace(/```json|```/g, "").trim();
-  const jsonStr = texto.slice(texto.indexOf("{"), texto.lastIndexOf("}") + 1);
-  return JSON.parse(jsonStr);
 }
 
 /* ================= Componente principal ================= */
@@ -1039,7 +1056,15 @@ function AppInterno({ session, onLogout }) {
   const escolherPatologia = (id, tipo) => {
     const b = BANCO[tipo];
     if (!b) return updItem(id, { tipo, patologia: "" });
-    updItem(id, { tipo, patologia: b.label, severidade: b.sev, descricao: b.desc, recomendacao: b.rec });
+    // O título fica editável: começa com o rótulo da patologia e o técnico detalha se quiser.
+    const item = itens.find((i) => i.id === id);
+    const tituloAtual = (item?.titulo || "").trim();
+    const eraDoBancoAnterior = !tituloAtual || tituloAtual === BANCO[item?.tipo]?.label;
+    updItem(id, {
+      tipo, patologia: b.label, severidade: b.sev, descricao: b.desc, recomendacao: b.rec,
+      categoria: b.categoria || "", norma: b.norma || "",
+      ...(eraDoBancoAnterior ? { titulo: b.label } : {}),
+    });
   };
   const addFotos = (id, fileList) => {
     const item = itens.find((i) => i.id === id);
@@ -2737,26 +2762,8 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
 
 function ItemCard({ item, num, onChange, onPatologia, onFotos, onRemoveFoto, onDelete }) {
   const fileRef = useRef();
-  const [iaLoad, setIaLoad] = useState(false);
-  const [iaErro, setIaErro] = useState("");
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
   const m = sevMeta[item.severidade];
-
-  const rodarIA = async () => {
-    if (item.fotos.length === 0 && !item.nota.trim()) { setIaErro("Tire uma foto ou escreva uma anotação primeiro."); return; }
-    setIaErro(""); setIaLoad(true);
-    try {
-      const r = await gerarComIA({ nota: item.nota, fotos: item.fotos, local: item.local });
-      onChange({
-        patologia: r.patologia || item.patologia,
-        severidade: ["Baixa", "Média", "Alta"].includes(r.severidade) ? r.severidade : item.severidade,
-        descricao: r.descricao || item.descricao,
-        recomendacao: r.recomendacao || item.recomendacao,
-      });
-    } catch (e) {
-      setIaErro("Não consegui gerar agora. Escreva manualmente ou tente de novo.");
-    } finally { setIaLoad(false); }
-  };
 
   return (
     <div style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 14, padding: 18, marginBottom: 14 }}>
@@ -2800,25 +2807,34 @@ function ItemCard({ item, num, onChange, onPatologia, onFotos, onRemoveFoto, onD
       </div>
 
       {/* Bloco IA */}
+      {/* Escolher a patologia preenche sozinho severidade, categoria, norma, descrição e
+          recomendação — tudo continua editável depois. */}
       <div style={{ marginTop: 14, background: "#f4f8fd", border: `1px solid #dbe7f4`, borderRadius: 11, padding: 13 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
-          <Sparkles size={15} color={AZUL_MEDIO} />
-          <strong style={{ fontSize: 13, color: AZUL_MARINHO }}>Descrever com IA</strong>
-        </div>
-        <textarea rows={2} style={{ ...inp, width: "100%", resize: "vertical", lineHeight: 1.5 }} value={item.nota}
-          onChange={(e) => onChange({ nota: e.target.value })}
-          placeholder="Anotação rápida do vistoriador. Ex.: rejunte falhado em volta do ralo, com acúmulo de água" />
-        <button onClick={rodarIA} disabled={iaLoad} className="btn-ia">
-          {iaLoad ? <><Loader2 size={15} className="spin" /> Gerando…</> : <><Sparkles size={15} /> Gerar descrição técnica</>}
-        </button>
-        {iaErro && <div style={{ fontSize: 12, color: "#c62828", marginTop: 7 }}>{iaErro}</div>}
-        <div style={{ fontSize: 11, color: "#8593a8", marginTop: 7 }}>Ou use o banco pronto:{" "}
-          <select style={{ fontSize: 11, padding: "2px 4px", border: `1px solid ${CINZA_BORDA}`, borderRadius: 5 }} value={item.tipo} onChange={(e) => onPatologia(e.target.value)}>
-            <option value="">selecionar patologia…</option>
-            {Object.entries(BANCO).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+        <label style={{ ...lab, display: "block", marginBottom: 6 }}>Patologia (preenche o restante automaticamente)</label>
+        <select style={{ ...inp, width: "100%" }} value={item.tipo} onChange={(e) => onPatologia(e.target.value)}>
+          <option value="">selecionar patologia…</option>
+          {Object.entries(BANCO).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+        </select>
+        {item.categoria && (
+          <div style={{ fontSize: 11.5, color: "#65758b", marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <span style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 20, padding: "2px 9px", fontWeight: 700, color: AZUL_MARINHO }}>
+              {item.categoria}
+            </span>
+            {item.norma && <span style={{ alignSelf: "center" }}>{item.norma}</span>}
+          </div>
+        )}
+      </div>
+
+      <Grid>
+        <Field label="Título (uma linha, aparece no resumo do laudo)" value={item.titulo} onChange={(v) => onChange({ titulo: v })} full />
+        <div style={cell(false)}>
+          <label style={lab}>Situação</label>
+          <select style={inp} value={item.status} onChange={(e) => onChange({ status: e.target.value })}>
+            {STATUS_ITEM_OPCOES.map((o) => <option key={o.valor} value={o.valor}>{o.label}</option>)}
           </select>
         </div>
-      </div>
+        <Field label="Norma técnica" value={item.norma} onChange={(v) => onChange({ norma: v })} />
+      </Grid>
 
       <Area label="Descrição técnica" value={item.descricao} onChange={(v) => onChange({ descricao: v })} rows={3} placeholder="Verifica-se..." />
       <Area label="Recomendação técnica" value={item.recomendacao} onChange={(v) => onChange({ recomendacao: v })} rows={2} placeholder="Recomenda-se..." />
