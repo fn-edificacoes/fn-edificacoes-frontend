@@ -2034,6 +2034,7 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
           const doDia = agendadosPorDia[chave] || [];
           const selecionado = diaSelecionado === chave;
           const hoje = chave === hojeISO;
+          const temAgendamento = doDia.length > 0;
           return (
             <button key={chave} className="dia-cel" data-dia-idx={i}
               onKeyDown={(e) => {
@@ -2043,12 +2044,25 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
                 gridRef.current?.querySelector(`[data-dia-idx="${i + passos}"]`)?.focus();
               }}
               onClick={() => setDiaSelecionado(selecionado ? null : chave)}
+              title={doDia.length > 0 ? `${doDia.length} vistoria(s) marcada(s) neste dia` : "Nenhuma vistoria marcada"}
               style={{
-                minHeight: 76, border: selecionado ? `2px solid ${AZUL_MEDIO}` : `1px solid ${CINZA_BORDA}`, borderRadius: 8,
-                background: hoje ? CINZA_CLARO : "#fff", cursor: "pointer", display: "flex", flexDirection: "column",
+                minHeight: 88,
+                // Dia com vistoria marcada fica visualmente destacado (fundo e borda azuis),
+                // pra dar pra bater o olho no mês e ver onde tem compromisso.
+                border: selecionado ? `2px solid ${AZUL_MEDIO}` : temAgendamento ? `1.5px solid ${AZUL_MEDIO}` : `1px solid ${CINZA_BORDA}`,
+                borderRadius: 8,
+                background: temAgendamento ? "#EAF2FB" : hoje ? CINZA_CLARO : "#fff",
+                cursor: "pointer", display: "flex", flexDirection: "column",
                 alignItems: "stretch", gap: 3, padding: 4, textAlign: "left",
               }}>
-              <span style={{ fontSize: 12, fontWeight: hoje ? 800 : 600, color: hoje ? AZUL_MARINHO : "#1a2330" }}>{dia}</span>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+                <span style={{ fontSize: 12, fontWeight: hoje ? 800 : 600, color: hoje ? AZUL_MARINHO : "#1a2330" }}>{dia}</span>
+                {temAgendamento && (
+                  <span style={{ background: AZUL_MEDIO, color: "#fff", borderRadius: 10, padding: "1px 6px", fontSize: 9, fontWeight: 800, whiteSpace: "nowrap" }}>
+                    {doDia.length} {doDia.length === 1 ? "vistoria" : "vistorias"}
+                  </span>
+                )}
+              </div>
               {vistoriadores.length > 0 && (
                 <div style={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
                   {vistoriadores.map((v) => {
@@ -2068,7 +2082,11 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
                     </div>
                   );
                 })}
-                {doDia.length > 3 && <div style={{ fontSize: 9, color: AZUL_MARINHO, fontWeight: 700 }}>+{doDia.length - 3}</div>}
+                {doDia.length > 3 && (
+                  <div style={{ fontSize: 9, color: AZUL_MARINHO, fontWeight: 700 }}>
+                    +{doDia.length - 3} {doDia.length - 3 === 1 ? "outra" : "outras"}
+                  </div>
+                )}
               </div>
             </button>
           );
