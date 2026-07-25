@@ -291,18 +291,18 @@ const TIPO_ART_OPCOES = ["Individual", "Coletiva"];
    Depois que a vistoria é finalizada, o docs.status_cliente assume: "Agendado" -> "Laudo em análise"
    quando o vistoriador finaliza a vistoria (POST /api/vistoria/finalizar) -> "Laudo enviado por
    e-mail" quando a gerência aprova (POST /api/docs/:id/aprovar, que já gera o PDF e envia o e-mail). */
-const STATUS_ATENDIMENTO_OPCOES = ["Em análise", "Agendado", "Laudo em análise", "Laudo enviado por e-mail"];
+const STATUS_ATENDIMENTO_OPCOES = ["Em análise", "Agendado", "Vistoria realizada", "Laudo enviado por e-mail"];
 /* Documentação ART/TRT tem fluxo próprio (sem vistoria): ver STATUS_DOC_* no backend. */
-const STATUS_DOC_PROCESSANDO = "Processando documentação";
-const STATUS_DOC_CONCLUIDA = "Documentação concluída";
+const STATUS_DOC_PROCESSANDO = "Elaborando";
+const STATUS_DOC_CONCLUIDA = "Documentação pronta";
 const TIPOS_DOCUMENTO_ART = ["Documentação assinada", "Placa de identificação de obra"];
 const STATUS_ATENDIMENTO_INFO = {
   "Em análise": "Recebemos seu cadastro e ele está em análise pelo nosso setor de Atendimento. Em breve confirmaremos seu agendamento.",
   "Agendado": "Recebemos sua solicitação e sua vistoria está agendada. Em breve nossa equipe entrará em contato.",
-  "Laudo em análise": "Sua vistoria foi realizada e o laudo está em análise pela nossa equipe técnica.",
+  "Vistoria realizada": "Sua vistoria foi realizada com sucesso. Estamos finalizando seu laudo e avisaremos assim que ele for enviado.",
   "Laudo enviado por e-mail": "Seu laudo foi aprovado e enviado para o e-mail cadastrado. Verifique sua caixa de entrada (e o spam).",
-  [STATUS_DOC_PROCESSANDO]: "Recebemos seu cadastro e sua documentação ART/TRT está sendo processada pela nossa equipe.",
-  [STATUS_DOC_CONCLUIDA]: "Sua documentação está pronta! Baixe os arquivos na seção \"Baixar minha documentação ART/TRT\" desta página, informando CPF e e-mail.",
+  [STATUS_DOC_PROCESSANDO]: "Recebemos seu cadastro e sua documentação ART/TRT está sendo elaborada pela nossa equipe técnica.",
+  [STATUS_DOC_CONCLUIDA]: "Sua documentação está pronta! Confirme seu e-mail no botão abaixo para baixar os dois arquivos: a documentação assinada e a placa de identificação de obra.",
 };
 /* ---------- Status INTERNO (docs.status) — uso exclusivo da equipe (Documentação/Gerência),
    nunca mostrado ao cliente. Precisa bater exatamente com STATUS_ATENDIMENTO_VALIDOS do backend. */
@@ -603,7 +603,9 @@ function AppInterno({ session, onLogout }) {
   const perfil = session.usuario.role; // definido pelo backend/login — não é mais escolhido na tela
   const token = session.token;
   const [abaTop, setAbaTop] = useState("laudos"); // "laudos" | "documentacao" | "gerencia"
-  const [aba, setAba] = useState("dados");
+  // Vistoriador começa na agenda (é de lá que ele inicia a vistoria, já com os dados
+  // preenchidos); os demais caem direto na vistoria.
+  const [aba, setAba] = useState("itens");
   const [abaGerencia, setAbaGerencia] = useState("visao-geral"); // "visao-geral" | "parceiros" | "financeiro"
   const [abaQualidade, setAbaQualidade] = useState("analise"); // "analise" | "vistoria" | "feedback"
   const [agendarAgoraId, setAgendarAgoraId] = useState(null); // id do cliente recém-aprovado, pra abrir direto o card dele em "Vistoria"
@@ -620,6 +622,8 @@ function AppInterno({ session, onLogout }) {
   const modulosPermitidos = MODULOS_POR_PERFIL[perfil] || [];
   useEffect(() => {
     if (!modulosPermitidos.includes(abaTop)) setAbaTop(modulosPermitidos[0]);
+    // O vistoriador entra direto na agenda dele — é o ponto de partida do trabalho.
+    if (perfil === "vistoriador") setAba("agenda");
   }, [perfil]);
 
   const [docs, setDocs] = useState([]);
@@ -1024,8 +1028,6 @@ function AppInterno({ session, onLogout }) {
   };
 
   /* ---- helpers de estado ---- */
-  const setD = (grupo, campo, val) => setDados((d) => ({ ...d, [grupo]: { ...d[grupo], [campo]: val } }));
-  const setTexto = (campo, val) => setDados((d) => ({ ...d, textos: { ...d.textos, [campo]: val } }));
 
 
   const updItem = (id, patch) => setItens((l) => l.map((i) => (i.id === id ? { ...i, ...patch } : i)));
@@ -1112,8 +1114,8 @@ function AppInterno({ session, onLogout }) {
         {/* Sub-navegação (somente dentro do módulo Laudos) */}
         {abaTop === "laudos" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
-            {[["dados", "Dados do laudo", ClipboardList], ["itens", `Vistoria (${totalItens})`, Camera], ["laudo", "Laudo final", FileText],
-              ...(perfil === "vistoriador" ? [["agenda", "Minha agenda", CalendarDays]] : [])]
+            {[...(perfil === "vistoriador" ? [["agenda", "Minha agenda", CalendarDays]] : []),
+              ["itens", `Vistoria (${totalItens})`, Camera], ["laudo", "Laudo final", FileText]]
               .map(([k, label, Icon]) => (
                 <button key={k} onClick={() => setAba(k)} className="tab" style={{ borderBottomColor: aba === k ? AZUL_MEDIO : "transparent", color: aba === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
                   <Icon size={15} /> {label}
@@ -1149,10 +1151,6 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "laudos" && <NotificacoesClientes clientes={clientes} preencherComCliente={preencherComCliente} style={{ marginBottom: 18 }} />}
         {abaTop === "documentacao" && <FaixaIndicadoresGerais docs={docs} clientes={clientes} modo="art" style={{ marginBottom: 18 }} />}
 
-        {abaTop === "laudos" && aba === "dados" && (
-          <AbaDados dados={dados} setD={setD} setTexto={setTexto} clientes={clientes} preencherComCliente={preencherComCliente} docs={docs} updDoc={updDoc} notify={notify} token={token}
-            bloqueado={laudoBloqueado} onPedirDesbloqueio={() => setConfirmandoDesbloqueio(true)} />
-        )}
         {abaTop === "laudos" && aba === "itens" && (
           <AbaItens itens={itens} setItens={setItens} updItem={updItem} escolherPatologia={escolherPatologia}
             addFotos={addFotos} removerFoto={removerFoto} contagem={contagem}
@@ -1900,7 +1898,14 @@ function AbaQualidadeFeedback({ avaliacoes, carregando, clientes = [], clientesC
                     <strong style={{ fontSize: 14 }}>{a.cliente || "Cliente"}</strong>
                     <Estrelas valor={a.nota} tamanho={15} />
                   </div>
-                  {a.empreendimento && <div style={{ fontSize: 12, color: "#65758b", marginBottom: 6 }}>{a.empreendimento}</div>}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+                    {a.servico && (
+                      <span style={{ background: "#EAF2FB", color: AZUL_MARINHO, borderRadius: 20, padding: "2px 10px", fontSize: 11.5, fontWeight: 700 }}>
+                        {a.servico}
+                      </span>
+                    )}
+                    {a.empreendimento && <span style={{ fontSize: 12, color: "#65758b" }}>{a.empreendimento}</span>}
+                  </div>
                   {a.comentario && <div style={{ fontSize: 13.5, color: "#334", background: CINZA_CLARO, borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>{a.comentario}</div>}
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     {podeAgir && aprovarAvaliacao ? (
@@ -2534,9 +2539,18 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
     (!filtroEtapa || etapaVistoriaCliente(c, docs) === filtroEtapa);
 
   const emAgenda = (c) => c.status === "Vistoria agendada" || c.status === "Em vistoria";
-  const pendentes = clientes.filter((c) => c.status === "Agendamento aprovado" && combina(c));
-  const agendadas = clientes.filter((c) => emAgenda(c) && !temDoc(c) && combina(c));
-  const realizadas = clientes.filter((c) => emAgenda(c) && temDoc(c) && combina(c));
+  /* Da data mais próxima para a mais distante; quem ainda não tem data vai para o fim
+     (a API devolve por ordem de cadastro, que não ajuda a organizar o dia a dia). */
+  const porDataMaisProxima = (a, b) => {
+    if (!a.dataDesejada && !b.dataDesejada) return (a.nome || "").localeCompare(b.nome || "", "pt-BR");
+    if (!a.dataDesejada) return 1;
+    if (!b.dataDesejada) return -1;
+    return `${a.dataDesejada} ${a.horarioDesejado || ""}`.localeCompare(`${b.dataDesejada} ${b.horarioDesejado || ""}`);
+  };
+
+  const pendentes = clientes.filter((c) => c.status === "Agendamento aprovado" && combina(c)).sort(porDataMaisProxima);
+  const agendadas = clientes.filter((c) => emAgenda(c) && !temDoc(c) && combina(c)).sort(porDataMaisProxima);
+  const realizadas = clientes.filter((c) => emAgenda(c) && temDoc(c) && combina(c)).sort(porDataMaisProxima);
 
   const setCampo = (id, campo, valor) => setForm((f) => ({ ...f, [id]: { ...f[id], [campo]: valor } }));
   const valorCampo = (c, campo, padrao) => form[c.id]?.[campo] ?? padrao;
@@ -2637,182 +2651,6 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
   );
 }
 
-function CardAndamentoAtendimento({ cpf, docs = [], updDoc, notify, token }) {
-  const cpfLimpo = (cpf || "").replace(/\D/g, "");
-  const doc = docs.find((d) => cpfLimpo && (d.cpf || "").replace(/\D/g, "") === cpfLimpo);
-  const [statusInterno, setStatusInterno] = useState(doc?.status || STATUS_INTERNO_OPCOES[0]);
-  const [salvando, setSalvando] = useState(false);
-  const [historico, setHistorico] = useState([]);
-
-  useEffect(() => { setStatusInterno(doc?.status || STATUS_INTERNO_OPCOES[0]); }, [doc?.id, doc?.status]);
-
-  useEffect(() => {
-    if (!doc?.id) { setHistorico([]); return; }
-    (async () => {
-      try {
-        const r = await apiFetch(`/api/docs/${doc.id}/historico`, { token });
-        setHistorico(r.historico || []);
-      } catch { setHistorico([]); }
-    })();
-  }, [doc?.id]);
-
-  const atualizar = async () => {
-    setSalvando(true);
-    try {
-      await updDoc(doc.id, { status: statusInterno });
-      notify("Status interno atualizado ✓");
-    } catch (e) { notify(`Não foi possível atualizar: ${e.message}`); }
-    setSalvando(false);
-  };
-
-  return (
-    <Card icon={ClipboardCheck} titulo="Andamento do atendimento">
-      {!cpfLimpo && (
-        <p style={{ color: "#8593a8", fontSize: 14 }}>Informe o CPF do contratante acima para localizar (ou criar) o acompanhamento deste cliente.</p>
-      )}
-
-      {cpfLimpo && !doc && (
-        <p style={{ color: "#8593a8", fontSize: 14 }}>
-          Nenhum registro de atendimento encontrado para este CPF ainda. Ele é criado automaticamente quando o vistoriador
-          envia o laudo para a gerência, ou manualmente na aba "Documentação".
-        </p>
-      )}
-
-      {cpfLimpo && doc && (
-        <>
-          <div style={{ marginBottom: 16 }}>
-            <label style={lab}>Status visto pelo cliente (automático)</label>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6, flexWrap: "wrap" }}>
-              <Selo valor={doc.statusCliente || "Agendado"} />
-              <span style={{ fontSize: 12.5, color: "#65758b" }}>{STATUS_ATENDIMENTO_INFO[doc.statusCliente] || ""}</span>
-            </div>
-            <p style={{ fontSize: 11.5, color: "#8593a8", marginTop: 6 }}>
-              Muda sozinho: quando o vistoriador envia o laudo para a gerência, e quando a gerência aprova (o laudo é
-              enviado por e-mail automaticamente). Não é editável manualmente aqui.
-            </p>
-          </div>
-
-          {historico.length > 0 && (
-            <div style={{ marginBottom: 16, paddingBottom: 14, borderBottom: `1px dashed ${CINZA_BORDA}` }}>
-              <label style={lab}>Histórico</label>
-              <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
-                {historico.map((h, i) => (
-                  <div key={i} style={{ fontSize: 12, color: "#4a5a70", display: "flex", justifyContent: "space-between", gap: 10 }}>
-                    <span>{h.status_cliente}</span>
-                    <span style={{ color: "#8593a8", whiteSpace: "nowrap" }}>{new Date(h.criado_em).toLocaleString("pt-BR")}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <Grid>
-            <div style={cell(true)}>
-              <label style={lab}>Status interno (uso da equipe — o cliente não vê isso)</label>
-              <select style={inp} value={statusInterno} onChange={(e) => setStatusInterno(e.target.value)}>
-                {STATUS_INTERNO_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
-              </select>
-            </div>
-          </Grid>
-          {doc.atualizadoEm && (
-            <div style={{ fontSize: 12, color: "#8593a8", marginTop: 8 }}>
-              Última atualização: {new Date(doc.atualizadoEm).toLocaleString("pt-BR")}
-            </div>
-          )}
-          <button className="btn-solid" style={{ marginTop: 12 }} onClick={atualizar} disabled={salvando}>
-            {salvando ? <Loader2 size={15} className="spin" /> : <Check size={15} />} Atualizar status interno
-          </button>
-        </>
-      )}
-    </Card>
-  );
-}
-
-function AbaDados({ dados, setD, setTexto, clientes = [], preencherComCliente, docs = [], updDoc, notify, token, bloqueado, onPedirDesbloqueio }) {
-  const [clienteSel, setClienteSel] = useState("");
-
-  return (
-    <div>
-      {bloqueado && (
-        <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 10, background: "#FFF4E0", border: "1px solid #f0c987", borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
-          <Lock size={16} color="#B26A00" />
-          <span style={{ fontSize: 13, color: "#7a4e00", flex: 1 }}>Este laudo já foi enviado para a gerência e está travado contra edição.</span>
-          <button className="btn-ghost" style={{ color: "#B26A00", background: "#fff", padding: "6px 12px" }} onClick={onPedirDesbloqueio}>
-            <LockOpen size={14} /> Desbloquear para correção
-          </button>
-        </div>
-      )}
-      <div style={{ display: "grid", gap: 16, pointerEvents: bloqueado ? "none" : "auto", opacity: bloqueado ? 0.55 : 1 }}>
-      {clientes.length > 0 && (
-        <Card icon={Users} titulo="Preencher com cadastro do cliente">
-          <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
-            Esta seção só reúne as informações necessárias para realizar a vistoria e montar um laudo final mais completo. Escolha um cliente já cadastrado para trazer os dados dele automaticamente.
-          </p>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <select style={{ ...inp, flex: 1, minWidth: 220 }} value={clienteSel} onChange={(e) => setClienteSel(e.target.value)}>
-              <option value="">Selecione um cliente cadastrado…</option>
-              {clientes.map((c) => (
-                <option key={c.id} value={c.id}>{c.nome}{c.empreendimento ? ` — ${c.empreendimento}` : ""}</option>
-              ))}
-            </select>
-            <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }}
-              onClick={() => preencherComCliente(clientes.find((c) => c.id === clienteSel))}
-              disabled={!clienteSel}>
-              <Check size={15} /> Usar estes dados
-            </button>
-          </div>
-        </Card>
-      )}
-
-      <Card icon={User} titulo="Identificação do contratante (proprietário)">
-        <Grid>
-          <Field label="Nome" value={dados.contratante.nome} onChange={(v) => setD("contratante", "nome", v)} full />
-          <Field label="CPF / CNPJ" value={dados.contratante.cpf} onChange={(v) => setD("contratante", "cpf", v)} />
-        </Grid>
-      </Card>
-
-      <CardAndamentoAtendimento cpf={dados.contratante.cpf} docs={docs} updDoc={updDoc} notify={notify} token={token} />
-
-      <Card icon={Building2} titulo="Dados do imóvel">
-        <Grid>
-          <Field label="Construtora" value={dados.imovel.construtora} onChange={(v) => setD("imovel", "construtora", v)} />
-          <Field label="Empreendimento" value={dados.imovel.empreendimento} onChange={(v) => setD("imovel", "empreendimento", v)} />
-          <Field label="Endereço" value={dados.imovel.endereco} onChange={(v) => setD("imovel", "endereco", v)} full />
-          <Field label="Unidade / Apartamento" value={dados.imovel.unidade} onChange={(v) => setD("imovel", "unidade", v)} />
-        </Grid>
-        <Area label="Descrição do imóvel" value={dados.imovel.descricao} onChange={(v) => setD("imovel", "descricao", v)} rows={2} />
-      </Card>
-
-      <Card icon={User} titulo="Responsável técnico">
-        <Grid>
-          <Field label="Nome" value={dados.rt.nome} onChange={(v) => setD("rt", "nome", v)} full />
-          <Field label="Qualificação" value={dados.rt.qualificacao} onChange={(v) => setD("rt", "qualificacao", v)} />
-          <Field label="Registro" value={dados.rt.registro} onChange={(v) => setD("rt", "registro", v)} />
-        </Grid>
-      </Card>
-
-      <Card icon={ClipboardList} titulo="Dados da vistoria">
-        <Grid>
-          <Field label="Data" type="date" value={dados.vistoria.data} onChange={(v) => setD("vistoria", "data", v)} />
-          <Field label="Início" type="time" value={dados.vistoria.inicio} onChange={(v) => setD("vistoria", "inicio", v)} />
-          <Field label="Término" type="time" value={dados.vistoria.termino} onChange={(v) => setD("vistoria", "termino", v)} />
-          <Field label="Cidade" value={dados.vistoria.cidade} onChange={(v) => setD("vistoria", "cidade", v)} />
-          <Field label="Presentes na vistoria" value={dados.vistoria.presentes} onChange={(v) => setD("vistoria", "presentes", v)} full />
-        </Grid>
-      </Card>
-
-      <Colapsavel titulo="Textos institucionais (Objetivo, Metodologia, Encerramento)">
-        <Area label="Objetivo" value={dados.textos.objetivo} onChange={(v) => setTexto("objetivo", v)} rows={4} />
-        <Area label="Referências técnicas" value={dados.textos.referencias} onChange={(v) => setTexto("referencias", v)} rows={3} />
-        <Area label="Metodologia" value={dados.textos.metodologia} onChange={(v) => setTexto("metodologia", v)} rows={4} />
-        <Area label="Encerramento" value={dados.textos.encerramento} onChange={(v) => setTexto("encerramento", v)} rows={4} />
-      </Colapsavel>
-      </div>
-    </div>
-  );
-}
-
-/* ================= Aba: Itens ================= */
 function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, fotoCliente, setFotoCliente, notify, setAba, bloqueado, onPedirDesbloqueio }) {
   const fotoClienteRef = useRef();
   const handleFotoCliente = (file) => {
@@ -3202,7 +3040,7 @@ function ConfirmModal({ aberto, titulo = "Confirmar exclusão", mensagem = "Tem 
 }
 
 /* Anexo dos dois documentos finais de um cliente de Documentação ART/TRT. O arquivo vai
-   para o Drive (via backend) e o status do cliente só vira "Documentação concluída" quando
+   para o Drive (via backend) e o status do cliente só vira "Documentação pronta" quando
    os dois estão anexados — é aí que ele consegue baixar pelo portal. */
 function CardDocumentosArt({ cliente, documentos = [], precoDocumentacao = 0, enviarDocumento, excluirDocumento, atualizarPagamento, notify }) {
   const [enviandoTipo, setEnviandoTipo] = useState(null);
@@ -4400,7 +4238,7 @@ function AvaliarServico({ doc, notify }) {
     try {
       await apiFetch("/api/avaliacoes", {
         method: "POST",
-        body: { docId: doc.id, cliente: doc.cliente, empreendimento: doc.empreendimento, nota, comentario },
+        body: { docId: doc.id, cliente: doc.cliente, empreendimento: doc.empreendimento, servico: doc.servico || "", nota, comentario },
       });
       setEnviado(true);
       notify("Obrigado pela avaliação! ✓");
@@ -4794,6 +4632,8 @@ STATUS_COR["Encerrado"] = { cor: "#65758b", bg: "#EEF1F5" };
 STATUS_COR["Agendamento aprovado"] = { cor: "#2C75B5", bg: "#EAF2FB" };
 STATUS_COR["Vistoria agendada"] = { cor: "#6A3FB2", bg: "#F1EBFB" };
 STATUS_COR["Laudo em análise"] = { cor: "#B26A00", bg: "#FFF4E0" };
+/* Rótulo que o cliente vê no lugar de "Laudo em análise" — ver ROTULO_PUBLICO no backend. */
+STATUS_COR["Vistoria realizada"] = { cor: "#2E7D32", bg: "#E6F4EA" };
 STATUS_COR["Laudo enviado por e-mail"] = { cor: "#2E7D32", bg: "#E6F4EA" };
 STATUS_COR["Cancelado"] = { cor: "#C62828", bg: "#FCEAEA" };
 /* Etapas operacionais da vistoria (ETAPAS_VISTORIA), usadas nos indicadores do Agendamento. */
@@ -5319,7 +5159,15 @@ function SecaoFeedbackVitrine({ notify }) {
               <strong style={{ fontSize: 14 }}>{a.cliente || "Cliente"}</strong>
               <Estrelas valor={a.nota} tamanho={15} />
             </div>
-            {a.empreendimento && <div style={{ fontSize: 12, color: "#65758b", marginBottom: 6 }}>{a.empreendimento}</div>}
+            {/* Serviço em destaque: ajuda quem lê a saber a que tipo de atendimento a nota se refere. */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+              {a.servico && (
+                <span style={{ background: "#EAF2FB", color: AZUL_MARINHO, borderRadius: 20, padding: "2px 10px", fontSize: 11.5, fontWeight: 700 }}>
+                  {a.servico}
+                </span>
+              )}
+              {a.empreendimento && <span style={{ fontSize: 12, color: "#65758b" }}>{a.empreendimento}</span>}
+            </div>
             {a.comentario && <div style={{ fontSize: 13.5, color: "#334", background: CINZA_CLARO, borderRadius: 8, padding: "8px 10px" }}>{a.comentario}</div>}
           </div>
         ))}
@@ -5385,17 +5233,6 @@ function Card({ icon: Icon, titulo, children }) {
         <h3 style={{ margin: 0, fontSize: 15, color: AZUL_MARINHO }}>{titulo}</h3>
       </div>
       {children}
-    </section>
-  );
-}
-function Colapsavel({ titulo, children }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <section style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 14 }}>
-      <button onClick={() => setOpen(!open)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: 18, background: "none", border: "none", cursor: "pointer", fontSize: 15, color: AZUL_MARINHO, fontWeight: 600 }}>
-        {open ? <ChevronDown size={17} /> : <ChevronRight size={17} />} {titulo}
-      </button>
-      {open && <div style={{ padding: "0 20px 20px" }}>{children}</div>}
     </section>
   );
 }
