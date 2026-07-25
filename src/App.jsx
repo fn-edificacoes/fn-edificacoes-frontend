@@ -291,18 +291,18 @@ const TIPO_ART_OPCOES = ["Individual", "Coletiva"];
    Depois que a vistoria é finalizada, o docs.status_cliente assume: "Agendado" -> "Laudo em análise"
    quando o vistoriador finaliza a vistoria (POST /api/vistoria/finalizar) -> "Laudo enviado por
    e-mail" quando a gerência aprova (POST /api/docs/:id/aprovar, que já gera o PDF e envia o e-mail). */
-const STATUS_ATENDIMENTO_OPCOES = ["Em análise", "Agendado", "Laudo em análise", "Laudo enviado por e-mail"];
+const STATUS_ATENDIMENTO_OPCOES = ["Em análise", "Agendado", "Vistoria realizada", "Laudo enviado por e-mail"];
 /* Documentação ART/TRT tem fluxo próprio (sem vistoria): ver STATUS_DOC_* no backend. */
-const STATUS_DOC_PROCESSANDO = "Processando documentação";
-const STATUS_DOC_CONCLUIDA = "Documentação concluída";
+const STATUS_DOC_PROCESSANDO = "Elaborando";
+const STATUS_DOC_CONCLUIDA = "Documentação pronta";
 const TIPOS_DOCUMENTO_ART = ["Documentação assinada", "Placa de identificação de obra"];
 const STATUS_ATENDIMENTO_INFO = {
   "Em análise": "Recebemos seu cadastro e ele está em análise pelo nosso setor de Atendimento. Em breve confirmaremos seu agendamento.",
   "Agendado": "Recebemos sua solicitação e sua vistoria está agendada. Em breve nossa equipe entrará em contato.",
-  "Laudo em análise": "Sua vistoria foi realizada e o laudo está em análise pela nossa equipe técnica.",
+  "Vistoria realizada": "Sua vistoria foi realizada com sucesso. Estamos finalizando seu laudo e avisaremos assim que ele for enviado.",
   "Laudo enviado por e-mail": "Seu laudo foi aprovado e enviado para o e-mail cadastrado. Verifique sua caixa de entrada (e o spam).",
-  [STATUS_DOC_PROCESSANDO]: "Recebemos seu cadastro e sua documentação ART/TRT está sendo processada pela nossa equipe.",
-  [STATUS_DOC_CONCLUIDA]: "Sua documentação está pronta! Baixe os arquivos na seção \"Baixar minha documentação ART/TRT\" desta página, informando CPF e e-mail.",
+  [STATUS_DOC_PROCESSANDO]: "Recebemos seu cadastro e sua documentação ART/TRT está sendo elaborada pela nossa equipe técnica.",
+  [STATUS_DOC_CONCLUIDA]: "Sua documentação está pronta! Confirme seu e-mail no botão abaixo para baixar os dois arquivos: a documentação assinada e a placa de identificação de obra.",
 };
 /* ---------- Status INTERNO (docs.status) — uso exclusivo da equipe (Documentação/Gerência),
    nunca mostrado ao cliente. Precisa bater exatamente com STATUS_ATENDIMENTO_VALIDOS do backend. */
@@ -1900,7 +1900,14 @@ function AbaQualidadeFeedback({ avaliacoes, carregando, clientes = [], clientesC
                     <strong style={{ fontSize: 14 }}>{a.cliente || "Cliente"}</strong>
                     <Estrelas valor={a.nota} tamanho={15} />
                   </div>
-                  {a.empreendimento && <div style={{ fontSize: 12, color: "#65758b", marginBottom: 6 }}>{a.empreendimento}</div>}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+                    {a.servico && (
+                      <span style={{ background: "#EAF2FB", color: AZUL_MARINHO, borderRadius: 20, padding: "2px 10px", fontSize: 11.5, fontWeight: 700 }}>
+                        {a.servico}
+                      </span>
+                    )}
+                    {a.empreendimento && <span style={{ fontSize: 12, color: "#65758b" }}>{a.empreendimento}</span>}
+                  </div>
                   {a.comentario && <div style={{ fontSize: 13.5, color: "#334", background: CINZA_CLARO, borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>{a.comentario}</div>}
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     {podeAgir && aprovarAvaliacao ? (
@@ -3202,7 +3209,7 @@ function ConfirmModal({ aberto, titulo = "Confirmar exclusão", mensagem = "Tem 
 }
 
 /* Anexo dos dois documentos finais de um cliente de Documentação ART/TRT. O arquivo vai
-   para o Drive (via backend) e o status do cliente só vira "Documentação concluída" quando
+   para o Drive (via backend) e o status do cliente só vira "Documentação pronta" quando
    os dois estão anexados — é aí que ele consegue baixar pelo portal. */
 function CardDocumentosArt({ cliente, documentos = [], precoDocumentacao = 0, enviarDocumento, excluirDocumento, atualizarPagamento, notify }) {
   const [enviandoTipo, setEnviandoTipo] = useState(null);
@@ -4400,7 +4407,7 @@ function AvaliarServico({ doc, notify }) {
     try {
       await apiFetch("/api/avaliacoes", {
         method: "POST",
-        body: { docId: doc.id, cliente: doc.cliente, empreendimento: doc.empreendimento, nota, comentario },
+        body: { docId: doc.id, cliente: doc.cliente, empreendimento: doc.empreendimento, servico: doc.servico || "", nota, comentario },
       });
       setEnviado(true);
       notify("Obrigado pela avaliação! ✓");
@@ -4794,6 +4801,8 @@ STATUS_COR["Encerrado"] = { cor: "#65758b", bg: "#EEF1F5" };
 STATUS_COR["Agendamento aprovado"] = { cor: "#2C75B5", bg: "#EAF2FB" };
 STATUS_COR["Vistoria agendada"] = { cor: "#6A3FB2", bg: "#F1EBFB" };
 STATUS_COR["Laudo em análise"] = { cor: "#B26A00", bg: "#FFF4E0" };
+/* Rótulo que o cliente vê no lugar de "Laudo em análise" — ver ROTULO_PUBLICO no backend. */
+STATUS_COR["Vistoria realizada"] = { cor: "#2E7D32", bg: "#E6F4EA" };
 STATUS_COR["Laudo enviado por e-mail"] = { cor: "#2E7D32", bg: "#E6F4EA" };
 STATUS_COR["Cancelado"] = { cor: "#C62828", bg: "#FCEAEA" };
 /* Etapas operacionais da vistoria (ETAPAS_VISTORIA), usadas nos indicadores do Agendamento. */
@@ -5319,7 +5328,15 @@ function SecaoFeedbackVitrine({ notify }) {
               <strong style={{ fontSize: 14 }}>{a.cliente || "Cliente"}</strong>
               <Estrelas valor={a.nota} tamanho={15} />
             </div>
-            {a.empreendimento && <div style={{ fontSize: 12, color: "#65758b", marginBottom: 6 }}>{a.empreendimento}</div>}
+            {/* Serviço em destaque: ajuda quem lê a saber a que tipo de atendimento a nota se refere. */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+              {a.servico && (
+                <span style={{ background: "#EAF2FB", color: AZUL_MARINHO, borderRadius: 20, padding: "2px 10px", fontSize: 11.5, fontWeight: 700 }}>
+                  {a.servico}
+                </span>
+              )}
+              {a.empreendimento && <span style={{ fontSize: 12, color: "#65758b" }}>{a.empreendimento}</span>}
+            </div>
             {a.comentario && <div style={{ fontSize: 13.5, color: "#334", background: CINZA_CLARO, borderRadius: 8, padding: "8px 10px" }}>{a.comentario}</div>}
           </div>
         ))}
