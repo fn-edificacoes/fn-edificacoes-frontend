@@ -357,6 +357,15 @@ const ehServicoDocumentacao = (c) => c?.servico === SERVICO_DOCUMENTACAO;
    as situações que ficam fora do fluxo de vistoria (documentação ART/TRT e cancelamentos).
    Sem esses extras, esses cadastros sumiriam da lista — aqui a visão precisa ser completa. */
 const ETAPAS_CLIENTE = [...ETAPAS_VISTORIA, SERVICO_DOCUMENTACAO, "Cancelamento solicitado", "Cancelado"];
+
+/* Fluxo do ponto de vista do técnico, na agenda dele. "Concluída" só depois que ele manda o
+   laudo pra gerência — começar a vistoria não conclui nada. */
+const ETAPAS_TECNICO = ["Agendada", "Em vistoria", "Concluída"];
+function etapaTecnico(item) {
+  if (item?.laudo_enviado) return "Concluída";
+  if (item?.status === "Em vistoria") return "Em vistoria";
+  return "Agendada";
+}
 function etapaClienteCompleta(cliente, docs = []) {
   if (ehServicoDocumentacao(cliente)) return SERVICO_DOCUMENTACAO;
   if (cliente.status === "Cancelamento solicitado") return "Cancelamento solicitado";
@@ -1245,6 +1254,58 @@ function CalendarioMensal({ porData, mesRef, setMesRef, diaSelecionado, setDiaSe
   );
 }
 
+/* Linha do tempo da vistoria como o técnico enxerga: Agendada → Em vistoria → Concluída
+   (concluída = laudo já enviado para a gerência). Mesmo formato usado no Agendamento. */
+function LinhaDoTempoTecnico({ etapaAtual }) {
+  const indiceAtual = ETAPAS_TECNICO.indexOf(etapaAtual);
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 0, marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${CINZA_BORDA}` }}>
+      {ETAPAS_TECNICO.map((label, i) => (
+        <React.Fragment key={label}>
+          <EtapaTempo label={label} cor={STATUS_COR[label]?.cor || AZUL_MEDIO} ativa={indiceAtual >= 0 && i <= indiceAtual} />
+          {i < ETAPAS_TECNICO.length - 1 && <div style={{ height: 2, background: "#D8DEE7", flex: 0.6, marginTop: 6 }} />}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
+/* Resumo da agenda do técnico: quantas vistorias em cada etapa do fluxo dele. */
+function CardIndicadoresTecnico({ agenda = [] }) {
+  const porEtapa = {};
+  agenda.forEach((a) => { const e = etapaTecnico(a); porEtapa[e] = (porEtapa[e] || 0) + 1; });
+  const hojeISO = paraChaveISO(new Date());
+  const hoje = agenda.filter((a) => a.data_desejada === hojeISO).length;
+
+  return (
+    <Card icon={LayoutGrid} titulo="Minhas vistorias">
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 16 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>Por etapa</div>
+          <div style={{ display: "grid", gap: 6 }}>
+            {ETAPAS_TECNICO.map((etapa) => (
+              <div key={etapa} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <Selo valor={etapa} />
+                <strong style={{ fontSize: 13 }}>{porEtapa[etapa] || 0}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>Hoje</div>
+          <div style={{ fontSize: 30, fontWeight: 800, color: AZUL_MARINHO, lineHeight: 1 }}>{hoje}</div>
+          <div style={{ fontSize: 12, color: "#65758b", marginTop: 4 }}>vistoria(s) marcada(s) para hoje</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>Total atribuído</div>
+          <div style={{ fontSize: 30, fontWeight: 800, color: AZUL_MARINHO, lineHeight: 1 }}>{agenda.length}</div>
+          <div style={{ fontSize: 12, color: "#65758b", marginTop: 4 }}>encaminhadas pelo Atendimento</div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function CalendarioVistoriador({ agenda = [], carregando, clientes = [], preencherComCliente }) {
   const [mesRef, setMesRef] = useState(() => { const h = new Date(); return new Date(h.getFullYear(), h.getMonth(), 1); });
   const [diaSelecionado, setDiaSelecionado] = useState(null);
@@ -1266,9 +1327,12 @@ function CalendarioVistoriador({ agenda = [], carregando, clientes = [], preench
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
+      <CardIndicadoresTecnico agenda={agenda} />
+
       <Card icon={CalendarDays} titulo="Minha agenda">
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-          Vistorias atribuídas a você. Clique num dia do calendário pra ver só os agendamentos daquela data. Apenas consulta — a atribuição e o agendamento são feitos pelo Agendamento/Gerência.
+          Vistorias que o Atendimento encaminhou para você. Clique num dia do calendário pra ver só os agendamentos daquela data.
+          Uma vistoria só fica "Concluída" depois que você envia o laudo para a gerência.
         </p>
 
         <CalendarioMensal porData={porData} mesRef={mesRef} setMesRef={setMesRef} diaSelecionado={diaSelecionado} setDiaSelecionado={setDiaSelecionado} />
@@ -1290,26 +1354,29 @@ function CalendarioVistoriador({ agenda = [], carregando, clientes = [], preench
             </div>
             <div style={{ display: "grid", gap: 10 }}>
               {porData[data].map((a) => (
-                <div key={a.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                  <div style={{ width: 56, textAlign: "center", flexShrink: 0, fontSize: 15, fontWeight: 800, color: AZUL_MEDIO }}>
-                    {a.horario_desejado || "—"}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 180 }}>
-                    <div style={{ fontWeight: 700, fontSize: 14 }}>{a.nome}</div>
-                    <div style={{ fontSize: 12.5, color: "#65758b" }}>
-                      {a.servico}{a.empreendimento ? ` · ${a.empreendimento}` : ""}{a.bloco_torre ? ` (${a.bloco_torre})` : ""}
+                <div key={a.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ width: 56, textAlign: "center", flexShrink: 0, fontSize: 15, fontWeight: 800, color: AZUL_MEDIO }}>
+                      {a.horario_desejado || "—"}
                     </div>
+                    <div style={{ flex: 1, minWidth: 180 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>{a.nome}</div>
+                      <div style={{ fontSize: 12.5, color: "#65758b" }}>
+                        {a.servico}{a.empreendimento ? ` · ${a.empreendimento}` : ""}{a.bloco_torre ? ` (${a.bloco_torre})` : ""}
+                      </div>
+                    </div>
+                    <Selo valor={etapaTecnico(a)} />
+                    {preencherComCliente && !a.laudo_enviado && (
+                      <button className="btn-solid" style={{ width: "auto", padding: "8px 14px" }}
+                        onClick={() => {
+                          const cli = clientes.find((c) => c.id === a.id);
+                          if (cli) preencherComCliente(cli, { irParaItens: true });
+                        }}>
+                        <Check size={14} /> {a.status === "Em vistoria" ? "Continuar vistoria" : "Iniciar vistoria"}
+                      </button>
+                    )}
                   </div>
-                  <Selo valor={a.atendido ? "Concluída" : "Agendada"} />
-                  {preencherComCliente && (
-                    <button className="btn-solid" style={{ width: "auto", padding: "8px 14px" }}
-                      onClick={() => {
-                        const cli = clientes.find((c) => c.id === a.id);
-                        if (cli) preencherComCliente(cli, { irParaItens: true });
-                      }}>
-                      <Check size={14} /> Iniciar vistoria
-                    </button>
-                  )}
+                  <LinhaDoTempoTecnico etapaAtual={etapaTecnico(a)} />
                 </div>
               ))}
             </div>
