@@ -58,6 +58,7 @@ function mapClienteDaApi(c) {
     observacoes: c.observacoes || "", atendido: !!c.atendido,
     status: c.status || "Em análise", cep: c.cep || "", vistoriadorId: c.vistoriador_id || "",
     precisaCadastroEmpreendimento: !!c.precisa_cadastro_empreendimento,
+    pagamento: c.pagamento || "Pendente",
   };
 }
 /* Etapa atual de um cliente no fluxo completo (cadastro → análise → vistoria → laudo → feedback).
@@ -794,16 +795,22 @@ function AppInterno({ session, onLogout }) {
   /* ---- Calendário do vistoriador: agendamentos atribuídos a ele ---- */
   const [agendaVistoriador, setAgendaVistoriador] = useState([]);
   const [agendaVistoriadorCarregando, setAgendaVistoriadorCarregando] = useState(false);
-  const carregarAgendaVistoriador = async () => {
+  const carregarAgendaVistoriador = async ({ silencioso = false } = {}) => {
     if (perfil !== "vistoriador" && perfil !== "gerencia") return;
-    setAgendaVistoriadorCarregando(true);
+    if (!silencioso) setAgendaVistoriadorCarregando(true);
     try {
       const r = await apiFetch("/api/clientes/minha-agenda", { token });
       setAgendaVistoriador(r.agenda || []);
-    } catch (e) { notify(`Não foi possível carregar sua agenda: ${e.message}`); }
-    setAgendaVistoriadorCarregando(false);
+    } catch (e) { if (!silencioso) notify(`Não foi possível carregar sua agenda: ${e.message}`); }
+    if (!silencioso) setAgendaVistoriadorCarregando(false);
   };
-  useEffect(() => { carregarAgendaVistoriador(); }, []);
+  useEffect(() => {
+    carregarAgendaVistoriador();
+    // Recarrega em segundo plano pra que uma vistoria cancelada pela Gerência suma da
+    // agenda do técnico sem ele precisar recarregar a página.
+    const t = setInterval(() => carregarAgendaVistoriador({ silencioso: true }), 20000);
+    return () => clearInterval(t);
+  }, []);
 
   /* ---- Assinatura digital da Gerência (via API real) ---- */
   const [assinatura, setAssinatura] = useState(null); // { imagem, nome }
@@ -1242,7 +1249,10 @@ function CalendarioVistoriador({ agenda = [], carregando, clientes = [], preench
   const [mesRef, setMesRef] = useState(() => { const h = new Date(); return new Date(h.getFullYear(), h.getMonth(), 1); });
   const [diaSelecionado, setDiaSelecionado] = useState(null);
 
+  // O backend já exclui cancelados; aqui é só proteção contra dados carregados antes do
+  // cancelamento (a agenda não fica recarregando sozinha).
   const porData = agenda.reduce((acc, a) => {
+    if (a.status === "Cancelado" || a.status === "Cancelamento solicitado") return acc;
     const k = a.data_desejada || "(sem data)";
     (acc[k] = acc[k] || []).push(a);
     return acc;
@@ -3033,7 +3043,7 @@ function ConfirmModal({ aberto, titulo = "Confirmar exclusão", mensagem = "Tem 
 /* Anexo dos dois documentos finais de um cliente de Documentação ART/TRT. O arquivo vai
    para o Drive (via backend) e o status do cliente só vira "Documentação concluída" quando
    os dois estão anexados — é aí que ele consegue baixar pelo portal. */
-function CardDocumentosArt({ cliente, documentos = [], precoDocumentacao = 0, enviarDocumento, excluirDocumento, notify }) {
+function CardDocumentosArt({ cliente, documentos = [], precoDocumentacao = 0, enviarDocumento, excluirDocumento, atualizarPagamento, notify }) {
   const [enviandoTipo, setEnviandoTipo] = useState(null);
   const doTipo = (tipo) => documentos.find((d) => d.tipo === tipo);
   const completo = TIPOS_DOCUMENTO_ART.every((t) => doTipo(t));
@@ -3101,6 +3111,16 @@ function CardDocumentosArt({ cliente, documentos = [], precoDocumentacao = 0, en
             </div>
           );
         })}
+      </div>
+
+      {/* Pagamento é responsabilidade deste setor — por isso fica editável aqui. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${CINZA_BORDA}` }}>
+        <label style={{ ...lab, margin: 0 }}>Pagamento</label>
+        <select style={{ ...inp, width: "auto", padding: "6px 10px" }} value={cliente.pagamento || "Pendente"}
+          onChange={(e) => atualizarPagamento(cliente.id, e.target.value)}>
+          {PAGAMENTO_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
+        </select>
+        <Selo valor={cliente.pagamento || "Pendente"} />
       </div>
 
       {!completo && (
@@ -3171,7 +3191,8 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, cli
               <CardDocumentosArt key={c.id} cliente={c}
                 documentos={documentosArt.filter((d) => d.clienteId === c.id)}
                 precoDocumentacao={precos.find((p) => p.empreendimento === (c.empreendimento || "").trim())?.precoDocumentacao || 0}
-                enviarDocumento={enviarDocumentoArt} excluirDocumento={excluirDocumentoArt} notify={notify} />
+                enviarDocumento={enviarDocumentoArt} excluirDocumento={excluirDocumentoArt}
+                atualizarPagamento={(id, pagamento) => updCliente(id, { pagamento })} notify={notify} />
             ))}
           </div>
         </Card>
@@ -3761,11 +3782,16 @@ function CardReceitaEstimada({ precos, clientes }) {
   const porEmpreendimento = {};
   const registrar = (c, campo, campoQtd) => {
     const k = c.empreendimento?.trim() || "(sem empreendimento)";
-    if (!porEmpreendimento[k]) porEmpreendimento[k] = { vistorias: 0, documentacoes: 0, receita: 0, faltaPreco: false };
+    if (!porEmpreendimento[k]) porEmpreendimento[k] = { vistorias: 0, documentacoes: 0, receita: 0, recebido: 0, faltaPreco: false };
     porEmpreendimento[k][campoQtd] += 1;
     const valor = Number(precoPorNome[k]?.[campo]) || 0;
-    if (valor > 0) porEmpreendimento[k].receita += valor;
-    else porEmpreendimento[k].faltaPreco = true;
+    if (valor > 0) {
+      porEmpreendimento[k].receita += valor;
+      // "Parcial" não tem valor parcial cadastrado, então só "Pago" entra como recebido.
+      if (c.pagamento === "Pago") porEmpreendimento[k].recebido += valor;
+    } else {
+      porEmpreendimento[k].faltaPreco = true;
+    }
   };
 
   clientes.forEach((c) => {
@@ -3780,6 +3806,7 @@ function CardReceitaEstimada({ precos, clientes }) {
 
   const linhas = Object.entries(porEmpreendimento).sort((a, b) => b[1].receita - a[1].receita);
   const totalReceita = linhas.reduce((s, [, v]) => s + v.receita, 0);
+  const totalRecebido = linhas.reduce((s, [, v]) => s + v.recebido, 0);
   const totalVistorias = linhas.reduce((s, [, v]) => s + v.vistorias, 0);
   const totalDocs = linhas.reduce((s, [, v]) => s + v.documentacoes, 0);
   const semPreco = linhas.filter(([, v]) => v.faltaPreco);
@@ -3797,7 +3824,7 @@ function CardReceitaEstimada({ precos, clientes }) {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: CINZA_CLARO }}>
-                  {["Empreendimento", "Vistorias", "Documentações", "Receita"].map((h) => (
+                  {["Empreendimento", "Vistorias", "Documentações", "Receita", "Recebido"].map((h) => (
                     <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}` }}>{h}</th>
                   ))}
                 </tr>
@@ -3811,6 +3838,9 @@ function CardReceitaEstimada({ precos, clientes }) {
                     <td style={{ padding: "8px 10px", color: AZUL_MARINHO, fontWeight: 700 }}>
                       {fmtReal(v.receita)}
                       {v.faltaPreco && <span style={{ color: "#B26A00", fontWeight: 400, fontSize: 11.5 }}> · falta preço</span>}
+                    </td>
+                    <td style={{ padding: "8px 10px", color: v.recebido >= v.receita && v.receita > 0 ? "#2E7D32" : "#65758b", fontWeight: 600 }}>
+                      {fmtReal(v.recebido)}
                     </td>
                   </tr>
                 ))}
