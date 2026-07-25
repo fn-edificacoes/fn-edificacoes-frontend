@@ -81,7 +81,7 @@ function mapClienteDaApi(c) {
     observacoes: c.observacoes || "", atendido: !!c.atendido,
     status: c.status || "Em análise", cep: c.cep || "", vistoriadorId: c.vistoriador_id || "",
     precisaCadastroEmpreendimento: !!c.precisa_cadastro_empreendimento,
-    pagamento: c.pagamento || "Pendente",
+    pagamento: c.pagamento || "Pendente", areaPrivativa: c.area_privativa || "",
   };
 }
 /* Etapa atual de um cliente no fluxo completo (cadastro → análise → vistoria → laudo → feedback).
@@ -307,9 +307,9 @@ const TEXTOS_PADRAO = {
 
 const DADOS_INICIAIS = {
   contratante: { nome: "", cpf: "" },
-  imovel: { construtora: "", empreendimento: "", endereco: "", unidade: "", descricao: "" },
+  imovel: { construtora: "", empreendimento: "", endereco: "", unidade: "", descricao: "", tipologia: "", areaPrivativa: "" },
   rt: { nome: "ANTONIO FELIPE NEVES BARBOSA", qualificacao: "Técnico em Edificações / Eletrotécnico", registro: "CFT-03 nº 09753183496" },
-  vistoria: { data: "", inicio: "", termino: "", presentes: "", cidade: "Paulista - PE" },
+  vistoria: { data: "", inicio: "", termino: "", presentes: "", cidade: "Paulista - PE", ambientesVistoriados: "" },
   textos: { ...TEXTOS_PADRAO },
   fotoCliente: null, // foto do vistoriador com o cliente (opcional) — aparece na última página do laudo e na página de acompanhamento do cliente
 };
@@ -480,7 +480,7 @@ const novoCadastroCliente = () => ({
   id: `cli_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
   nome: "", cpf: "", telefone: "", email: "",
   construtora: "", empreendimento: "", blocoTorre: "", endereco: "", cep: "",
-  servico: SERVICO_OPCOES[0], dataDesejada: "", horarioDesejado: "", observacoes: "",
+  servico: SERVICO_OPCOES[0], dataDesejada: "", horarioDesejado: "", areaPrivativa: "", observacoes: "",
   atendido: false,
   criadoEm: new Date().toISOString(),
 });
@@ -966,7 +966,7 @@ function AppInterno({ session, onLogout }) {
     setDados((d) => ({
       ...d,
       contratante: { ...d.contratante, nome: cli.nome || d.contratante.nome, cpf: cli.cpf || d.contratante.cpf },
-      imovel: { ...d.imovel, construtora: cli.construtora || d.imovel.construtora, empreendimento: cli.empreendimento || d.imovel.empreendimento, unidade: cli.blocoTorre || d.imovel.unidade, endereco: cli.endereco || d.imovel.endereco },
+      imovel: { ...d.imovel, construtora: cli.construtora || d.imovel.construtora, empreendimento: cli.empreendimento || d.imovel.empreendimento, unidade: cli.blocoTorre || d.imovel.unidade, endereco: cli.endereco || d.imovel.endereco, areaPrivativa: cli.areaPrivativa || d.imovel.areaPrivativa },
       vistoria: {
         ...d.vistoria,
         data: cli.dataDesejada || d.vistoria.data,
@@ -989,6 +989,9 @@ function AppInterno({ session, onLogout }) {
      revisar/aprovar remotamente. Redimensiona as fotos antes de enviar (evita payload
      enorme). Muda o status do cliente para "Laudo em análise" automaticamente. ---- */
   const [enviandoParaGerencia, setEnviandoParaGerencia] = useState(false);
+  /* Editor pontual de "dados" — usado pelos campos do imóvel/vistoria que ficaram na
+     tela da vistoria depois que a aba "Dados do laudo" saiu. */
+  const setD = (grupo, campo, val) => setDados((d) => ({ ...d, [grupo]: { ...d[grupo], [campo]: val } }));
   const setFotoCliente = (foto) => setDados((d) => ({ ...d, fotoCliente: foto }));
   const enviarParaGerencia = async () => {
     if (!clienteAtualId) { notify("Selecione um cliente cadastrado em \"Dados do laudo\" antes de enviar."); return; }
@@ -1183,7 +1186,7 @@ function AppInterno({ session, onLogout }) {
 
         {abaTop === "laudos" && aba === "itens" && (
           <AbaItens itens={itens} setItens={setItens} updItem={updItem} escolherPatologia={escolherPatologia}
-            addFotos={addFotos} removerFoto={removerFoto} contagem={contagem}
+            addFotos={addFotos} removerFoto={removerFoto} contagem={contagem} dados={dados} setD={setD}
             fotoCliente={dados.fotoCliente} setFotoCliente={setFotoCliente} notify={notify} setAba={setAba}
             bloqueado={laudoBloqueado} onPedirDesbloqueio={() => setConfirmandoDesbloqueio(true)} />
         )}
@@ -2681,7 +2684,7 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
   );
 }
 
-function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, fotoCliente, setFotoCliente, notify, setAba, bloqueado, onPedirDesbloqueio }) {
+function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, dados, setD, fotoCliente, setFotoCliente, notify, setAba, bloqueado, onPedirDesbloqueio }) {
   const fotoClienteRef = useRef();
   const handleFotoCliente = (file) => {
     if (!file) return;
@@ -2708,6 +2711,23 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
         </div>
       )}
       <div style={{ pointerEvents: bloqueado ? "none" : "auto", opacity: bloqueado ? 0.55 : 1 }}>
+      {/* Três dados do imóvel que só o técnico tem na hora da vistoria — o resto do
+          cabeçalho do laudo já vem do cadastro do cliente. Se ficarem vazios, o laudo
+          simplesmente omite. */}
+      <div style={{ marginBottom: 16 }}>
+        <Card icon={Building2} titulo="Dados do imóvel vistoriado">
+          <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
+            Complementam o laudo. O restante (cliente, endereço, unidade, data, horário e área privativa) já veio do cadastro automaticamente.
+          </p>
+          <Grid>
+            <Field label="Tipologia" value={dados?.imovel?.tipologia || ""} onChange={(v) => setD("imovel", "tipologia", v)}
+              placeholder="Ex.: 2 quartos (1 suíte) com varanda" />
+            <Field label="Ambientes vistoriados" type="number" value={dados?.vistoria?.ambientesVistoriados || ""}
+              onChange={(v) => setD("vistoria", "ambientesVistoriados", v)} placeholder="Ex.: 10" />
+          </Grid>
+        </Card>
+      </div>
+
       <div style={{ marginBottom: 16 }}>
         <Card icon={Camera} titulo="Foto com o cliente (obrigatória)">
           <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
@@ -4557,6 +4577,8 @@ function AbaCliente({ notify }) {
                 </select>
                 <span style={{ fontSize: 11.5, color: "#8593a8" }}>Atendemos das 07:00 às 18:00.</span>
               </div>
+              <Field label="Área privativa do imóvel (opcional)" value={form.areaPrivativa}
+                onChange={(v) => setF("areaPrivativa", v)} placeholder="Ex.: 58,40 m²" />
             </>
           )}
         </Grid>
@@ -5261,8 +5283,8 @@ const Grid = ({ children }) => <div style={{ display: "grid", gridTemplateColumn
 const cell = (full) => ({ display: "flex", flexDirection: "column", gap: 5, gridColumn: full ? "1 / -1" : "auto" });
 const lab = { fontSize: 12, fontWeight: 600, color: "#5a6a80" };
 const inp = { padding: "9px 11px", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, fontSize: 14, outline: "none", background: "#fff", fontFamily: "inherit" };
-function Field({ label, value, onChange, type = "text", full, disabled }) {
-  return (<div style={cell(full)}><label style={lab}>{label}</label><input type={type} style={inp} value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled} /></div>);
+function Field({ label, value, onChange, type = "text", full, disabled, placeholder }) {
+  return (<div style={cell(full)}><label style={lab}>{label}</label><input type={type} style={inp} value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} disabled={disabled} /></div>);
 }
 function Area({ label, value, onChange, rows = 3, placeholder }) {
   return (<div style={{ ...cell(true), marginTop: 12 }}><label style={lab}>{label}</label><textarea rows={rows} style={{ ...inp, resize: "vertical", lineHeight: 1.5 }} value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} /></div>);
