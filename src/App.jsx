@@ -2035,7 +2035,7 @@ function AppInterno({ session, onLogout }) {
         {/* Sub-navegação (somente dentro do módulo Qualidade) */}
         {abaTop === "qualidade" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
-            {[["analise", "Análise", ClipboardCheck], ["vistoria", "Vistoria", CalendarDays], ["feedback", "Feedback", Star]].map(([k, label, Icon]) => (
+            {[["analise", "Análise", ClipboardCheck], ["vistoria", "Vistoria", CalendarDays], ["feedback", "Feedback", Star], ["acompanhamento", "Acompanhamento", ClipboardList]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setAbaQualidade(k)} className="tab" style={{ borderBottomColor: abaQualidade === k ? AZUL_MEDIO : "transparent", color: abaQualidade === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
                 <Icon size={15} /> {label}
               </button>
@@ -2841,6 +2841,8 @@ function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, u
         </div>
       )}
       {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} abrirAutomaticoId={agendarAgoraId} aoAbrirAutomatico={() => setAgendarAgoraId(null)} aoConfirmar={aoConfirmarVistoria} filtroEtapa={filtroEtapa} />}
+      {sub === "acompanhamento" && <AbaQualidadeAcompanhamento clientes={clientes} clientesCarregando={clientesCarregando}
+        docs={docs} avaliacoes={avaliacoes} filtroEtapa={filtroEtapa} />}
       {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} clientes={clientes} clientesCarregando={clientesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
         solicitarExclusaoAvaliacao={solicitarExclusaoAvaliacao} manterAvaliacao={manterAvaliacao} excluirAvaliacao={excluirAvaliacao} podeAgir={podeAgir} ehGerencia={ehGerencia} filtroEtapa={filtroEtapa} />}
       {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} onAgendarAgora={irParaAgendamento} diaParaAbrir={diaParaAbrir} aoAbrirDia={() => setDiaParaAbrir(null)} filtroEtapa={filtroEtapa} aoTrocarEtapa={setFiltroEtapa} />}
@@ -2848,11 +2850,13 @@ function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, u
   );
 }
 
-function AbaQualidadeFeedback({ avaliacoes, carregando, clientes = [], clientesCarregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, podeAgir = false, ehGerencia = false, filtroEtapa = null }) {
+/* ================= Acompanhamento do atendimento =================
+   Saiu de dentro do Feedback e virou aba própria. Era a lista mais consultada do
+   Agendamento e ficava enterrada embaixo das avaliações: quem queria só ver em que pé
+   está cada cliente precisava rolar a página inteira. As duas coisas não têm relação —
+   uma é a satisfação de quem já foi atendido, a outra é a fila de quem está sendo. */
+function AbaQualidadeAcompanhamento({ clientes = [], clientesCarregando, docs = [], avaliacoes = [], filtroEtapa = null }) {
   const [busca, setBusca] = useState("");
-  const total = avaliacoes.length;
-  const media = total ? (avaliacoes.reduce((s, a) => s + a.nota, 0) / total) : 0;
-  const contagemPorNota = [5, 4, 3, 2, 1].map((n) => ({ n, qtd: avaliacoes.filter((a) => a.nota === n).length }));
 
   const avaliacaoPorDoc = {};
   avaliacoes.forEach((a) => { if (a.doc_id) avaliacaoPorDoc[a.doc_id] = a; });
@@ -2861,8 +2865,6 @@ function AbaQualidadeFeedback({ avaliacoes, carregando, clientes = [], clientesC
     return cpfLimpo ? docs.find((d) => (d.cpf || "").replace(/\D/g, "") === cpfLimpo) : null;
   };
 
-  // Mesma fonte (clientes) e mesmas etapas usadas nos "Indicadores do Agendamento" logo acima,
-  // só que aqui listando quem está em cada etapa em vez de contar.
   const termo = busca.trim().toLowerCase();
   const clientesPorEtapa = {};
   clientes.forEach((c) => {
@@ -2873,6 +2875,62 @@ function AbaQualidadeFeedback({ avaliacoes, carregando, clientes = [], clientesC
     (clientesPorEtapa[etapa] = clientesPorEtapa[etapa] || []).push(c);
   });
   const totalAcompanhamento = Object.values(clientesPorEtapa).reduce((s, l) => s + l.length, 0);
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+        <Card icon={ClipboardCheck} titulo="Acompanhamento do atendimento — do início ao fim">
+          <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
+            Cada cliente separado pela etapa em que está agora — as mesmas etapas contadas nos indicadores acima.
+          </p>
+          <input style={{ ...inp, marginBottom: 14 }} placeholder="Buscar por cliente ou empreendimento…" value={busca} onChange={(e) => setBusca(e.target.value)} />
+
+          {clientesCarregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+          {!clientesCarregando && totalAcompanhamento === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum atendimento encontrado.</p>}
+
+          <div style={{ display: "grid", gap: 20 }}>
+            {ETAPAS_VISTORIA.map((etapa) => {
+              const daEtapa = clientesPorEtapa[etapa] || [];
+              if (daEtapa.length === 0) return null;
+              return (
+                <div key={etapa}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, borderBottom: `2px solid ${CINZA_CLARO}`, paddingBottom: 6 }}>
+                    <Selo valor={etapa} />
+                    <strong style={{ fontSize: 13, color: AZUL_MARINHO }}>{daEtapa.length}</strong>
+                  </div>
+                  <div style={{ display: "grid", gap: 14 }}>
+                    {daEtapa.map((c) => {
+                      const doc = docDoCliente(c);
+                      const avaliacao = doc ? avaliacaoPorDoc[doc.id] : null;
+                      return (
+                        <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                            <strong style={{ fontSize: 14 }}>{c.nome || "—"}</strong>
+                            <span style={{ fontSize: 12, color: "#65758b" }}>{c.empreendimento}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}</span>
+                          </div>
+                          <LinhaDoTempo etapaAtual={etapa} />
+                          {avaliacao && (
+                            <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                              <Estrelas valor={avaliacao.nota} tamanho={13} />
+                              {avaliacao.comentario && <span style={{ fontSize: 12.5, color: "#65758b" }}>"{avaliacao.comentario}"</span>}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+    </div>
+  );
+}
+
+function AbaQualidadeFeedback({ avaliacoes, carregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, podeAgir = false, ehGerencia = false }) {
+  const total = avaliacoes.length;
+  const media = total ? (avaliacoes.reduce((s, a) => s + a.nota, 0) / total) : 0;
+  const contagemPorNota = [5, 4, 3, 2, 1].map((n) => ({ n, qtd: avaliacoes.filter((a) => a.nota === n).length }));
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -2968,52 +3026,6 @@ function AbaQualidadeFeedback({ avaliacoes, carregando, clientes = [], clientesC
             </div>
           </>
         )}
-      </Card>
-
-      <Card icon={ClipboardCheck} titulo="Acompanhamento do atendimento — do início ao fim">
-        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
-          Cada cliente separado pela etapa em que está agora — as mesmas etapas contadas nos indicadores acima.
-        </p>
-        <input style={{ ...inp, marginBottom: 14 }} placeholder="Buscar por cliente ou empreendimento…" value={busca} onChange={(e) => setBusca(e.target.value)} />
-
-        {clientesCarregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
-        {!clientesCarregando && totalAcompanhamento === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum atendimento encontrado.</p>}
-
-        <div style={{ display: "grid", gap: 20 }}>
-          {ETAPAS_VISTORIA.map((etapa) => {
-            const daEtapa = clientesPorEtapa[etapa] || [];
-            if (daEtapa.length === 0) return null;
-            return (
-              <div key={etapa}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, borderBottom: `2px solid ${CINZA_CLARO}`, paddingBottom: 6 }}>
-                  <Selo valor={etapa} />
-                  <strong style={{ fontSize: 13, color: AZUL_MARINHO }}>{daEtapa.length}</strong>
-                </div>
-                <div style={{ display: "grid", gap: 14 }}>
-                  {daEtapa.map((c) => {
-                    const doc = docDoCliente(c);
-                    const avaliacao = doc ? avaliacaoPorDoc[doc.id] : null;
-                    return (
-                      <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-                          <strong style={{ fontSize: 14 }}>{c.nome || "—"}</strong>
-                          <span style={{ fontSize: 12, color: "#65758b" }}>{c.empreendimento}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}</span>
-                        </div>
-                        <LinhaDoTempo etapaAtual={etapa} />
-                        {avaliacao && (
-                          <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
-                            <Estrelas valor={avaliacao.nota} tamanho={13} />
-                            {avaliacao.comentario && <span style={{ fontSize: 12.5, color: "#65758b" }}>"{avaliacao.comentario}"</span>}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
       </Card>
     </div>
   );
@@ -3578,8 +3590,33 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
   const agendadas = clientes.filter((c) => emAgenda(c) && !temDoc(c) && combina(c)).sort(porDataMaisProxima);
   const realizadas = clientes.filter((c) => emAgenda(c) && temDoc(c) && combina(c)).sort(porDataMaisProxima);
 
+  const [trocandoId, setTrocandoId] = useState(null);
   const setCampo = (id, campo, valor) => setForm((f) => ({ ...f, [id]: { ...f[id], [campo]: valor } }));
   const valorCampo = (c, campo, padrao) => form[c.id]?.[campo] ?? padrao;
+
+  /* Trocar o técnico de uma vistoria já agendada. Acontece bastante: alguém adoece, a rota
+     do dia muda, entra um encaixe. Antes disso, a única saída era cancelar e agendar de
+     novo — o que tirava a vistoria da agenda e assustava o cliente, que acompanha o status.
+     A checagem de choque de horário é a mesma do agendamento inicial. */
+  const trocarTecnico = async (c, novoId) => {
+    if (!novoId || String(novoId) === String(c.vistoriadorId)) return;
+    const conflito = clientes.find((o) =>
+      o.id !== c.id && (o.status === "Vistoria agendada" || o.status === "Em vistoria") &&
+      String(o.vistoriadorId) === String(novoId) &&
+      o.dataDesejada === c.dataDesejada && o.horarioDesejado === c.horarioDesejado
+    );
+    const nomeNovo = vistoriadores.find((v) => String(v.id) === String(novoId))?.nome || "O técnico";
+    if (conflito) {
+      notify(`${nomeNovo} já tem vistoria às ${c.horarioDesejado} nesse dia. Escolha outro.`);
+      return;
+    }
+    setTrocandoId(c.id);
+    try {
+      await updCliente(c.id, { vistoriadorId: novoId });
+      notify(`Vistoria transferida para ${nomeNovo} \u2713`);
+    } catch (e) { notify(`Não foi possível trocar o técnico: ${e.message}`); }
+    setTrocandoId(null);
+  };
 
   const confirmar = async (c) => {
     const vistoriadorId = valorCampo(c, "vistoriadorId", "");
@@ -3655,7 +3692,21 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
                     <div style={{ fontSize: 13, color: "#4a5a70", display: "grid", gap: 4 }}>
                       <div><strong>Telefone:</strong> {c.telefone || "—"}</div>
                       <div><strong>Construtora:</strong> {c.construtora || "—"}</div>
-                      <div><strong>Vistoriador:</strong> {nomeVistoriador(c.vistoriadorId)}</div>
+                      {g.chave === "agendada" && podeAgir ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <strong>Vistoriador:</strong>
+                          <select style={{ ...inp, width: "auto", minWidth: 190, padding: "6px 10px" }}
+                            value={c.vistoriadorId || ""} disabled={trocandoId === c.id}
+                            onChange={(e) => trocarTecnico(c, e.target.value)}>
+                            <option value="">selecionar…</option>
+                            {vistoriadores.map((v) => <option key={v.id} value={v.id}>{v.nome}</option>)}
+                          </select>
+                          {trocandoId === c.id && <Loader2 size={14} className="spin" />}
+                          <span style={{ fontSize: 11.5, color: "#8593a8" }}>trocar não desmarca a vistoria</span>
+                        </div>
+                      ) : (
+                        <div><strong>Vistoriador:</strong> {nomeVistoriador(c.vistoriadorId)}</div>
+                      )}
                       <div><strong>Status:</strong> <Selo valor={etapaAtualCliente(c, docs)} /></div>
                       {g.chave === "agendada" && (
                         podeAgir ? (
