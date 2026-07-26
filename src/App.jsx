@@ -2431,9 +2431,23 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
   const podeExcluir = perfil === "gerencia";
   const alternarCpfRevelado = (id) => setCpfsRevelados((s) => ({ ...s, [id]: !s[id] }));
 
-  const filtrados = clientes.filter((c) =>
-    !busca || `${c.nome} ${c.empreendimento} ${c.construtora}`.toLowerCase().includes(busca.toLowerCase())
-  );
+  /* Ordem da lista: por data de agendamento, da mais próxima para a mais distante.
+     Quem não tem data marcada (o caso da Documentação ART/TRT, que não passa por
+     vistoria) vai para o fim — não é atraso, é serviço de outro fluxo. */
+  const chaveData = (c) =>
+    c.dataDesejada ? `${c.dataDesejada} ${c.horarioDesejado || "00:00"}` : null;
+
+  const filtrados = clientes
+    .filter((c) =>
+      !busca || `${c.nome} ${c.empreendimento} ${c.construtora}`.toLowerCase().includes(busca.toLowerCase())
+    )
+    .sort((a, b) => {
+      const da = chaveData(a), db = chaveData(b);
+      if (da && db) return da.localeCompare(db);
+      if (da) return -1;
+      if (db) return 1;
+      return (a.nome || "").localeCompare(b.nome || "", "pt-BR");
+    });
 
   const abrirEdicao = (c) => setEditando({ ...c });
   const salvar = async () => {
