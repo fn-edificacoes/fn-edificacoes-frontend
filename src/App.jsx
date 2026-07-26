@@ -1120,6 +1120,62 @@ function SinoNotificacoes({ itens = [], onIr }) {
   );
 }
 
+/* ================= Trocar a própria senha =================
+   Antes não existia: só a Gerência redefinia senha, o que obrigava ela a criar e comunicar a
+   senha de cada pessoa (ficando sabendo dela), ninguém podia trocar depois, e se a própria
+   Gerência esquecesse a dela não havia saída dentro do sistema. */
+function ModalTrocarSenha({ token, onFechar, notify }) {
+  const [atual, setAtual] = useState("");
+  const [nova, setNova] = useState("");
+  const [repetir, setRepetir] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState("");
+
+  const salvar = async () => {
+    setErro("");
+    if (!atual || !nova) { setErro("Preencha a senha atual e a nova."); return; }
+    if (nova.length < 8) { setErro("A nova senha precisa ter pelo menos 8 caracteres."); return; }
+    if (nova !== repetir) { setErro("A nova senha e a repetição não são iguais."); return; }
+    if (nova === atual) { setErro("A nova senha precisa ser diferente da atual."); return; }
+    setSalvando(true);
+    try {
+      await apiFetch("/api/auth/trocar-senha", { method: "POST", token, body: { senhaAtual: atual, senhaNova: nova } });
+      notify("Senha alterada ✓");
+      onFechar();
+    } catch (e) { setErro(e.message); }
+    setSalvando(false);
+  };
+
+  return (
+    <div className="no-print" style={overlay} onClick={onFechar}>
+      <div style={{ ...modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <strong>Alterar minha senha</strong>
+          <button className="icon-btn" onClick={onFechar} aria-label="Fechar"><X size={16} /></button>
+        </div>
+        <div style={cell(true)}>
+          <label style={lab}>Senha atual</label>
+          <input style={inp} type="password" value={atual} onChange={(e) => setAtual(e.target.value)} autoFocus />
+        </div>
+        <div style={{ ...cell(true), marginTop: 10 }}>
+          <label style={lab}>Nova senha</label>
+          <input style={inp} type="password" value={nova} onChange={(e) => setNova(e.target.value)} placeholder="mínimo 8 caracteres" />
+        </div>
+        <div style={{ ...cell(true), marginTop: 10 }}>
+          <label style={lab}>Repita a nova senha</label>
+          <input style={inp} type="password" value={repetir} onChange={(e) => setRepetir(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && salvar()} />
+        </div>
+        {erro && <div style={{ marginTop: 12, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>{erro}</div>}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+          <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={onFechar}>Cancelar</button>
+          <button className="btn-solid" onClick={salvar} disabled={salvando}>{salvando ? "Salvando…" : "Salvar senha"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ================= Componente principal ================= */
 /* ================= Login da equipe ================= */
 function TelaLogin({ onLogin, onVoltar }) {
@@ -1209,10 +1265,59 @@ function PortalCliente({ onIrParaLogin, onIrParaCadastroParceiro }) {
 }
 
 /* ================= App: decide entre Portal do Cliente, Login e App interno ================= */
+/* ---------- Sessão guardada no navegador ----------
+   A sessão vivia só na memória da aba: qualquer F5 — sem querer, ou o navegador do celular
+   reciclando a aba em segundo plano — derrubava o login e levava junto a vistoria em edição.
+   Agora ela é gravada com a validade do próprio token (12h, definida pelo backend) e
+   descartada sozinha quando vence. */
+const CHAVE_SESSAO = "fn_sessao";
+
+function lerValidadeDoToken(token) {
+  try {
+    const payload = JSON.parse(atob(String(token).split(".")[0].replace(/-/g, "+").replace(/_/g, "/")));
+    return Number(payload?.exp) || 0;
+  } catch { return 0; }
+}
+function carregarSessaoSalva() {
+  try {
+    const bruto = window.localStorage.getItem(CHAVE_SESSAO);
+    if (!bruto) return null;
+    const s = JSON.parse(bruto);
+    if (!s?.token || !s?.usuario) return null;
+    // Token vencido não adianta: seria erro em toda chamada até a pessoa perceber.
+    if (lerValidadeDoToken(s.token) <= Date.now()) {
+      window.localStorage.removeItem(CHAVE_SESSAO);
+      return null;
+    }
+    return s;
+  } catch { return null; }
+}
+function guardarSessao(s) {
+  try {
+    if (s) window.localStorage.setItem(CHAVE_SESSAO, JSON.stringify(s));
+    else window.localStorage.removeItem(CHAVE_SESSAO);
+  } catch { /* navegador sem storage: segue só na memória, como era antes */ }
+}
+
 export default function App() {
-  const [session, setSession] = useState(null); // { token, usuario }
+  const [session, setSessionEstado] = useState(() => carregarSessaoSalva());
   const [mostrarLogin, setMostrarLogin] = useState(false);
   const [mostrarCadastroParceiro, setMostrarCadastroParceiro] = useState(false);
+
+  const setSession = (s) => { guardarSessao(s); setSessionEstado(s); };
+
+  /* Quando o token vence, encerra a sessão avisando — antes o sistema seguia aberto
+     disparando "Erro 401" em cada tela, e a pessoa achava que o sistema tinha quebrado. */
+  useEffect(() => {
+    if (!session?.token) return;
+    const faltam = lerValidadeDoToken(session.token) - Date.now();
+    if (faltam <= 0) { setSession(null); return; }
+    const t = setTimeout(() => {
+      setSession(null);
+      alert("Sua sessão expirou por segurança. Entre novamente para continuar.");
+    }, Math.min(faltam, 2 ** 31 - 1));
+    return () => clearTimeout(t);
+  }, [session?.token]);
 
   // Conta o acesso uma vez por aba: "portal" quando é o site público, "equipe" quando
   // alguém entra logado. Precisa ficar antes dos returns abaixo (regra dos hooks).
@@ -1251,6 +1356,7 @@ function AppInterno({ session, onLogout }) {
   const [rascunhos, setRascunhos] = useState([]);
   const [toast, setToast] = useState("");
   const [showLoad, setShowLoad] = useState(false);
+  const [trocandoSenha, setTrocandoSenha] = useState(false);
 
   const modulosPermitidos = MODULOS_POR_PERFIL[perfil] || [];
   useEffect(() => {
@@ -1696,41 +1802,71 @@ function AppInterno({ session, onLogout }) {
   };
   const desbloquearLaudo = () => { setLaudoBloqueado(false); setConfirmandoDesbloqueio(false); notify("Laudo desbloqueado para correção — envie novamente para a gerência depois de ajustar."); };
 
-  /* ---- rascunhos de laudo em andamento: guardados só neste navegador (não vão para o banco da equipe) ---- */
-  const temStorage = typeof window !== "undefined" && window.storage;
-  const listarRascunhos = async () => {
-    if (!temStorage) return;
+  /* ---- Rascunhos de laudo em andamento: guardados neste navegador ----
+     Isto usava `window.storage`, que NÃO existe em navegador nenhum — era uma API do
+     ambiente de protótipo onde o sistema nasceu. Como o código avisava "Rascunho salvo"
+     antes de conferir se havia onde salvar, o técnico recebia confirmação de um salvamento
+     que nunca acontecia: fechou a aba, perdeu a vistoria inteira.
+     Agora usa localStorage, que é o armazenamento padrão do navegador, e a mensagem de
+     sucesso só aparece depois de gravar de fato. */
+  const PREFIXO_RASCUNHO = "fn_laudo:";
+  const temStorage = (() => {
     try {
-      const r = await window.storage.list("fn_laudo:");
-      setRascunhos(r?.keys || []);
+      if (typeof window === "undefined" || !window.localStorage) return false;
+      // Aba anônima restrita deixa o localStorage existir mas lança ao gravar.
+      const teste = "__fn_teste__";
+      window.localStorage.setItem(teste, "1");
+      window.localStorage.removeItem(teste);
+      return true;
+    } catch { return false; }
+  })();
+
+  const listarRascunhos = () => {
+    if (!temStorage) return setRascunhos([]);
+    try {
+      const chaves = Object.keys(window.localStorage)
+        .filter((k) => k.startsWith(PREFIXO_RASCUNHO))
+        .sort()
+        .reverse(); // a chave termina com a data/hora, então o mais recente vem primeiro
+      setRascunhos(chaves);
     } catch { setRascunhos([]); }
   };
   useEffect(() => { listarRascunhos(); }, []);
 
-  const salvarRascunho = async () => {
+  const salvarRascunho = () => {
+    if (!temStorage) {
+      notify("Este navegador não permite salvar rascunho. Envie o laudo para a gerência antes de fechar a aba.");
+      return;
+    }
     const nome = dados.contratante.nome?.trim() || dados.imovel.empreendimento?.trim() || "Sem nome";
-    const key = `fn_laudo:${Date.now()}`;
-    const payload = { nome, dados, itens: itens.map(({ fotos, ...r }) => ({ ...r, nFotos: fotos.length })) };
-    if (!temStorage) { notify("Rascunho salvo nesta sessão"); return; }
+    const key = `${PREFIXO_RASCUNHO}${Date.now()}`;
+    // As fotos ficam de fora de propósito: são pesadas e estourariam o limite do navegador.
+    const payload = { nome, salvoEm: new Date().toISOString(), dados,
+      itens: itens.map(({ fotos, ...r }) => ({ ...r, nFotos: fotos.length })) };
     try {
-      await window.storage.set(key, JSON.stringify(payload));
-      notify("Rascunho salvo ✓");
+      window.localStorage.setItem(key, JSON.stringify(payload));
+      notify("Rascunho salvo ✓ (as fotos não entram no rascunho)");
       listarRascunhos();
-    } catch { notify("Não foi possível salvar o rascunho"); }
+    } catch (e) {
+      notify(e?.name === "QuotaExceededError"
+        ? "Sem espaço para salvar. Exclua rascunhos antigos em \"Abrir\" e tente de novo."
+        : "Não foi possível salvar o rascunho.");
+    }
   };
 
-  const carregar = async (key) => {
+  const carregar = (key) => {
     try {
-      const r = await window.storage.get(key);
-      const p = JSON.parse(r.value);
+      const bruto = window.localStorage.getItem(key);
+      if (!bruto) { notify("Rascunho não encontrado."); listarRascunhos(); return; }
+      const p = JSON.parse(bruto);
       setDados(p.dados);
       setItens((p.itens || []).map((i) => ({ ...i, id: idCounter++, fotos: [] })));
       setShowLoad(false);
-      notify("Rascunho carregado (refaça o upload das fotos)");
-    } catch { notify("Falha ao carregar"); }
+      notify("Rascunho carregado (refaça o envio das fotos)");
+    } catch { notify("Falha ao carregar o rascunho."); }
   };
-  const excluirRascunho = async (key) => {
-    try { await window.storage.delete(key); listarRascunhos(); } catch {}
+  const excluirRascunho = (key) => {
+    try { window.localStorage.removeItem(key); listarRascunhos(); } catch {}
   };
 
   /* ---- helpers de estado ---- */
@@ -1750,16 +1886,36 @@ function AppInterno({ session, onLogout }) {
       ...(eraDoBancoAnterior ? { titulo: b.label } : {}),
     });
   };
-  const addFotos = (id, fileList) => {
+  /* Selecionar várias fotos de uma vez precisa acrescentar TODAS.
+     Antes, cada foto que terminava de carregar montava a lista nova a partir da lista antiga
+     (a que existia quando o técnico clicou), porque `itens` vinha congelado da renderização.
+     Como as fotos carregam em paralelo, uma sobrescrevia a outra: escolher 3 salvava 1 — e o
+     técnico só descobria conferindo foto a foto, com o laudo já fechado.
+     Agora: lê todas primeiro, depois acrescenta de uma vez usando a forma funcional do
+     setItens, que sempre enxerga a lista atual. */
+  const MAX_FOTOS_ITEM = 4;
+  const addFotos = async (id, fileList) => {
     const item = itens.find((i) => i.id === id);
-    const espaco = 4 - item.fotos.length;
-    const files = Array.from(fileList).slice(0, espaco);
-    files.forEach((f) => {
-      const reader = new FileReader();
-      reader.onload = (e) => updItem(id, { fotos: [...(itens.find((x) => x.id === id)?.fotos || item.fotos), e.target.result] });
-      reader.onerror = () => notify(`Não foi possível carregar a foto "${f.name}". Tente novamente.`);
-      reader.readAsDataURL(f);
-    });
+    if (!item) return;
+    const espaco = MAX_FOTOS_ITEM - item.fotos.length;
+    if (espaco <= 0) { notify(`Cada item aceita no máximo ${MAX_FOTOS_ITEM} fotos.`); return; }
+
+    const escolhidas = Array.from(fileList);
+    if (escolhidas.length > espaco) notify(`Cabem mais ${espaco} foto(s) neste item — as demais não foram anexadas.`);
+
+    const lidas = await Promise.all(
+      escolhidas.slice(0, espaco).map((f) => new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = () => { notify(`Não foi possível carregar a foto "${f.name}". Tente novamente.`); resolve(null); };
+        reader.readAsDataURL(f);
+      }))
+    );
+    const validas = lidas.filter(Boolean);
+    if (validas.length === 0) return;
+    setItens((lista) => lista.map((i) =>
+      i.id === id ? { ...i, fotos: [...i.fotos, ...validas].slice(0, MAX_FOTOS_ITEM) } : i
+    ));
   };
   const removerFoto = (id, idx) => {
     const item = itens.find((i) => i.id === id);
@@ -1802,8 +1958,12 @@ function AppInterno({ session, onLogout }) {
                 if (sub && aba === "gerencia") setAbaGerencia(sub);
                 if (sub && aba === "laudos") setAba(sub);
               }} />
+            <button className="btn-ghost" onClick={() => setTrocandoSenha(true)} title="Alterar minha senha">
+              <Lock size={14} /> Senha
+            </button>
             <button className="btn-ghost" onClick={onLogout} title="Sair"><X size={14} /> Sair</button>
           </div>
+          {trocandoSenha && <ModalTrocarSenha token={token} notify={notify} onFechar={() => setTrocandoSenha(false)} />}
           {abaTop === "laudos" && (
             <>
               <button className="btn-ghost" onClick={() => { setShowLoad(true); listarRascunhos(); }}><FolderOpen size={15} /> Abrir</button>
@@ -1951,12 +2111,27 @@ function AppInterno({ session, onLogout }) {
 }
 
 function RascunhoLinha({ k, onLoad, onDel }) {
-  const [nome, setNome] = useState("...");
-  useEffect(() => { (async () => { try { const r = await window.storage.get(k); setNome(JSON.parse(r.value).nome); } catch { setNome("Rascunho"); } })(); }, [k]);
+  // Lê direto do localStorage (mesmo lugar onde salvarRascunho grava). Antes buscava em
+  // window.storage, que não existe no navegador, então esta linha mostrava sempre "Rascunho".
+  const { nome, quando } = (() => {
+    try {
+      const p = JSON.parse(window.localStorage.getItem(k) || "{}");
+      const d = p.salvoEm ? new Date(p.salvoEm) : null;
+      return {
+        nome: p.nome || "Rascunho",
+        quando: d && !Number.isNaN(d.getTime())
+          ? d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+          : "",
+      };
+    } catch { return { nome: "Rascunho", quando: "" }; }
+  })();
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 0", borderBottom: `1px solid ${CINZA_BORDA}` }}>
       <FileText size={15} color={AZUL_MEDIO} />
-      <span style={{ flex: 1, fontSize: 14 }}>{nome}</span>
+      <span style={{ flex: 1, fontSize: 14, minWidth: 0, overflowWrap: "anywhere" }}>
+        {nome}
+        {quando && <span style={{ color: "#8593a8", fontSize: 12 }}> · {quando}</span>}
+      </span>
       <button className="btn-mini" onClick={() => onLoad(k)}>Abrir</button>
       <button className="icon-btn" onClick={() => onDel(k)}><Trash2 size={14} color="#c62828" /></button>
     </div>
@@ -1983,7 +2158,9 @@ function NotificacoesClientes({ clientes, preencherComCliente, style }) {
         <div style={{ display: "grid", gap: 10 }}>
           {pendentes.map((c) => (
             <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ flex: 1, minWidth: 200 }}>
+              {/* minWidth precisa ser 0 aqui: com o padrão (auto) o item flex nunca encolhe
+                  abaixo do próprio conteúdo, e um nome muito longo empurrava a tela toda. */}
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 700, fontSize: 14 }}>{c.nome}</div>
                 <div style={{ fontSize: 12.5, color: "#65758b" }}>
                   {c.servico} {c.empreendimento ? `· ${c.empreendimento}` : ""}{c.blocoTorre ? ` (${c.blocoTorre})` : ""}
@@ -5095,9 +5272,23 @@ function CardPrecoEmpreendimento({ precos, carregando, salvarPreco, empreendimen
 /* Receita cruzando empreendimento x tipo de serviço: uma linha por combinação, com o valor
    unitário ao lado, o total da linha e o total geral no rodapé. Conta só o que foi
    efetivamente entregue — vistoria atendida e documentação concluída. */
-function CardReceitaEstimada({ precos, clientes }) {
+function CardReceitaEstimada({ precos, clientes, docs = [] }) {
   const precoPorNome = {};
   precos.forEach((p) => { precoPorNome[p.empreendimento] = p; });
+
+  /* O que conta como serviço entregue.
+     Antes a vistoria entrava na receita quando o cadastro estava marcado como "atendido" —
+     só que essa marca é ligada automaticamente ao ABRIR o cadastro na tela, mesmo sem
+     ninguém ter ido ao imóvel. Consultar um cliente somava dinheiro no relatório.
+     Agora o marco é o laudo aprovado e enviado ao cliente, que é quando o serviço de fato
+     terminou (e é o mesmo momento em que o sistema já grava a data de aprovação). */
+  const LAUDO_ENTREGUE = "Laudo enviado por e-mail";
+  const cpfsComLaudoEntregue = new Set(
+    docs.filter((d) => d.statusCliente === LAUDO_ENTREGUE)
+        .map((d) => String(d.cpf || "").replace(/\D/g, ""))
+        .filter(Boolean)
+  );
+  const vistoriaEntregue = (c) => cpfsComLaudoEntregue.has(String(c.cpf || "").replace(/\D/g, ""));
 
   const SERVICOS = [
     { chave: "vistoria", rotulo: "Vistoria de entrega de chaves", campoPreco: "precoVistoria" },
@@ -5114,12 +5305,16 @@ function CardReceitaEstimada({ precos, clientes }) {
     if (c.pagamento === "Pago") cruzamento[k].qtdPagos += 1;
   };
 
+  let foraDoRelatorio = 0;
   clientes.forEach((c) => {
     if (c.status === "Cancelado") return;
     if (ehServicoDocumentacao(c)) {
       if (c.status === STATUS_DOC_CONCLUIDA) registrar(c, "documentacao");
-    } else if (c.servico === SERVICO_VISTORIA && c.atendido) {
-      registrar(c, "vistoria");
+    } else if (c.servico === SERVICO_VISTORIA) {
+      if (vistoriaEntregue(c)) registrar(c, "vistoria");
+    } else if (c.servico) {
+      // Serviço "Outro" não tem preço de tabela e sumia daqui sem avisar ninguém.
+      foraDoRelatorio += 1;
     }
   });
 
@@ -5142,7 +5337,8 @@ function CardReceitaEstimada({ precos, clientes }) {
     <Card icon={TrendingUp} titulo="Receita por empreendimento e serviço">
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
         Uma linha por empreendimento e tipo de serviço, com o valor unitário cadastrado acima.
-        Entram só os serviços entregues: vistorias já atendidas e documentações concluídas.
+        Entram só os serviços entregues: vistorias com <strong>laudo já enviado ao cliente</strong> e
+        documentações concluídas.
       </p>
 
       {linhas.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum serviço concluído ainda.</p>}
@@ -5195,6 +5391,13 @@ function CardReceitaEstimada({ precos, clientes }) {
               {semPreco.length} combinação(ões) sem preço cadastrado — esses serviços não entram no total.
             </div>
           )}
+
+          {foraDoRelatorio > 0 && (
+            <div style={{ marginTop: 10, background: "#FFF4E0", color: "#B26A00", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>
+              {foraDoRelatorio} cadastro(s) com serviço "Outro" ficam fora deste relatório: esse tipo não
+              tem preço de tabela. Combine o valor com o cliente e registre em Documentação.
+            </div>
+          )}
         </>
       )}
     </Card>
@@ -5243,7 +5446,7 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
       <CardPrecoEmpreendimento precos={precos} carregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef} clientes={clientes}
         adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento} notify={notify} />
 
-      <CardReceitaEstimada precos={precos} clientes={clientes} />
+      <CardReceitaEstimada precos={precos} clientes={clientes} docs={docs} />
     </div>
   );
 }
@@ -5381,7 +5584,7 @@ function CardUsuarios({ usuarios, carregando, criarUsuario, atualizarUsuario, ex
                       <Edit3 size={15} color={AZUL_MEDIO} />
                     </button>
                     {u.id !== usuarioAtualId && (
-                      <button className="icon-btn" onClick={() => pedirRemocao(u)} title="Remover"><Trash2 size={15} color="#c62828" /></button>
+                      <button className="icon-btn" onClick={() => pedirRemocao(u)} title="Remover do sistema"><Trash2 size={15} color="#c62828" /></button>
                     )}
                   </td>
                 </tr>
@@ -5446,8 +5649,11 @@ function CardUsuarios({ usuarios, carregando, criarUsuario, atualizarUsuario, ex
         </div>
       )}
 
-      <ConfirmModal aberto={!!removendo} titulo="Remover usuário"
-        mensagem={removendo ? `Tem certeza que deseja remover "${removendo.nome}"? Essa ação não pode ser desfeita.` : ""}
+      {/* O laudo é documento com responsabilidade técnica registrada: apagar o usuário
+          deixaria os laudos dele sem vínculo com quem os assinou. Por isso o servidor
+          desativa em vez de excluir — e o texto abaixo diz exatamente o que acontece. */}
+      <ConfirmModal aberto={!!removendo} titulo="Remover do sistema"
+        mensagem={removendo ? `"${removendo.nome}" perde o acesso imediatamente. O histórico e os laudos assinados por essa pessoa continuam guardados, como exige a responsabilidade técnica. Você pode reativar o acesso depois.` : ""}
         onConfirm={remover} onCancel={() => setRemovendo(null)} />
     </Card>
   );
@@ -5496,7 +5702,7 @@ function CardAssinaturaGerencia({ assinatura, salvarAssinatura, removerAssinatur
 }
 
 /* ================= Aba: Cliente (autocadastro e acompanhamento) ================= */
-function AvaliarServico({ doc, notify, fotoCliente }) {
+function AvaliarServico({ doc, notify, fotoCliente, cpf }) {
   const [aberto, setAberto] = useState(false);
   const [nota, setNota] = useState(0);
   const [comentario, setComentario] = useState("");
@@ -5507,9 +5713,13 @@ function AvaliarServico({ doc, notify, fotoCliente }) {
     if (!nota) { notify("Escolha de 1 a 5 estrelas"); return; }
     setEnviando(true);
     try {
+      // O CPF vai junto porque o servidor agora confere se quem avalia é mesmo o cliente
+      // daquele atendimento — antes qualquer um postava nota apontando para um atendimento
+      // inventado, e avaliação aprovada vira vitrine no site. Nome e empreendimento saem do
+      // próprio atendimento no servidor, então não precisam ser enviados daqui.
       await apiFetch("/api/avaliacoes", {
         method: "POST",
-        body: { docId: doc.id, cliente: doc.cliente, empreendimento: doc.empreendimento, servico: doc.servico || "", nota, comentario },
+        body: { docId: doc.id, cpf, servico: doc.servico || "", nota, comentario },
       });
       setEnviado(true);
       notify("Obrigado pela avaliação! ✓");
@@ -5688,7 +5898,7 @@ function CartaoAtendimentoCliente({ doc, cpf, notify }) {
         <AcessoLaudoFinal cpf={cpf} notify={notify} aoDescobrirFoto={setFotoCliente} />
       )}
       {doc.status === STATUS_DOC_CONCLUIDA && <AcessoDocumentosArt cpf={cpf} notify={notify} />}
-      <AvaliarServico doc={doc} notify={notify} fotoCliente={fotoCliente} />
+      <AvaliarServico doc={doc} notify={notify} fotoCliente={fotoCliente} cpf={cpf} />
     </>
   );
 }
@@ -6663,6 +6873,15 @@ const toastStyle = { position: "fixed", bottom: 22, left: "50%", transform: "tra
 
 const estilos = `
   * { box-sizing: border-box; }
+  /* Rede de segurança de layout: um nome muito longo (ou colado sem espaços) esticava a
+     linha para os lados e empurrava a tela inteira — vimos isso acontecer na agenda do
+     técnico. O servidor passou a limitar o tamanho dos campos, mas os dados já gravados
+     continuam aí, então a tela também precisa aguentar. */
+  /* overflow-wrap:anywhere é herdado, então vale para toda a tela de uma vez. Diferente de
+     break-word, ele também deixa o bloco ENCOLHER abaixo do tamanho da palavra — que é o
+     que faz um item flex parar de empurrar a página inteira para a direita. */
+  body { overflow-wrap: anywhere; }
+  .quebra-texto { overflow-wrap: anywhere; min-width: 0; }
   .tab { background:none; border:none; border-bottom:3px solid transparent; padding:11px 14px; font-size:14px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:7px; }
   .btn-ghost { background:rgba(255,255,255,.1); color:#fff; border:none; padding:8px 13px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:6px; }
   .btn-ghost:hover { background:rgba(255,255,255,.2); }
