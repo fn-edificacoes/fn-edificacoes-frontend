@@ -1268,6 +1268,28 @@ function AppInterno({ session, onLogout }) {
     }
   };
 
+  /* ---- Prospecção: carteira comercial de empreendimentos (só Gerência) ---- */
+  const [prospeccao, setProspeccao] = useState([]);
+  const [prospeccaoCarregando, setProspeccaoCarregando] = useState(false);
+  const carregarProspeccao = async () => {
+    if (perfil !== "gerencia") return;
+    setProspeccaoCarregando(true);
+    try {
+      const r = await apiFetch("/api/prospeccao", { token });
+      setProspeccao(r.prospeccao || []);
+    } catch (e) { notify(`Não foi possível carregar a prospecção: ${e.message}`); }
+    setProspeccaoCarregando(false);
+  };
+  useEffect(() => { carregarProspeccao(); }, []);
+  /* Atualiza na tela na hora e grava atrás; texto livre não avisa a cada tecla. */
+  const atualizarProspeccao = async (id, patch, { silencioso = false } = {}) => {
+    setProspeccao((atual) => atual.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+    try {
+      await apiFetch(`/api/prospeccao/${id}`, { method: "PATCH", token, body: patch });
+      if (!silencioso) notify("Prospecção atualizada ✓");
+    } catch (e) { notify(`Não foi possível salvar: ${e.message}`); carregarProspeccao(); }
+  };
+
   /* ---- Acessos ao sistema (indicador da Gerência) ---- */
   const [acessos, setAcessos] = useState(null);
   const [acessosCarregando, setAcessosCarregando] = useState(false);
@@ -1635,6 +1657,7 @@ function AppInterno({ session, onLogout }) {
             vales={vales} valesCarregando={valesCarregando}
             precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
             padronizarEmpreendimento={padronizarEmpreendimento} excluirCliente={delCliente}
+            prospeccao={prospeccao} prospeccaoCarregando={prospeccaoCarregando} atualizarProspeccao={atualizarProspeccao}
             laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo}
             acessos={acessos} acessosCarregando={acessosCarregando} />
         )}
@@ -4113,7 +4136,127 @@ function CardPadronizarEmpreendimentos({ clientes = [], empreendimentosRef = [],
   );
 }
 
-function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendimento, excluirCliente, empreendimentosRef = [], carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, acessos, acessosCarregando }) {
+/* Carteira de prospecção — quais empreendimentos entram no funil comercial, com que
+   prioridade e qual a ação recomendada. Base: pesquisa "Mapa Total de Empreendimentos".
+   A prioridade é editável, porque a realidade muda mais rápido que a pesquisa. */
+const PRIORIDADES_PROSPECCAO = ["Imediata", "Alta", "Média", "Baixa", "Futura", "Pós-entrega", "Fora do escopo", "A confirmar"];
+
+const COR_PRIORIDADE = {
+  "Imediata": { cor: "#C62828", bg: "#FCEAEA" },
+  "Alta": { cor: "#C25E00", bg: "#FFEDD9" },
+  "Média": { cor: "#B26A00", bg: "#FFF4E0" },
+  "Baixa": { cor: "#65758b", bg: "#EEF1F5" },
+  "Futura": { cor: "#2C75B5", bg: "#EAF2FB" },
+  "Pós-entrega": { cor: "#0F766E", bg: "#E3F3F1" },
+  "Fora do escopo": { cor: "#8593a8", bg: "#F4F6F8" },
+  "A confirmar": { cor: "#8593a8", bg: "#F4F6F8" },
+};
+
+function CardProspeccao({ prospeccao = [], carregando, atualizar, clientes = [], notify }) {
+  const [busca, setBusca] = useState("");
+  const [filtro, setFiltro] = useState("");
+  const [abertoId, setAbertoId] = useState(null);
+
+  // Empreendimento que já virou cliente sai do "a prospectar" e vira prova de conversão.
+  const jaAtendidos = new Set(
+    clientes.filter((c) => c.status !== "Cancelado").map((c) => (c.empreendimento || "").trim().toLowerCase()).filter(Boolean)
+  );
+
+  const contagem = {};
+  prospeccao.forEach((p) => { contagem[p.prioridade] = (contagem[p.prioridade] || 0) + 1; });
+  const convertidos = prospeccao.filter((p) => jaAtendidos.has((p.empreendimento || "").trim().toLowerCase())).length;
+
+  const termo = busca.trim().toLowerCase();
+  const lista = prospeccao
+    .filter((p) => !filtro || p.prioridade === filtro)
+    .filter((p) => !termo || `${p.empreendimento} ${p.acao} ${p.observacoes}`.toLowerCase().includes(termo))
+    .sort((a, b) => PRIORIDADES_PROSPECCAO.indexOf(a.prioridade) - PRIORIDADES_PROSPECCAO.indexOf(b.prioridade)
+      || a.empreendimento.localeCompare(b.empreendimento, "pt-BR"));
+
+  return (
+    <Card icon={TrendingUp} titulo={`Prospecção — carteira de empreendimentos (${prospeccao.length})`}>
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Base do planejamento comercial. Clique num empreendimento para ver a situação da obra e
+        ajustar a prioridade — as datas das construtoras mudam, então a carteira precisa acompanhar.
+      </p>
+
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12, alignItems: "center" }}>
+        <button onClick={() => setFiltro("")} aria-pressed={!filtro}
+          style={{ padding: "5px 11px", borderRadius: 20, border: `1.5px solid ${filtro ? CINZA_BORDA : AZUL_MEDIO}`, background: filtro ? "#fff" : AZUL_MEDIO, color: filtro ? "#65758b" : "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+          Todas
+        </button>
+        {PRIORIDADES_PROSPECCAO.filter((p) => contagem[p]).map((p) => {
+          const ativo = filtro === p;
+          const c = COR_PRIORIDADE[p] || COR_PRIORIDADE["A confirmar"];
+          return (
+            <button key={p} onClick={() => setFiltro(ativo ? "" : p)} aria-pressed={ativo}
+              style={{ padding: "5px 11px", borderRadius: 20, border: `1.5px solid ${c.cor}`, background: ativo ? c.cor : "#fff", color: ativo ? "#fff" : c.cor, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+              {p} ({contagem[p]})
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+        <input style={{ ...inp, flex: 1, minWidth: 200 }} placeholder="Buscar empreendimento, ação ou observação…"
+          value={busca} onChange={(e) => setBusca(e.target.value)} />
+        <span style={{ fontSize: 12.5, color: "#2E7D32", fontWeight: 600 }}>{convertidos} já viraram cliente</span>
+      </div>
+
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && lista.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum empreendimento com esse filtro.</p>}
+
+      <div style={{ display: "grid", gap: 8 }}>
+        {lista.map((p) => {
+          const c = COR_PRIORIDADE[p.prioridade] || COR_PRIORIDADE["A confirmar"];
+          const convertido = jaAtendidos.has((p.empreendimento || "").trim().toLowerCase());
+          const aberto = abertoId === p.id;
+          return (
+            <div key={p.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, overflow: "hidden" }}>
+              <button onClick={() => setAbertoId(aberto ? null : p.id)}
+                style={{ width: "100%", background: "#fff", border: "none", cursor: "pointer", padding: 12, display: "flex", alignItems: "center", gap: 10, textAlign: "left", flexWrap: "wrap" }}>
+                <span style={{ background: c.bg, color: c.cor, borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 800, whiteSpace: "nowrap" }}>
+                  {p.prioridade}
+                </span>
+                <strong style={{ fontSize: 13.5, flex: 1, minWidth: 150 }}>{p.empreendimento}</strong>
+                {convertido && (
+                  <span style={{ fontSize: 11, color: "#2E7D32", fontWeight: 700, whiteSpace: "nowrap" }}>✓ já é cliente</span>
+                )}
+                {aberto ? <ChevronDown size={16} color="#8593a8" /> : <ChevronRight size={16} color="#8593a8" />}
+              </button>
+
+              {aberto && (
+                <div style={{ padding: "0 12px 12px", display: "grid", gap: 8 }}>
+                  {p.estrutura && (
+                    <div style={{ fontSize: 12.5, color: "#4a5a70" }}>
+                      <strong style={{ color: "#65758b" }}>Obra: </strong>{p.estrutura}
+                    </div>
+                  )}
+                  <div style={cell(true)}>
+                    <label style={lab}>Prioridade</label>
+                    <select style={inp} value={p.prioridade}
+                      onChange={(e) => atualizar(p.id, { prioridade: e.target.value })}>
+                      {PRIORIDADES_PROSPECCAO.map((o) => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                    {p.prioridadeOriginal && p.prioridadeOriginal !== p.prioridade && (
+                      <span style={{ fontSize: 11, color: "#8593a8" }}>na pesquisa: “{p.prioridadeOriginal}”</span>
+                    )}
+                  </div>
+                  <Area label="Ação recomendada" value={p.acao} rows={2}
+                    onChange={(v) => atualizar(p.id, { acao: v }, { silencioso: true })} />
+                  <Area label="Observações" value={p.observacoes} rows={2}
+                    onChange={(v) => atualizar(p.id, { observacoes: v }, { silencioso: true })} />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendimento, excluirCliente, empreendimentosRef = [], prospeccao = [], prospeccaoCarregando, atualizarProspeccao, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, acessos, acessosCarregando }) {
   const porVistoria = docs.reduce((acc, d) => { acc[d.vistoria] = (acc[d.vistoria] || 0) + 1; return acc; }, {});
   const porStatusProducao = docs.reduce((acc, d) => { acc[d.statusProducao] = (acc[d.statusProducao] || 0) + 1; return acc; }, {});
   const totalRegistrosDocs = docs.length;
@@ -4135,6 +4278,9 @@ function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendi
       <CardCancelamentosPendentes clientes={clientes} usuarios={usuarios} updCliente={updCliente} notify={notify} />
 
       <CardAcessos dados={acessos} carregando={acessosCarregando} />
+
+      <CardProspeccao prospeccao={prospeccao} carregando={prospeccaoCarregando} atualizar={atualizarProspeccao}
+        clientes={clientes} notify={notify} />
 
       <CardPadronizarEmpreendimentos clientes={clientes} empreendimentosRef={empreendimentosRef}
         padronizar={padronizarEmpreendimento} excluirCliente={excluirCliente} notify={notify} />
@@ -4516,7 +4662,7 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, acessos, acessosCarregando }) {
+function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, prospeccao, prospeccaoCarregando, atualizarProspeccao, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, acessos, acessosCarregando }) {
   if (sub === "parceiros") {
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} vales={vales} valesCarregando={valesCarregando} notify={notify} />;
   }
@@ -4525,7 +4671,8 @@ function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, pad
   }
   return (
     <AbaGerenciaVisaoGeral docs={docs} clientes={clientes} updCliente={updCliente} carregando={carregando}
-      padronizarEmpreendimento={padronizarEmpreendimento} excluirCliente={excluirCliente} empreendimentosRef={empreendimentosRef} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
+      padronizarEmpreendimento={padronizarEmpreendimento} excluirCliente={excluirCliente} empreendimentosRef={empreendimentosRef}
+      prospeccao={prospeccao} prospeccaoCarregando={prospeccaoCarregando} atualizarProspeccao={atualizarProspeccao} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
       usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={usuarioAtualId}
       avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
       laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo}
