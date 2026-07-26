@@ -4,7 +4,8 @@ import {
   Building2, User, ClipboardList, ChevronDown, ChevronRight, ChevronLeft, Check,
   AlertTriangle, CircleAlert, Info, Copy, Sparkles, Loader2,
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
-  TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, LockOpen, Bell
+  TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, LockOpen, Bell,
+  ExternalLink
 } from "lucide-react";
 
 /* ============================================================
@@ -1956,8 +1957,11 @@ function RascunhoLinha({ k, onLoad, onDel }) {
 
 /* ================= Notificações: solicitações de clientes pendentes ================= */
 function NotificacoesClientes({ clientes, preencherComCliente, style }) {
+  // Documentação ART/TRT não tem vistoria: vai do cadastro direto para a Documentação.
+  // Sem este filtro esses clientes apareciam aqui com "Iniciar vistoria", que não existe
+  // para eles. Cancelado também sai — não faz sentido oferecer vistoria de algo cancelado.
   const pendentes = clientes
-    .filter((c) => !c.atendido)
+    .filter((c) => !c.atendido && !ehServicoDocumentacao(c) && c.status !== "Cancelado")
     .sort((a, b) => `${a.dataDesejada}${a.horarioDesejado}`.localeCompare(`${b.dataDesejada}${b.horarioDesejado}`));
 
   if (pendentes.length === 0) return null;
@@ -3709,6 +3713,69 @@ function ConfirmModal({ aberto, titulo = "Confirmar exclusão", mensagem = "Tem 
 /* Anexo dos dois documentos finais de um cliente de Documentação ART/TRT. O arquivo vai
    para o Drive (via backend) e o status do cliente só vira "Documentação pronta" quando
    os dois estão anexados — é aí que ele consegue baixar pelo portal. */
+/* Endereço onde a equipe emite a ART/TRT. Fica no código (e não escrito em cada card)
+   para trocar num lugar só se o SINCETI mudar de endereço. */
+const URL_EMISSAO_ART = "https://servicos.sinceti.net.br/index.php";
+
+/* Dados do cadastro do cliente, do jeito que a pessoa da Documentação precisa deles:
+   tudo visível de uma vez e copiável, porque esses campos são redigitados no sistema
+   externo de emissão. Sem isso ela teria que abrir o cadastro em outra aba e ir e voltar. */
+function DadosParaDocumentacao({ cliente, notify }) {
+  const [aberto, setAberto] = useState(false);
+
+  const campos = [
+    ["Nome", cliente.nome],
+    ["CPF", cliente.cpf],
+    ["E-mail", cliente.email],
+    ["Telefone", cliente.telefone],
+    ["Construtora", cliente.construtora],
+    ["Empreendimento", cliente.empreendimento],
+    ["Bloco / Torre / Apto", cliente.blocoTorre],
+    ["Endereço", cliente.endereco],
+    ["CEP", cliente.cep],
+    ["Área privativa", cliente.areaPrivativa],
+    ["Observações", cliente.observacoes],
+  ].filter(([, v]) => v);
+
+  const copiarTudo = async () => {
+    const texto = campos.map(([k, v]) => `${k}: ${v}`).join("\n");
+    try {
+      await navigator.clipboard.writeText(texto);
+      notify("Dados copiados ✓");
+    } catch { notify("Não foi possível copiar — selecione e copie manualmente."); }
+  };
+
+  return (
+    <div style={{ marginTop: 10, borderTop: `1px solid ${CINZA_BORDA}`, paddingTop: 10 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <button className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO }} onClick={() => setAberto((v) => !v)}>
+          {aberto ? <ChevronDown size={14} /> : <ChevronRight size={14} />} Dados do cadastro ({campos.length})
+        </button>
+        <a href={URL_EMISSAO_ART} target="_blank" rel="noopener noreferrer"
+          className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, textDecoration: "none" }}>
+          <ExternalLink size={14} /> Emitir no SINCETI
+        </a>
+      </div>
+
+      {aberto && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ display: "grid", gap: 4 }}>
+            {campos.map(([k, v]) => (
+              <div key={k} style={{ display: "flex", gap: 8, fontSize: 12.5, flexWrap: "wrap" }}>
+                <span style={{ color: "#8593a8", width: 150, flexShrink: 0 }}>{k}</span>
+                <strong style={{ color: "#1a2330", fontWeight: 600, userSelect: "all" }}>{v}</strong>
+              </div>
+            ))}
+          </div>
+          <button className="btn-ghost" style={{ marginTop: 10, color: AZUL_MEDIO, background: CINZA_CLARO }} onClick={copiarTudo}>
+            <ClipboardList size={14} /> Copiar todos os dados
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CardDocumentosArt({ cliente, documentos = [], precoDocumentacao = 0, enviarDocumento, excluirDocumento, atualizarPagamento, notify }) {
   const [enviandoTipo, setEnviandoTipo] = useState(null);
   const doTipo = (tipo) => documentos.find((d) => d.tipo === tipo);
@@ -3752,7 +3819,9 @@ function CardDocumentosArt({ cliente, documentos = [], precoDocumentacao = 0, en
         </div>
       </div>
 
-      <div style={{ display: "grid", gap: 8 }}>
+      <DadosParaDocumentacao cliente={cliente} notify={notify} />
+
+      <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
         {TIPOS_DOCUMENTO_ART.map((tipo) => {
           const doc = doTipo(tipo);
           const enviando = enviandoTipo === tipo;
@@ -5386,7 +5455,7 @@ function CardAssinaturaGerencia({ assinatura, salvarAssinatura, removerAssinatur
 }
 
 /* ================= Aba: Cliente (autocadastro e acompanhamento) ================= */
-function AvaliarServico({ doc, notify }) {
+function AvaliarServico({ doc, notify, fotoCliente }) {
   const [aberto, setAberto] = useState(false);
   const [nota, setNota] = useState(0);
   const [comentario, setComentario] = useState("");
@@ -5413,9 +5482,23 @@ function AvaliarServico({ doc, notify }) {
 
   if (!aberto) {
     return (
-      <button className="btn-ghost" style={{ marginTop: 10, color: AZUL_MEDIO, background: CINZA_CLARO }} onClick={() => setAberto(true)}>
-        <Star size={14} /> Avaliar este atendimento
-      </button>
+      <div style={{ marginTop: 12 }}>
+        {/* A foto da vistoria fica aqui, junto do convite para avaliar: é a lembrança do
+            atendimento, e é o que faz o cliente parar e responder. Antes ela ficava
+            escondida dentro do bloco de download do laudo, onde poucos chegavam. */}
+        {fotoCliente && (
+          <img src={fotoCliente} alt="Foto da sua vistoria com nosso vistoriador"
+            style={{ width: "100%", maxWidth: 460, borderRadius: 12, display: "block", marginBottom: 10 }} />
+        )}
+        {fotoCliente && (
+          <div style={{ fontSize: 13.5, color: AZUL_MARINHO, fontWeight: 600, marginBottom: 8 }}>
+            Como foi a sua vistoria? Sua opinião leva menos de um minuto e ajuda muito a nossa equipe.
+          </div>
+        )}
+        <button className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO }} onClick={() => setAberto(true)}>
+          <Star size={14} /> Avaliar este atendimento
+        </button>
+      </div>
     );
   }
 
@@ -5494,7 +5577,7 @@ function AcessoDocumentosArt({ cpf, notify }) {
    O Drive nunca fica público: o backend só libera o download depois de confirmar CPF + e-mail
    cadastrados, e devolve um link com token curto (expira em minutos) que faz o backend buscar
    o arquivo no Drive e entregar diretamente — o cliente nunca vê nem precisa de conta Google. */
-function AcessoLaudoFinal({ cpf, notify }) {
+function AcessoLaudoFinal({ cpf, notify, aoDescobrirFoto }) {
   const [aberto, setAberto] = useState(false);
   const [email, setEmail] = useState("");
   const [consultando, setConsultando] = useState(false);
@@ -5506,6 +5589,9 @@ function AcessoLaudoFinal({ cpf, notify }) {
     try {
       const r = await apiFetch("/api/laudo-final/consultar", { method: "POST", body: { cpf, email } });
       setLaudos(r.laudos || []);
+      // A foto vem junto com o laudo, mas quem a exibe é o convite de avaliação, logo abaixo.
+      const comFoto = (r.laudos || []).find((l) => l.fotoCliente);
+      if (comFoto) aoDescobrirFoto?.(comFoto.fotoCliente);
       if ((r.laudos || []).length === 0) notify("Não encontramos laudo disponível para esse e-mail.");
     } catch (e) { notify(`Não foi possível confirmar: ${e.message}`); setLaudos(null); }
     setConsultando(false);
@@ -5536,9 +5622,6 @@ function AcessoLaudoFinal({ cpf, notify }) {
         <div style={{ display: "grid", gap: 12 }}>
           {laudos.map((l) => (
             <div key={l.docId}>
-              {l.fotoCliente && (
-                <img src={l.fotoCliente} alt="Foto da sua vistoria com nosso vistoriador" style={{ width: "100%", maxWidth: 320, borderRadius: 10, display: "block", marginBottom: 8 }} />
-              )}
               <a href={`${API_URL}/api/laudo-final/download?token=${encodeURIComponent(l.tokenDownload)}`}
                 target="_blank" rel="noopener noreferrer" className="btn-solid" style={{ textDecoration: "none", justifyContent: "center" }}>
                 <FileText size={14} /> Baixar laudo{l.empreendimento ? ` — ${l.empreendimento}` : ""}
@@ -5549,6 +5632,23 @@ function AcessoLaudoFinal({ cpf, notify }) {
         </div>
       )}
     </div>
+  );
+}
+
+/* Um atendimento na tela do cliente: acesso aos arquivos e convite para avaliar.
+   Existe como componente separado porque precisa guardar a foto da vistoria — ela chega
+   junto com o laudo, mas quem a mostra é o convite de avaliação, logo abaixo. */
+function CartaoAtendimentoCliente({ doc, cpf, notify }) {
+  const [fotoCliente, setFotoCliente] = useState(null);
+
+  return (
+    <>
+      {doc.status === "Laudo enviado por e-mail" && (
+        <AcessoLaudoFinal cpf={cpf} notify={notify} aoDescobrirFoto={setFotoCliente} />
+      )}
+      {doc.status === STATUS_DOC_CONCLUIDA && <AcessoDocumentosArt cpf={cpf} notify={notify} />}
+      <AvaliarServico doc={doc} notify={notify} fotoCliente={fotoCliente} />
+    </>
   );
 }
 
@@ -5850,9 +5950,7 @@ function AbaCliente({ notify }) {
                       Atualizado em {new Date(d.atualizadoEm).toLocaleString("pt-BR")}
                     </div>
                   )}
-                  {d.status === "Laudo enviado por e-mail" && <AcessoLaudoFinal cpf={cpfConsulta} notify={notify} />}
-                  {d.status === STATUS_DOC_CONCLUIDA && <AcessoDocumentosArt cpf={cpfConsulta} notify={notify} />}
-                  <AvaliarServico doc={d} notify={notify} />
+                  <CartaoAtendimentoCliente doc={d} cpf={cpfConsulta} notify={notify} />
                 </div>
               );
             })}
