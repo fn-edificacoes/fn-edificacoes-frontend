@@ -1502,6 +1502,13 @@ function AppInterno({ session, onLogout }) {
   };
   useEffect(() => { carregarProspeccao(); }, []);
   /* Atualiza na tela na hora e grava atrás; texto livre não avisa a cada tecla. */
+  /* Publica a carteira na planilha do Drive. Mão única: o sistema manda, a planilha
+     recebe — quem edita é sempre aqui. Devolve o link para abrir a planilha. */
+  const publicarProspeccaoDrive = async () => {
+    const r = await apiFetch("/api/prospeccao/publicar-drive", { method: "POST", token });
+    return r;
+  };
+
   const atualizarProspeccao = async (id, patch, { silencioso = false } = {}) => {
     setProspeccao((atual) => atual.map((p) => (p.id === id ? { ...p, ...patch } : p)));
     try {
@@ -1912,6 +1919,7 @@ function AppInterno({ session, onLogout }) {
             precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
             padronizarEmpreendimento={padronizarEmpreendimento} excluirCliente={delCliente}
             prospeccao={prospeccao} prospeccaoCarregando={prospeccaoCarregando} atualizarProspeccao={atualizarProspeccao}
+            publicarProspeccaoDrive={publicarProspeccaoDrive}
             adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento}
             laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo}
             acessos={acessos} acessosCarregando={acessosCarregando} />
@@ -4654,8 +4662,20 @@ function AbaLaudosRealizados({ laudos = [], carregando, recarregar, assinatura, 
   );
 }
 
-function CardProspeccao({ prospeccao = [], carregando, atualizar, clientes = [], notify }) {
+function CardProspeccao({ prospeccao = [], carregando, atualizar, publicarNoDrive, clientes = [], notify }) {
   const [busca, setBusca] = useState("");
+  const [publicando, setPublicando] = useState(false);
+  const [linkPlanilha, setLinkPlanilha] = useState(null);
+
+  const publicar = async () => {
+    setPublicando(true);
+    try {
+      const r = await publicarNoDrive();
+      setLinkPlanilha(r.url || null);
+      notify(`Planilha atualizada no Drive com ${r.total} empreendimento(s) \u2713`);
+    } catch (e) { notify(`Não foi possível publicar: ${e.message}`); }
+    setPublicando(false);
+  };
   const [filtro, setFiltro] = useState("");
   const [abertoId, setAbertoId] = useState(null);
 
@@ -4681,6 +4701,26 @@ function CardProspeccao({ prospeccao = [], carregando, atualizar, clientes = [],
         Base do planejamento comercial. Clique num empreendimento para ver a situação da obra e
         ajustar a prioridade — as datas das construtoras mudam, então a carteira precisa acompanhar.
       </p>
+
+      {/* Ligação com o Drive: esta tela é a carteira de verdade; a planilha é uma cópia
+          publicada, para consultar no celular ou mandar para alguém. Por isso o botão
+          empurra daqui para lá, e nunca o contrário. */}
+      {publicarNoDrive && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", background: CINZA_CLARO, borderRadius: 10, padding: "10px 12px", marginBottom: 14 }}>
+          <span style={{ fontSize: 12.5, color: "#4a5a70", flex: 1, minWidth: 190 }}>
+            Publicar esta carteira na planilha do Drive (sempre o mesmo arquivo).
+          </span>
+          {linkPlanilha && (
+            <a href={linkPlanilha} target="_blank" rel="noopener noreferrer" className="btn-ghost"
+              style={{ color: AZUL_MARINHO, background: "#fff", textDecoration: "none" }}>
+              <ExternalLink size={14} /> Abrir planilha
+            </a>
+          )}
+          <button className="btn-solid" style={{ width: "auto", padding: "8px 14px" }} onClick={publicar} disabled={publicando}>
+            {publicando ? <Loader2 size={14} className="spin" /> : <Send size={14} />} Publicar no Drive
+          </button>
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12, alignItems: "center" }}>
         <button onClick={() => setFiltro("")} aria-pressed={!filtro}
@@ -5208,12 +5248,13 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, acessos, acessosCarregando }) {
+function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, acessos, acessosCarregando }) {
   if (sub === "parceiros") {
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} vales={vales} valesCarregando={valesCarregando} notify={notify} />;
   }
   if (sub === "prospeccao") {
     return <CardProspeccao prospeccao={prospeccao} carregando={prospeccaoCarregando} atualizar={atualizarProspeccao}
+      publicarNoDrive={publicarProspeccaoDrive}
       clientes={clientes} notify={notify} />;
   }
   if (sub === "financeiro") {
