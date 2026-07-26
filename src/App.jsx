@@ -573,6 +573,314 @@ function montarLaudoModelo(dados = {}, itens = []) {
   };
 }
 
+/* ---------- Indicadores do laudo (regras do modelo, ver modelo-laudo/AUTOMACAO.md) ----------
+   Nada aqui e digitado pelo tecnico: tudo sai dos itens. Funcao pura, para poder ser
+   conferida sem abrir a tela. */
+const PESO_SEVERIDADE = { alta: 3, media: 2, baixa: 1 };
+const REFERENCIA_ICC_PADRAO = 120;
+
+const FAIXAS_ICC = [
+  { min: 85, label: "Conforme", cor: "#2E7D32", bg: "#E6F4EA" },
+  { min: 70, label: "Conformidade parcial", cor: "#B26A00", bg: "#FFF4E0" },
+  { min: 50, label: "Requer reparos", cor: "#C25E00", bg: "#FFEDD9" },
+  { min: 0, label: "Crítico", cor: "#C62828", bg: "#FCEAEA" },
+];
+const ROTULO_SEVERIDADE = { alta: "Alta", media: "Média", baixa: "Baixa" };
+const ROTULO_STATUS = { pendente: "Pendente", corrigido: "Corrigido", reincidente: "Reincidente" };
+
+function calcularIndicadoresLaudo(laudo, referenciaIcc = REFERENCIA_ICC_PADRAO) {
+  const itens = laudo?.itens || [];
+  const porSeveridade = { alta: 0, media: 0, baixa: 0 };
+  const porAmbiente = {};
+  const porCategoria = {};
+  let corrigidos = 0;
+
+  itens.forEach((i) => {
+    if (porSeveridade[i.severidade] !== undefined) porSeveridade[i.severidade] += 1;
+    const amb = (i.ambiente || "").trim() || "(sem ambiente)";
+    const cat = (i.categoria || "").trim() || "(sem categoria)";
+    porAmbiente[amb] = (porAmbiente[amb] || 0) + 1;
+    porCategoria[cat] = (porCategoria[cat] || 0) + 1;
+    if (i.status === "corrigido") corrigidos += 1;
+  });
+
+  // So o que ainda nao foi corrigido pontua — e o que faz o indice subir na revistoria.
+  const pontos = itens.reduce((soma, i) => soma + (i.status === "corrigido" ? 0 : (PESO_SEVERIDADE[i.severidade] || 0)), 0);
+  const ref = Number(referenciaIcc) || REFERENCIA_ICC_PADRAO;
+  const icc = Math.max(0, Math.min(100, Math.round(100 - (pontos / ref) * 100)));
+  const faixa = FAIXAS_ICC.find((f) => icc >= f.min) || FAIXAS_ICC[FAIXAS_ICC.length - 1];
+  const ordenar = (obj) => Object.entries(obj).sort((a, b) => b[1] - a[1]);
+
+  return {
+    total: itens.length,
+    porSeveridade,
+    porAmbiente: ordenar(porAmbiente),
+    porCategoria: ordenar(porCategoria),
+    corrigidos,
+    pendentes: itens.length - corrigidos,
+    ambientesAfetados: Object.keys(porAmbiente).length,
+    ambientesVistoriados: Number(laudo?.ambientesVistoriados) || 0,
+    pontos,
+    icc,
+    faixa,
+  };
+}
+
+/* Paragrafo de abertura da conclusao, montado a partir dos numeros. */
+function textoConclusaoLaudo(ind) {
+  if (ind.total === 0) return "A vistoria não identificou não conformidades aparentes nos ambientes verificados.";
+  const partes = [];
+  if (ind.porSeveridade.alta) partes.push(`${ind.porSeveridade.alta} de severidade alta`);
+  if (ind.porSeveridade.media) partes.push(`${ind.porSeveridade.media} de severidade média`);
+  if (ind.porSeveridade.baixa) partes.push(`${ind.porSeveridade.baixa} de severidade baixa`);
+  const distribuicao = partes.length ? `, sendo ${partes.join(", ").replace(/, ([^,]*)$/, " e $1")}` : "";
+  const ambientes = ind.ambientesVistoriados
+    ? ` distribuídas em ${ind.ambientesAfetados} dos ${ind.ambientesVistoriados} ambientes vistoriados`
+    : ` distribuídas em ${ind.ambientesAfetados} ambiente(s)`;
+  const sanadas = ind.corrigidos
+    ? (ind.corrigidos === 1 ? " Até o momento, 1 já foi sanada." : ` Até o momento, ${ind.corrigidos} já foram sanadas.`)
+    : "";
+  return `A vistoria identificou ${ind.total} não conformidade(s)${distribuicao}${ambientes}.${sanadas}`;
+}
+
+/* ================= Laudo no modelo novo =================
+   Reconstruído dentro do sistema (em vez de usar o arquivo do modelo, que depende do
+   runtime de autoria). Mesma estrutura: capa, sumário com indicadores e ICC, gráficos,
+   quadro-resumo, fichas com duas fotos e conclusão. Impressão A4 pelo CSS de print. */
+
+function BarraProporcao({ rotulo, valor, total, cor }) {
+  const pct = total ? Math.round((valor / total) * 100) : 0;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+      <span style={{ fontSize: 10.5, color: "#4a5a70", width: 130, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rotulo}</span>
+      <div style={{ flex: 1, height: 9, background: "#EEF1F5", borderRadius: 5, overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", background: cor || AZUL_MEDIO, borderRadius: 5 }} />
+      </div>
+      <strong style={{ fontSize: 10.5, width: 22, textAlign: "right" }}>{valor}</strong>
+    </div>
+  );
+}
+
+function CartaoIndicador({ titulo, valor, apoio, cor }) {
+  return (
+    <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "10px 12px", flex: 1, minWidth: 110 }}>
+      <div style={{ fontSize: 9.5, color: "#8593a8", textTransform: "uppercase", letterSpacing: .4, marginBottom: 3 }}>{titulo}</div>
+      <div style={{ fontSize: 22, fontWeight: 800, color: cor || AZUL_MARINHO, lineHeight: 1 }}>{valor}</div>
+      {apoio && <div style={{ fontSize: 10, color: "#65758b", marginTop: 3 }}>{apoio}</div>}
+    </div>
+  );
+}
+
+function LaudoModelo({ laudo, assinatura }) {
+  const ind = calcularIndicadoresLaudo(laudo);
+  const itens = laudo.itens || [];
+  const corSeveridade = { alta: "#C62828", media: "#B26A00", baixa: "#2C75B5" };
+  const corStatus = { pendente: "#B26A00", corrigido: "#2E7D32", reincidente: "#C62828" };
+  const linha = { display: "flex", gap: 6, fontSize: 11.5, padding: "3px 0" };
+  const chave = { color: "#65758b", width: 120, flexShrink: 0 };
+
+  const Campo = ({ k, v }) => (v ? <div style={linha}><span style={chave}>{k}</span><strong style={{ fontWeight: 600 }}>{v}</strong></div> : null);
+
+  return (
+    <div className="laudo-modelo" style={{ background: "#fff", color: "#1a2330" }}>
+      {/* ---------- Capa ---------- */}
+      <section className="laudo-pagina">
+        <div style={{ display: "flex", alignItems: "center", gap: 12, borderBottom: `3px solid ${AZUL_MARINHO}`, paddingBottom: 12 }}>
+          <img src={LOGO_URL} alt="FN Edificações" style={{ height: 54 }} />
+          <div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: AZUL_MARINHO }}>FN Edificações</div>
+            <div style={{ fontSize: 11, color: "#65758b" }}>Engenharia diagnóstica e vistorias</div>
+          </div>
+          <div style={{ marginLeft: "auto", textAlign: "right", fontSize: 10.5, color: "#65758b" }}>
+            <div>Protocolo</div>
+            <strong style={{ fontFamily: "monospace", fontSize: 12, color: AZUL_MARINHO }}>{laudo.protocolo}</strong>
+          </div>
+        </div>
+
+        <h1 style={{ fontSize: 26, color: AZUL_MARINHO, margin: "26px 0 4px", letterSpacing: -.5 }}>Laudo Técnico de Vistoria</h1>
+        <div style={{ fontSize: 13, color: "#65758b", marginBottom: 22 }}>Vistoria de entrega de chaves</div>
+
+        <div style={{ background: CINZA_CLARO, borderRadius: 12, padding: 16, marginBottom: 18 }}>
+          <div style={{ fontSize: 20, fontWeight: 800, color: AZUL_MARINHO }}>{laudo.empreendimento || "—"}</div>
+          {laudo.unidade && <div style={{ fontSize: 13.5, color: "#4a5a70", marginTop: 2 }}>{laudo.unidade}</div>}
+        </div>
+
+        <Campo k="Proprietário" v={laudo.proprietario} />
+        <Campo k="CPF/CNPJ" v={laudo.cpf} />
+        <Campo k="Construtora" v={laudo.construtora} />
+        <Campo k="Endereço" v={laudo.endereco} />
+        <Campo k="Tipologia" v={laudo.tipologia} />
+        <Campo k="Área privativa" v={laudo.areaPrivativa} />
+        <Campo k="Data da vistoria" v={[laudo.dataVistoria, laudo.horaInicio && `das ${laudo.horaInicio}${laudo.horaFim ? ` às ${laudo.horaFim}` : ""}`].filter(Boolean).join(" · ")} />
+        <Campo k="Emissão" v={laudo.dataEmissao} />
+
+        <div style={{ marginTop: 26, paddingTop: 14, borderTop: `1px solid ${CINZA_BORDA}`, fontSize: 11.5 }}>
+          <div style={{ color: "#65758b", marginBottom: 3 }}>Responsável técnico</div>
+          <strong>{laudo.responsavel?.nome}</strong>
+          <div style={{ color: "#4a5a70" }}>{laudo.responsavel?.qualificacao}</div>
+          <div style={{ color: "#4a5a70" }}>{laudo.responsavel?.registro}</div>
+        </div>
+      </section>
+
+      {/* ---------- Sumário executivo ---------- */}
+      <section className="laudo-pagina">
+        <h2 style={{ fontSize: 15, color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_CLARO}`, paddingBottom: 7, marginBottom: 14 }}>Sumário executivo</h2>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 18 }}>
+          <CartaoIndicador titulo="Não conformidades" valor={ind.total} apoio={`${ind.pendentes} pendente(s)`} />
+          <CartaoIndicador titulo="Severidade alta" valor={ind.porSeveridade.alta} cor={corSeveridade.alta} />
+          <CartaoIndicador titulo="Severidade média" valor={ind.porSeveridade.media} cor={corSeveridade.media} />
+          <CartaoIndicador titulo="Severidade baixa" valor={ind.porSeveridade.baixa} cor={corSeveridade.baixa} />
+          <CartaoIndicador titulo="Ambientes afetados"
+            valor={ind.ambientesVistoriados ? `${ind.ambientesAfetados}/${ind.ambientesVistoriados}` : ind.ambientesAfetados}
+            apoio={ind.ambientesVistoriados ? "de vistoriados" : ""} />
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 16, background: ind.faixa.bg, borderRadius: 12, padding: "14px 16px", marginBottom: 20 }}>
+          <div style={{ textAlign: "center", minWidth: 92 }}>
+            <div style={{ fontSize: 34, fontWeight: 800, color: ind.faixa.cor, lineHeight: 1 }}>{ind.icc}</div>
+            <div style={{ fontSize: 9.5, color: ind.faixa.cor, letterSpacing: .4 }}>ÍNDICE</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 13.5, fontWeight: 800, color: ind.faixa.cor }}>{ind.faixa.label}</div>
+            <div style={{ fontSize: 11, color: "#4a5a70", marginTop: 3, maxWidth: 420 }}>
+              Índice de Conformidade Construtiva. Calculado pelo peso das não conformidades ainda não sanadas
+              (alta 3, média 2, baixa 1). Itens corrigidos deixam de pontuar e o índice sobe.
+            </div>
+          </div>
+        </div>
+
+        {ind.porAmbiente.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 7 }}>Por ambiente</div>
+            {ind.porAmbiente.map(([nome, qtd]) => <BarraProporcao key={nome} rotulo={nome} valor={qtd} total={ind.total} />)}
+          </div>
+        )}
+
+        {ind.porCategoria.length > 0 && (
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 7 }}>Por sistema construtivo</div>
+            {ind.porCategoria.map(([nome, qtd]) => <BarraProporcao key={nome} rotulo={nome} valor={qtd} total={ind.total} cor="#5B7C99" />)}
+          </div>
+        )}
+      </section>
+
+      {/* ---------- Quadro-resumo ---------- */}
+      {itens.length > 0 && (
+        <section className="laudo-pagina">
+          <h2 style={{ fontSize: 15, color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_CLARO}`, paddingBottom: 7, marginBottom: 12 }}>Quadro-resumo das não conformidades</h2>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5 }}>
+            <thead>
+              <tr style={{ background: CINZA_CLARO }}>
+                {["#", "Ambiente", "Sistema", "Constatação", "Severidade", "Situação"].map((h) => (
+                  <th key={h} style={{ textAlign: "left", padding: "6px 7px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}` }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {itens.map((i) => (
+                <tr key={i.n} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                  <td style={{ padding: "5px 7px", fontFamily: "monospace" }}>{i.n}</td>
+                  <td style={{ padding: "5px 7px" }}>{i.ambiente}</td>
+                  <td style={{ padding: "5px 7px" }}>{i.categoria}</td>
+                  <td style={{ padding: "5px 7px" }}>{i.titulo}</td>
+                  <td style={{ padding: "5px 7px", color: corSeveridade[i.severidade], fontWeight: 700 }}>{ROTULO_SEVERIDADE[i.severidade]}</td>
+                  <td style={{ padding: "5px 7px", color: corStatus[i.status], fontWeight: 600 }}>{ROTULO_STATUS[i.status]}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+
+      {/* ---------- Fichas ---------- */}
+      {itens.map((i) => (
+        <section key={i.n} className="laudo-ficha">
+          <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginBottom: 8 }}>
+            <span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 800, color: "#fff", background: AZUL_MARINHO, borderRadius: 6, padding: "2px 8px" }}>ITEM {i.n}</span>
+            <strong style={{ fontSize: 12.5, color: AZUL_MARINHO }}>{i.ambiente}</strong>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+              {i.categoria && <span style={{ fontSize: 9.5, border: `1px solid ${CINZA_BORDA}`, borderRadius: 20, padding: "2px 8px", color: "#4a5a70" }}>{i.categoria}</span>}
+              <span style={{ fontSize: 9.5, borderRadius: 20, padding: "2px 8px", color: "#fff", background: corSeveridade[i.severidade], fontWeight: 700 }}>{ROTULO_SEVERIDADE[i.severidade]}</span>
+              <span style={{ fontSize: 9.5, borderRadius: 20, padding: "2px 8px", color: "#fff", background: corStatus[i.status], fontWeight: 700 }}>{ROTULO_STATUS[i.status]}</span>
+            </div>
+          </div>
+
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 9 }}>{i.titulo}</div>
+
+          {(i.fotos || []).length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+              {(i.fotos || []).slice(0, 2).map((f, idx) => (
+                <figure key={idx} style={{ margin: 0 }}>
+                  <img src={f} alt={`Item ${i.n} — ${idx === 0 ? "visão geral" : "detalhe"}`}
+                    style={{ width: "100%", height: 170, objectFit: "cover", borderRadius: 8, border: `1px solid ${CINZA_BORDA}` }} />
+                  <figcaption style={{ fontSize: 9.5, color: "#8593a8", marginTop: 3 }}>{idx === 0 ? "Foto A — visão geral" : "Foto B — detalhe"}</figcaption>
+                </figure>
+              ))}
+            </div>
+          )}
+          {/* Fotos além das duas principais entram menores, para nenhuma se perder. */}
+          {(i.fotos || []).length > 2 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+              {(i.fotos || []).slice(2).map((f, idx) => (
+                <img key={idx} src={f} alt={`Item ${i.n} — complementar ${idx + 1}`}
+                  style={{ width: 104, height: 78, objectFit: "cover", borderRadius: 6, border: `1px solid ${CINZA_BORDA}` }} />
+              ))}
+            </div>
+          )}
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <div>
+              <div style={{ fontSize: 9.5, color: "#8593a8", textTransform: "uppercase", letterSpacing: .4, marginBottom: 2 }}>Descrição técnica</div>
+              <div style={{ fontSize: 11.5, lineHeight: 1.55 }}>{i.descricao}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 9.5, color: "#8593a8", textTransform: "uppercase", letterSpacing: .4, marginBottom: 2 }}>Recomendação</div>
+              <div style={{ fontSize: 11.5, lineHeight: 1.55 }}>{i.recomendacao}</div>
+            </div>
+          </div>
+
+          {i.norma && (
+            <div style={{ marginTop: 8, paddingTop: 7, borderTop: `1px solid ${CINZA_BORDA}`, fontSize: 10, color: "#65758b" }}>
+              Referência normativa · {i.norma}
+            </div>
+          )}
+        </section>
+      ))}
+
+      {/* ---------- Conclusão e assinaturas ---------- */}
+      <section className="laudo-pagina">
+        <h2 style={{ fontSize: 15, color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_CLARO}`, paddingBottom: 7, marginBottom: 12 }}>Conclusão</h2>
+        <p style={{ fontSize: 12, lineHeight: 1.65, textAlign: "justify" }}>{textoConclusaoLaudo(ind)}</p>
+        <p style={{ fontSize: 12, lineHeight: 1.65, textAlign: "justify" }}>
+          O índice de conformidade apurado é de <strong>{ind.icc}</strong>, classificado como <strong>{ind.faixa.label}</strong>.
+          Recomenda-se o encaminhamento das não conformidades à construtora para correção e posterior revistoria.
+        </p>
+
+        <div style={{ marginTop: 34, display: "flex", gap: 40, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 200, textAlign: "center" }}>
+            {assinatura?.imagem && <img src={assinatura.imagem} alt="" style={{ height: 52, marginBottom: 4 }} />}
+            <div style={{ borderTop: `1px solid ${AZUL_MARINHO}`, paddingTop: 5, fontSize: 11.5 }}>
+              <strong>{laudo.responsavel?.nome}</strong>
+              <div style={{ color: "#65758b", fontSize: 10.5 }}>{laudo.responsavel?.registro}</div>
+            </div>
+          </div>
+          <div style={{ flex: 1, minWidth: 200, textAlign: "center", alignSelf: "flex-end" }}>
+            <div style={{ borderTop: `1px solid ${AZUL_MARINHO}`, paddingTop: 5, fontSize: 11.5 }}>
+              <strong>{laudo.proprietario}</strong>
+              <div style={{ color: "#65758b", fontSize: 10.5 }}>Proprietário(a)</div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 30, fontSize: 10, color: "#8593a8", textAlign: "center" }}>
+          {laudo.local}{laudo.local && laudo.dataEmissao ? ", " : ""}{laudo.dataEmissao} · Protocolo {laudo.protocolo}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 /* ================= Componente principal ================= */
 /* ================= Login da equipe ================= */
 function TelaLogin({ onLogin, onVoltar }) {
@@ -1254,7 +1562,7 @@ function AppInterno({ session, onLogout }) {
             fotoCliente={dados.fotoCliente} setFotoCliente={setFotoCliente} notify={notify} setAba={setAba}
             bloqueado={laudoBloqueado} onPedirDesbloqueio={() => setConfirmandoDesbloqueio(true)} />
         )}
-        {abaTop === "laudos" && aba === "laudo" && <Laudo dados={dados} itens={itens} contagem={contagem} totalItens={totalItens} assinatura={assinatura} />}
+        {abaTop === "laudos" && aba === "laudo" && <LaudoModelo laudo={montarLaudoModelo(dados, itens)} assinatura={assinatura} />}
         {abaTop === "laudos" && aba === "agenda" && perfil === "vistoriador" && (
           <CalendarioVistoriador agenda={agendaVistoriador} carregando={agendaVistoriadorCarregando} clientes={clientes} preencherComCliente={preencherComCliente} />
         )}
@@ -2972,107 +3280,6 @@ function GraficoPatologias({ contagem, totalItens }) {
   );
 }
 
-function Laudo({ dados, itens, contagem, totalItens, assinatura }) {
-  const validos = itens.filter((i) => i.tipo || i.descricao);
-  const fmtData = (d) => { if (!d) return "___/___/______"; const [a, m, dia] = d.split("-"); return `${dia}/${m}/${a}`; };
-
-  return (
-    <div className="laudo-print" style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 14, overflow: "hidden" }}>
-      {/* Capa */}
-      <div style={{ background: `linear-gradient(135deg, ${AZUL_MARINHO}, ${AZUL_MEDIO})`, color: "#fff", padding: "46px 40px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 34 }}>
-          <div style={{ width: 46, height: 46, borderRadius: 10, background: "rgba(255,255,255,.15)", display: "grid", placeItems: "center", fontWeight: 800 }}>FN</div>
-          <div style={{ fontWeight: 700, letterSpacing: 1 }}>FN EDIFICAÇÕES</div>
-        </div>
-        <div style={{ fontSize: 13, opacity: 0.8, letterSpacing: 2 }}>ENGENHARIA DIAGNÓSTICA</div>
-        <h1 style={{ fontSize: 30, margin: "8px 0 6px", fontWeight: 800 }}>Laudo Técnico de Vistoria Imobiliária</h1>
-        <div style={{ opacity: 0.9 }}>{dados.imovel.empreendimento || "Empreendimento"} {dados.imovel.unidade && `· ${dados.imovel.unidade}`}</div>
-        <div style={{ marginTop: 26, fontSize: 13, opacity: 0.85 }}>{dados.contratante.nome || "Proprietário(a)"}</div>
-      </div>
-
-      <div style={{ padding: "30px 40px" }}>
-        <SecTitulo n="1">Dados preliminares</SecTitulo>
-        <TabelaDados rows={[
-          ["Proprietário(a)", dados.contratante.nome], ["CPF/CNPJ", dados.contratante.cpf],
-          ["Construtora", dados.imovel.construtora], ["Empreendimento", dados.imovel.empreendimento],
-          ["Endereço", dados.imovel.endereco], ["Unidade", dados.imovel.unidade],
-        ]} />
-        {dados.imovel.descricao && <p style={pTexto}>{dados.imovel.descricao}</p>}
-        <TabelaDados rows={[
-          ["Responsável Técnico", dados.rt.nome], ["Qualificação", dados.rt.qualificacao], ["Registro", dados.rt.registro],
-        ]} />
-
-        <SecTitulo n="2">Objetivo</SecTitulo>
-        <p style={pTexto}>{dados.textos.objetivo}</p>
-
-        <SecTitulo n="3">Referências técnicas</SecTitulo>
-        <p style={pTexto}>{dados.textos.referencias}</p>
-
-        <SecTitulo n="4">Metodologia</SecTitulo>
-        <p style={pTexto}>{dados.textos.metodologia}</p>
-
-        <SecTitulo n="5">Relato da vistoria</SecTitulo>
-        <p style={pTexto}>
-          A vistoria foi realizada no dia {fmtData(dados.vistoria.data)}
-          {dados.vistoria.inicio && `, com início às ${dados.vistoria.inicio}`}
-          {dados.vistoria.termino && ` e término às ${dados.vistoria.termino}`}.
-          {dados.vistoria.presentes && ` Estiveram presentes: ${dados.vistoria.presentes}.`} A vistoria ocorreu sem intercorrências.
-        </p>
-
-        <SecTitulo n="6">Registro fotográfico e não conformidades</SecTitulo>
-        <GraficoPatologias contagem={contagem} totalItens={totalItens} />
-        <div style={{ display: "flex", gap: 8, margin: "4px 0 18px", flexWrap: "wrap" }}>
-          {["Alta", "Média", "Baixa"].map((s) => contagem[s] > 0 && (
-            <span key={s} style={{ background: sevMeta[s].bg, color: sevMeta[s].cor, padding: "4px 11px", borderRadius: 20, fontSize: 12, fontWeight: 600 }}>{contagem[s]} de severidade {s.toLowerCase()}</span>
-          ))}
-        </div>
-
-        {validos.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum item cadastrado. Adicione itens na aba "Vistoria".</p>}
-        {validos.map((item, i) => <ItemLaudo key={item.id} item={item} num={i + 1} />)}
-
-        <SecTitulo n="7">Conclusão</SecTitulo>
-        <p style={pTexto}>
-          Durante a vistoria técnica {totalItens > 0 ? `foram constatadas ${totalItens} não conformidade(s)` : "não foram constatadas não conformidades"}, abrangendo falhas de acabamento, execução e/ou instalação de componentes construtivos. As inconformidades apontadas figuram sob a responsabilidade da construtora, para saná-las de imediato. Ressalta-se que o presente laudo não exime a construtora da responsabilidade por eventuais vícios ocultos que venham a se manifestar com o uso da unidade.
-        </p>
-
-        <SecTitulo n="8">Encerramento</SecTitulo>
-        <p style={pTexto}>{dados.textos.encerramento}</p>
-
-        <div style={{ marginTop: 40, paddingTop: 26, borderTop: `2px solid ${AZUL_MEDIO}`, textAlign: "center" }}>
-          <div style={{ fontSize: 13, color: "#65758b" }}>{dados.vistoria.cidade}{dados.vistoria.data && `, ${fmtData(dados.vistoria.data)}`}.</div>
-          <div style={{ marginTop: 34, fontWeight: 700 }}>{dados.rt.nome}</div>
-          <div style={{ fontSize: 13, color: "#65758b" }}>{dados.rt.qualificacao} · {dados.rt.registro}</div>
-
-          {assinatura && (
-            <div style={{ marginTop: 30, display: "inline-block" }}>
-              <div style={{ background: "#fff", padding: "8px 14px", borderRadius: 8, display: "inline-block" }}>
-                <img src={assinatura.imagem} alt="Assinatura da Gerência" style={{ maxHeight: 64, maxWidth: 220, display: "block", margin: "0 auto" }} />
-              </div>
-              <div style={{ borderTop: `1px solid ${CINZA_BORDA}`, marginTop: 6, paddingTop: 6, fontWeight: 700, fontSize: 13 }}>{assinatura.nome}</div>
-              <div style={{ fontSize: 11.5, color: "#8593a8" }}>Aprovação da Gerência · FN Edificações</div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Última página: foto com o cliente + agradecimento (mesma ordem do PDF final: foto primeiro, legenda abaixo) */}
-      {dados.fotoCliente && (
-        <div style={{ breakBefore: "page" }}>
-          <div style={{ background: `linear-gradient(135deg, ${AZUL_MARINHO}, ${AZUL_MEDIO})`, color: "#fff", padding: "26px 40px", textAlign: "center" }}>
-            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>Agradecemos a confiança</h2>
-          </div>
-          <div style={{ padding: "34px 40px", textAlign: "center" }}>
-            <img src={dados.fotoCliente} alt="Foto com o cliente" style={{ maxWidth: 380, width: "100%", borderRadius: 12, border: `1px solid ${CINZA_BORDA}` }} />
-            <p style={{ ...pTexto, maxWidth: 480, margin: "20px auto 0" }}>
-              A FN Edificações agradece a confiança depositada em nosso trabalho. Foi um prazer acompanhar você nesta etapa tão importante da aquisição do seu imóvel.
-            </p>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function ItemLaudo({ item, num }) {
   const m = sevMeta[item.severidade];
   return (
@@ -3578,7 +3785,8 @@ function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, a
               <strong>Pré-visualização do laudo</strong>
               <button className="icon-btn" onClick={() => setPreviewId(null)}><X size={16} /></button>
             </div>
-            <Laudo dados={laudoPreview.dados} itens={laudoPreview.itens || []} contagem={contagemPreview} totalItens={(laudoPreview.itens || []).length} assinatura={assinatura} />
+            {/* Mesma peça que o cliente recebe — a gerência aprova vendo o resultado final. */}
+            <LaudoModelo laudo={montarLaudoModelo(laudoPreview.dados, laudoPreview.itens || [])} assinatura={assinatura} />
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
               <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setPreviewId(null)}>Fechar</button>
               <button className="btn-solid" onClick={() => aprovar(laudoPreview.doc_id)} disabled={aprovandoId === laudoPreview.doc_id}>
@@ -5353,11 +5561,6 @@ function Field({ label, value, onChange, type = "text", full, disabled, placehol
 function Area({ label, value, onChange, rows = 3, placeholder }) {
   return (<div style={{ ...cell(true), marginTop: 12 }}><label style={lab}>{label}</label><textarea rows={rows} style={{ ...inp, resize: "vertical", lineHeight: 1.5 }} value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} /></div>);
 }
-function SecTitulo({ n, children }) {
-  return (<h2 style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 16, color: AZUL_MARINHO, margin: "26px 0 12px", paddingBottom: 8, borderBottom: `2px solid ${CINZA_CLARO}` }}>
-    <span style={{ fontFamily: "monospace", background: AZUL_MEDIO, color: "#fff", width: 24, height: 24, borderRadius: 6, display: "grid", placeItems: "center", fontSize: 13 }}>{n}</span>{children}</h2>);
-}
-const pTexto = { fontSize: 14, lineHeight: 1.65, color: "#2b3648", textAlign: "justify", margin: "0 0 12px" };
 function TabelaDados({ rows }) {
   return (<table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 14, fontSize: 13.5 }}><tbody>
     {rows.filter(([, v]) => v).map(([k, v]) => (
@@ -5390,6 +5593,17 @@ const estilos = `
   .foto-x { position:absolute; top:3px; right:3px; background:rgba(198,40,40,.92); color:#fff; border:none; border-radius:50%; width:20px; height:20px; display:grid; place-items:center; cursor:pointer; }
   select, input, textarea { font-family:inherit; }
   input:focus, textarea:focus, select:focus { border-color:${AZUL_MEDIO}; }
+  /* Laudo no modelo novo: cada seção é uma página A4 na impressão. */
+  .laudo-modelo { max-width: 820px; margin: 0 auto; }
+  .laudo-pagina, .laudo-ficha { background: #fff; border: 1px solid ${CINZA_BORDA}; border-radius: 12px; padding: 30px 34px; margin-bottom: 16px; }
+  @media print {
+    @page { size: A4; margin: 12mm; }
+    .laudo-modelo { max-width: none; }
+    .laudo-pagina { break-after: page; page-break-after: always; }
+    .laudo-pagina, .laudo-ficha { border: none; border-radius: 0; padding: 0 0 10px; margin: 0; box-shadow: none; }
+    .laudo-ficha { break-inside: avoid; page-break-inside: avoid; }
+    .laudo-modelo img { max-width: 100%; }
+  }
   .dia-cel:focus-visible, .chip-tecnico:focus-visible { outline: 2.5px solid ${AZUL_MARINHO}; outline-offset: 2px; }
   .painel-lateral { animation: entra-painel .18s ease-out; }
   @keyframes entra-painel { from { transform: translateX(24px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
