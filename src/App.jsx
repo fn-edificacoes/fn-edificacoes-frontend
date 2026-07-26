@@ -1036,16 +1036,22 @@ function SinoNotificacoes({ itens = [], onIr }) {
 
   return (
     <div style={{ position: "relative" }}>
-      <button className="btn-ghost" onClick={() => setAberto((v) => !v)}
+      <button className={`btn-ghost${urgentes ? " sino-alerta" : ""}`} onClick={() => setAberto((v) => !v)}
         title={itens.length ? `${itens.length} aviso(s)` : "Nada pendente"}
         aria-label={`Notificações: ${itens.length} aviso(s)`}
-        style={{ position: "relative", padding: "6px 10px" }}>
-        <Bell size={15} />
+        style={{
+          position: "relative", padding: "6px 10px",
+          // O cabeçalho é azul-escuro; sem forçar o branco, o ícone herda preto e some.
+          color: "#fff",
+          background: itens.length ? "rgba(255,255,255,.16)" : "transparent",
+        }}>
+        <Bell size={16} />
         {itens.length > 0 && (
           <span style={{
-            position: "absolute", top: 1, right: 2, minWidth: 16, height: 16, padding: "0 4px",
-            borderRadius: 10, background: urgentes ? "#C62828" : AZUL_MEDIO, color: "#fff",
-            fontSize: 10, fontWeight: 800, display: "grid", placeItems: "center", lineHeight: 1,
+            position: "absolute", top: -3, right: -3, minWidth: 18, height: 18, padding: "0 4px",
+            borderRadius: 10, background: urgentes ? "#E53935" : AZUL_MEDIO, color: "#fff",
+            fontSize: 10.5, fontWeight: 800, display: "grid", placeItems: "center", lineHeight: 1,
+            border: `2px solid ${AZUL_MARINHO}`, boxShadow: "0 1px 4px rgba(0,0,0,.3)",
           }}>
             {itens.length}
           </span>
@@ -6321,11 +6327,18 @@ const estilos = `
     .laudo-modelo img { max-width: 100%; }
   }
   .dia-cel:focus-visible, .chip-tecnico:focus-visible { outline: 2.5px solid ${AZUL_MARINHO}; outline-offset: 2px; }
+  /* Sino com pendência urgente pulsa de leve, para ser notado sem incomodar. */
+  .sino-alerta { animation: pulsa-sino 2s ease-in-out infinite; }
+  @keyframes pulsa-sino {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(229, 57, 53, .55); }
+    50%      { box-shadow: 0 0 0 7px rgba(229, 57, 53, 0); }
+  }
   .painel-lateral { animation: entra-painel .18s ease-out; }
   @keyframes entra-painel { from { transform: translateX(24px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
   @media (prefers-reduced-motion: reduce) {
     .painel-lateral { animation: none !important; }
     .spin { animation: none !important; }
+    .sino-alerta { animation: none !important; }
   }
   @media print {
     .no-print { display:none !important; }
