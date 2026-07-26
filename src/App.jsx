@@ -4755,6 +4755,7 @@ function AbaCliente({ notify }) {
   const [refTipologias, setRefTipologias] = useState([]);
   const [tipologiaSel, setTipologiaSel] = useState("");
   const [buscandoCep, setBuscandoCep] = useState(false);
+  const [avisoEmail, setAvisoEmail] = useState(null); // { mensagem, sugestao } ou null
   const [construtoraSel, setConstrutoraSel] = useState("");
   const [empreendimentoSel, setEmpreendimentoSel] = useState("");
   const [construtoraOutros, setConstrutoraOutros] = useState("");
@@ -4885,10 +4886,39 @@ function AbaCliente({ notify }) {
           <div style={cell(true)}>
             <label style={lab}>E-mail</label>
             <input list="sugestoes-email" style={inp} type="email" placeholder="seunome@gmail.com"
-              value={form.email} onChange={(e) => setF("email", e.target.value)} />
+              value={form.email}
+              onChange={(e) => { setF("email", e.target.value); setAvisoEmail(null); }}
+              onBlur={async (e) => {
+                // Confere só ao sair do campo, para não incomodar enquanto digita.
+                const valor = e.target.value.trim();
+                if (!valor) { setAvisoEmail(null); return; }
+                try {
+                  const r = await apiFetch("/api/verificar-email", { method: "POST", body: { email: valor } });
+                  setAvisoEmail(r.valido && !r.sugestao ? null : { mensagem: r.mensagem, sugestao: r.sugestao });
+                } catch { setAvisoEmail(null); } // verificação fora do ar não atrapalha o cadastro
+              }} />
             <datalist id="sugestoes-email">
               {sugestoesEmail(form.email).map((s) => <option key={s} value={s} />)}
             </datalist>
+            {avisoEmail && (
+              <span style={{ fontSize: 11.5, color: "#B26A00" }}>
+                {avisoEmail.mensagem}
+                {avisoEmail.sugestao && (
+                  <>
+                    {avisoEmail.mensagem ? " " : ""}Você quis dizer{" "}
+                    <button type="button"
+                      onClick={() => {
+                        const usuario = (form.email.split("@")[0] || "").trim();
+                        setF("email", `${usuario}@${avisoEmail.sugestao}`);
+                        setAvisoEmail(null);
+                      }}
+                      style={{ background: "none", border: "none", padding: 0, color: AZUL_MEDIO, fontWeight: 700, cursor: "pointer", fontSize: 11.5, textDecoration: "underline" }}>
+                      @{avisoEmail.sugestao}
+                    </button>?
+                  </>
+                )}
+              </span>
+            )}
           </div>
           <div style={cell(false)}>
             <label style={lab}>Construtora</label>
