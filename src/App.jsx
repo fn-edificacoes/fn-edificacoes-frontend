@@ -1664,6 +1664,12 @@ function AppInterno({ session, onLogout }) {
     }
   };
 
+  /* Cliente cancelado sai das telas de trabalho: ele não é mais atendimento, e ficar
+     no meio dos ativos faz a equipe contar errado e clicar no lugar errado. A Gerência
+     continua vendo o histórico completo (ela recebe `clientes` inteiro), porque é ela
+     quem decide cancelamento e precisa poder conferir depois. */
+  const clientesAtivos = clientes.filter((c) => c.status !== "Cancelado");
+
   /* ---- Laudos que o técnico já realizou, com o retorno do cliente ---- */
   const [meusLaudos, setMeusLaudos] = useState([]);
   const [meusLaudosCarregando, setMeusLaudosCarregando] = useState(false);
@@ -1951,7 +1957,7 @@ function AppInterno({ session, onLogout }) {
               <div style={{ opacity: 0.7 }}>{PERFIL_LABEL[perfil] || perfil}</div>
             </div>
             <SinoNotificacoes
-              itens={calcularNotificacoes({ perfil, clientes, laudosPendentes, avaliacoes, documentosArt, agendaVistoriador })}
+              itens={calcularNotificacoes({ perfil, clientes: clientesAtivos, laudosPendentes, avaliacoes, documentosArt, agendaVistoriador })}
               onIr={({ aba, sub }) => {
                 if (aba) setAbaTop(aba);
                 if (sub && aba === "qualidade") setAbaQualidade(sub);
@@ -2038,8 +2044,8 @@ function AppInterno({ session, onLogout }) {
       </header>
 
       <main style={{ maxWidth: 1080, margin: "0 auto", padding: "22px 18px 80px" }}>
-        {abaTop === "laudos" && <NotificacoesClientes clientes={clientes} preencherComCliente={preencherComCliente} style={{ marginBottom: 18 }} />}
-        {abaTop === "documentacao" && <FaixaIndicadoresGerais docs={docs} clientes={clientes} modo="art" style={{ marginBottom: 18 }} />}
+        {abaTop === "laudos" && <NotificacoesClientes clientes={clientesAtivos} preencherComCliente={preencherComCliente} style={{ marginBottom: 18 }} />}
+        {abaTop === "documentacao" && <FaixaIndicadoresGerais docs={docs} clientes={clientesAtivos} modo="art" style={{ marginBottom: 18 }} />}
 
         {abaTop === "laudos" && aba === "itens" && (
           <AbaItens itens={itens} setItens={setItens} updItem={updItem} escolherPatologia={escolherPatologia}
@@ -2053,20 +2059,20 @@ function AppInterno({ session, onLogout }) {
             recarregar={carregarMeusLaudos} assinatura={assinatura} ehGerencia={perfil === "gerencia"} />
         )}
         {abaTop === "laudos" && aba === "agenda" && perfil === "vistoriador" && (
-          <CalendarioVistoriador agenda={agendaVistoriador} carregando={agendaVistoriadorCarregando} clientes={clientes} preencherComCliente={preencherComCliente} />
+          <CalendarioVistoriador agenda={agendaVistoriador} carregando={agendaVistoriadorCarregando} clientes={clientesAtivos} preencherComCliente={preencherComCliente} />
         )}
 
         {abaTop === "documentacao" && (
-          <AbaDocumentacao docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={docsCarregando} notify={notify} clientes={clientes} updCliente={updCliente} perfil={perfil}
+          <AbaDocumentacao docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={docsCarregando} notify={notify} clientes={clientesAtivos} updCliente={updCliente} perfil={perfil}
             documentosArt={documentosArt} enviarDocumentoArt={enviarDocumentoArt} excluirDocumentoArt={excluirDocumentoArt} precos={precos} />
         )}
         {abaTop === "clientes" && (
-          <AbaClientesComercial clientes={clientes} carregando={clientesCarregando} atualizarCliente={updCliente} excluirCliente={delCliente} notify={notify} docs={docs} perfil={perfil} />
+          <AbaClientesComercial clientes={clientesAtivos} carregando={clientesCarregando} atualizarCliente={updCliente} excluirCliente={delCliente} notify={notify} docs={docs} perfil={perfil} />
         )}
         {abaTop === "qualidade" && (
           <AbaQualidade sub={abaQualidade} setSub={setAbaQualidade} avaliacoes={avaliacoes} carregando={avaliacoesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
             solicitarExclusaoAvaliacao={solicitarExclusaoAvaliacao} manterAvaliacao={manterAvaliacao} excluirAvaliacao={excluirAvaliacao}
-            clientes={clientes} clientesCarregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} preencherComCliente={preencherComCliente}
+            clientes={clientesAtivos} clientesCarregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} preencherComCliente={preencherComCliente}
             agendarAgoraId={agendarAgoraId} setAgendarAgoraId={setAgendarAgoraId}
             podeAgir={perfil === "atendimento" || perfil === "gerencia"} ehGerencia={perfil === "gerencia"} />
         )}
