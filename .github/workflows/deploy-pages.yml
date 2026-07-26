@@ -36,8 +36,6 @@ jobs:
 
       - name: Gerar o site
         run: npm run build
-        env:
-          GITHUB_PAGES: "true" # faz o Vite usar o caminho /fn-edificacoes-frontend/
 
       # O Pages não conhece as rotas do app; sem isso, recarregar numa URL interna dá 404.
       - name: Tratar recarregamento de página

@@ -1,11 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-/* O GitHub Pages serve o site numa subpasta (/fn-edificacoes-frontend/), então os caminhos
-   dos arquivos precisam levar esse prefixo. Netlify e Vercel servem na raiz do domínio.
-   A variável GITHUB_PAGES só é ligada pelo workflow do Pages, então os outros deploys
-   continuam funcionando exatamente como antes. */
+/* O site é servido na raiz do domínio próprio (sistema.fnedificacoes.com.br), então não
+   leva prefixo de subpasta. O arquivo public/CNAME é o que diz ao GitHub Pages qual
+   domínio atender. */
 export default defineConfig({
   plugins: [react()],
-  base: process.env.GITHUB_PAGES ? "/fn-edificacoes-frontend/" : "/",
 });
