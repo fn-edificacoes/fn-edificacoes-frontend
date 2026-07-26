@@ -4715,6 +4715,8 @@ function AbaCliente({ notify }) {
   const [resultados, setResultados] = useState([]);
 
   const [refEmpreendimentos, setRefEmpreendimentos] = useState([]);
+  const [refTipologias, setRefTipologias] = useState([]);
+  const [tipologiaSel, setTipologiaSel] = useState("");
   const [construtoraSel, setConstrutoraSel] = useState("");
   const [empreendimentoSel, setEmpreendimentoSel] = useState("");
   const [construtoraOutros, setConstrutoraOutros] = useState("");
@@ -4724,6 +4726,11 @@ function AbaCliente({ notify }) {
       try {
         const r = await apiFetch("/api/empreendimentos-ref");
         setRefEmpreendimentos(r.empreendimentos || []);
+        // Tipologias do empreendimento: é o que faz a área privativa vir sozinha.
+        try {
+          const t = await apiFetch("/api/tipologias-ref");
+          setRefTipologias(t.tipologias || []);
+        } catch { /* sem tipologias, o campo de área continua manual */ }
       } catch { /* dropdown vira "Outros" direto se a lista não carregar */ }
     })();
   }, []);
@@ -4731,6 +4738,27 @@ function AbaCliente({ notify }) {
   const empreendimentosDisponiveis = [...new Set(
     refEmpreendimentos.filter((e) => e.construtora === construtoraSel).map((e) => e.empreendimento)
   )].sort();
+  const tipologiasDoEmpreendimento = refTipologias.filter((t) => t.empreendimento === empreendimentoSel);
+  const refDoEmpreendimento = refEmpreendimentos.find((e) => e.empreendimento === empreendimentoSel);
+
+  /* Escolher a tipologia preenche a área; trocar de empreendimento limpa a escolha e
+     traz endereço/CEP quando a base tiver. O cliente pode corrigir tudo depois. */
+  const escolherEmpreendimento = (nome) => {
+    setEmpreendimentoSel(nome);
+    setTipologiaSel("");
+    const ref = refEmpreendimentos.find((e) => e.empreendimento === nome);
+    setForm((f) => ({
+      ...f,
+      areaPrivativa: "",
+      endereco: ref?.endereco ? String(ref.endereco).toUpperCase() : f.endereco,
+      cep: ref?.cep ? String(ref.cep).replace(/\D/g, "").slice(0, 8) : f.cep,
+    }));
+  };
+  const escolherTipologia = (nome) => {
+    setTipologiaSel(nome);
+    const t = tipologiasDoEmpreendimento.find((x) => x.tipologia === nome);
+    if (t) setForm((f) => ({ ...f, areaPrivativa: t.areaPrivativa || f.areaPrivativa }));
+  };
 
   const setF = (campo, v) => setForm((f) => ({ ...f, [campo]: v }));
   const setFMaiusc = (campo, v) => setForm((f) => ({ ...f, [campo]: v.toUpperCase() }));
@@ -4826,7 +4854,7 @@ function AbaCliente({ notify }) {
           </div>
           <div style={cell(false)}>
             <label style={lab}>Empreendimento</label>
-            <select style={inp} value={empreendimentoSel} onChange={(e) => setEmpreendimentoSel(e.target.value)} disabled={!construtoraSel}>
+            <select style={inp} value={empreendimentoSel} onChange={(e) => escolherEmpreendimento(e.target.value)} disabled={!construtoraSel}>
               <option value="">{construtoraSel ? "selecionar…" : "escolha a construtora primeiro"}</option>
               {empreendimentosDisponiveis.map((e) => <option key={e} value={e}>{e}</option>)}
               <option value={OUTROS}>Outros (não está na lista)</option>
@@ -4835,6 +4863,19 @@ function AbaCliente({ notify }) {
               <input style={{ ...inp, marginTop: 6 }} placeholder="Digite o nome do empreendimento" value={empreendimentoOutros} onChange={(e) => setEmpreendimentoOutros(e.target.value)} />
             )}
           </div>
+          {/* Só aparece quando conhecemos as tipologias do empreendimento escolhido. */}
+          {tipologiasDoEmpreendimento.length > 0 && (
+            <div style={cell(false)}>
+              <label style={lab}>Tipologia do seu imóvel</label>
+              <select style={inp} value={tipologiaSel} onChange={(e) => escolherTipologia(e.target.value)}>
+                <option value="">selecionar…</option>
+                {[...new Set(tipologiasDoEmpreendimento.map((t) => t.tipologia).filter(Boolean))].map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+              <span style={{ fontSize: 11.5, color: "#8593a8" }}>Preenche a área privativa automaticamente.</span>
+            </div>
+          )}
           <Field label="Endereço completo" value={form.endereco} onChange={(v) => setFMaiusc("endereco", v)} full />
           <Field label="CEP" value={form.cep} onChange={(v) => setF("cep", v.replace(/\D/g, "").slice(0, 8))} />
           <Field label="Bloco / Apto" value={form.blocoTorre} onChange={(v) => setFMaiusc("blocoTorre", v)} />
