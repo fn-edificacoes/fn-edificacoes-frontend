@@ -4361,87 +4361,107 @@ function CardPrecoEmpreendimento({ precos, carregando, salvarPreco, empreendimen
     </Card>
   );
 }
-/* Receita estimada por empreendimento, somando os dois serviços: vistorias já atendidas
-   (preço de vistoria) e documentações ART/TRT concluídas (preço de documentação). */
+/* Receita cruzando empreendimento x tipo de serviço: uma linha por combinação, com o valor
+   unitário ao lado, o total da linha e o total geral no rodapé. Conta só o que foi
+   efetivamente entregue — vistoria atendida e documentação concluída. */
 function CardReceitaEstimada({ precos, clientes }) {
   const precoPorNome = {};
   precos.forEach((p) => { precoPorNome[p.empreendimento] = p; });
 
-  const porEmpreendimento = {};
-  const registrar = (c, campo, campoQtd) => {
-    const k = c.empreendimento?.trim() || "(sem empreendimento)";
-    if (!porEmpreendimento[k]) porEmpreendimento[k] = { vistorias: 0, documentacoes: 0, receita: 0, recebido: 0, faltaPreco: false };
-    porEmpreendimento[k][campoQtd] += 1;
-    const valor = Number(precoPorNome[k]?.[campo]) || 0;
-    if (valor > 0) {
-      porEmpreendimento[k].receita += valor;
-      // "Parcial" não tem valor parcial cadastrado, então só "Pago" entra como recebido.
-      if (c.pagamento === "Pago") porEmpreendimento[k].recebido += valor;
-    } else {
-      porEmpreendimento[k].faltaPreco = true;
-    }
+  const SERVICOS = [
+    { chave: "vistoria", rotulo: "Vistoria de entrega de chaves", campoPreco: "precoVistoria" },
+    { chave: "documentacao", rotulo: SERVICO_DOCUMENTACAO, campoPreco: "precoDocumentacao" },
+  ];
+
+  // chave "empreendimento||servico" -> { qtd, recebidos }
+  const cruzamento = {};
+  const registrar = (c, servico) => {
+    const emp = c.empreendimento?.trim() || "(sem empreendimento)";
+    const k = `${emp}||${servico}`;
+    if (!cruzamento[k]) cruzamento[k] = { empreendimento: emp, servico, qtd: 0, qtdPagos: 0 };
+    cruzamento[k].qtd += 1;
+    if (c.pagamento === "Pago") cruzamento[k].qtdPagos += 1;
   };
 
   clientes.forEach((c) => {
     if (c.status === "Cancelado") return;
     if (ehServicoDocumentacao(c)) {
-      // Só conta depois que a documentação foi entregue.
-      if (c.status === STATUS_DOC_CONCLUIDA) registrar(c, "precoDocumentacao", "documentacoes");
+      if (c.status === STATUS_DOC_CONCLUIDA) registrar(c, "documentacao");
     } else if (c.servico === SERVICO_VISTORIA && c.atendido) {
-      registrar(c, "precoVistoria", "vistorias");
+      registrar(c, "vistoria");
     }
   });
 
-  const linhas = Object.entries(porEmpreendimento).sort((a, b) => b[1].receita - a[1].receita);
-  const totalReceita = linhas.reduce((s, [, v]) => s + v.receita, 0);
-  const totalRecebido = linhas.reduce((s, [, v]) => s + v.recebido, 0);
-  const totalVistorias = linhas.reduce((s, [, v]) => s + v.vistorias, 0);
-  const totalDocs = linhas.reduce((s, [, v]) => s + v.documentacoes, 0);
-  const semPreco = linhas.filter(([, v]) => v.faltaPreco);
+  const linhas = Object.values(cruzamento)
+    .map((l) => {
+      const def = SERVICOS.find((s) => s.chave === l.servico);
+      const unitario = Number(precoPorNome[l.empreendimento]?.[def.campoPreco]) || 0;
+      return { ...l, rotulo: def.rotulo, unitario, total: unitario * l.qtd, recebido: unitario * l.qtdPagos };
+    })
+    .sort((a, b) => b.total - a.total || a.empreendimento.localeCompare(b.empreendimento, "pt-BR"));
+
+  const totalGeral = linhas.reduce((s, l) => s + l.total, 0);
+  const totalRecebido = linhas.reduce((s, l) => s + l.recebido, 0);
+  const totalServicos = linhas.reduce((s, l) => s + l.qtd, 0);
+  const semPreco = linhas.filter((l) => l.unitario === 0);
+
+  const num = { textAlign: "right", whiteSpace: "nowrap" };
 
   return (
-    <Card icon={TrendingUp} titulo="Receita estimada por empreendimento">
+    <Card icon={TrendingUp} titulo="Receita por empreendimento e serviço">
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-        Calculada automaticamente com os preços fixados acima: vistorias já atendidas × preço de vistoria,
-        mais documentações ART/TRT já concluídas × preço de documentação.
+        Uma linha por empreendimento e tipo de serviço, com o valor unitário cadastrado acima.
+        Entram só os serviços entregues: vistorias já atendidas e documentações concluídas.
       </p>
+
       {linhas.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum serviço concluído ainda.</p>}
+
       {linhas.length > 0 && (
         <>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: CINZA_CLARO }}>
-                  {["Empreendimento", "Vistorias", "Documentações", "Receita", "Recebido"].map((h) => (
-                    <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}` }}>{h}</th>
+                  {["Empreendimento", "Serviço", "Qtd", "Valor unitário", "Total", "Recebido"].map((h, i) => (
+                    <th key={h} style={{ textAlign: i >= 2 ? "right" : "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}`, whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {linhas.map(([nome, v]) => (
-                  <tr key={nome} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
-                    <td style={{ padding: "8px 10px", fontWeight: 600 }}>{nome}</td>
-                    <td style={{ padding: "8px 10px" }}>{v.vistorias || "—"}</td>
-                    <td style={{ padding: "8px 10px" }}>{v.documentacoes || "—"}</td>
-                    <td style={{ padding: "8px 10px", color: AZUL_MARINHO, fontWeight: 700 }}>
-                      {fmtReal(v.receita)}
-                      {v.faltaPreco && <span style={{ color: "#B26A00", fontWeight: 400, fontSize: 11.5 }}> · falta preço</span>}
+                {linhas.map((l) => (
+                  <tr key={`${l.empreendimento}||${l.servico}`} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                    <td style={{ padding: "8px 10px", fontWeight: 600 }}>{l.empreendimento}</td>
+                    <td style={{ padding: "8px 10px", color: "#4a5a70" }}>{l.rotulo}</td>
+                    <td style={{ padding: "8px 10px", ...num }}>{l.qtd}</td>
+                    <td style={{ padding: "8px 10px", ...num, color: l.unitario ? "#4a5a70" : "#B26A00" }}>
+                      {l.unitario ? fmtReal(l.unitario) : "sem preço"}
                     </td>
-                    <td style={{ padding: "8px 10px", color: v.recebido >= v.receita && v.receita > 0 ? "#2E7D32" : "#65758b", fontWeight: 600 }}>
-                      {fmtReal(v.recebido)}
+                    <td style={{ padding: "8px 10px", ...num, fontWeight: 700, color: AZUL_MARINHO }}>{fmtReal(l.total)}</td>
+                    <td style={{ padding: "8px 10px", ...num, color: l.recebido >= l.total && l.total > 0 ? "#2E7D32" : "#65758b" }}>
+                      {fmtReal(l.recebido)}
                     </td>
                   </tr>
                 ))}
               </tbody>
+              <tfoot>
+                <tr style={{ borderTop: `2px solid ${CINZA_BORDA}`, background: CINZA_CLARO }}>
+                  <td style={{ padding: "9px 10px", fontWeight: 800, color: AZUL_MARINHO }} colSpan={2}>Total</td>
+                  <td style={{ padding: "9px 10px", ...num, fontWeight: 700 }}>{totalServicos}</td>
+                  <td />
+                  <td style={{ padding: "9px 10px", ...num, fontWeight: 800, color: AZUL_MARINHO }}>{fmtReal(totalGeral)}</td>
+                  <td style={{ padding: "9px 10px", ...num, fontWeight: 800, color: "#2E7D32" }}>{fmtReal(totalRecebido)}</td>
+                </tr>
+              </tfoot>
             </table>
           </div>
-          <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${CINZA_BORDA}`, fontSize: 14, display: "flex", gap: 18, flexWrap: "wrap" }}>
-            <span><strong style={{ color: AZUL_MARINHO }}>Total estimado: </strong>{fmtReal(totalReceita)}</span>
-            <span style={{ color: "#65758b", fontSize: 13 }}>{totalVistorias} vistoria(s) · {totalDocs} documentação(ões)</span>
+
+          <div style={{ marginTop: 12, fontSize: 12.5, color: "#65758b" }}>
+            A receber: <strong style={{ color: "#B26A00" }}>{fmtReal(totalGeral - totalRecebido)}</strong>
           </div>
+
           {semPreco.length > 0 && (
             <div style={{ marginTop: 10, background: "#FFF4E0", color: "#B26A00", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>
-              {semPreco.length} empreendimento(s) com serviço concluído mas sem preço fixado — esses valores ainda não entram no total.
+              {semPreco.length} combinação(ões) sem preço cadastrado — esses serviços não entram no total.
             </div>
           )}
         </>
@@ -4449,6 +4469,7 @@ function CardReceitaEstimada({ precos, clientes }) {
     </Card>
   );
 }
+
 function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salvarPreco, empreendimentosRef = [], notify }) {
   const somaCampo = (campo, filtro) => docs.filter(filtro).reduce((s, d) => s + (Number(d[campo]) || 0), 0);
   const pago = (d) => d.pagamento === "Pago";
