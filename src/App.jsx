@@ -2437,7 +2437,12 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
   const chaveData = (c) =>
     c.dataDesejada ? `${c.dataDesejada} ${c.horarioDesejado || "00:00"}` : null;
 
-  const filtrados = clientes
+  /* Documentação ART/TRT não entra aqui: esse serviço não tem vistoria, então não tem dia
+     nem horário para ordenar, e ficava no meio da fila sem significar nada. O setor de
+     Documentação tem a aba própria dele, que é onde esses cadastros são trabalhados. */
+  const daVistoria = clientes.filter((c) => !ehServicoDocumentacao(c));
+
+  const filtrados = daVistoria
     .filter((c) =>
       !busca || `${c.nome} ${c.empreendimento} ${c.construtora}`.toLowerCase().includes(busca.toLowerCase())
     )
@@ -2467,7 +2472,7 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
   // Mesmas etapas dos "Indicadores do Agendamento", na mesma ordem, mais os casos fora do
   // fluxo de vistoria (ART/TRT e cancelados) — ver ETAPAS_CLIENTE.
   const contagemPorEtapa = {};
-  clientes.forEach((c) => { const et = etapaClienteCompleta(c, docs); contagemPorEtapa[et] = (contagemPorEtapa[et] || 0) + 1; });
+  daVistoria.forEach((c) => { const et = etapaClienteCompleta(c, docs); contagemPorEtapa[et] = (contagemPorEtapa[et] || 0) + 1; });
   const etapasComClientes = ETAPAS_CLIENTE.filter((e) => contagemPorEtapa[e]);
 
   return (
@@ -2482,7 +2487,7 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
           ))}
         </div>
       )}
-      <Card icon={Users} titulo={`Clientes cadastrados (${clientes.length})`}>
+      <Card icon={Users} titulo={`Clientes cadastrados (${daVistoria.length})`}>
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
           Cadastro, agendamento e acompanhamento de todos os clientes que já se cadastraram (pelo portal público) ou foram cadastrados pela equipe.
         </p>
