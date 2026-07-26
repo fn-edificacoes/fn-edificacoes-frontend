@@ -509,6 +509,23 @@ function somarHora(hhmm, horas) {
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
+/* ---------- Busca de endereço pelo CEP (ViaCEP) ----------
+   Serviço público e gratuito dos Correios, sem chave de acesso. Se estiver fora do ar ou o
+   CEP não existir, devolve null e o cliente simplesmente digita o endereço à mão — a busca
+   nunca pode impedir o cadastro. */
+async function buscarEnderecoPorCep(cep) {
+  const limpo = String(cep || "").replace(/\D/g, "");
+  if (limpo.length !== 8) return null;
+  try {
+    const resp = await fetch(`https://viacep.com.br/ws/${limpo}/json/`);
+    if (!resp.ok) return null;
+    const d = await resp.json();
+    if (d?.erro) return null;
+    const partes = [d.logradouro, d.bairro, [d.localidade, d.uf].filter(Boolean).join("/")].filter(Boolean);
+    return { endereco: partes.join(", "), cidade: d.localidade || "", uf: d.uf || "" };
+  } catch { return null; }
+}
+
 /* ---------- Monta o objeto que o modelo novo de laudo consome ----------
    Estrutura documentada em modelo-laudo/AUTOMACAO.md: o modelo recebe este objeto e
    refaz sozinho capa, indicadores, gráficos, quadro-resumo, fichas e conclusão. Aqui só
@@ -4717,6 +4734,7 @@ function AbaCliente({ notify }) {
   const [refEmpreendimentos, setRefEmpreendimentos] = useState([]);
   const [refTipologias, setRefTipologias] = useState([]);
   const [tipologiaSel, setTipologiaSel] = useState("");
+  const [buscandoCep, setBuscandoCep] = useState(false);
   const [construtoraSel, setConstrutoraSel] = useState("");
   const [empreendimentoSel, setEmpreendimentoSel] = useState("");
   const [construtoraOutros, setConstrutoraOutros] = useState("");
@@ -4877,7 +4895,24 @@ function AbaCliente({ notify }) {
             </div>
           )}
           <Field label="Endereço completo" value={form.endereco} onChange={(v) => setFMaiusc("endereco", v)} full />
-          <Field label="CEP" value={form.cep} onChange={(v) => setF("cep", v.replace(/\D/g, "").slice(0, 8))} />
+          <div style={cell(false)}>
+            <label style={lab}>CEP</label>
+            <input style={inp} value={form.cep} inputMode="numeric" placeholder="Só números"
+              onChange={async (e) => {
+                const cep = e.target.value.replace(/\D/g, "").slice(0, 8);
+                setF("cep", cep);
+                // Ao completar o CEP, busca e preenche o endereço — que continua editável.
+                if (cep.length === 8) {
+                  setBuscandoCep(true);
+                  const achado = await buscarEnderecoPorCep(cep);
+                  setBuscandoCep(false);
+                  if (achado) setF("endereco", achado.endereco.toUpperCase());
+                }
+              }} />
+            <span style={{ fontSize: 11.5, color: "#8593a8" }}>
+              {buscandoCep ? "Buscando endereço…" : "Preenche o endereço automaticamente."}
+            </span>
+          </div>
           <Field label="Bloco / Apto" value={form.blocoTorre} onChange={(v) => setFMaiusc("blocoTorre", v)} />
           {form.servico === SERVICO_OPCOES[0] && (
             <>
