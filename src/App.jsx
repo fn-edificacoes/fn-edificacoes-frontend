@@ -1115,6 +1115,15 @@ function AppInterno({ session, onLogout }) {
     try { await apiFetch(`/api/clientes/${id}`, { method: "PATCH", token, body: patch }); }
     catch (e) { notify(`Não foi possível atualizar cliente: ${e.message}`); }
   };
+  /* Unifica a grafia de um empreendimento em todos os cadastros (só Gerência). */
+  const padronizarEmpreendimento = async (de, para) => {
+    try {
+      const r = await apiFetch("/api/clientes/padronizar-empreendimento", { method: "POST", token, body: { de, para } });
+      notify(`${r.atualizados} cadastro(s) atualizado(s) para "${para}" ✓`);
+      await carregarClientes();
+    } catch (e) { notify(`Não foi possível padronizar: ${e.message}`); }
+  };
+
   /* Exclusão definitiva — só Gerência tem essa opção na tela. */
   const delCliente = async (id) => {
     setClientes((atual) => atual.filter((c) => c.id !== id));
@@ -1625,6 +1634,7 @@ function AppInterno({ session, onLogout }) {
             parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
             vales={vales} valesCarregando={valesCarregando}
             precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
+            padronizarEmpreendimento={padronizarEmpreendimento} excluirCliente={delCliente}
             laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo}
             acessos={acessos} acessosCarregando={acessosCarregando} />
         )}
@@ -3955,7 +3965,155 @@ function CardAcessos({ dados, carregando }) {
   );
 }
 
-function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, acessos, acessosCarregando }) {
+/* Padronização dos nomes de empreendimento nos cadastros.
+   O nome foi digitado livremente por muito tempo, então convivem variações da mesma coisa
+   ("VILA DAS PALMEIRAS" e "RESIDENCIAL VILA DAS PALMEIRAS") e entradas de teste. Isso
+   quebra indicadores, preços e a busca por tipologia. Aqui a Gerência unifica cada nome,
+   sempre confirmando — nada é renomeado automaticamente, porque mexe em cadastro real. */
+function semAcento(v) {
+  return String(v || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/* Quantas letras diferem entre duas palavras — pega erro de digitação ("palneiras"). */
+function distanciaTexto(a, b) {
+  const m = a.length, n = b.length;
+  let anterior = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const atual = [i];
+    for (let j = 1; j <= n; j++) {
+      atual[j] = Math.min(anterior[j] + 1, atual[j - 1] + 1, anterior[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    anterior = atual;
+  }
+  return anterior[n];
+}
+
+/* Melhor palpite entre os nomes oficiais. Primeiro quem contém ou está contido no digitado
+   ("vila das palmeiras" x "residencial vila das palmeiras"); depois, o mais parecido em
+   letras, para pegar digitação errada ("villa", "palneiras"). Sem palpite razoável devolve
+   null — é o caso das entradas de teste, que devem ser excluídas e não renomeadas. */
+function sugerirOficial(nome, oficiais) {
+  const alvo = semAcento(nome);
+  if (!alvo) return null;
+
+  let porConteudo = null;
+  for (const o of oficiais) {
+    const c = semAcento(o);
+    if (c === alvo) return o;
+    if (c.includes(alvo) || alvo.includes(c)) {
+      if (!porConteudo || Math.abs(c.length - alvo.length) < Math.abs(semAcento(porConteudo).length - alvo.length)) porConteudo = o;
+    }
+  }
+  if (porConteudo) return porConteudo;
+
+  let melhor = null, menor = Infinity;
+  for (const o of oficiais) {
+    const d = distanciaTexto(alvo, semAcento(o));
+    if (d < menor) { menor = d; melhor = o; }
+  }
+  // Tolerância proporcional: nomes longos podem errar mais letras que nomes curtos.
+  const limite = Math.max(2, Math.floor(alvo.length * 0.25));
+  return menor <= limite ? melhor : null;
+}
+
+function CardPadronizarEmpreendimentos({ clientes = [], empreendimentosRef = [], padronizar, excluirCliente, notify }) {
+  const [escolhas, setEscolhas] = useState({}); // { nomeAtual: nomeOficial }
+  const [aplicando, setAplicando] = useState(null);
+  const [confirmandoLimpeza, setConfirmandoLimpeza] = useState(null);
+
+  const oficiais = [...new Set(empreendimentosRef.map((e) => e.empreendimento).filter(Boolean))].sort();
+  const oficiaisNormalizados = new Set(oficiais.map(semAcento));
+
+  // Agrupa os nomes usados nos cadastros que não batem com a lista oficial.
+  const usados = {};
+  clientes.forEach((c) => {
+    const nome = (c.empreendimento || "").trim();
+    if (!nome) return;
+    (usados[nome] = usados[nome] || []).push(c);
+  });
+  const foraDoPadrao = Object.entries(usados)
+    .filter(([nome]) => !oficiaisNormalizados.has(semAcento(nome)))
+    .map(([nome, lista]) => ({ nome, qtd: lista.length, clientes: lista, sugestao: sugerirOficial(nome, oficiais) }))
+    .sort((a, b) => b.qtd - a.qtd);
+
+  const aplicar = async (linha) => {
+    const destino = escolhas[linha.nome] || linha.sugestao;
+    if (!destino) { notify("Escolha o nome oficial primeiro"); return; }
+    setAplicando(linha.nome);
+    await padronizar(linha.nome, destino);
+    setAplicando(null);
+  };
+
+  if (foraDoPadrao.length === 0) {
+    return (
+      <Card icon={Building2} titulo="Padronização de empreendimentos">
+        <p style={{ fontSize: 13.5, color: "#2E7D32", margin: 0 }}>
+          ✓ Todos os cadastros usam nomes da lista oficial.
+        </p>
+      </Card>
+    );
+  }
+
+  return (
+    <Card icon={Building2} titulo={`Padronização de empreendimentos (${foraDoPadrao.length})`}>
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Estes nomes aparecem nos cadastros mas não estão na lista oficial. Unificar corrige os
+        indicadores, os preços e a busca por tipologia. Escolha o nome correto e aplique — ou
+        exclua, se for cadastro de teste.
+      </p>
+
+      <div style={{ display: "grid", gap: 10 }}>
+        {foraDoPadrao.map((l) => (
+          <div key={l.nome} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+              <strong style={{ fontSize: 14 }}>{l.nome}</strong>
+              <span style={{ fontSize: 11.5, color: "#65758b", background: CINZA_CLARO, borderRadius: 20, padding: "2px 9px" }}>
+                {l.qtd} cadastro(s)
+              </span>
+              {l.sugestao && (
+                <span style={{ fontSize: 11.5, color: "#2E7D32" }}>sugestão: {l.sugestao}</span>
+              )}
+            </div>
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <select style={{ ...inp, flex: 1, minWidth: 220 }}
+                value={escolhas[l.nome] ?? l.sugestao ?? ""}
+                onChange={(e) => setEscolhas((s) => ({ ...s, [l.nome]: e.target.value }))}>
+                <option value="">renomear para…</option>
+                {oficiais.map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
+              <button className="btn-solid" style={{ width: "auto", padding: "8px 14px" }}
+                onClick={() => aplicar(l)} disabled={aplicando === l.nome}>
+                {aplicando === l.nome ? <Loader2 size={14} className="spin" /> : <Check size={14} />} Aplicar
+              </button>
+              {excluirCliente && (
+                <button className="btn-ghost" style={{ color: "#C62828" }}
+                  onClick={() => setConfirmandoLimpeza(l)}>
+                  <Trash2 size={14} /> Excluir cadastros
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <ConfirmModal aberto={!!confirmandoLimpeza}
+        titulo="Excluir cadastros de teste"
+        mensagem={confirmandoLimpeza
+          ? `Excluir os ${confirmandoLimpeza.qtd} cadastro(s) de "${confirmandoLimpeza.nome}"? Os clientes serão apagados junto. Essa ação não pode ser desfeita.`
+          : ""}
+        onConfirm={async () => {
+          const alvo = confirmandoLimpeza;
+          setConfirmandoLimpeza(null);
+          for (const c of alvo.clientes) await excluirCliente(c.id);
+          notify(`${alvo.qtd} cadastro(s) excluído(s)`);
+        }}
+        onCancel={() => setConfirmandoLimpeza(null)} />
+    </Card>
+  );
+}
+
+function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendimento, excluirCliente, empreendimentosRef = [], carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, acessos, acessosCarregando }) {
   const porVistoria = docs.reduce((acc, d) => { acc[d.vistoria] = (acc[d.vistoria] || 0) + 1; return acc; }, {});
   const porStatusProducao = docs.reduce((acc, d) => { acc[d.statusProducao] = (acc[d.statusProducao] || 0) + 1; return acc; }, {});
   const totalRegistrosDocs = docs.length;
@@ -3977,6 +4135,9 @@ function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, carregando, assinat
       <CardCancelamentosPendentes clientes={clientes} usuarios={usuarios} updCliente={updCliente} notify={notify} />
 
       <CardAcessos dados={acessos} carregando={acessosCarregando} />
+
+      <CardPadronizarEmpreendimentos clientes={clientes} empreendimentosRef={empreendimentosRef}
+        padronizar={padronizarEmpreendimento} excluirCliente={excluirCliente} notify={notify} />
 
       <CardIndicadoresGerais docs={docs} clientes={clientes} />
 
@@ -4334,7 +4495,7 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, acessos, acessosCarregando }) {
+function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, acessos, acessosCarregando }) {
   if (sub === "parceiros") {
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} vales={vales} valesCarregando={valesCarregando} notify={notify} />;
   }
@@ -4342,7 +4503,8 @@ function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, car
     return <AbaGerenciaFinanceiro docs={docs} clientes={clientes} precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef} notify={notify} />;
   }
   return (
-    <AbaGerenciaVisaoGeral docs={docs} clientes={clientes} updCliente={updCliente} carregando={carregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
+    <AbaGerenciaVisaoGeral docs={docs} clientes={clientes} updCliente={updCliente} carregando={carregando}
+      padronizarEmpreendimento={padronizarEmpreendimento} excluirCliente={excluirCliente} empreendimentosRef={empreendimentosRef} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
       usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={usuarioAtualId}
       avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
       laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo}
