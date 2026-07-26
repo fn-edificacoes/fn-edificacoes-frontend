@@ -1037,7 +1037,7 @@ function AppInterno({ session, onLogout }) {
   // Vistoriador começa na agenda (é de lá que ele inicia a vistoria, já com os dados
   // preenchidos); os demais caem direto na vistoria.
   const [aba, setAba] = useState("itens");
-  const [abaGerencia, setAbaGerencia] = useState("visao-geral"); // "visao-geral" | "parceiros" | "financeiro"
+  const [abaGerencia, setAbaGerencia] = useState("visao-geral"); // "visao-geral" | "parceiros" | "financeiro" | "prospeccao"
   const [abaQualidade, setAbaQualidade] = useState("analise"); // "analise" | "vistoria" | "feedback"
   const [agendarAgoraId, setAgendarAgoraId] = useState(null); // id do cliente recém-aprovado, pra abrir direto o card dele em "Vistoria"
   const [dados, setDados] = useState(DADOS_INICIAIS);
@@ -1115,6 +1115,25 @@ function AppInterno({ session, onLogout }) {
     try { await apiFetch(`/api/clientes/${id}`, { method: "PATCH", token, body: patch }); }
     catch (e) { notify(`Não foi possível atualizar cliente: ${e.message}`); }
   };
+  /* Manutenção da lista oficial de empreendimentos (só Gerência). */
+  const adicionarEmpreendimento = async (empreendimento, construtora) => {
+    try {
+      await apiFetch("/api/empreendimentos-ref", { method: "POST", token, body: { empreendimento, construtora } });
+      notify("Empreendimento adicionado ✓");
+      await carregarEmpreendimentosRef();
+      return true;
+    } catch (e) { notify(`Não foi possível adicionar: ${e.message}`); return false; }
+  };
+  const removerEmpreendimento = async (empreendimento) => {
+    try {
+      const r = await apiFetch("/api/empreendimentos-ref", { method: "DELETE", token, body: { empreendimento } });
+      notify(r.cadastrosUsando
+        ? `Removido da lista. Atenção: ${r.cadastrosUsando} cadastro(s) ainda usam esse nome — trate em "Padronização".`
+        : "Empreendimento removido ✓");
+      await Promise.all([carregarEmpreendimentosRef(), carregarPrecos()]);
+    } catch (e) { notify(`Não foi possível remover: ${e.message}`); }
+  };
+
   /* Unifica a grafia de um empreendimento em todos os cadastros (só Gerência). */
   const padronizarEmpreendimento = async (de, para) => {
     try {
@@ -1233,14 +1252,13 @@ function AppInterno({ session, onLogout }) {
   /* Lista oficial de empreendimentos (vem da planilha do Drive, tabela empreendimentos_ref).
      É ela que a Gerência usa para fixar os preços — em vez de digitar o nome na mão. */
   const [empreendimentosRef, setEmpreendimentosRef] = useState([]);
-  useEffect(() => {
-    (async () => {
-      try {
-        const r = await apiFetch("/api/empreendimentos-ref");
-        setEmpreendimentosRef(r.empreendimentos || []);
-      } catch { /* sem a lista, o card de preços mostra só o que já foi cadastrado */ }
-    })();
-  }, []);
+  const carregarEmpreendimentosRef = async () => {
+    try {
+      const r = await apiFetch("/api/empreendimentos-ref");
+      setEmpreendimentosRef(r.empreendimentos || []);
+    } catch { /* sem a lista, o card de preços mostra só o que já foi cadastrado */ }
+  };
+  useEffect(() => { carregarEmpreendimentosRef(); }, []);
   const carregarPrecos = async () => {
     // Documentação também lê (só leitura), pra ver o valor fixado pela Gerência.
     if (perfil !== "gerencia" && perfil !== "documentacao") return;
@@ -1600,7 +1618,7 @@ function AppInterno({ session, onLogout }) {
         {/* Sub-navegação (somente dentro do módulo Gerência) */}
         {abaTop === "gerencia" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
-            {[["visao-geral", "Visão geral", LayoutGrid], ["parceiros", "Parceiros e Afiliados", Users], ["financeiro", "Financeiro", DollarSign]].map(([k, label, Icon]) => (
+            {[["visao-geral", "Visão geral", LayoutGrid], ["parceiros", "Parceiros e Afiliados", Users], ["financeiro", "Financeiro", DollarSign], ["prospeccao", "Prospecção", TrendingUp]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setAbaGerencia(k)} className="tab" style={{ borderBottomColor: abaGerencia === k ? AZUL_MEDIO : "transparent", color: abaGerencia === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
                 <Icon size={15} /> {label}
               </button>
@@ -1658,6 +1676,7 @@ function AppInterno({ session, onLogout }) {
             precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
             padronizarEmpreendimento={padronizarEmpreendimento} excluirCliente={delCliente}
             prospeccao={prospeccao} prospeccaoCarregando={prospeccaoCarregando} atualizarProspeccao={atualizarProspeccao}
+            adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento}
             laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo}
             acessos={acessos} acessosCarregando={acessosCarregando} />
         )}
@@ -4256,7 +4275,7 @@ function CardProspeccao({ prospeccao = [], carregando, atualizar, clientes = [],
   );
 }
 
-function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendimento, excluirCliente, empreendimentosRef = [], prospeccao = [], prospeccaoCarregando, atualizarProspeccao, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, acessos, acessosCarregando }) {
+function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendimento, excluirCliente, empreendimentosRef = [], carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, acessos, acessosCarregando }) {
   const porVistoria = docs.reduce((acc, d) => { acc[d.vistoria] = (acc[d.vistoria] || 0) + 1; return acc; }, {});
   const porStatusProducao = docs.reduce((acc, d) => { acc[d.statusProducao] = (acc[d.statusProducao] || 0) + 1; return acc; }, {});
   const totalRegistrosDocs = docs.length;
@@ -4278,9 +4297,6 @@ function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendi
       <CardCancelamentosPendentes clientes={clientes} usuarios={usuarios} updCliente={updCliente} notify={notify} />
 
       <CardAcessos dados={acessos} carregando={acessosCarregando} />
-
-      <CardProspeccao prospeccao={prospeccao} carregando={prospeccaoCarregando} atualizar={atualizarProspeccao}
-        clientes={clientes} notify={notify} />
 
       <CardPadronizarEmpreendimentos clientes={clientes} empreendimentosRef={empreendimentosRef}
         padronizar={padronizarEmpreendimento} excluirCliente={excluirCliente} notify={notify} />
@@ -4375,7 +4391,7 @@ function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceir
 /* ---- Gerência · Financeiro ---- */
 /* Uma linha da tabela de preços: o empreendimento vem da lista oficial (planilha do Drive)
    e a Gerência fixa os dois valores — vistoria e documentação ART/TRT. */
-function LinhaPrecoEmpreendimento({ empreendimento, construtora, preco, salvarPreco, notify }) {
+function LinhaPrecoEmpreendimento({ empreendimento, construtora, preco, salvarPreco, onRemover, notify }) {
   const [editando, setEditando] = useState(false);
   const [vistoria, setVistoria] = useState("");
   const [documentacao, setDocumentacao] = useState("");
@@ -4424,18 +4440,29 @@ function LinhaPrecoEmpreendimento({ empreendimento, construtora, preco, salvarPr
             <button className="icon-btn" onClick={() => setEditando(false)}><X size={15} /></button>
           </>
         ) : (
-          <button className="icon-btn" title={semPreco ? "Definir preços" : "Editar preços"} onClick={abrir}>
-            <Edit3 size={15} color={AZUL_MEDIO} />
-          </button>
+          <>
+            <button className="icon-btn" title={semPreco ? "Definir preços" : "Editar preços"} onClick={abrir}>
+              <Edit3 size={15} color={AZUL_MEDIO} />
+            </button>
+            {onRemover && (
+              <button className="icon-btn" title="Remover da lista" onClick={() => onRemover(empreendimento)}>
+                <Trash2 size={15} color="#c62828" />
+              </button>
+            )}
+          </>
         )}
       </td>
     </tr>
   );
 }
 
-function CardPrecoEmpreendimento({ precos, carregando, salvarPreco, empreendimentosRef = [], clientes = [], notify }) {
+function CardPrecoEmpreendimento({ precos, carregando, salvarPreco, empreendimentosRef = [], clientes = [], adicionarEmpreendimento, removerEmpreendimento, notify }) {
   const [busca, setBusca] = useState("");
   const [soComPreco, setSoComPreco] = useState(false);
+  const [novoNome, setNovoNome] = useState("");
+  const [novaConstrutora, setNovaConstrutora] = useState("");
+  const [salvandoNovo, setSalvandoNovo] = useState(false);
+  const [removendo, setRemovendo] = useState(null);
 
   /* A lista de empreendimentos vem da planilha do Drive (empreendimentos_ref). Junta com
      qualquer empreendimento que já tenha preço salvo ou que apareça em cadastros de cliente,
@@ -4470,6 +4497,32 @@ function CardPrecoEmpreendimento({ precos, carregando, salvarPreco, empreendimen
         o setor de Documentação vê o preço fixado aqui ao trabalhar no serviço, e os valores alimentam a receita no Financeiro.
       </p>
 
+      {adicionarEmpreendimento && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "flex-end", background: CINZA_CLARO, borderRadius: 10, padding: 12 }}>
+          <div style={{ ...cell(false), flex: 1, minWidth: 180 }}>
+            <label style={lab}>Novo empreendimento</label>
+            <input style={inp} placeholder="Nome do empreendimento" value={novoNome} onChange={(e) => setNovoNome(e.target.value)} />
+          </div>
+          <div style={{ ...cell(false), flex: 1, minWidth: 150 }}>
+            <label style={lab}>Construtora</label>
+            <input list="construtoras-conhecidas" style={inp} placeholder="Construtora" value={novaConstrutora} onChange={(e) => setNovaConstrutora(e.target.value)} />
+            <datalist id="construtoras-conhecidas">
+              {[...new Set(empreendimentosRef.map((e) => e.construtora).filter(Boolean))].sort().map((c) => <option key={c} value={c} />)}
+            </datalist>
+          </div>
+          <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }} disabled={salvandoNovo}
+            onClick={async () => {
+              if (!novoNome.trim()) { notify("Informe o nome do empreendimento"); return; }
+              setSalvandoNovo(true);
+              const ok = await adicionarEmpreendimento(novoNome.trim(), novaConstrutora.trim());
+              setSalvandoNovo(false);
+              if (ok) { setNovoNome(""); setNovaConstrutora(""); }
+            }}>
+            {salvandoNovo ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} Adicionar
+          </button>
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
         <input style={{ ...inp, flex: 1, minWidth: 200 }} placeholder="Buscar empreendimento ou construtora…" value={busca} onChange={(e) => setBusca(e.target.value)} />
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "#4a5a70", cursor: "pointer" }}>
@@ -4485,6 +4538,14 @@ function CardPrecoEmpreendimento({ precos, carregando, salvarPreco, empreendimen
           {porNome.size === 0 ? "A lista de empreendimentos ainda não foi carregada." : "Nenhum empreendimento encontrado com esse filtro."}
         </p>
       )}
+      <ConfirmModal aberto={!!removendo}
+        titulo="Remover da lista de empreendimentos"
+        mensagem={removendo
+          ? `Remover "${removendo}" da lista oficial? O preço e as tipologias dele também saem. Cadastros de clientes não são apagados.`
+          : ""}
+        onConfirm={() => { const alvo = removendo; setRemovendo(null); removerEmpreendimento(alvo); }}
+        onCancel={() => setRemovendo(null)} />
+
       {linhas.length > 0 && (
         <div style={{ overflowX: "auto", maxHeight: 480, overflowY: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -4498,7 +4559,8 @@ function CardPrecoEmpreendimento({ precos, carregando, salvarPreco, empreendimen
             <tbody>
               {linhas.map((l) => (
                 <LinhaPrecoEmpreendimento key={l.empreendimento} empreendimento={l.empreendimento} construtora={l.construtora}
-                  preco={l.preco} salvarPreco={salvarPreco} notify={notify} />
+                  preco={l.preco} salvarPreco={salvarPreco} notify={notify}
+                  onRemover={removerEmpreendimento ? (nome) => setRemovendo(nome) : null} />
               ))}
             </tbody>
           </table>
@@ -4616,7 +4678,7 @@ function CardReceitaEstimada({ precos, clientes }) {
   );
 }
 
-function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salvarPreco, empreendimentosRef = [], notify }) {
+function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salvarPreco, empreendimentosRef = [], adicionarEmpreendimento, removerEmpreendimento, notify }) {
   const somaCampo = (campo, filtro) => docs.filter(filtro).reduce((s, d) => s + (Number(d[campo]) || 0), 0);
   const pago = (d) => d.pagamento === "Pago";
   const naoPago = (d) => d.pagamento !== "Pago";
@@ -4655,24 +4717,29 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
         </div>
       </Card>
 
-      <CardPrecoEmpreendimento precos={precos} carregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef} clientes={clientes} notify={notify} />
+      <CardPrecoEmpreendimento precos={precos} carregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef} clientes={clientes}
+        adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento} notify={notify} />
 
       <CardReceitaEstimada precos={precos} clientes={clientes} />
     </div>
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, prospeccao, prospeccaoCarregando, atualizarProspeccao, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, acessos, acessosCarregando }) {
+function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, acessos, acessosCarregando }) {
   if (sub === "parceiros") {
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} vales={vales} valesCarregando={valesCarregando} notify={notify} />;
   }
+  if (sub === "prospeccao") {
+    return <CardProspeccao prospeccao={prospeccao} carregando={prospeccaoCarregando} atualizar={atualizarProspeccao}
+      clientes={clientes} notify={notify} />;
+  }
   if (sub === "financeiro") {
-    return <AbaGerenciaFinanceiro docs={docs} clientes={clientes} precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef} notify={notify} />;
+    return <AbaGerenciaFinanceiro docs={docs} clientes={clientes} precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
+      adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento} notify={notify} />;
   }
   return (
     <AbaGerenciaVisaoGeral docs={docs} clientes={clientes} updCliente={updCliente} carregando={carregando}
-      padronizarEmpreendimento={padronizarEmpreendimento} excluirCliente={excluirCliente} empreendimentosRef={empreendimentosRef}
-      prospeccao={prospeccao} prospeccaoCarregando={prospeccaoCarregando} atualizarProspeccao={atualizarProspeccao} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
+      padronizarEmpreendimento={padronizarEmpreendimento} excluirCliente={excluirCliente} empreendimentosRef={empreendimentosRef} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
       usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={usuarioAtualId}
       avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
       laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo}
