@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import * as Rascunho from "./rascunho-local.js";
 import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
   Building2, User, ClipboardList, ChevronDown, ChevronRight, ChevronLeft, Check,
@@ -1816,64 +1817,67 @@ function AppInterno({ session, onLogout }) {
      que nunca acontecia: fechou a aba, perdeu a vistoria inteira.
      Agora usa localStorage, que é o armazenamento padrão do navegador, e a mensagem de
      sucesso só aparece depois de gravar de fato. */
-  const PREFIXO_RASCUNHO = "fn_laudo:";
-  const temStorage = (() => {
-    try {
-      if (typeof window === "undefined" || !window.localStorage) return false;
-      // Aba anônima restrita deixa o localStorage existir mas lança ao gravar.
-      const teste = "__fn_teste__";
-      window.localStorage.setItem(teste, "1");
-      window.localStorage.removeItem(teste);
-      return true;
-    } catch { return false; }
-  })();
-
-  const listarRascunhos = () => {
-    if (!temStorage) return setRascunhos([]);
-    try {
-      const chaves = Object.keys(window.localStorage)
-        .filter((k) => k.startsWith(PREFIXO_RASCUNHO))
-        .sort()
-        .reverse(); // a chave termina com a data/hora, então o mais recente vem primeiro
-      setRascunhos(chaves);
-    } catch { setRascunhos([]); }
+  /* O rascunho agora mora no IndexedDB (ver rascunho-local.js): guarda as fotos junto,
+     que era o que se perdia quando o celular descartava a aba em segundo plano. */
+  const listarRascunhos = async () => {
+    try { setRascunhos(await Rascunho.listarRascunhos()); }
+    catch { setRascunhos([]); }
   };
   useEffect(() => { listarRascunhos(); }, []);
 
-  const salvarRascunho = () => {
-    if (!temStorage) {
-      notify("Este navegador não permite salvar rascunho. Envie o laudo para a gerência antes de fechar a aba.");
-      return;
-    }
-    const nome = dados.contratante.nome?.trim() || dados.imovel.empreendimento?.trim() || "Sem nome";
-    const key = `${PREFIXO_RASCUNHO}${Date.now()}`;
-    // As fotos ficam de fora de propósito: são pesadas e estourariam o limite do navegador.
-    const payload = { nome, salvoEm: new Date().toISOString(), dados,
-      itens: itens.map(({ fotos, ...r }) => ({ ...r, nFotos: fotos.length })) };
+  const nomeDoRascunho = () =>
+    dados.contratante.nome?.trim() || dados.imovel.empreendimento?.trim() || "Sem nome";
+
+  const salvarRascunho = async () => {
     try {
-      window.localStorage.setItem(key, JSON.stringify(payload));
-      notify("Rascunho salvo ✓ (as fotos não entram no rascunho)");
+      await Rascunho.salvarRascunho({
+        chave: `manual-${Date.now()}`, nome: nomeDoRascunho(), dados, itens,
+      });
+      const espaco = await Rascunho.espacoDisponivel();
+      const aviso = espaco && espaco.totalMB - espaco.usadoMB < 60
+        ? " — atenção: o celular está com pouco espaço."
+        : "";
+      notify(`Rascunho salvo com as fotos ✓${aviso}`);
       listarRascunhos();
     } catch (e) {
       notify(e?.name === "QuotaExceededError"
-        ? "Sem espaço para salvar. Exclua rascunhos antigos em \"Abrir\" e tente de novo."
+        ? "Sem espaço no celular. Exclua rascunhos antigos em \"Abrir\" e tente de novo."
         : "Não foi possível salvar o rascunho.");
     }
   };
 
-  const carregar = (key) => {
+  /* Salvamento automático: o técnico não precisa lembrar de apertar "Salvar". Grava
+     alguns segundos depois da última alteração, sempre na mesma chave, para não encher
+     o aparelho com uma cópia por toque. */
+  const salvandoAuto = useRef(false);
+  useEffect(() => {
+    if (itens.length === 0 && !dados.contratante?.nome) return;
+    const t = setTimeout(async () => {
+      if (salvandoAuto.current) return;
+      salvandoAuto.current = true;
+      try {
+        await Rascunho.salvarRascunho({
+          chave: Rascunho.CHAVE_EM_ANDAMENTO,
+          nome: `${nomeDoRascunho()} (automático)`, dados, itens,
+        });
+      } catch { /* sem espaço ou navegador restrito: o salvamento manual avisa */ }
+      salvandoAuto.current = false;
+    }, 4000);
+    return () => clearTimeout(t);
+  }, [dados, itens]);
+
+  const carregar = async (chave) => {
     try {
-      const bruto = window.localStorage.getItem(key);
-      if (!bruto) { notify("Rascunho não encontrado."); listarRascunhos(); return; }
-      const p = JSON.parse(bruto);
-      setDados(p.dados);
-      setItens((p.itens || []).map((i) => ({ ...i, id: idCounter++, fotos: [] })));
+      const r = await Rascunho.abrirRascunho(chave);
+      setDados(r.dados);
+      setItens((r.itens || []).map((i) => ({ ...i, id: idCounter++, fotos: i.fotos || [] })));
       setShowLoad(false);
-      notify("Rascunho carregado (refaça o envio das fotos)");
+      notify(r.comFotos ? "Rascunho carregado com as fotos ✓" : "Rascunho antigo carregado — refaça o envio das fotos");
     } catch { notify("Falha ao carregar o rascunho."); }
   };
-  const excluirRascunho = (key) => {
-    try { window.localStorage.removeItem(key); listarRascunhos(); } catch {}
+
+  const excluirRascunho = async (chave) => {
+    try { await Rascunho.excluirRascunho(chave); listarRascunhos(); } catch {}
   };
 
   /* ---- helpers de estado ---- */
@@ -2102,8 +2106,11 @@ function AppInterno({ session, onLogout }) {
               <button className="icon-btn" onClick={() => setShowLoad(false)}><X size={16} /></button>
             </div>
             {rascunhos.length === 0 && <p style={{ color: "#65758b", fontSize: 14 }}>Nenhum rascunho salvo ainda.</p>}
-            {rascunhos.map((k) => <RascunhoLinha key={k} k={k} onLoad={carregar} onDel={excluirRascunho} />)}
-            <p style={{ fontSize: 12, color: "#8593a8", marginTop: 12 }}>As fotos não ficam no rascunho de teste — na versão em nuvem elas serão salvas junto.</p>
+            {rascunhos.map((r) => <RascunhoLinha key={r.chave} r={r} onLoad={carregar} onDel={excluirRascunho} />)}
+            <p style={{ fontSize: 12, color: "#8593a8", marginTop: 12 }}>
+              As fotos ficam salvas no rascunho, no próprio aparelho. O rascunho automático é
+              gravado sozinho enquanto você trabalha, mesmo sem internet.
+            </p>
           </div>
         </div>
       )}
@@ -2117,33 +2124,29 @@ function AppInterno({ session, onLogout }) {
   );
 }
 
-function RascunhoLinha({ k, onLoad, onDel }) {
-  // Lê direto do localStorage (mesmo lugar onde salvarRascunho grava). Antes buscava em
-  // window.storage, que não existe no navegador, então esta linha mostrava sempre "Rascunho".
-  const { nome, quando } = (() => {
-    try {
-      const p = JSON.parse(window.localStorage.getItem(k) || "{}");
-      const d = p.salvoEm ? new Date(p.salvoEm) : null;
-      return {
-        nome: p.nome || "Rascunho",
-        quando: d && !Number.isNaN(d.getTime())
-          ? d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
-          : "",
-      };
-    } catch { return { nome: "Rascunho", quando: "" }; }
-  })();
+function RascunhoLinha({ r, onLoad, onDel }) {
+  const d = r.salvoEm ? new Date(r.salvoEm) : null;
+  const quando = d && !Number.isNaN(d.getTime())
+    ? d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+    : "";
+
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 0", borderBottom: `1px solid ${CINZA_BORDA}` }}>
-      <FileText size={15} color={AZUL_MEDIO} />
+      <FileText size={15} color={r.automatico ? "#2E7D32" : AZUL_MEDIO} />
       <span style={{ flex: 1, fontSize: 14, minWidth: 0, overflowWrap: "anywhere" }}>
-        {nome}
+        {r.nome || "Rascunho"}
         {quando && <span style={{ color: "#8593a8", fontSize: 12 }}> · {quando}</span>}
+        <span style={{ display: "block", fontSize: 11.5, color: "#8593a8" }}>
+          {r.nItens} item(ns)
+          {r.comFotos ? ` · ${r.nFotos} foto(s)` : " · sem fotos (rascunho antigo)"}
+        </span>
       </span>
-      <button className="btn-mini" onClick={() => onLoad(k)}>Abrir</button>
-      <button className="icon-btn" onClick={() => onDel(k)}><Trash2 size={14} color="#c62828" /></button>
+      <button className="btn-mini" onClick={() => onLoad(r.chave)}>Abrir</button>
+      <button className="icon-btn" onClick={() => onDel(r.chave)}><Trash2 size={14} color="#c62828" /></button>
     </div>
   );
 }
+
 
 /* ================= Notificações: solicitações de clientes pendentes ================= */
 function NotificacoesClientes({ clientes, preencherComCliente, style }) {
