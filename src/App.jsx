@@ -4,7 +4,7 @@ import {
   Building2, User, ClipboardList, ChevronDown, ChevronRight, ChevronLeft, Check,
   AlertTriangle, CircleAlert, Info, Copy, Sparkles, Loader2,
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
-  TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, LockOpen
+  TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, LockOpen, Bell
 } from "lucide-react";
 
 /* ============================================================
@@ -918,6 +918,180 @@ function LaudoModelo({ laudo, assinatura }) {
   );
 }
 
+/* ================= Notificações da equipe =================
+   Sino no cabeçalho mostrando o que espera ação de quem está logado. Cada perfil vê só o
+   que é dele. Tudo sai dos dados que o sistema já carrega — não há consulta nova nem
+   tabela de notificação: o que vale é o estado atual, então nada fica desatualizado. */
+function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], avaliacoes = [], documentosArt = [], agendaVistoriador = [] }) {
+  const itens = [];
+  const hojeISO = paraChaveISO(new Date());
+
+  /* --- Fila do Agendamento --- Atendimento e Gerência agem; o perfil Agendamento só
+     acompanha, então recebe o mesmo aviso sem a marcação de urgência. */
+  if (["atendimento", "gerencia", "qualidade"].includes(perfil)) {
+    const podeAgir = perfil !== "qualidade";
+    const aguardando = clientes.filter((c) => c.status === "Em análise" && !ehServicoDocumentacao(c));
+    if (aguardando.length) {
+      itens.push({
+        id: "aprovacao", urgente: podeAgir,
+        texto: `${aguardando.length} cliente(s) aguardando aprovação`,
+        onde: { aba: "qualidade", sub: "analise" },
+      });
+    }
+    const aprovados = clientes.filter((c) => c.status === "Agendamento aprovado");
+    if (aprovados.length) {
+      itens.push({
+        id: "sem-tecnico",
+        texto: `${aprovados.length} vistoria(s) sem técnico atribuído`,
+        onde: { aba: "qualidade", sub: "vistoria" },
+      });
+    }
+    const emVistoria = clientes.filter((c) => c.status === "Em vistoria");
+    if (emVistoria.length) {
+      itens.push({
+        id: "em-vistoria",
+        texto: `${emVistoria.length} vistoria(s) em andamento agora`,
+        onde: { aba: "qualidade", sub: "vistoria" },
+      });
+    }
+  }
+
+  // --- Gerência: decisões que só ela pode tomar ---
+  if (perfil === "gerencia") {
+    if (laudosPendentes.length) {
+      itens.push({
+        id: "laudos", urgente: true,
+        texto: `${laudosPendentes.length} laudo(s) aguardando sua aprovação`,
+        onde: { aba: "gerencia", sub: "visao-geral" },
+      });
+    }
+    const cancelamentos = clientes.filter((c) => c.status === "Cancelamento solicitado");
+    if (cancelamentos.length) {
+      itens.push({
+        id: "cancelamentos", urgente: true,
+        texto: `${cancelamentos.length} cancelamento(s) de vistoria para decidir`,
+        onde: { aba: "gerencia", sub: "visao-geral" },
+      });
+    }
+    const exclusoes = avaliacoes.filter((a) => a.exclusao_solicitada);
+    if (exclusoes.length) {
+      itens.push({
+        id: "exclusoes",
+        texto: `${exclusoes.length} exclusão(ões) de avaliação para decidir`,
+        onde: { aba: "qualidade", sub: "feedback" },
+      });
+    }
+  }
+
+  // --- Documentação: ART/TRT sem os dois anexos ---
+  if (perfil === "documentacao" || perfil === "gerencia") {
+    const art = clientes.filter((c) => ehServicoDocumentacao(c) && c.status !== "Cancelado");
+    const incompletos = art.filter((c) => {
+      const meus = documentosArt.filter((d) => d.clienteId === c.id);
+      return !TIPOS_DOCUMENTO_ART.every((t) => meus.some((d) => d.tipo === t));
+    });
+    if (incompletos.length) {
+      itens.push({
+        id: "art", urgente: true,
+        texto: `${incompletos.length} documentação(ões) ART/TRT pendente(s)`,
+        onde: { aba: "documentacao" },
+      });
+    }
+  }
+
+  // --- Vistoriador: a agenda dele ---
+  if (perfil === "vistoriador") {
+    const deHoje = agendaVistoriador.filter((a) => a.data_desejada === hojeISO && !a.laudo_enviado);
+    if (deHoje.length) {
+      itens.push({
+        id: "hoje", urgente: true,
+        texto: `${deHoje.length} vistoria(s) marcada(s) para hoje`,
+        onde: { aba: "laudos", sub: "agenda" },
+      });
+    }
+    const atrasadas = agendaVistoriador.filter((a) => a.data_desejada && a.data_desejada < hojeISO && !a.laudo_enviado);
+    if (atrasadas.length) {
+      itens.push({
+        id: "atrasadas", urgente: true,
+        texto: `${atrasadas.length} vistoria(s) de dias anteriores sem laudo enviado`,
+        onde: { aba: "laudos", sub: "agenda" },
+      });
+    }
+    const proximas = agendaVistoriador.filter((a) => a.data_desejada && a.data_desejada > hojeISO && !a.laudo_enviado);
+    if (proximas.length) {
+      itens.push({
+        id: "proximas",
+        texto: `${proximas.length} vistoria(s) agendada(s) para os próximos dias`,
+        onde: { aba: "laudos", sub: "agenda" },
+      });
+    }
+  }
+
+  return itens;
+}
+
+function SinoNotificacoes({ itens = [], onIr }) {
+  const [aberto, setAberto] = useState(false);
+  const urgentes = itens.filter((i) => i.urgente).length;
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button className="btn-ghost" onClick={() => setAberto((v) => !v)}
+        title={itens.length ? `${itens.length} aviso(s)` : "Nada pendente"}
+        aria-label={`Notificações: ${itens.length} aviso(s)`}
+        style={{ position: "relative", padding: "6px 10px" }}>
+        <Bell size={15} />
+        {itens.length > 0 && (
+          <span style={{
+            position: "absolute", top: 1, right: 2, minWidth: 16, height: 16, padding: "0 4px",
+            borderRadius: 10, background: urgentes ? "#C62828" : AZUL_MEDIO, color: "#fff",
+            fontSize: 10, fontWeight: 800, display: "grid", placeItems: "center", lineHeight: 1,
+          }}>
+            {itens.length}
+          </span>
+        )}
+      </button>
+
+      {aberto && (
+        <>
+          {/* Camada invisível: clicar fora fecha o painel. */}
+          <div onClick={() => setAberto(false)}
+            style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+          <div style={{
+            position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 41, width: 300,
+            background: "#fff", color: "#1a2330", borderRadius: 12, border: `1px solid ${CINZA_BORDA}`,
+            boxShadow: "0 10px 30px rgba(0,0,0,.16)", overflow: "hidden",
+          }}>
+            <div style={{ padding: "10px 13px", borderBottom: `1px solid ${CINZA_BORDA}`, fontSize: 13, fontWeight: 700, color: AZUL_MARINHO }}>
+              Avisos
+            </div>
+
+            {itens.length === 0 && (
+              <div style={{ padding: "16px 13px", fontSize: 13, color: "#65758b" }}>
+                Nada pendente por aqui. ✓
+              </div>
+            )}
+
+            {itens.map((i) => (
+              <button key={i.id}
+                onClick={() => { setAberto(false); onIr?.(i.onde); }}
+                style={{
+                  width: "100%", textAlign: "left", background: "none", border: "none",
+                  borderBottom: `1px solid ${CINZA_CLARO}`, padding: "11px 13px", cursor: "pointer",
+                  display: "flex", alignItems: "center", gap: 9, fontSize: 13,
+                }}>
+                <span style={{ width: 7, height: 7, borderRadius: "50%", background: i.urgente ? "#C62828" : AZUL_MEDIO, flexShrink: 0 }} />
+                <span style={{ flex: 1, color: "#1a2330" }}>{i.texto}</span>
+                <ChevronRight size={14} color="#8593a8" />
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ================= Componente principal ================= */
 /* ================= Login da equipe ================= */
 function TelaLogin({ onLogin, onVoltar }) {
@@ -1571,6 +1745,14 @@ function AppInterno({ session, onLogout }) {
               <div style={{ fontWeight: 700 }}>{session.usuario.nome}</div>
               <div style={{ opacity: 0.7 }}>{PERFIL_LABEL[perfil] || perfil}</div>
             </div>
+            <SinoNotificacoes
+              itens={calcularNotificacoes({ perfil, clientes, laudosPendentes, avaliacoes, documentosArt, agendaVistoriador })}
+              onIr={({ aba, sub }) => {
+                if (aba) setAbaTop(aba);
+                if (sub && aba === "qualidade") setAbaQualidade(sub);
+                if (sub && aba === "gerencia") setAbaGerencia(sub);
+                if (sub && aba === "laudos") setAba(sub);
+              }} />
             <button className="btn-ghost" onClick={onLogout} title="Sair"><X size={14} /> Sair</button>
           </div>
           {abaTop === "laudos" && (
