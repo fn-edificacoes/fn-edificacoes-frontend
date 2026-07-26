@@ -680,6 +680,18 @@ function textoConclusaoLaudo(ind) {
   return `A vistoria identificou ${ind.total} não conformidade(s)${distribuicao}${ambientes}.${sanadas}`;
 }
 
+/* Cancelar vistoria: a Gerência decide sozinha, então cancela na hora. Os outros perfis
+   pedem, e a Gerência confirma depois — ver CardCancelamentosPendentes. */
+async function cancelarVistoria({ cliente, ehGerencia, updCliente, notify }) {
+  if (ehGerencia) {
+    await updCliente(cliente.id, { status: "Cancelado" });
+    notify("Vistoria cancelada ✓");
+  } else {
+    await updCliente(cliente.id, { status: "Cancelamento solicitado" });
+    notify("Cancelamento solicitado à gerência");
+  }
+}
+
 /* ================= Laudo no modelo novo =================
    Reconstruído dentro do sistema (em vez de usar o arquivo do modelo, que depende do
    runtime de autoria). Mesma estrutura: capa, sumário com indicadores e ICC, gráficos,
@@ -1766,9 +1778,12 @@ function AppInterno({ session, onLogout }) {
               <button className="btn-ghost" onClick={() => { setShowLoad(true); listarRascunhos(); }}><FolderOpen size={15} /> Abrir</button>
               <button className="btn-ghost" onClick={salvarRascunho}><Save size={15} /> Salvar</button>
               <button className="btn-solid" onClick={() => { setAba("laudo"); setTimeout(imprimir, 300); }}><Printer size={15} /> Gerar PDF</button>
-              <button className="btn-solid" style={{ background: AZUL_MARINHO }} onClick={enviarParaGerencia} disabled={enviandoParaGerencia || laudoBloqueado} title={laudoBloqueado ? "Este laudo já foi enviado — desbloqueie para corrigir e reenviar" : ""}>
-                {enviandoParaGerencia ? <Loader2 size={15} className="spin" /> : laudoBloqueado ? <Lock size={15} /> : <Send size={15} />} {laudoBloqueado ? "Laudo enviado" : "Enviar para gerência"}
-              </button>
+              {/* Só o vistoriador envia: a Gerência é quem aprova, não teria a quem enviar. */}
+              {perfil === "vistoriador" && (
+                <button className="btn-solid" style={{ background: AZUL_MARINHO }} onClick={enviarParaGerencia} disabled={enviandoParaGerencia || laudoBloqueado} title={laudoBloqueado ? "Este laudo já foi enviado — desbloqueie para corrigir e reenviar" : ""}>
+                  {enviandoParaGerencia ? <Loader2 size={15} className="spin" /> : laudoBloqueado ? <Lock size={15} /> : <Send size={15} />} {laudoBloqueado ? "Laudo enviado" : "Enviar para gerência"}
+                </button>
+              )}
             </>
           )}
           {abaTop === "documentacao" && (
@@ -2927,7 +2942,8 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
 }
 
 /* Painel lateral: agenda completa do dia clicado + atalho pra agendar uma nova vistoria. */
-function PainelDiaAgendamento({ diaISO, clientes = [], vistoriadores = [], onFechar, onAgendarNovo, podeAgir, updCliente, notify }) {
+function PainelDiaAgendamento({ diaISO, clientes = [], vistoriadores = [], onFechar, onAgendarNovo, podeAgir, ehGerencia = false, updCliente, notify }) {
+  const [confirmandoCancelamento, setConfirmandoCancelamento] = useState(null);
   const dataFmt = new Date(`${diaISO}T00:00:00`).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
   // Mostra todo cliente já cadastrado com vistoria desejada nesse dia, não só os que já
   // têm técnico confirmado — "Cancelado" fica de fora por não ser mais um compromisso ativo.
@@ -2972,7 +2988,7 @@ function PainelDiaAgendamento({ diaISO, clientes = [], vistoriadores = [], onFec
                       <Selo valor={c.status} />
                       {podeAgir && c.status === "Vistoria agendada" && (
                         <button className="btn-ghost" style={{ color: "#C62828", padding: "3px 8px", fontSize: 12 }}
-                          onClick={async () => { await updCliente(c.id, { status: "Cancelamento solicitado" }); notify("Cancelamento solicitado à gerência"); }}>
+                          onClick={() => setConfirmandoCancelamento(c)}>
                           Cancelar vistoria
                         </button>
                       )}
@@ -2988,6 +3004,20 @@ function PainelDiaAgendamento({ diaISO, clientes = [], vistoriadores = [], onFec
             )}
           </>
         )}
+
+      <ConfirmModal aberto={!!confirmandoCancelamento}
+        titulo={ehGerencia ? "Cancelar vistoria" : "Solicitar cancelamento"}
+        mensagem={confirmandoCancelamento
+          ? (ehGerencia
+              ? `Cancelar a vistoria de "${confirmandoCancelamento.nome}"? Ela sai da agenda do técnico imediatamente.`
+              : `Solicitar o cancelamento da vistoria de "${confirmandoCancelamento.nome}"? A gerência decide se confirma.`)
+          : ""}
+        onConfirm={async () => {
+          const alvo = confirmandoCancelamento;
+          setConfirmandoCancelamento(null);
+          await cancelarVistoria({ cliente: alvo, ehGerencia, updCliente, notify });
+        }}
+        onCancel={() => setConfirmandoCancelamento(null)} />
       </div>
     </div>
   );
@@ -3082,7 +3112,7 @@ function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesAprovados
 }
 
 /* ================= Agendamento · Análise: aprovação de clientes + calendário operacional ================= */
-function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, onAgendarAgora, diaParaAbrir, aoAbrirDia, filtroEtapa = null, aoTrocarEtapa }) {
+function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, ehGerencia = false, onAgendarAgora, diaParaAbrir, aoAbrirDia, filtroEtapa = null, aoTrocarEtapa }) {
   const [mesRef, setMesRef] = useState(() => { const h = new Date(); return new Date(h.getFullYear(), h.getMonth(), 1); });
   const [diaSelecionado, setDiaSelecionado] = useState(null);
   const [filtroTecnicos, setFiltroTecnicos] = useState(() => new Set());
@@ -3154,7 +3184,7 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
       </Card>
 
       {diaSelecionado && (
-        <PainelDiaAgendamento diaISO={diaSelecionado} clientes={doDiaSelecionado} vistoriadores={vistoriadores} podeAgir={podeAgir}
+        <PainelDiaAgendamento diaISO={diaSelecionado} clientes={doDiaSelecionado} vistoriadores={vistoriadores} podeAgir={podeAgir} ehGerencia={ehGerencia}
           updCliente={updCliente} notify={notify}
           onFechar={() => setDiaSelecionado(null)}
           onAgendarNovo={() => setAgendando({ dataDesejada: diaSelecionado })} />
@@ -3193,8 +3223,9 @@ function CardVistoriaResumo({ c, aberto, onToggle, children }) {
 /* Sub-aba Vistoria: agrupa por status (pendente de agendamento / já agendada / já
    realizada), com busca e cards resumidos que expandem ao clicar — antes mostrava
    tudo (formulário completo) de uma vez pra cada cliente, o que ficava confuso. */
-function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, abrirAutomaticoId = null, aoAbrirAutomatico, aoConfirmar, filtroEtapa = null }) {
+function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, ehGerencia = false, abrirAutomaticoId = null, aoAbrirAutomatico, aoConfirmar, filtroEtapa = null }) {
   const [busca, setBusca] = useState("");
+  const [confirmandoCancelamento, setConfirmandoCancelamento] = useState(null);
   const [abertoId, setAbertoId] = useState(null);
   const [form, setForm] = useState({});
   const vistoriadores = usuarios.filter((u) => u.role === "vistoriador" && u.ativo);
@@ -3316,7 +3347,7 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
                       {g.chave === "agendada" && (
                         podeAgir ? (
                           <button className="btn-ghost" style={{ color: "#C62828", padding: "4px 10px", width: "auto", marginTop: 4 }}
-                            onClick={async () => { await updCliente(c.id, { status: "Cancelamento solicitado" }); notify("Cancelamento solicitado à gerência"); }}>
+                            onClick={() => setConfirmandoCancelamento(c)}>
                             <Trash2 size={13} /> Cancelar vistoria
                           </button>
                         ) : null
@@ -3329,6 +3360,21 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
           </div>
         ))}
       </div>
+
+      <ConfirmModal aberto={!!confirmandoCancelamento}
+        titulo={ehGerencia ? "Cancelar vistoria" : "Solicitar cancelamento"}
+        mensagem={confirmandoCancelamento
+          ? (ehGerencia
+              ? `Cancelar a vistoria de "${confirmandoCancelamento.nome}"? Ela sai da agenda do técnico imediatamente.`
+              : `Solicitar o cancelamento da vistoria de "${confirmandoCancelamento.nome}"? A gerência decide se confirma.`)
+          : ""}
+        onConfirm={async () => {
+          const alvo = confirmandoCancelamento;
+          setConfirmandoCancelamento(null);
+          await cancelarVistoria({ cliente: alvo, ehGerencia, updCliente, notify });
+        }}
+        onCancel={() => setConfirmandoCancelamento(null)} />
+
     </Card>
   );
 }
