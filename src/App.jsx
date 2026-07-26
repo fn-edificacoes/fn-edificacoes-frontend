@@ -83,6 +83,7 @@ function mapClienteDaApi(c) {
     status: c.status || "Em análise", cep: c.cep || "", vistoriadorId: c.vistoriador_id || "",
     precisaCadastroEmpreendimento: !!c.precisa_cadastro_empreendimento,
     pagamento: c.pagamento || "Pendente", areaPrivativa: c.area_privativa || "",
+    encaminhadoDocumentacao: !!c.encaminhado_documentacao,
   };
 }
 /* Etapa atual de um cliente no fluxo completo (cadastro → análise → vistoria → laudo → feedback).
@@ -2421,6 +2422,70 @@ function KanbanClientes({ clientes, docs, onAbrir }) {
   );
 }
 
+/* ================= Repasse de ART/TRT para a Documentação =================
+   Documentação ART/TRT não tem vistoria, então esses cadastros não entram na fila do
+   Atendimento. Mas alguém precisa reparar que chegaram e passar adiante — antes eles
+   simplesmente apareciam na aba da Documentação sem que ninguém do Atendimento soubesse.
+   Aqui o Atendimento vê o que chegou, confere e repassa. O repasse fica registrado. */
+function CardEncaminharDocumentacao({ clientes = [], atualizarCliente, notify }) {
+  const [enviando, setEnviando] = useState(null);
+
+  const art = clientes.filter((c) => ehServicoDocumentacao(c) && c.status !== "Cancelado");
+  const aguardando = art.filter((c) => !c.encaminhadoDocumentacao);
+  const jaEncaminhados = art.filter((c) => c.encaminhadoDocumentacao);
+
+  if (art.length === 0) return null;
+
+  const encaminhar = async (c) => {
+    setEnviando(c.id);
+    try {
+      await atualizarCliente(c.id, { encaminhadoDocumentacao: true });
+      notify(`${c.nome} encaminhado para a Documentação \u2713`);
+    } catch (e) { notify(`Não foi possível encaminhar: ${e.message}`); }
+    setEnviando(null);
+  };
+
+  return (
+    <Card icon={ClipboardList} titulo={`Documentação ART/TRT (${aguardando.length} a encaminhar)`}>
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Estes clientes pediram Documentação ART/TRT. Eles não passam por vistoria, por isso
+        ficam fora da fila acima. Confira os dados e repasse para o setor de Documentação.
+      </p>
+
+      {aguardando.length === 0 && (
+        <p style={{ fontSize: 13.5, color: "#2E7D32", margin: "0 0 12px" }}>
+          ✓ Todos os cadastros de ART/TRT já foram encaminhados.
+        </p>
+      )}
+
+      <div style={{ display: "grid", gap: 8 }}>
+        {aguardando.map((c) => (
+          <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 190 }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>{c.nome}</div>
+              <div style={{ fontSize: 12.5, color: "#65758b" }}>
+                {c.empreendimento || c.endereco || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}
+                {c.telefone ? ` · ${c.telefone}` : ""}
+              </div>
+            </div>
+            <button className="btn-solid" style={{ width: "auto", padding: "8px 14px" }}
+              onClick={() => encaminhar(c)} disabled={enviando === c.id}>
+              {enviando === c.id ? <Loader2 size={14} className="spin" /> : <Send size={14} />} Encaminhar
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {jaEncaminhados.length > 0 && (
+        <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${CINZA_BORDA}`, fontSize: 12.5, color: "#65758b" }}>
+          <strong style={{ color: "#2E7D32" }}>{jaEncaminhados.length}</strong> já encaminhado(s):{" "}
+          {jaEncaminhados.map((c) => c.nome).join(" · ")}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirCliente, notify, docs = [], perfil }) {
   const [busca, setBusca] = useState("");
   const [editando, setEditando] = useState(null); // cópia do cliente em edição
@@ -2487,6 +2552,8 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
           ))}
         </div>
       )}
+      <CardEncaminharDocumentacao clientes={clientes} atualizarCliente={atualizarCliente} notify={notify} />
+
       <Card icon={Users} titulo={`Clientes cadastrados (${daVistoria.length})`}>
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
           Cadastro, agendamento e acompanhamento de todos os clientes que já se cadastraram (pelo portal público) ou foram cadastrados pela equipe.
