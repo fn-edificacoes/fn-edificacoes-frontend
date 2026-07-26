@@ -720,7 +720,7 @@ function CartaoIndicador({ titulo, valor, apoio, cor }) {
   );
 }
 
-function LaudoModelo({ laudo, assinatura }) {
+function LaudoModelo({ laudo, assinatura, aprovado = true }) {
   const ind = calcularIndicadoresLaudo(laudo);
   const itens = laudo.itens || [];
   const corSeveridade = { alta: "#C62828", media: "#B26A00", baixa: "#2C75B5" };
@@ -731,7 +731,16 @@ function LaudoModelo({ laudo, assinatura }) {
   const Campo = ({ k, v }) => (v ? <div style={linha}><span style={chave}>{k}</span><strong style={{ fontWeight: 600 }}>{v}</strong></div> : null);
 
   return (
-    <div className="laudo-modelo" style={{ background: "#fff", color: "#1a2330" }}>
+    <div className={`laudo-modelo${aprovado ? "" : " laudo-rascunho"}`} style={{ background: "#fff", color: "#1a2330" }}>
+      {/* Só a Gerência emite o laudo oficial. Antes da aprovação, qualquer impressão sai
+          marcada — não dá para impedir o Ctrl+P do navegador, mas dá para deixar claro
+          que aquele papel não é o documento final. */}
+      {!aprovado && (
+        <div className="laudo-aviso-rascunho">
+          Versão preliminar — aguardando aprovação da Gerência. Não vale como laudo oficial.
+        </div>
+      )}
+
       {/* ---------- Capa ---------- */}
       <section className="laudo-pagina">
         <div style={{ display: "flex", alignItems: "center", gap: 12, borderBottom: `3px solid ${AZUL_MARINHO}`, paddingBottom: 12 }}>
@@ -1541,6 +1550,20 @@ function AppInterno({ session, onLogout }) {
     }
   };
 
+  /* ---- Laudos que o técnico já realizou, com o retorno do cliente ---- */
+  const [meusLaudos, setMeusLaudos] = useState([]);
+  const [meusLaudosCarregando, setMeusLaudosCarregando] = useState(false);
+  const carregarMeusLaudos = async () => {
+    if (perfil !== "vistoriador" && perfil !== "gerencia") return;
+    setMeusLaudosCarregando(true);
+    try {
+      const r = await apiFetch("/api/meus-laudos", { token });
+      setMeusLaudos(r.laudos || []);
+    } catch (e) { notify(`Não foi possível carregar seus laudos: ${e.message}`); }
+    setMeusLaudosCarregando(false);
+  };
+  useEffect(() => { carregarMeusLaudos(); }, []);
+
   /* ---- Calendário do vistoriador: agendamentos atribuídos a ele ---- */
   const [agendaVistoriador, setAgendaVistoriador] = useState([]);
   const [agendaVistoriadorCarregando, setAgendaVistoriadorCarregando] = useState(false);
@@ -1777,7 +1800,11 @@ function AppInterno({ session, onLogout }) {
             <>
               <button className="btn-ghost" onClick={() => { setShowLoad(true); listarRascunhos(); }}><FolderOpen size={15} /> Abrir</button>
               <button className="btn-ghost" onClick={salvarRascunho}><Save size={15} /> Salvar</button>
-              <button className="btn-solid" onClick={() => { setAba("laudo"); setTimeout(imprimir, 300); }}><Printer size={15} /> Gerar PDF</button>
+              {/* Gerar PDF é da Gerência: quem aprova é quem emite. O vistoriador vê o laudo
+                  na tela e envia para aprovação — assim nenhuma versão não aprovada circula. */}
+              {perfil === "gerencia" && (
+                <button className="btn-solid" onClick={() => { setAba("laudo"); setTimeout(imprimir, 300); }}><Printer size={15} /> Gerar PDF</button>
+              )}
               {/* Só o vistoriador envia: a Gerência é quem aprova, não teria a quem enviar. */}
               {perfil === "vistoriador" && (
                 <button className="btn-solid" style={{ background: AZUL_MARINHO }} onClick={enviarParaGerencia} disabled={enviandoParaGerencia || laudoBloqueado} title={laudoBloqueado ? "Este laudo já foi enviado — desbloqueie para corrigir e reenviar" : ""}>
@@ -1809,7 +1836,8 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "laudos" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
             {[...(perfil === "vistoriador" ? [["agenda", "Minha agenda", CalendarDays]] : []),
-              ["itens", `Vistoria (${totalItens})`, Camera], ["laudo", "Laudo final", FileText]]
+              ["itens", `Vistoria (${totalItens})`, Camera], ["laudo", "Laudo final", FileText],
+              ...(perfil === "vistoriador" || perfil === "gerencia" ? [["realizados", "Laudos realizados", ClipboardCheck]] : [])]
               .map(([k, label, Icon]) => (
                 <button key={k} onClick={() => setAba(k)} className="tab" style={{ borderBottomColor: aba === k ? AZUL_MEDIO : "transparent", color: aba === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
                   <Icon size={15} /> {label}
@@ -1851,7 +1879,11 @@ function AppInterno({ session, onLogout }) {
             fotoCliente={dados.fotoCliente} setFotoCliente={setFotoCliente} notify={notify} setAba={setAba}
             bloqueado={laudoBloqueado} onPedirDesbloqueio={() => setConfirmandoDesbloqueio(true)} />
         )}
-        {abaTop === "laudos" && aba === "laudo" && <LaudoModelo laudo={montarLaudoModelo(dados, itens)} assinatura={assinatura} />}
+        {abaTop === "laudos" && aba === "laudo" && <LaudoModelo laudo={montarLaudoModelo(dados, itens)} assinatura={assinatura} aprovado={perfil === "gerencia"} />}
+        {abaTop === "laudos" && aba === "realizados" && (
+          <AbaLaudosRealizados laudos={meusLaudos} carregando={meusLaudosCarregando}
+            recarregar={carregarMeusLaudos} assinatura={assinatura} ehGerencia={perfil === "gerencia"} />
+        )}
         {abaTop === "laudos" && aba === "agenda" && perfil === "vistoriador" && (
           <CalendarioVistoriador agenda={agendaVistoriador} carregando={agendaVistoriadorCarregando} clientes={clientes} preencherComCliente={preencherComCliente} />
         )}
@@ -4405,6 +4437,154 @@ const COR_PRIORIDADE = {
   "A confirmar": { cor: "#8593a8", bg: "#F4F6F8" },
 };
 
+/* ================= Laudos realizados pelo técnico =================
+   Duas coisas que o vistoriador não tinha como acompanhar: o que aconteceu com o laudo
+   depois que ele enviou, e o que o cliente achou do atendimento dele. Aqui ele abre o
+   documento exatamente como o cliente recebe — aprovado, sem tarja de rascunho - e vê a
+   nota que aquele cliente deu. O servidor só devolve os laudos dele: cada técnico
+   acompanha o próprio feedback, não o dos colegas. */
+const ETAPAS_LAUDO = {
+  "Laudo em análise": { rotulo: "Aguardando a Gerência", cor: "#B26A00", bg: "#FFF4E0" },
+  "Laudo enviado por e-mail": { rotulo: "Entregue ao cliente", cor: "#2E7D32", bg: "#E8F5E9" },
+};
+
+function EstrelasNota({ nota }) {
+  return (
+    <span style={{ whiteSpace: "nowrap", color: "#E8A317", fontSize: 14, letterSpacing: 1 }}
+      aria-label={`Nota ${nota} de 5`}>
+      {"★".repeat(nota)}<span style={{ color: "#d6dbe3" }}>{"★".repeat(5 - nota)}</span>
+    </span>
+  );
+}
+
+function AbaLaudosRealizados({ laudos = [], carregando, recarregar, assinatura, ehGerencia }) {
+  const [abertoId, setAbertoId] = useState(null);
+  const [filtro, setFiltro] = useState("");
+
+  const entregues = laudos.filter((l) => l.status_cliente === "Laudo enviado por e-mail");
+  const emAnalise = laudos.filter((l) => l.status_cliente === "Laudo em análise");
+  const avaliados = laudos.filter((l) => l.avaliacao_nota);
+  const media = avaliados.length
+    ? avaliados.reduce((soma, l) => soma + Number(l.avaliacao_nota), 0) / avaliados.length
+    : 0;
+
+  const lista = laudos.filter((l) =>
+    filtro === "entregues" ? l.status_cliente === "Laudo enviado por e-mail"
+    : filtro === "analise" ? l.status_cliente === "Laudo em análise"
+    : filtro === "avaliados" ? !!l.avaliacao_nota
+    : true
+  );
+
+  const indicadores = [
+    { k: "", rotulo: "Todos", valor: laudos.length, cor: AZUL_MEDIO },
+    { k: "analise", rotulo: "Aguardando Gerência", valor: emAnalise.length, cor: "#B26A00" },
+    { k: "entregues", rotulo: "Entregues ao cliente", valor: entregues.length, cor: "#2E7D32" },
+    { k: "avaliados", rotulo: "Com feedback", valor: avaliados.length, cor: "#E8A317" },
+  ];
+
+  return (
+    <Card icon={ClipboardCheck} titulo={`Laudos realizados (${laudos.length})`}>
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        {ehGerencia
+          ? "Todos os laudos enviados, por técnico, com o retorno do cliente."
+          : "Seus laudos e o que o cliente achou. Abrindo um laudo entregue você vê o documento exatamente como ele chegou ao cliente."}
+      </p>
+
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14, alignItems: "center" }}>
+        {indicadores.map((i) => {
+          const ativo = filtro === i.k;
+          return (
+            <button key={i.rotulo} onClick={() => setFiltro(i.k)} aria-pressed={ativo}
+              style={{ padding: "7px 13px", borderRadius: 20, border: `1.5px solid ${i.cor}`, cursor: "pointer",
+                background: ativo ? i.cor : "#fff", color: ativo ? "#fff" : i.cor, fontSize: 12.5, fontWeight: 700 }}>
+              {i.rotulo} ({i.valor})
+            </button>
+          );
+        })}
+        <button className="btn-ghost" onClick={recarregar} style={{ marginLeft: "auto" }}>
+          {carregando ? <Loader2 size={14} className="spin" /> : <Check size={14} />} Atualizar
+        </button>
+      </div>
+
+      {avaliados.length > 0 && (
+        <div style={{ background: "#FFFBF0", border: "1px solid #f0dfae", borderRadius: 10, padding: "11px 14px", marginBottom: 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <strong style={{ fontSize: 20, color: "#B26A00" }}>{media.toFixed(1)}</strong>
+          <EstrelasNota nota={Math.round(media)} />
+          <span style={{ fontSize: 12.5, color: "#65758b" }}>
+            média de {avaliados.length} avaliação(ões) {ehGerencia ? "da equipe" : "dos seus clientes"}
+          </span>
+        </div>
+      )}
+
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && lista.length === 0 && (
+        <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum laudo por aqui ainda.</p>
+      )}
+
+      <div style={{ display: "grid", gap: 8 }}>
+        {lista.map((l) => {
+          const etapa = ETAPAS_LAUDO[l.status_cliente] || { rotulo: l.status_cliente, cor: "#65758b", bg: CINZA_CLARO };
+          const entregue = l.status_cliente === "Laudo enviado por e-mail";
+          const aberto = abertoId === l.doc_id;
+          const unidade = [l.bloco_torre, l.apartamento].filter(Boolean).join(" · ");
+          return (
+            <div key={l.doc_id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, overflow: "hidden" }}>
+              <button onClick={() => setAbertoId(aberto ? null : l.doc_id)}
+                style={{ width: "100%", background: "#fff", border: "none", cursor: "pointer", padding: 12, display: "flex", alignItems: "center", gap: 10, textAlign: "left", flexWrap: "wrap" }}>
+                <span style={{ background: etapa.bg, color: etapa.cor, borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 800, whiteSpace: "nowrap" }}>
+                  {etapa.rotulo}
+                </span>
+                <span style={{ flex: 1, minWidth: 160 }}>
+                  <strong style={{ fontSize: 13.5, display: "block" }}>{l.cliente}</strong>
+                  <span style={{ fontSize: 12, color: "#65758b" }}>
+                    {l.empreendimento}{unidade ? ` · ${unidade}` : ""}
+                    {ehGerencia && l.vistoriador_nome ? ` · téc.: ${l.vistoriador_nome}` : ""}
+                  </span>
+                </span>
+                {l.avaliacao_nota ? <EstrelasNota nota={Number(l.avaliacao_nota)} />
+                  : <span style={{ fontSize: 11.5, color: "#8593a8" }}>sem feedback</span>}
+                {aberto ? <ChevronDown size={16} color="#8593a8" /> : <ChevronRight size={16} color="#8593a8" />}
+              </button>
+
+              {aberto && (
+                <div style={{ padding: "0 12px 12px" }}>
+                  {l.avaliacao_nota && (
+                    <div style={{ background: "#FFFBF0", border: "1px solid #f0dfae", borderRadius: 8, padding: "10px 12px", marginBottom: 12 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+                        <EstrelasNota nota={Number(l.avaliacao_nota)} />
+                        <span style={{ fontSize: 12, color: "#65758b" }}>{l.avaliacao_em ? new Date(l.avaliacao_em).toLocaleDateString("pt-BR") : ""}</span>
+                        {l.avaliacao_aprovada && (
+                          <span style={{ fontSize: 11, color: "#2E7D32", fontWeight: 700 }}>✓ publicado na vitrine</span>
+                        )}
+                      </div>
+                      {l.avaliacao_comentario && (
+                        <p style={{ margin: 0, fontSize: 13, color: "#4a5a70", fontStyle: "italic" }}>&ldquo;{l.avaliacao_comentario}&rdquo;</p>
+                      )}
+                    </div>
+                  )}
+
+                  {!entregue && (
+                    <div style={{ background: "#FFF4E0", color: "#B26A00", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 12.5 }}>
+                      Este laudo ainda está com a Gerência. O cliente só recebe depois da aprovação.
+                    </div>
+                  )}
+
+                  {/* Mesmo documento que o cliente recebe. Só marcamos como aprovado o que já
+                      foi entregue — o que está em análise continua saindo como preliminar. */}
+                  <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, overflow: "hidden" }}>
+                    <LaudoModelo laudo={montarLaudoModelo(l.dados || {}, l.itens || [])}
+                      assinatura={assinatura} aprovado={entregue} />
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
 function CardProspeccao({ prospeccao = [], carregando, atualizar, clientes = [], notify }) {
   const [busca, setBusca] = useState("");
   const [filtro, setFiltro] = useState("");
@@ -6361,6 +6541,22 @@ const estilos = `
   .foto-x { position:absolute; top:3px; right:3px; background:rgba(198,40,40,.92); color:#fff; border:none; border-radius:50%; width:20px; height:20px; display:grid; place-items:center; cursor:pointer; }
   select, input, textarea { font-family:inherit; }
   input:focus, textarea:focus, select:focus { border-color:${AZUL_MEDIO}; }
+  /* Aviso de versão preliminar: fica visível na tela e vira marca d'água na impressão. */
+  .laudo-aviso-rascunho {
+    background: #FFF4E0; color: #B26A00; border: 1px solid #f0c987; border-radius: 10px;
+    padding: 10px 14px; margin-bottom: 14px; font-size: 13px; font-weight: 700; text-align: center;
+  }
+  .laudo-rascunho { position: relative; }
+  @media print {
+    .laudo-rascunho::before {
+      content: "VERSÃO PRELIMINAR — NÃO APROVADA";
+      position: fixed; inset: 0; display: grid; place-items: center;
+      transform: rotate(-32deg); font-size: 52px; font-weight: 800;
+      color: rgba(198, 40, 40, .16); letter-spacing: 3px; pointer-events: none; z-index: 999;
+    }
+    .laudo-aviso-rascunho { border: 2px solid #C62828; color: #C62828; background: #fff; }
+  }
+
   /* Laudo no modelo novo: cada seção é uma página A4 na impressão. */
   .laudo-modelo { max-width: 820px; margin: 0 auto; }
   .laudo-pagina, .laudo-ficha { background: #fff; border: 1px solid ${CINZA_BORDA}; border-radius: 12px; padding: 30px 34px; margin-bottom: 16px; }
