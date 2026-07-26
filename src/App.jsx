@@ -2855,6 +2855,30 @@ function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, u
    Agendamento e ficava enterrada embaixo das avaliações: quem queria só ver em que pé
    está cada cliente precisava rolar a página inteira. As duas coisas não têm relação —
    uma é a satisfação de quem já foi atendido, a outra é a fila de quem está sendo. */
+/* Rótulo curto de cada critério, para a equipe ler a nota detalhada sem decorar chave. */
+const ROTULO_CRITERIO = {
+  pontualidade: "Pontualidade", atendimento: "Atendimento",
+  clareza: "Clareza", prazo: "Prazo",
+};
+
+/* Notas por critério de uma avaliação. Só aparece nas avaliações novas — as antigas
+   guardaram uma nota única e continuam mostrando só ela. */
+function NotasPorCriterio({ notas }) {
+  const itens = notas && typeof notas === "object" ? Object.entries(notas) : [];
+  if (itens.length === 0) return null;
+  return (
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
+      {itens.map(([chave, valor]) => (
+        <span key={chave} style={{ fontSize: 12, color: "#65758b", display: "flex", alignItems: "center", gap: 4 }}>
+          {ROTULO_CRITERIO[chave] || chave}
+          <strong style={{ color: AZUL_MARINHO }}>{valor}</strong>
+          <Star size={11} color="#E8A317" fill="#E8A317" />
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function AbaQualidadeAcompanhamento({ clientes = [], clientesCarregando, docs = [], avaliacoes = [], filtroEtapa = null }) {
   const [busca, setBusca] = useState("");
 
@@ -2974,6 +2998,7 @@ function AbaQualidadeFeedback({ avaliacoes, carregando, aprovarAvaliacao, solici
                     )}
                     {a.empreendimento && <span style={{ fontSize: 12, color: "#65758b" }}>{a.empreendimento}</span>}
                   </div>
+                  <NotasPorCriterio notas={a.notas} />
                   {a.comentario && <div style={{ fontSize: 13.5, color: "#334", background: CINZA_CLARO, borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>{a.comentario}</div>}
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     {podeAgir && aprovarAvaliacao ? (
@@ -5845,30 +5870,57 @@ function CardAssinaturaGerencia({ assinatura, salvarAssinatura, removerAssinatur
 }
 
 /* ================= Aba: Cliente (autocadastro e acompanhamento) ================= */
+/* Critérios de avaliação por serviço — os mesmos nomes que o backend valida.
+   Uma nota só não diz onde melhorar: quem achou o técnico ótimo e o laudo confuso
+   dá 3, e a equipe nunca descobre o quê. */
+const CRITERIOS_AVALIACAO = {
+  [SERVICO_VISTORIA]: [
+    ["pontualidade", "Pontualidade e agendamento"],
+    ["atendimento", "Atendimento do técnico"],
+    ["clareza", "Clareza do laudo"],
+  ],
+  [SERVICO_DOCUMENTACAO]: [
+    ["prazo", "Prazo de entrega"],
+    ["atendimento", "Atendimento da equipe"],
+    ["clareza", "Clareza da documentação"],
+  ],
+};
+
 function AvaliarServico({ doc, notify, fotoCliente, cpf }) {
   const [aberto, setAberto] = useState(false);
-  const [nota, setNota] = useState(0);
+  const [notas, setNotas] = useState({});
   const [comentario, setComentario] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [enviado, setEnviado] = useState(false);
 
+  const criterios = CRITERIOS_AVALIACAO[doc.servico] || CRITERIOS_AVALIACAO[SERVICO_VISTORIA];
+  const respondidos = criterios.filter(([chave]) => notas[chave]).length;
+
   const enviar = async () => {
-    if (!nota) { notify("Escolha de 1 a 5 estrelas"); return; }
+    if (respondidos < criterios.length) { notify("Dê uma nota para cada item"); return; }
     setEnviando(true);
     try {
-      // O CPF vai junto porque o servidor agora confere se quem avalia é mesmo o cliente
-      // daquele atendimento — antes qualquer um postava nota apontando para um atendimento
-      // inventado, e avaliação aprovada vira vitrine no site. Nome e empreendimento saem do
-      // próprio atendimento no servidor, então não precisam ser enviados daqui.
       await apiFetch("/api/avaliacoes", {
         method: "POST",
-        body: { docId: doc.id, cpf, servico: doc.servico || "", nota, comentario },
+        body: {
+          // ART/TRT não gera registro em "docs": nesse caso a avaliação aponta para o cadastro.
+          ...(doc.origem === "cliente" ? { clienteId: doc.id } : { docId: doc.id }),
+          // O CPF vai junto porque o servidor confere se quem avalia é mesmo o cliente
+          // daquele atendimento — sem isso, qualquer um postaria nota apontando para um
+          // atendimento inventado, e avaliação aprovada vira vitrine no site.
+          cpf,
+          notas,
+          comentario,
+        },
       });
       setEnviado(true);
       notify("Obrigado pela avaliação! ✓");
     } catch (e) { notify(`Não foi possível enviar: ${e.message}`); }
     setEnviando(false);
   };
+
+  // A avaliação só existe depois do serviço entregue — quem ainda está esperando não avalia.
+  if (!doc.podeAvaliar) return null;
 
   if (enviado) {
     return <div style={{ marginTop: 10, fontSize: 13, color: "#2E7D32", fontWeight: 600 }}>✓ Avaliação enviada. Obrigado!</div>;
@@ -5878,17 +5930,14 @@ function AvaliarServico({ doc, notify, fotoCliente, cpf }) {
     return (
       <div style={{ marginTop: 12 }}>
         {/* A foto da vistoria fica aqui, junto do convite para avaliar: é a lembrança do
-            atendimento, e é o que faz o cliente parar e responder. Antes ela ficava
-            escondida dentro do bloco de download do laudo, onde poucos chegavam. */}
+            atendimento, e é o que faz o cliente parar e responder. */}
         {fotoCliente && (
           <img src={fotoCliente} alt="Foto da sua vistoria com nosso vistoriador"
             style={{ width: "100%", maxWidth: 460, borderRadius: 12, display: "block", marginBottom: 10 }} />
         )}
-        {fotoCliente && (
-          <div style={{ fontSize: 13.5, color: AZUL_MARINHO, fontWeight: 600, marginBottom: 8 }}>
-            Como foi a sua vistoria? Sua opinião leva menos de um minuto e ajuda muito a nossa equipe.
-          </div>
-        )}
+        <div style={{ fontSize: 13.5, color: AZUL_MARINHO, fontWeight: 600, marginBottom: 8 }}>
+          Como foi o seu atendimento? Leva menos de um minuto e ajuda muito a nossa equipe.
+        </div>
         <button className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO }} onClick={() => setAberto(true)}>
           <Star size={14} /> Avaliar este atendimento
         </button>
@@ -5898,13 +5947,27 @@ function AvaliarServico({ doc, notify, fotoCliente, cpf }) {
 
   return (
     <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${CINZA_BORDA}` }}>
-      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Como foi o atendimento?</div>
-      <Estrelas valor={nota} onChange={setNota} tamanho={24} />
-      <textarea style={{ ...inp, marginTop: 10, resize: "vertical" }} rows={2} placeholder="Conte como foi (opcional)"
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, color: AZUL_MARINHO }}>
+        {doc.servico || "Atendimento"}
+      </div>
+
+      <div style={{ display: "grid", gap: 12 }}>
+        {criterios.map(([chave, rotulo]) => (
+          <div key={chave} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 13, color: "#4a5a70" }}>{rotulo}</span>
+            <Estrelas valor={notas[chave] || 0} tamanho={22}
+              onChange={(n) => setNotas((v) => ({ ...v, [chave]: n }))} />
+          </div>
+        ))}
+      </div>
+
+      <textarea style={{ ...inp, marginTop: 12, resize: "vertical" }} rows={2} placeholder="Quer contar mais alguma coisa? (opcional)"
         value={comentario} onChange={(e) => setComentario(e.target.value)} />
-      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
         <button className="btn-solid" onClick={enviar} disabled={enviando}>{enviando ? "Enviando…" : "Enviar avaliação"}</button>
         <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setAberto(false)}>Cancelar</button>
+        <span style={{ fontSize: 12, color: "#8593a8" }}>{respondidos} de {criterios.length} respondidos</span>
       </div>
     </div>
   );
