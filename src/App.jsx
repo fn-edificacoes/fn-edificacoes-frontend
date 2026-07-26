@@ -509,6 +509,26 @@ function somarHora(hhmm, horas) {
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
+/* ---------- Validação de CPF (dígitos verificadores) ----------
+   Confere se o CPF é matematicamente válido, sem consultar nada: os dois últimos dígitos
+   são calculados a partir dos nove primeiros. Pega erro de digitação e número inventado.
+   NÃO diz se o CPF existe na Receita nem de quem é — isso exige convênio e não é público. */
+function cpfValido(cpf) {
+  const d = String(cpf || "").replace(/\D/g, "");
+  if (d.length !== 11) return false;
+  // 111.111.111-11 e afins passam na conta dos digitos, mas nao sao CPFs validos.
+  if (new RegExp("^(\\d)\\1{10}$").test(d)) return false;
+
+  const digito = (ateIndice) => {
+    let soma = 0;
+    let peso = ateIndice + 2;
+    for (let i = 0; i < ateIndice + 1; i++) soma += Number(d[i]) * peso--;
+    const resto = (soma * 10) % 11;
+    return resto === 10 ? 0 : resto;
+  };
+  return digito(8) === Number(d[9]) && digito(9) === Number(d[10]);
+}
+
 /* ---------- Busca de endereço pelo CEP (ViaCEP) ----------
    Serviço público e gratuito dos Correios, sem chave de acesso. Se estiver fora do ar ou o
    CEP não existir, devolve null e o cliente simplesmente digita o endereço à mão — a busca
@@ -4790,6 +4810,7 @@ function AbaCliente({ notify }) {
   const enviar = async () => {
     if (!form.nome.trim() || !form.telefone.trim()) { notify("Informe pelo menos nome e telefone"); return; }
     if (form.cpf && form.cpf.length !== 11) { notify("O CPF deve ter 11 dígitos"); return; }
+    if (form.cpf && !cpfValido(form.cpf)) { notify("CPF inválido — confira os números digitados"); return; }
     const construtoraFinal = construtoraSel === OUTROS ? construtoraOutros.trim() : construtoraSel;
     const empreendimentoFinal = empreendimentoSel === OUTROS ? empreendimentoOutros.trim() : empreendimentoSel;
     const precisaCadastroEmpreendimento = construtoraSel === OUTROS || empreendimentoSel === OUTROS;
@@ -4847,7 +4868,17 @@ function AbaCliente({ notify }) {
             </select>
           </div>
           <Field label="Nome completo" value={form.nome} onChange={(v) => setF("nome", somenteLetras(v))} full />
-          <Field label="CPF (11 dígitos)" value={form.cpf} onChange={setFCpf} />
+          <div style={cell(false)}>
+            <label style={lab}>CPF (11 dígitos)</label>
+            <input style={inp} value={form.cpf} inputMode="numeric" onChange={(e) => setFCpf(e.target.value)} />
+            {/* Só avisa depois de completar os 11 dígitos, para não acusar erro enquanto digita. */}
+            {form.cpf.length === 11 && !cpfValido(form.cpf) && (
+              <span style={{ fontSize: 11.5, color: "#C62828" }}>CPF inválido — confira os números.</span>
+            )}
+            {form.cpf.length === 11 && cpfValido(form.cpf) && (
+              <span style={{ fontSize: 11.5, color: "#2E7D32" }}>CPF válido</span>
+            )}
+          </div>
           <Field label="Telefone / WhatsApp" value={form.telefone} onChange={(v) => setF("telefone", v.replace(/\D/g, "").slice(0, 11))} />
           {/* Sugere o domínio conforme digita (@gmail.com, @hotmail.com…), mas continua
               aceitando qualquer e-mail escrito à mão. */}
