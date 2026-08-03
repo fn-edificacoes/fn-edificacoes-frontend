@@ -5,7 +5,7 @@ import {
   Building2, User, ClipboardList, ChevronDown, ChevronRight, ChevronLeft, Check,
   AlertTriangle, CircleAlert, Info, Copy, Sparkles, Loader2,
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
-  TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, LockOpen, Bell,
+  TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
   ExternalLink
 } from "lucide-react";
 
@@ -596,6 +596,11 @@ function montarLaudoModelo(dados = {}, itens = []) {
     horaFim: paraHora(vistoria.termino),
     presentes: vistoria.presentes || "",
     ambientesVistoriados: Number(vistoria.ambientesVistoriados) || 0,
+    /* Esta linha faltava, e era a causa de a foto com o cliente sumir do laudo: o técnico
+       anexava a foto, o envio exigia ela e o PDF do backend a desenhava — mas a prévia da
+       tela (e qualquer impressão pelo navegador) montava o laudo sem o campo. O gêmeo desta
+       função no backend (laudo-modelo.js) sempre teve. */
+    fotoCliente: dados.fotoCliente || "",
     responsavel: { nome: rt.nome || "", qualificacao: rt.qualificacao || "", registro: rt.registro || "" },
     itens: itens.map((item, i) => ({
       n: String(i + 1).padStart(2, "0"),
@@ -725,6 +730,11 @@ function CartaoIndicador({ titulo, valor, apoio, cor }) {
 
 function LaudoModelo({ laudo, assinatura, aprovado = true }) {
   const ind = calcularIndicadoresLaudo(laudo);
+  /* Se a foto com o cliente não decodificar, a página final inteira some — no laudo do
+     cliente não pode sobrar o ícone de imagem quebrada nem um quadro vazio. Mesma regra
+     do PDF, que valida a imagem antes de criar a página (ver laudo-pdf.js). */
+  const [fotoQuebrada, setFotoQuebrada] = useState(false);
+  useEffect(() => { setFotoQuebrada(false); }, [laudo.fotoCliente]);
   const itens = laudo.itens || [];
   const corSeveridade = { alta: "#C62828", media: "#B26A00", baixa: "#2C75B5" };
   const corStatus = { pendente: "#B26A00", corrigido: "#2E7D32", reincidente: "#C62828" };
@@ -938,6 +948,47 @@ function LaudoModelo({ laudo, assinatura, aprovado = true }) {
           {laudo.local}{laudo.local && laudo.dataEmissao ? ", " : ""}{laudo.dataEmissao} · Protocolo {laudo.protocolo}
         </div>
       </section>
+
+      {/* ---------- Página final: foto com o cliente ----------
+          Só existe se houver foto — sem ela a página inteira some, em vez de sobrar um
+          quadro vazio no documento. Espelha a última página do PDF (laudo-pdf.js). */}
+      {laudo.fotoCliente && !fotoQuebrada && (
+        <section className="laudo-pagina">
+          <div style={{ background: AZUL_MARINHO, margin: "-28px -28px 0", padding: "22px 28px", textAlign: "center" }}>
+            <div style={{ fontSize: 17, fontWeight: 800, color: "#fff" }}>Agradecemos a confiança</div>
+          </div>
+
+          <div style={{ display: "grid", placeItems: "center", marginTop: 26 }}>
+            {/* objectFit "contain" e não "cover": a foto é um retrato, cortar a borda corta rosto. */}
+            <img
+              src={laudo.fotoCliente}
+              alt="Foto da vistoria com o cliente"
+              onError={() => setFotoQuebrada(true)}
+              style={{ maxWidth: "100%", maxHeight: 360, objectFit: "contain", borderRadius: 10, border: `1px solid ${CINZA_BORDA}` }}
+            />
+          </div>
+
+          <div style={{ marginTop: 26, background: CINZA_CLARO, borderRadius: 9, padding: "14px 18px" }}>
+            {[
+              ["Cliente", laudo.proprietario],
+              ["Vistoriador", laudo.responsavel?.nome],
+              ["Data da vistoria", laudo.dataVistoria],
+              ["Condomínio", laudo.empreendimento],
+              ["Bloco / unidade", laudo.unidade],
+            ].filter(([, v]) => (v || "").toString().trim()).map(([rotulo, valor]) => (
+              <div key={rotulo} style={{ display: "flex", gap: 8, fontSize: 11.5, padding: "3px 0" }}>
+                <span style={{ color: "#65758b", width: 120, flexShrink: 0 }}>{rotulo}</span>
+                <strong style={{ fontWeight: 600 }}>{valor}</strong>
+              </div>
+            ))}
+          </div>
+
+          <p style={{ marginTop: 26, fontSize: 12, fontStyle: "italic", color: AZUL_MARINHO, textAlign: "center", lineHeight: 1.6 }}>
+            Vistoria concluída com segurança, responsabilidade técnica e o compromisso da
+            FN Edificações com a tranquilidade do cliente.
+          </p>
+        </section>
+      )}
     </div>
   );
 }
@@ -1352,9 +1403,13 @@ function AppInterno({ session, onLogout }) {
   const [dados, setDados] = useState(DADOS_INICIAIS);
   const [itens, setItens] = useState([novoItem()]);
   const [clienteAtualId, setClienteAtualId] = useState(null); // id do cliente carregado no laudo em edição — necessário para "Enviar para gerência"
-  const [laudoBloqueado, setLaudoBloqueado] = useState(false); // trava local após envio à gerência — evita edição acidental do que já foi emitido
+  /* Trava do laudo após o envio à gerência.
+     Isto já existiu como useState solto com um botão de "desbloquear" ao lado: o próprio
+     técnico reabria o laudo que tinha acabado de enviar, e um F5 destravava sozinho. Como o
+     backend também aceitava o reenvio (e ainda zerava a aprovação), a trava não segurava
+     nada. Agora quem decide é o servidor — aqui só refletimos a resposta dele, e a única
+     forma de reabrir a edição é a gerência devolver o laudo para correção. */
   const [confirmandoDesbloqueio, setConfirmandoDesbloqueio] = useState(false);
-  useEffect(() => { setLaudoBloqueado(false); }, [clienteAtualId]);
   const [rascunhos, setRascunhos] = useState([]);
   const [toast, setToast] = useState("");
   const [showLoad, setShowLoad] = useState(false);
@@ -1686,6 +1741,14 @@ function AppInterno({ session, onLogout }) {
   };
   useEffect(() => { carregarMeusLaudos(); }, []);
 
+  /* ---- Estado do laudo em edição, do ponto de vista do servidor ----
+     "editavelPeloTecnico" vem do backend (ver LAUDO_STATUS em server.js): é verdadeiro só
+     enquanto o laudo nunca foi enviado ou foi devolvido para correção. A gerência não é
+     travada aqui — é ela quem corrige o laudo depois da análise. */
+  const laudoNoServidor = meusLaudos.find((l) => l.cliente_id && l.cliente_id === clienteAtualId) || null;
+  const laudoBloqueado = perfil === "vistoriador" && !!laudoNoServidor && !laudoNoServidor.editavelPeloTecnico;
+  const laudoDevolvido = laudoNoServidor?.laudo_status === "devolvido_correcao";
+
   /* ---- Calendário do vistoriador: agendamentos atribuídos a ele ---- */
   const [agendaVistoriador, setAgendaVistoriador] = useState([]);
   const [agendaVistoriadorCarregando, setAgendaVistoriadorCarregando] = useState(false);
@@ -1803,12 +1866,15 @@ function AppInterno({ session, onLogout }) {
         body: { clienteId: clienteAtualId, dados: dadosComprimidos, itens: itensComprimidos },
       });
       notify("Laudo enviado para a gerência ✓");
-      setLaudoBloqueado(true);
+      /* A trava agora vem do servidor: recarregar a lista é o que a aplica na tela. */
+      await carregarMeusLaudos();
       carregarDocs();
     } catch (e) { notify(`Não foi possível enviar para a gerência: ${e.message}`); }
     setEnviandoParaGerencia(false);
   };
-  const desbloquearLaudo = () => { setLaudoBloqueado(false); setConfirmandoDesbloqueio(false); notify("Laudo desbloqueado para correção — envie novamente para a gerência depois de ajustar."); };
+  /* O técnico não destrava mais o próprio laudo — quem reabre a edição é a gerência, ao
+     devolver para correção (POST /api/laudos/:docId/devolver). O modal virou explicação. */
+  const fecharAvisoBloqueio = () => setConfirmandoDesbloqueio(false);
 
   /* ---- Rascunhos de laudo em andamento: guardados neste navegador ----
      Isto usava `window.storage`, que NÃO existe em navegador nenhum — era uma API do
@@ -2056,7 +2122,9 @@ function AppInterno({ session, onLogout }) {
           <AbaItens itens={itens} setItens={setItens} updItem={updItem} escolherPatologia={escolherPatologia}
             addFotos={addFotos} removerFoto={removerFoto} contagem={contagem} dados={dados} setD={setD}
             fotoCliente={dados.fotoCliente} setFotoCliente={setFotoCliente} notify={notify} setAba={setAba}
-            bloqueado={laudoBloqueado} onPedirDesbloqueio={() => setConfirmandoDesbloqueio(true)} />
+            bloqueado={laudoBloqueado} onPedirDesbloqueio={() => setConfirmandoDesbloqueio(true)}
+            statusLaudo={laudoNoServidor?.laudoStatusLabel} devolvido={laudoDevolvido}
+            motivoDevolucao={laudoNoServidor?.motivo_devolucao} />
         )}
         {abaTop === "laudos" && aba === "laudo" && <LaudoModelo laudo={montarLaudoModelo(dados, itens)} assinatura={assinatura} aprovado={perfil === "gerencia"} />}
         {abaTop === "laudos" && aba === "realizados" && (
@@ -2117,9 +2185,11 @@ function AppInterno({ session, onLogout }) {
 
       {toast && <div className="no-print" style={toastStyle}><Check size={15} /> {toast}</div>}
 
-      <ConfirmModal aberto={confirmandoDesbloqueio} titulo="Desbloquear laudo para correção"
-        mensagem="Este laudo já foi enviado para a gerência e está travado. Desbloquear permite editar os dados e itens novamente, mas a correção precisa ser reenviada para valer. Deseja continuar?"
-        onConfirm={desbloquearLaudo} onCancel={() => setConfirmandoDesbloqueio(false)} />
+      <ConfirmModal aberto={confirmandoDesbloqueio} titulo="Laudo em análise pela gerência"
+        mensagem={"Este laudo já foi enviado e está sob responsabilidade da gerência, por isso não pode mais ser editado aqui. "
+          + "Se algo precisa ser corrigido, peça à gerência que devolva o laudo para correção — assim a edição é reaberta "
+          + "e o motivo da devolução fica registrado no histórico."}
+        onConfirm={fecharAvisoBloqueio} onCancel={fecharAvisoBloqueio} />
     </div>
   );
 }
@@ -3771,7 +3841,7 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
   );
 }
 
-function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, dados, setD, fotoCliente, setFotoCliente, notify, setAba, bloqueado, onPedirDesbloqueio }) {
+function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, dados, setD, fotoCliente, setFotoCliente, notify, setAba, bloqueado, onPedirDesbloqueio, statusLaudo, devolvido, motivoDevolucao }) {
   const fotoClienteRef = useRef();
   const handleFotoCliente = (file) => {
     if (!file) return;
@@ -3791,10 +3861,29 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
       {bloqueado && (
         <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 10, background: "#FFF4E0", border: "1px solid #f0c987", borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
           <Lock size={16} color="#B26A00" />
-          <span style={{ fontSize: 13, color: "#7a4e00", flex: 1 }}>Este laudo já foi enviado para a gerência e está travado contra edição.</span>
+          <span style={{ fontSize: 13, color: "#7a4e00", flex: 1 }}>
+            Este laudo está com a gerência{statusLaudo ? ` (${statusLaudo})` : ""} e não pode mais ser editado aqui.
+          </span>
           <button className="btn-ghost" style={{ color: "#B26A00", background: "#fff", padding: "6px 12px" }} onClick={onPedirDesbloqueio}>
-            <LockOpen size={14} /> Desbloquear para correção
+            Entenda
           </button>
+        </div>
+      )}
+
+      {/* Devolvido: a edição está liberada de novo, e o técnico precisa ver o que corrigir
+          sem ter de procurar. Por isso o motivo aparece aqui, no topo do formulário. */}
+      {devolvido && motivoDevolucao && (
+        <div className="no-print" style={{ display: "flex", gap: 10, background: "#FCEAEA", border: "1px solid #e8a9a9", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+          <AlertTriangle size={16} color="#C62828" style={{ flexShrink: 0, marginTop: 2 }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#8f2020", marginBottom: 3 }}>
+              Laudo devolvido pela gerência para correção
+            </div>
+            <div style={{ fontSize: 12.5, color: "#7a2323", lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{motivoDevolucao}</div>
+            <div style={{ fontSize: 11.5, color: "#a05252", marginTop: 6 }}>
+              Depois de ajustar, envie novamente para a gerência.
+            </div>
+          </div>
         </div>
       )}
       <div style={{ pointerEvents: bloqueado ? "none" : "auto", opacity: bloqueado ? 0.55 : 1 }}>
