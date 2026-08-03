@@ -1720,6 +1720,19 @@ function AppInterno({ session, onLogout }) {
       return false;
     }
   };
+  /* Reenvio manual do que falhou ao subir para o Drive. Fica com a gerência porque um erro
+     que sobreviveu às 3 tentativas automáticas costuma ser credencial ou cota. */
+  const reenviarDrive = async (docId) => {
+    try {
+      const r = await apiFetch(`/api/laudos/${docId}/drive/reenviar`, { method: "POST", token });
+      notify(r.recolocados ? `${r.recolocados} arquivo(s) recolocados na fila do Drive ✓` : "Nada pendente para reenviar.");
+      setTimeout(carregarLaudosPendentes, 1500); // dá um instante para a fila andar
+      return true;
+    } catch (e) {
+      notify(`Não foi possível reenviar: ${e.message}`);
+      return false;
+    }
+  };
   /* Devolver é o único caminho que reabre a edição para o vistoriador — sem isto, um laudo
      enviado ficaria travado para sempre, já que o técnico não destrava mais o próprio laudo. */
   const devolverLaudo = async (docId, motivo) => {
@@ -2174,7 +2187,7 @@ function AppInterno({ session, onLogout }) {
             prospeccao={prospeccao} prospeccaoCarregando={prospeccaoCarregando} atualizarProspeccao={atualizarProspeccao}
             publicarProspeccaoDrive={publicarProspeccaoDrive}
             adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento}
-            laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo}
+            laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} reenviarDrive={reenviarDrive}
             acessos={acessos} acessosCarregando={acessosCarregando} />
         )}
       </main>
@@ -4618,7 +4631,38 @@ function CardCadastrosClientes({ clientes }) {
 
 /* ---- Laudos aguardando aprovação da Gerência: pré-visualiza (reaproveita o componente
    Laudo já existente) e aprova (gera PDF + envia por e-mail automaticamente). ---- */
-function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, devolverLaudo, assinatura, notify }) {
+/* Estado do arquivamento no Drive, em uma linha. O laudo não deve ser aprovado como
+   "finalizado" enquanto houver obrigatório pendente — então a gerência precisa ver isso
+   antes de clicar em aprovar, não depois. */
+function SeloSincronizacao({ drive }) {
+  if (!drive || !drive.total) {
+    return <span style={{ fontSize: 11.5, color: "#8593a8" }}>Drive: aguardando envio</span>;
+  }
+  const { sincronizados, total, comErro, completo, linkPasta } = drive;
+  const cor = comErro ? "#C62828" : completo ? "#2E7D32" : "#B26A00";
+  const fundo = comErro ? "#FCEAEA" : completo ? "#E6F4EA" : "#FFF4E0";
+  const texto = comErro
+    ? `Erro de sincronização (${comErro} de ${total})`
+    : completo ? `Sincronizado (${sincronizados}/${total})`
+    : `Enviando para o Drive (${sincronizados}/${total})`;
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+      <span style={{ fontSize: 11, fontWeight: 700, color: cor, background: fundo, border: `1px solid ${cor}33`, borderRadius: 20, padding: "1px 9px" }}>
+        {texto}
+      </span>
+      {/* Abrir a pasta do cliente direto do sistema. O link não torna nada público: só
+          quem já tem acesso à conta do Drive da FN consegue abrir. */}
+      {linkPasta && (
+        <a href={linkPasta} target="_blank" rel="noreferrer"
+          style={{ fontSize: 11.5, color: AZUL_MEDIO, display: "inline-flex", alignItems: "center", gap: 3 }}>
+          <ExternalLink size={12} /> pasta no Drive
+        </a>
+      )}
+    </span>
+  );
+}
+
+function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, devolverLaudo, reenviarDrive, assinatura, notify }) {
   const [previewId, setPreviewId] = useState(null);
   const [aprovandoId, setAprovandoId] = useState(null);
   /* Devolver exige motivo: é ele que o técnico vê no topo do formulário ao reabrir o laudo. */
@@ -4675,6 +4719,15 @@ function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, d
               </div>
               <div style={{ fontSize: 12.5, color: "#65758b" }}>
                 {l.empreendimento}{l.bloco_torre ? ` · ${l.bloco_torre}` : ""} · enviado em {new Date(l.laudo_criado_em).toLocaleString("pt-BR")}
+              </div>
+              <div style={{ marginTop: 5, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <SeloSincronizacao drive={l.drive} />
+                {l.drive?.comErro > 0 && (
+                  <button className="btn-ghost" style={{ color: "#C62828", background: "#fff", padding: "2px 9px", fontSize: 11.5 }}
+                    onClick={() => reenviarDrive(l.doc_id)}>
+                    <RefreshCcw size={12} /> Reenviar ao Drive
+                  </button>
+                )}
               </div>
             </div>
             <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setPreviewId(l.doc_id)}>
@@ -5315,7 +5368,7 @@ function CardProspeccao({ prospeccao = [], carregando, atualizar, publicarNoDriv
   );
 }
 
-function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendimento, excluirCliente, empreendimentosRef = [], carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, acessos, acessosCarregando }) {
+function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendimento, excluirCliente, empreendimentosRef = [], carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, reenviarDrive, acessos, acessosCarregando }) {
   const porVistoria = docs.reduce((acc, d) => { acc[d.vistoria] = (acc[d.vistoria] || 0) + 1; return acc; }, {});
   const porStatusProducao = docs.reduce((acc, d) => { acc[d.statusProducao] = (acc[d.statusProducao] || 0) + 1; return acc; }, {});
   const totalRegistrosDocs = docs.length;
@@ -5332,7 +5385,7 @@ function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendi
     <div style={{ display: "grid", gap: 16 }}>
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando indicadores…</p>}
 
-      <CardLaudosPendentes laudosPendentes={laudosPendentes} carregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} assinatura={assinatura} notify={notify} />
+      <CardLaudosPendentes laudosPendentes={laudosPendentes} carregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} reenviarDrive={reenviarDrive} assinatura={assinatura} notify={notify} />
 
       <CardCancelamentosPendentes clientes={clientes} usuarios={usuarios} updCliente={updCliente} notify={notify} />
 
@@ -5791,7 +5844,7 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, acessos, acessosCarregando }) {
+function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, reenviarDrive, acessos, acessosCarregando }) {
   if (sub === "parceiros") {
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} vales={vales} valesCarregando={valesCarregando} notify={notify} />;
   }
@@ -5809,7 +5862,7 @@ function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, pad
       padronizarEmpreendimento={padronizarEmpreendimento} excluirCliente={excluirCliente} empreendimentosRef={empreendimentosRef} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
       usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={usuarioAtualId}
       avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
-      laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo}
+      laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} reenviarDrive={reenviarDrive}
       acessos={acessos} acessosCarregando={acessosCarregando} />
   );
 }
