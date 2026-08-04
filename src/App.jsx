@@ -1893,6 +1893,19 @@ function AppInterno({ session, onLogout }) {
       return false;
     }
   };
+  /* Gerência corrige o laudo direto na tela de aprovação, sem devolver pro vistoriador —
+     evita a ida e volta quando o ajuste é pequeno (texto, severidade etc.).
+     PRECISA de uma rota nova no backend: PATCH /api/laudos/:docId/editar, body {dados, itens}. */
+  const editarLaudo = async (docId, patch) => {
+    try {
+      await apiFetch(`/api/laudos/${docId}/editar`, { method: "PATCH", token, body: patch });
+      setLaudosPendentes((atual) => atual.map((p) => (p.doc_id === docId ? { ...p, ...patch } : p)));
+      return true;
+    } catch (e) {
+      notify(`Não foi possível salvar as correções: ${e.message}`);
+      return false;
+    }
+  };
 
   /* Cliente cancelado sai das telas de trabalho: ele não é mais atendimento, e ficar
      no meio dos ativos faz a equipe contar errado e clicar no lugar errado. A Gerência
@@ -2339,7 +2352,7 @@ function AppInterno({ session, onLogout }) {
             prospeccao={prospeccao} prospeccaoCarregando={prospeccaoCarregando} atualizarProspeccao={atualizarProspeccao}
             publicarProspeccaoDrive={publicarProspeccaoDrive}
             adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento}
-            laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} reenviarDrive={reenviarDrive} marcarEmAnalise={marcarEmAnalise}
+            laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} editarLaudo={editarLaudo} reenviarDrive={reenviarDrive} marcarEmAnalise={marcarEmAnalise}
       painel={painel} painelCarregando={painelCarregando} carregarPainel={carregarPainel}
             acessos={acessos} acessosCarregando={acessosCarregando} />
         )}
@@ -5107,20 +5120,101 @@ function SeloSincronizacao({ drive }) {
   );
 }
 
-function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, devolverLaudo, reenviarDrive, marcarEmAnalise, assinatura, notify }) {
+/* Edição do laudo pela própria Gerência (sem devolver pro vistoriador) — pensada pra
+   ajuste pontual de texto/severidade, não pra trocar foto. Trabalha em cópia local e só
+   grava (via editarLaudo) quando a gerência clica em salvar. */
+function EditorLaudoGerencia({ laudo, onSalvar, onCancelar, salvando }) {
+  const [dados, setDadosEdit] = useState(() => JSON.parse(JSON.stringify(laudo.dados || {})));
+  const [itens, setItensEdit] = useState(() => (laudo.itens || []).map((i) => ({ ...i })));
+
+  const setD = (grupo, campo, val) => setDadosEdit((d) => ({ ...d, [grupo]: { ...(d[grupo] || {}), [campo]: val } }));
+  const setItemCampo = (id, campo, val) => setItensEdit((arr) => arr.map((i) => (i.id === id ? { ...i, [campo]: val } : i)));
+
+  return (
+    <div style={{ display: "grid", gap: 18 }}>
+      <p style={{ fontSize: 13, color: "#65758b", margin: 0, lineHeight: 1.55 }}>
+        Corrija texto, local ou severidade diretamente aqui. Fotos não são editáveis por aqui — se precisar trocar foto, use "Devolver para correção".
+      </p>
+
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>Dados do laudo</div>
+        <Grid>
+          <Field label="Contratante" value={dados.contratante?.nome || ""} onChange={(v) => setD("contratante", "nome", v)} />
+          <Field label="CPF" value={dados.contratante?.cpf || ""} onChange={(v) => setD("contratante", "cpf", v)} />
+          <Field label="Construtora" value={dados.imovel?.construtora || ""} onChange={(v) => setD("imovel", "construtora", v)} />
+          <Field label="Empreendimento" value={dados.imovel?.empreendimento || ""} onChange={(v) => setD("imovel", "empreendimento", v)} />
+          <Field label="Unidade" value={dados.imovel?.unidade || ""} onChange={(v) => setD("imovel", "unidade", v)} />
+          <Field label="Endereço" value={dados.imovel?.endereco || ""} onChange={(v) => setD("imovel", "endereco", v)} full />
+        </Grid>
+      </div>
+
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>Itens da vistoria ({itens.length})</div>
+        {itens.length === 0 && <p style={{ color: "#8593a8", fontSize: 13 }}>Nenhum item registrado.</p>}
+        <div style={{ display: "grid", gap: 12 }}>
+          {itens.map((item, i) => (
+            <div key={item.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#8593a8", marginBottom: 8 }}>Item {i + 1}</div>
+              <Grid>
+                <Field label="Local" value={item.local} onChange={(v) => setItemCampo(item.id, "local", v)} />
+                <Field label="Patologia" value={item.patologia} onChange={(v) => setItemCampo(item.id, "patologia", v)} />
+                <div style={cell(false)}>
+                  <label style={lab}>Severidade</label>
+                  <select style={inp} value={item.severidade} onChange={(e) => setItemCampo(item.id, "severidade", e.target.value)}>
+                    {["Baixa", "Média", "Alta"].map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              </Grid>
+              <Area label="Descrição" value={item.descricao} onChange={(v) => setItemCampo(item.id, "descricao", v)} rows={3} />
+              <Area label="Recomendação" value={item.recomendacao} onChange={(v) => setItemCampo(item.id, "recomendacao", v)} rows={2} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+        <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={onCancelar} disabled={salvando}>Cancelar edição</button>
+        <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: "#EAF2FB" }} onClick={() => onSalvar({ dados, itens }, false)} disabled={salvando}>
+          {salvando ? <Loader2 size={14} className="spin" /> : <Save size={14} />} Salvar correções
+        </button>
+        <button className="btn-solid" onClick={() => onSalvar({ dados, itens }, true)} disabled={salvando}>
+          {salvando ? <Loader2 size={14} className="spin" /> : <Mail size={14} />} Salvar e enviar por e-mail
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, assinatura, notify }) {
   const [previewId, setPreviewId] = useState(null);
   const [aprovandoId, setAprovandoId] = useState(null);
   /* Devolver exige motivo: é ele que o técnico vê no topo do formulário ao reabrir o laudo. */
   const [devolvendoId, setDevolvendoId] = useState(null);
   const [motivoDevolucao, setMotivoDevolucao] = useState("");
   const [enviandoDevolucao, setEnviandoDevolucao] = useState(false);
+  const [editando, setEditando] = useState(false);
+  const [salvandoEdicao, setSalvandoEdicao] = useState(false);
   const laudoPreview = laudosPendentes.find((l) => l.doc_id === previewId);
+
+  const abrirPreview = (docId) => { setPreviewId(docId); setEditando(false); marcarEmAnalise?.(docId); };
 
   const aprovar = async (docId) => {
     setAprovandoId(docId);
     await aprovarLaudo(docId);
     setAprovandoId(null);
     if (previewId === docId) setPreviewId(null);
+  };
+
+  /* Gerência corrige direto (sem devolver pro vistoriador). "enviarTambem" já aprova em
+     seguida — evita salvar e ter que clicar de novo em Aprovar com os dados na tela. */
+  const salvarEdicao = async (patch, enviarTambem) => {
+    setSalvandoEdicao(true);
+    const ok = await editarLaudo(previewId, patch);
+    setSalvandoEdicao(false);
+    if (!ok) return;
+    notify("Correções salvas ✓");
+    setEditando(false);
+    if (enviarTambem) await aprovar(previewId);
   };
 
   const abrirDevolucao = (docId) => { setDevolvendoId(docId); setMotivoDevolucao(""); };
@@ -5175,7 +5269,7 @@ function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, d
                 )}
               </div>
             </div>
-            <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => { setPreviewId(l.doc_id); marcarEmAnalise?.(l.doc_id); }}>
+            <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => abrirPreview(l.doc_id)}>
               <Eye size={14} /> Pré-visualizar
             </button>
             <button className="btn-ghost" style={{ color: "#B26A00", background: "#FFF4E0" }} onClick={() => abrirDevolucao(l.doc_id)}>
@@ -5192,20 +5286,32 @@ function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, d
         <div className="no-print" style={overlay} onClick={() => setPreviewId(null)}>
           <div style={{ ...modal, maxWidth: 780, maxHeight: "85vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <strong>Pré-visualização do laudo</strong>
+              <strong>{editando ? "Corrigir laudo" : "Pré-visualização do laudo"}</strong>
               <button className="icon-btn" onClick={() => setPreviewId(null)}><X size={16} /></button>
             </div>
-            {/* Mesma peça que o cliente recebe — a gerência aprova vendo o resultado final. */}
-            <LaudoModelo laudo={montarLaudoModelo(laudoPreview.dados, laudoPreview.itens || [])} assinatura={assinatura} />
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setPreviewId(null)}>Fechar</button>
-              <button className="btn-ghost" style={{ color: "#B26A00", background: "#FFF4E0" }} onClick={() => abrirDevolucao(laudoPreview.doc_id)}>
-                <Undo2 size={14} /> Devolver para correção
-              </button>
-              <button className="btn-solid" onClick={() => aprovar(laudoPreview.doc_id)} disabled={aprovandoId === laudoPreview.doc_id}>
-                {aprovandoId === laudoPreview.doc_id ? <Loader2 size={14} className="spin" /> : <Mail size={14} />} Aprovar e enviar por e-mail
-              </button>
-            </div>
+
+            {editando ? (
+              <EditorLaudoGerencia laudo={laudoPreview} salvando={salvandoEdicao}
+                onCancelar={() => setEditando(false)}
+                onSalvar={(patch, enviarTambem) => salvarEdicao(patch, enviarTambem)} />
+            ) : (
+              <>
+                {/* Mesma peça que o cliente recebe — a gerência aprova vendo o resultado final. */}
+                <LaudoModelo laudo={montarLaudoModelo(laudoPreview.dados, laudoPreview.itens || [])} assinatura={assinatura} />
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
+                  <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setPreviewId(null)}>Fechar</button>
+                  <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: "#EAF2FB" }} onClick={() => setEditando(true)}>
+                    <Edit3 size={14} /> Editar e corrigir
+                  </button>
+                  <button className="btn-ghost" style={{ color: "#B26A00", background: "#FFF4E0" }} onClick={() => abrirDevolucao(laudoPreview.doc_id)}>
+                    <Undo2 size={14} /> Devolver para correção
+                  </button>
+                  <button className="btn-solid" onClick={() => aprovar(laudoPreview.doc_id)} disabled={aprovandoId === laudoPreview.doc_id}>
+                    {aprovandoId === laudoPreview.doc_id ? <Loader2 size={14} className="spin" /> : <Mail size={14} />} Aprovar e enviar por e-mail
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -5848,7 +5954,7 @@ function CardProspeccao({ prospeccao = [], carregando, atualizar, publicarNoDriv
   );
 }
 
-function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendimento, excluirCliente, empreendimentosRef = [], carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando }) {
+function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendimento, excluirCliente, empreendimentosRef = [], carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando }) {
   const porVistoria = docs.reduce((acc, d) => { acc[d.vistoria] = (acc[d.vistoria] || 0) + 1; return acc; }, {});
   const porStatusProducao = docs.reduce((acc, d) => { acc[d.statusProducao] = (acc[d.statusProducao] || 0) + 1; return acc; }, {});
   const totalRegistrosDocs = docs.length;
@@ -5866,7 +5972,7 @@ function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendi
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando indicadores…</p>}
 
       <CardPainelLaudos painel={painel} carregando={painelCarregando} recarregar={carregarPainel} usuarios={usuarios} notify={notify} />
-      <CardLaudosPendentes laudosPendentes={laudosPendentes} carregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} reenviarDrive={reenviarDrive} marcarEmAnalise={marcarEmAnalise}
+      <CardLaudosPendentes laudosPendentes={laudosPendentes} carregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} editarLaudo={editarLaudo} reenviarDrive={reenviarDrive} marcarEmAnalise={marcarEmAnalise}
       painel={painel} painelCarregando={painelCarregando} carregarPainel={carregarPainel} assinatura={assinatura} notify={notify} />
 
       <CardCancelamentosPendentes clientes={clientes} usuarios={usuarios} updCliente={updCliente} notify={notify} />
@@ -6336,7 +6442,7 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando }) {
+function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando }) {
   if (sub === "parceiros") {
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual}
       salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} vales={vales} valesCarregando={valesCarregando} notify={notify} />;
@@ -6355,7 +6461,7 @@ function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, pad
       padronizarEmpreendimento={padronizarEmpreendimento} excluirCliente={excluirCliente} empreendimentosRef={empreendimentosRef} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
       usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={usuarioAtualId}
       avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
-      laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} reenviarDrive={reenviarDrive} marcarEmAnalise={marcarEmAnalise}
+      laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} editarLaudo={editarLaudo} reenviarDrive={reenviarDrive} marcarEmAnalise={marcarEmAnalise}
       painel={painel} painelCarregando={painelCarregando} carregarPainel={carregarPainel}
       acessos={acessos} acessosCarregando={acessosCarregando} />
   );
