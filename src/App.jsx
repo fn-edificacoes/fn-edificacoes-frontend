@@ -4480,20 +4480,23 @@ function GraficoPatologias({ contagem, totalItens }) {
 }
 
 function ItemLaudo({ item, num }) {
-  const m = sevMeta[item.severidade];
+  /* item pode vir direto do banco (laudo antigo, campo ausente/fora do padrão) — sem
+     fallback aqui, um severidade/fotos inesperado derrubava a tela inteira em branco. */
+  const m = sevMeta[item.severidade] || sevMeta.Média;
+  const fotos = item.fotos || [];
   return (
     <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, overflow: "hidden", marginBottom: 16, breakInside: "avoid" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, background: CINZA_CLARO, padding: "10px 14px" }}>
         <span style={{ fontFamily: "monospace", fontWeight: 700, color: AZUL_MARINHO }}>ITEM {String(num).padStart(2, "0")}</span>
         {item.local && <span style={{ fontSize: 13, color: "#4a5a70" }}>· {item.local}</span>}
         <div style={{ flex: 1 }} />
-        <span style={{ background: m.bg, color: m.cor, padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700 }}>{item.severidade.toUpperCase()}</span>
+        <span style={{ background: m.bg, color: m.cor, padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700 }}>{(item.severidade || "média").toUpperCase()}</span>
       </div>
       <div style={{ padding: 14 }}>
         {item.patologia && <div style={{ fontWeight: 700, marginBottom: 6, color: AZUL_MARINHO }}>{item.patologia}</div>}
-        {item.fotos.length > 0 && (
-          <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(item.fotos.length, 2)}, 1fr)`, gap: 8, marginBottom: 12 }}>
-            {item.fotos.map((s, i) => <img key={i} src={s} alt="" style={{ width: "100%", height: 150, objectFit: "cover", borderRadius: 8, border: `1px solid ${CINZA_BORDA}` }} />)}
+        {fotos.length > 0 && (
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(fotos.length, 2)}, 1fr)`, gap: 8, marginBottom: 12 }}>
+            {fotos.map((s, i) => <img key={i} src={s} alt="" style={{ width: "100%", height: 150, objectFit: "cover", borderRadius: 8, border: `1px solid ${CINZA_BORDA}` }} />)}
           </div>
         )}
         {item.descricao && <p style={{ ...pTexto, margin: "0 0 8px" }}><strong style={{ color: AZUL_MEDIO }}>Descrição técnica. </strong>{item.descricao}</p>}
