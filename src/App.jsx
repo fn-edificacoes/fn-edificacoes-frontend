@@ -1457,9 +1457,19 @@ export default function App() {
   // alguém entra logado. Precisa ficar antes dos returns abaixo (regra dos hooks).
   useEffect(() => { registrarAcesso(session ? "equipe" : "portal"); }, [!!session]);
 
+  // Link público do portfólio de um parceiro (?portfolio=<id>) — funciona sem login,
+  // então intercepta antes de qualquer outra checagem de sessão.
+  const portfolioId = new URLSearchParams(window.location.search).get("portfolio");
+  if (portfolioId) return <PaginaPortfolioParceiro parceiroId={portfolioId} />;
+
   if (!session) {
     if (mostrarCadastroParceiro) {
-      return <TelaCadastroParceiro onVoltar={() => setMostrarCadastroParceiro(false)} />;
+      return (
+        <TelaCadastroParceiro
+          onVoltar={() => setMostrarCadastroParceiro(false)}
+          onIrParaLogin={() => { setMostrarCadastroParceiro(false); setMostrarLogin(true); }}
+        />
+      );
     }
     return mostrarLogin
       ? <TelaLogin onLogin={setSession} onVoltar={() => setMostrarLogin(false)} />
@@ -1689,6 +1699,21 @@ function AppInterno({ session, onLogout }) {
       notify(`Não foi possível cadastrar o parceiro: ${e.message}`);
       return { ok: false };
     }
+  };
+  /* Vendas/Gerência edita o portfólio ("catálogo de vendas") de um parceiro qualquer, em
+     nome dele — precisa informar parceiroId (diferente do próprio parceiro logado, que
+     nunca passa parceiroId porque o backend já resolve pelo token). */
+  const salvarItemCatalogoAdmin = async (parceiroId, item) => {
+    try {
+      const body = { parceiroId, titulo: item.titulo || "", categoria: item.categoria || "", preco: item.preco || "", descricao: item.descricao || "", foto: item.foto || "" };
+      if (item.id) await apiFetch(`/api/parceiros/servicos/${item.id}`, { method: "PATCH", token, body });
+      else await apiFetch("/api/parceiros/servicos", { method: "POST", token, body });
+      return true;
+    } catch (e) { notify(`Não foi possível salvar: ${e.message}`); return false; }
+  };
+  const excluirItemCatalogoAdmin = async (id) => {
+    try { await apiFetch(`/api/parceiros/servicos/${id}`, { method: "DELETE", token }); return true; }
+    catch (e) { notify(`Não foi possível excluir: ${e.message}`); return false; }
   };
 
   /* ---- Vales (todos, para Gerência/Vendas acompanharem leads/conversão de Parceiros) ---- */
@@ -2299,13 +2324,15 @@ function AppInterno({ session, onLogout }) {
         )}
         {abaTop === "vendas" && (
           <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
-            vales={vales} valesCarregando={valesCarregando} criarParceiroManual={criarParceiroManual} notify={notify} />
+            vales={vales} valesCarregando={valesCarregando} criarParceiroManual={criarParceiroManual}
+            salvarItemCatalogo={salvarItemCatalogoAdmin} excluirItemCatalogo={excluirItemCatalogoAdmin} notify={notify} />
         )}
         {abaTop === "gerencia" && (
           <AbaGerencia sub={abaGerencia} docs={docs} clientes={clientes} updCliente={updCliente} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
             usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={session.usuario.id}
             avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
             parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual}
+            salvarItemCatalogo={salvarItemCatalogoAdmin} excluirItemCatalogo={excluirItemCatalogoAdmin}
             vales={vales} valesCarregando={valesCarregando}
             precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
             padronizarEmpreendimento={padronizarEmpreendimento} excluirCliente={delCliente}
@@ -5927,7 +5954,7 @@ function CardIndicadoresParceiros({ parceiros, vales, valesCarregando }) {
     </Card>
   );
 }
-function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, vales, valesCarregando, notify }) {
+function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, notify }) {
   const [cadastrando, setCadastrando] = useState(false);
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -5937,7 +5964,8 @@ function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceir
           <Plus size={15} /> Cadastrar parceiro
         </button>
       </div>
-      <CardParceiros parceiros={parceiros} carregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} notify={notify} />
+      <CardParceiros parceiros={parceiros} carregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
+        salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} notify={notify} />
       {cadastrando && (
         <ModalCriarParceiroManual onFechar={() => setCadastrando(false)} criarParceiroManual={criarParceiroManual} notify={notify} />
       )}
@@ -6308,9 +6336,10 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando }) {
+function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando }) {
   if (sub === "parceiros") {
-    return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual} vales={vales} valesCarregando={valesCarregando} notify={notify} />;
+    return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual}
+      salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} vales={vales} valesCarregando={valesCarregando} notify={notify} />;
   }
   if (sub === "prospeccao") {
     return <CardProspeccao prospeccao={prospeccao} carregando={prospeccaoCarregando} atualizar={atualizarProspeccao}
@@ -7124,12 +7153,15 @@ function AbaCliente({ notify }) {
   );
 }
 
-/* ================= Módulo: Parceiros / Afiliados (aditivo) ================= */
+/* ================= Módulo: Parceiros / Afiliados (aditivo) =================
+   Nomenclatura: "Parceiro" é quem presta um serviço; "Afiliado" é quem vende produto.
+   É o mesmo cadastro/tabela por baixo (campo "tipo" já distinguia isso) — só os rótulos
+   exibidos que precisavam deixar essa distinção clara. */
 const PARCEIRO_TIPO_OPCOES = [
-  { valor: "servico", label: "Prestadores de Serviço" },
-  { valor: "produto", label: "Venda de Produtos" },
+  { valor: "servico", label: "Parceiro (presta serviço)" },
+  { valor: "produto", label: "Afiliado (vende produto)" },
 ];
-const PARCEIRO_TIPO_LABEL = { servico: "Prestador de Serviço", produto: "Venda de Produtos" };
+const PARCEIRO_TIPO_LABEL = { servico: "Parceiro", produto: "Afiliado" };
 
 const PARCEIRO_STATUS_OPCOES = ["em_analise", "aprovado", "suspenso", "encerrado"];
 const PARCEIRO_STATUS_LABEL = { em_analise: "Em análise", aprovado: "Aprovado", suspenso: "Suspenso", encerrado: "Encerrado" };
@@ -7275,8 +7307,100 @@ function ModalCriarParceiroManual({ onFechar, criarParceiroManual, notify }) {
   );
 }
 
+/* ---- Página pública: portfólio do parceiro ("mini site de vendas"), acessível pelo link
+   individual (?portfolio=<id>) sem precisar de login — é o que atrai o cliente. ---- */
+function PaginaPortfolioParceiro({ parceiroId }) {
+  const [parceiro, setParceiro] = useState(null);
+  const [itens, setItens] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      setCarregando(true);
+      try {
+        const [rVitrine, rServicos] = await Promise.all([
+          apiFetch("/api/parceiros/vitrine"),
+          apiFetch(`/api/parceiros/${parceiroId}/servicos`),
+        ]);
+        const p = (rVitrine.parceiros || []).find((x) => x.id === parceiroId);
+        if (!p) setErro("Portfólio não encontrado ou a parceria não está mais ativa.");
+        setParceiro(p || null);
+        setItens(rServicos.servicos || []);
+      } catch {
+        setErro("Não foi possível carregar este portfólio. Verifique sua internet e tente novamente.");
+      }
+      setCarregando(false);
+    })();
+  }, [parceiroId]);
+
+  if (carregando) {
+    return <div style={{ minHeight: "100vh", background: CINZA_CLARO, display: "grid", placeItems: "center", color: "#8593a8", fontFamily: "'Inter', system-ui, sans-serif" }}>Carregando…</div>;
+  }
+  if (erro || !parceiro) {
+    return (
+      <div style={{ minHeight: "100vh", background: CINZA_CLARO, display: "grid", placeItems: "center", padding: 18, fontFamily: "'Inter', system-ui, sans-serif" }}>
+        <p style={{ color: "#65758b", fontSize: 14, textAlign: "center", maxWidth: 320 }}>{erro || "Portfólio não encontrado."}</p>
+      </div>
+    );
+  }
+
+  const linkWhatsapp = parceiro.whatsapp ? `https://wa.me/55${String(parceiro.whatsapp).replace(/\D/g, "")}` : null;
+
+  return (
+    <div style={{ minHeight: "100vh", background: CINZA_CLARO, fontFamily: "'Inter', system-ui, sans-serif" }}>
+      <header style={{ background: AZUL_MARINHO, color: "#fff" }}>
+        <div style={{ maxWidth: 780, margin: "0 auto", padding: "26px 18px", display: "flex", alignItems: "center", gap: 14 }}>
+          {parceiro.logo && <img src={parceiro.logo} alt={parceiro.empresa} style={{ width: 56, height: 56, borderRadius: 10, background: "#fff", objectFit: "contain", flexShrink: 0 }} />}
+          <div>
+            <div style={{ fontSize: 20, fontWeight: 800 }}>{parceiro.empresa}</div>
+            <div style={{ fontSize: 12.5, opacity: .75 }}>
+              {PARCEIRO_TIPO_LABEL[parceiro.tipo] || parceiro.tipo}{parceiro.cidade ? ` · ${parceiro.cidade}/${parceiro.uf}` : ""}
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main style={{ maxWidth: 780, margin: "0 auto", padding: "24px 18px 60px" }}>
+        {parceiro.beneficio && (
+          <div style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: 16, marginBottom: 22 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 4, textTransform: "uppercase", letterSpacing: .3 }}>Benefício para clientes FN</div>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>{parceiro.beneficio}</div>
+            {parceiro.descricao_beneficio && <p style={{ fontSize: 13, color: "#65758b", margin: "6px 0 0" }}>{parceiro.descricao_beneficio}</p>}
+          </div>
+        )}
+
+        {itens.length === 0 ? (
+          <p style={{ color: "#8593a8", fontSize: 14, textAlign: "center", marginTop: 40 }}>Este portfólio ainda não tem itens cadastrados.</p>
+        ) : (
+          <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))" }}>
+            {itens.map((s) => (
+              <div key={s.id} style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, overflow: "hidden" }}>
+                {s.foto && <img src={s.foto} alt={s.titulo || ""} style={{ width: "100%", height: 150, objectFit: "cover", display: "block" }} />}
+                <div style={{ padding: 12 }}>
+                  {s.categoria && <div style={{ fontSize: 10.5, fontWeight: 700, color: AZUL_MEDIO, textTransform: "uppercase", marginBottom: 4 }}>{s.categoria}</div>}
+                  {s.titulo && <div style={{ fontSize: 14.5, fontWeight: 700, marginBottom: 4 }}>{s.titulo}</div>}
+                  {s.descricao && <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 6px" }}>{s.descricao}</p>}
+                  {s.preco && <div style={{ fontSize: 13, fontWeight: 700, color: "#2E7D32" }}>{s.preco}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {linkWhatsapp && (
+          <a href={linkWhatsapp} target="_blank" rel="noreferrer" className="btn-solid"
+            style={{ marginTop: 26, width: "auto", padding: "12px 22px", textDecoration: "none", display: "inline-flex" }}>
+            Falar no WhatsApp
+          </a>
+        )}
+      </main>
+    </div>
+  );
+}
+
 /* ---- Tela pública: cadastro de Parceiro/Afiliado (sem login) ---- */
-function TelaCadastroParceiro({ onVoltar }) {
+function TelaCadastroParceiro({ onVoltar, onIrParaLogin }) {
   const [form, setForm] = useState(novoCadastroParceiro());
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState("");
@@ -7349,6 +7473,7 @@ function TelaCadastroParceiro({ onVoltar }) {
             <div style={{ fontWeight: 700, fontSize: 15 }}>FN Edificações</div>
             <div style={{ fontSize: 11, opacity: 0.7 }}>Seja um Parceiro</div>
           </div>
+          <button className="btn-ghost" onClick={onIrParaLogin}><Lock size={13} /> Entrar</button>
           <button className="btn-ghost" onClick={onVoltar}>← Voltar</button>
         </div>
       </header>
@@ -7356,6 +7481,7 @@ function TelaCadastroParceiro({ onVoltar }) {
         <Card icon={Users} titulo="Cadastro de Parceiro / Afiliado">
           <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
             Cadastre sua empresa para se tornar parceira FN Edificações e oferecer benefícios aos nossos clientes.
+            Já é cadastrado? <a onClick={onIrParaLogin} style={{ color: AZUL_MARINHO, fontWeight: 600, cursor: "pointer" }}>Entre com seu e-mail e senha</a>.
           </p>
           <div style={{ background: "#FFF4E0", color: "#B26A00", padding: "10px 12px", borderRadius: 8, fontSize: 12.5, marginBottom: 16, display: "flex", gap: 8, alignItems: "flex-start" }}>
             <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
@@ -7465,8 +7591,77 @@ function CardStatusParceiro({ parceiro }) {
   );
 }
 
-function CardPerfilParceiro({ parceiro }) {
+function CardPerfilParceiro({ parceiro, token, onSalvo }) {
+  const [editando, setEditando] = useState(false);
+  const [form, setForm] = useState(null);
+  const [enviando, setEnviando] = useState(false);
+  const [erro, setErro] = useState("");
+
   const comissaoTexto = parceiro.comissao.length > 0 ? parceiro.comissao.map((c) => `${c.name}: ${c.p}%`).join(" · ") : "";
+  const setF = (campo, v) => setForm((f) => ({ ...f, [campo]: v }));
+
+  const iniciarEdicao = () => {
+    setForm({
+      responsavel: parceiro.responsavel || "", whatsapp: parceiro.whatsapp || "", instagram: parceiro.instagram || "",
+      site: parceiro.site || "", cidade: parceiro.cidade || "", uf: parceiro.uf || "", logo: parceiro.logo || "",
+    });
+    setErro("");
+    setEditando(true);
+  };
+
+  const onLogo = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { setErro("Envie uma imagem (PNG ou JPG) para a logo."); return; }
+    const reader = new FileReader();
+    reader.onload = () => setF("logo", reader.result);
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const salvar = async () => {
+    setErro("");
+    if (!form.whatsapp.trim()) { setErro("Informe um WhatsApp para contato."); return; }
+    if (!form.cidade.trim() || !form.uf.trim()) { setErro("Informe cidade e UF."); return; }
+    setEnviando(true);
+    try {
+      await apiFetch("/api/parceiros/me", { method: "PATCH", token, body: form });
+      setEditando(false);
+      await onSalvo();
+    } catch (e) { setErro(e.message); }
+    setEnviando(false);
+  };
+
+  if (editando && form) {
+    return (
+      <Card icon={User} titulo="Dados do parceiro">
+        {erro && <p style={{ color: "#C62828", fontSize: 13, margin: "0 0 10px" }}>{erro}</p>}
+        <Grid>
+          <Field label="Responsável" value={form.responsavel} onChange={(v) => setF("responsavel", v)} />
+          <Field label="WhatsApp" value={form.whatsapp} onChange={(v) => setF("whatsapp", v)} />
+          <Field label="Cidade" value={form.cidade} onChange={(v) => setF("cidade", v)} />
+          <Field label="UF" value={form.uf} onChange={(v) => setF("uf", v.toUpperCase().slice(0, 2))} />
+          <Field label="Instagram" value={form.instagram} onChange={(v) => setF("instagram", v)} />
+          <Field label="Site" value={form.site} onChange={(v) => setF("site", v)} />
+        </Grid>
+        <div style={{ ...cell(true), marginTop: 12 }}>
+          <label style={lab}>Logo da empresa</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {form.logo && <img src={form.logo} alt="Logo" style={{ width: 52, height: 52, objectFit: "contain", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, background: "#fff" }} />}
+            <label className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, cursor: "pointer" }}>
+              <Camera size={14} /> {form.logo ? "Trocar logo" : "Enviar logo"}
+              <input type="file" accept="image/*" onChange={onLogo} style={{ display: "none" }} />
+            </label>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+          <button type="button" className="btn-solid" onClick={salvar} disabled={enviando}>{enviando ? "Salvando…" : "Salvar alterações"}</button>
+          <button type="button" className="btn-ghost" onClick={() => setEditando(false)} disabled={enviando}>Cancelar</button>
+        </div>
+      </Card>
+    );
+  }
+
   return (
     <Card icon={User} titulo="Dados do parceiro">
       <TabelaDados rows={[
@@ -7476,7 +7671,8 @@ function CardPerfilParceiro({ parceiro }) {
         ["WhatsApp", parceiro.whatsapp], ["Instagram", parceiro.instagram], ["Site", parceiro.site],
         ["Comissão combinada", comissaoTexto], ["Benefício oferecido", parceiro.beneficio],
       ]} />
-      {parceiro.descricaoBeneficio && <p style={{ fontSize: 13.5, color: "#4a5a70", margin: 0 }}>{parceiro.descricaoBeneficio}</p>}
+      {parceiro.descricaoBeneficio && <p style={{ fontSize: 13.5, color: "#4a5a70", margin: "0 0 12px" }}>{parceiro.descricaoBeneficio}</p>}
+      <button type="button" className="btn-ghost" onClick={iniciarEdicao}><Edit3 size={14} /> Editar meus dados</button>
     </Card>
   );
 }
@@ -7513,11 +7709,121 @@ function CardValesParceiro({ vales }) {
   );
 }
 
+/* Editor do portfólio ("mini site de vendas") do parceiro — usado tanto pelo próprio
+   parceiro (PainelParceiro, sem precisar informar parceiroId) quanto por Vendas/Gerência
+   editando em nome dele (CardParceiros). Puramente de apresentação: quem chama decide como
+   carregar/salvar/excluir (onSalvar/onExcluir), pra não duplicar a lógica de autenticação. */
+function EditorCatalogoParceiro({ itens = [], carregando, onSalvar, onExcluir, linkPortfolio, notify }) {
+  const [editando, setEditando] = useState(null);
+  const [salvando, setSalvando] = useState(false);
+
+  const onFoto = (e, cb) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { notify("Envie uma imagem (PNG ou JPG)"); return; }
+    const reader = new FileReader();
+    reader.onload = () => cb(reader.result);
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const salvar = async () => {
+    if (!editando.titulo?.trim() && !editando.descricao?.trim() && !editando.foto) {
+      notify("Informe ao menos título, foto ou descrição."); return;
+    }
+    setSalvando(true);
+    const ok = await onSalvar(editando);
+    setSalvando(false);
+    if (ok) setEditando(null);
+  };
+
+  const copiarLink = () => {
+    navigator.clipboard?.writeText(linkPortfolio);
+    notify("Link copiado ✓");
+  };
+
+  return (
+    <Card icon={Camera} titulo={`Portfólio (${itens.length} ${itens.length === 1 ? "item" : "itens"})`}>
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
+        Fotos e descrições dos serviços/produtos que aparecem na página pública do parceiro — o "catálogo de vendas" que atrai o cliente.
+      </p>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap", background: CINZA_CLARO, borderRadius: 8, padding: "8px 10px" }}>
+        <span style={{ fontSize: 12, color: "#4a5a70", flex: 1, minWidth: 180, wordBreak: "break-all" }}>
+          Link público: <a href={linkPortfolio} target="_blank" rel="noreferrer" style={{ color: AZUL_MEDIO }}>{linkPortfolio}</a>
+        </span>
+        <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: "#fff" }} onClick={copiarLink}><Copy size={13} /> Copiar link</button>
+      </div>
+
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && itens.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum item no portfólio ainda.</p>}
+
+      {itens.length > 0 && (
+        <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", marginBottom: 14 }}>
+          {itens.map((s) => (
+            <div key={s.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, overflow: "hidden" }}>
+              {s.foto && <img src={s.foto} alt="" style={{ width: "100%", height: 100, objectFit: "cover", display: "block" }} />}
+              <div style={{ padding: 10 }}>
+                {s.categoria && <div style={{ fontSize: 10.5, fontWeight: 700, color: AZUL_MEDIO, textTransform: "uppercase" }}>{s.categoria}</div>}
+                {s.titulo && <div style={{ fontWeight: 700, fontSize: 13 }}>{s.titulo}</div>}
+                {s.preco && <div style={{ fontSize: 12, color: "#2E7D32", fontWeight: 700 }}>{s.preco}</div>}
+                <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                  <button className="icon-btn" onClick={() => setEditando({ ...s })} title="Editar"><Edit3 size={13} color={AZUL_MEDIO} /></button>
+                  <button className="icon-btn" onClick={() => onExcluir(s.id)} title="Excluir"><Trash2 size={13} color="#c62828" /></button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <button className="btn-add" style={{ padding: 10, fontSize: 13 }} onClick={() => setEditando({})}>
+        <Plus size={15} /> Adicionar item ao portfólio
+      </button>
+
+      {editando && (
+        <div className="no-print" style={overlay} onClick={() => setEditando(null)}>
+          <div style={{ ...modal, maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <strong>{editando.id ? "Editar item" : "Novo item do portfólio"}</strong>
+              <button className="icon-btn" onClick={() => setEditando(null)}><X size={16} /></button>
+            </div>
+            <div style={{ ...cell(true), marginBottom: 10 }}>
+              <label style={lab}>Foto</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                {editando.foto && <img src={editando.foto} alt="" style={{ width: 52, height: 52, objectFit: "cover", borderRadius: 8, border: `1px solid ${CINZA_BORDA}` }} />}
+                <label className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, cursor: "pointer" }}>
+                  <Camera size={14} /> {editando.foto ? "Trocar foto" : "Enviar foto"}
+                  <input type="file" accept="image/*" onChange={(e) => onFoto(e, (v) => setEditando((ed) => ({ ...ed, foto: v })))} style={{ display: "none" }} />
+                </label>
+              </div>
+            </div>
+            <div style={{ ...cell(true), marginBottom: 10 }}>
+              <label style={lab}>Título</label>
+              <input style={inp} value={editando.titulo || ""} onChange={(e) => setEditando((ed) => ({ ...ed, titulo: e.target.value }))} placeholder="Ex.: Instalação de vidro temperado" />
+            </div>
+            <Grid>
+              <Field label="Categoria" value={editando.categoria || ""} onChange={(v) => setEditando((ed) => ({ ...ed, categoria: v }))} />
+              <Field label="Preço / condições" value={editando.preco || ""} onChange={(v) => setEditando((ed) => ({ ...ed, preco: v }))} />
+            </Grid>
+            <Area label="Descrição" value={editando.descricao || ""} onChange={(v) => setEditando((ed) => ({ ...ed, descricao: v }))} rows={3} placeholder="O que torna esse serviço/produto atrativo pro cliente" />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setEditando(null)}>Cancelar</button>
+              <button className="btn-solid" onClick={salvar} disabled={salvando}>{salvando ? "Salvando…" : "Salvar item"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function PainelParceiro({ session, onLogout }) {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
   const [parceiro, setParceiro] = useState(null);
   const [vales, setVales] = useState([]);
+  const [itensCatalogo, setItensCatalogo] = useState([]);
+  const [itensCarregando, setItensCarregando] = useState(true);
 
   const carregar = async () => {
     setCarregando(true); setErro("");
@@ -7529,6 +7835,30 @@ function PainelParceiro({ session, onLogout }) {
     setCarregando(false);
   };
   useEffect(() => { carregar(); }, []);
+
+  const carregarCatalogo = async () => {
+    setItensCarregando(true);
+    try {
+      const r = await apiFetch("/api/parceiros/servicos", { token: session.token });
+      setItensCatalogo(r.servicos || []);
+    } catch { /* mostra vazio; o card de erro geral já cobre falha de sessão */ }
+    setItensCarregando(false);
+  };
+  useEffect(() => { carregarCatalogo(); }, []);
+
+  const salvarItemCatalogo = async (item) => {
+    try {
+      const body = { titulo: item.titulo || "", categoria: item.categoria || "", preco: item.preco || "", descricao: item.descricao || "", foto: item.foto || "" };
+      if (item.id) await apiFetch(`/api/parceiros/servicos/${item.id}`, { method: "PATCH", token: session.token, body });
+      else await apiFetch("/api/parceiros/servicos", { method: "POST", token: session.token, body });
+      await carregarCatalogo();
+      return true;
+    } catch (e) { alert(`Não foi possível salvar: ${e.message}`); return false; }
+  };
+  const excluirItemCatalogo = async (id) => {
+    try { await apiFetch(`/api/parceiros/servicos/${id}`, { method: "DELETE", token: session.token }); await carregarCatalogo(); }
+    catch (e) { alert(`Não foi possível excluir: ${e.message}`); }
+  };
 
   return (
     <div style={{ fontFamily: "'Inter', system-ui, sans-serif", color: "#1a2330", background: CINZA_CLARO, minHeight: "100vh" }}>
@@ -7569,7 +7899,11 @@ function PainelParceiro({ session, onLogout }) {
         {!carregando && !erro && parceiro && (
           <>
             <CardStatusParceiro parceiro={parceiro} />
-            <CardPerfilParceiro parceiro={parceiro} />
+            <CardPerfilParceiro parceiro={parceiro} token={session.token} onSalvo={carregar} />
+            <EditorCatalogoParceiro itens={itensCatalogo} carregando={itensCarregando}
+              onSalvar={salvarItemCatalogo} onExcluir={excluirItemCatalogo}
+              linkPortfolio={`${window.location.origin}${window.location.pathname}?portfolio=${parceiro.id}`}
+              notify={(msg) => alert(msg)} />
             <CardValesParceiro vales={vales} />
           </>
         )}
@@ -7578,9 +7912,44 @@ function PainelParceiro({ session, onLogout }) {
   );
 }
 
+/* Wrapper do EditorCatalogoParceiro pra uso da Gerência/Vendas: carrega o catálogo público
+   de um parceiro específico e liga onSalvar/onExcluir nas versões "admin" (que informam
+   parceiroId, diferente do fluxo do próprio parceiro logado). */
+function ModalCatalogoParceiro({ parceiro, onFechar, salvarItemCatalogo, excluirItemCatalogo, notify }) {
+  const [itens, setItens] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+
+  const carregar = async () => {
+    setCarregando(true);
+    try {
+      const r = await apiFetch(`/api/parceiros/${parceiro.id}/servicos`);
+      setItens(r.servicos || []);
+    } catch (e) { notify(`Não foi possível carregar o portfólio: ${e.message}`); }
+    setCarregando(false);
+  };
+  useEffect(() => { carregar(); }, [parceiro.id]);
+
+  const onSalvar = async (item) => { const ok = await salvarItemCatalogo(parceiro.id, item); if (ok) await carregar(); return ok; };
+  const onExcluir = async (id) => { const ok = await excluirItemCatalogo(id); if (ok) await carregar(); };
+
+  return (
+    <div className="no-print" style={overlay} onClick={onFechar}>
+      <div style={{ ...modal, maxWidth: 640, maxHeight: "85vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <strong>Portfólio de {parceiro.empresa}</strong>
+          <button className="icon-btn" onClick={onFechar}><X size={16} /></button>
+        </div>
+        <EditorCatalogoParceiro itens={itens} carregando={carregando} onSalvar={onSalvar} onExcluir={onExcluir}
+          linkPortfolio={`${window.location.origin}${window.location.pathname}?portfolio=${parceiro.id}`} notify={notify} />
+      </div>
+    </div>
+  );
+}
+
 /* ---- Aba Parceiros dentro da Gerência (homologação) ---- */
-function CardParceiros({ parceiros, carregando, atualizarParceiro, notify }) {
+function CardParceiros({ parceiros, carregando, atualizarParceiro, salvarItemCatalogo, excluirItemCatalogo, notify }) {
   const [editando, setEditando] = useState(null); // { id, status, avaliacao }
+  const [catalogoDe, setCatalogoDe] = useState(null); // parceiro cujo portfólio está aberto
 
   const abrirEdicao = (p) => setEditando({ id: p.id, status: p.status, avaliacao: p.avaliacao || "" });
   const salvar = async () => {
@@ -7622,7 +7991,8 @@ function CardParceiros({ parceiros, carregando, atualizarParceiro, notify }) {
                     {p.comissao.length > 0 ? p.comissao.map((c) => `${c.name} ${c.p}%`).join(", ") : "—"}
                   </td>
                   <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
-                    <button className="icon-btn" onClick={() => abrirEdicao(p)}><Edit3 size={15} color={AZUL_MEDIO} /></button>
+                    <button className="icon-btn" onClick={() => setCatalogoDe(p)} title="Portfólio"><Camera size={15} color={AZUL_MEDIO} /></button>
+                    <button className="icon-btn" onClick={() => abrirEdicao(p)} title="Homologação"><Edit3 size={15} color={AZUL_MEDIO} /></button>
                   </td>
                 </tr>
               ))}
@@ -7651,6 +8021,11 @@ function CardParceiros({ parceiros, carregando, atualizarParceiro, notify }) {
             </div>
           </div>
         </div>
+      )}
+
+      {catalogoDe && (
+        <ModalCatalogoParceiro parceiro={catalogoDe} onFechar={() => setCatalogoDe(null)}
+          salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} notify={notify} />
       )}
     </Card>
   );
