@@ -997,7 +997,18 @@ function LaudoModelo({ laudo, assinatura, aprovado = true }) {
    Sino no cabeçalho mostrando o que espera ação de quem está logado. Cada perfil vê só o
    que é dele. Tudo sai dos dados que o sistema já carrega — não há consulta nova nem
    tabela de notificação: o que vale é o estado atual, então nada fica desatualizado. */
-function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], avaliacoes = [], documentosArt = [], agendaVistoriador = [] }) {
+/* Depois de quantos dias um laudo parado na gerência vira cobrança. Três dias úteis é o que
+   a equipe pratica hoje; está aqui em cima, num lugar só, para mudar sem caçar pelo código. */
+const PRAZO_ANALISE_DIAS = 3;
+
+function diasDesde(quando) {
+  if (!quando) return 0;
+  const d = new Date(quando);
+  if (Number.isNaN(d.getTime())) return 0;
+  return (Date.now() - d.getTime()) / 86400000;
+}
+
+function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], avaliacoes = [], documentosArt = [], agendaVistoriador = [], meusLaudos = [] }) {
   const itens = [];
   const hojeISO = paraChaveISO(new Date());
 
@@ -1037,6 +1048,36 @@ function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], ava
       itens.push({
         id: "laudos", urgente: true,
         texto: `${laudosPendentes.length} laudo(s) aguardando sua aprovação`,
+        onde: { aba: "gerencia", sub: "visao-geral" },
+      });
+    }
+    /* Reenvio é retrabalho já analisado uma vez — merece aviso próprio, senão some no meio
+       da fila junto com os laudos que a gerência nunca viu. */
+    const reenviados = laudosPendentes.filter((l) => l.ehReenvio);
+    if (reenviados.length) {
+      itens.push({
+        id: "reenviados", urgente: true,
+        texto: `${reenviados.length} laudo(s) corrigido(s) e reenviado(s) para nova análise`,
+        onde: { aba: "gerencia", sub: "visao-geral" },
+      });
+    }
+    /* Arquivo que não subiu ao Drive impede o laudo de ser dado como finalizado, então
+       precisa chegar à gerência — é ela quem reenvia. */
+    const comErroDrive = laudosPendentes.filter((l) => l.drive?.comErro > 0);
+    if (comErroDrive.length) {
+      itens.push({
+        id: "drive-erro", urgente: true,
+        texto: `${comErroDrive.length} laudo(s) com erro de sincronização no Google Drive`,
+        onde: { aba: "gerencia", sub: "visao-geral" },
+      });
+    }
+    /* Laudo parado além do prazo. O limite é do fluxo, não do relógio de ninguém: passou de
+       PRAZO_ANALISE_DIAS, a gerência é quem está segurando. */
+    const parados = laudosPendentes.filter((l) => diasDesde(l.laudo_criado_em) > PRAZO_ANALISE_DIAS);
+    if (parados.length) {
+      itens.push({
+        id: "parados", urgente: true,
+        texto: `${parados.length} laudo(s) aguardando análise há mais de ${PRAZO_ANALISE_DIAS} dias`,
         onde: { aba: "gerencia", sub: "visao-geral" },
       });
     }
@@ -1098,6 +1139,39 @@ function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], ava
         id: "proximas",
         texto: `${proximas.length} vistoria(s) agendada(s) para os próximos dias`,
         onde: { aba: "laudos", sub: "agenda" },
+      });
+    }
+
+    /* Devolvido é a única coisa desta tela que está parada esperando o técnico. Antes ele
+       não tinha como saber: no status voltado ao cliente, laudo devolvido e laudo intocado
+       apareciam os dois como "Laudo em análise". */
+    const devolvidos = meusLaudos.filter((l) => l.laudo_status === "devolvido_correcao");
+    if (devolvidos.length) {
+      itens.push({
+        id: "devolvidos", urgente: true,
+        texto: `${devolvidos.length} laudo(s) devolvido(s) pela gerência para correção`,
+        onde: { aba: "laudos", sub: "realizados" },
+      });
+    }
+    const aprovadosRecentes = meusLaudos.filter((l) =>
+      ["aprovado", "laudo_finalizado", "enviado_cliente"].includes(l.laudo_status)
+      && l.aprovado_em && diasDesde(l.aprovado_em) <= 3
+    );
+    if (aprovadosRecentes.length) {
+      itens.push({
+        id: "aprovados",
+        texto: `${aprovadosRecentes.length} laudo(s) seu(s) aprovado(s) nos últimos dias`,
+        onde: { aba: "laudos", sub: "realizados" },
+      });
+    }
+    /* Foto que não subiu é problema do técnico saber: a vistoria fica sem registro
+       fotográfico arquivado, e refazer depois é impossível — ele já saiu do imóvel. */
+    const comFalhaDeFoto = meusLaudos.filter((l) => l.drive?.comErro > 0);
+    if (comFalhaDeFoto.length) {
+      itens.push({
+        id: "fotos-falharam", urgente: true,
+        texto: `${comFalhaDeFoto.length} laudo(s) com falha no envio de fotos`,
+        onde: { aba: "laudos", sub: "realizados" },
       });
     }
   }
@@ -1720,6 +1794,24 @@ function AppInterno({ session, onLogout }) {
       return false;
     }
   };
+  /* ---- Painel da gerência: indicadores e tempos médios, com filtros ----
+     Os números são contados no banco. Trazer os laudos para contar no navegador significaria
+     baixar as fotos em JSONB junto — megabytes por laudo, para exibir um total. */
+  const [painel, setPainel] = useState(null);
+  const [painelCarregando, setPainelCarregando] = useState(false);
+  const carregarPainel = async (filtros = {}) => {
+    if (perfil !== "gerencia") return;
+    setPainelCarregando(true);
+    try {
+      const qs = new URLSearchParams(
+        Object.entries(filtros).filter(([, v]) => String(v || "").trim())
+      ).toString();
+      setPainel(await apiFetch(`/api/painel/laudos${qs ? `?${qs}` : ""}`, { token }));
+    } catch (e) { notify(`Não foi possível carregar o painel: ${e.message}`); }
+    setPainelCarregando(false);
+  };
+  useEffect(() => { carregarPainel(); }, []);
+
   /* Abrir o laudo marca "Em análise": o técnico passa a saber que o documento saiu da fila
      e alguém está olhando, em vez de ficar dias vendo "Enviado". O backend ignora a chamada
      quando o laudo já passou desse ponto, então abrir um aprovado não o faz retroceder. */
@@ -2064,7 +2156,7 @@ function AppInterno({ session, onLogout }) {
               <div style={{ opacity: 0.7 }}>{PERFIL_LABEL[perfil] || perfil}</div>
             </div>
             <SinoNotificacoes
-              itens={calcularNotificacoes({ perfil, clientes: clientesAtivos, laudosPendentes, avaliacoes, documentosArt, agendaVistoriador })}
+              itens={calcularNotificacoes({ perfil, clientes: clientesAtivos, laudosPendentes, avaliacoes, documentosArt, agendaVistoriador, meusLaudos })}
               onIr={({ aba, sub }) => {
                 if (aba) setAbaTop(aba);
                 if (sub && aba === "qualidade") setAbaQualidade(sub);
@@ -2197,6 +2289,7 @@ function AppInterno({ session, onLogout }) {
             publicarProspeccaoDrive={publicarProspeccaoDrive}
             adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento}
             laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} reenviarDrive={reenviarDrive} marcarEmAnalise={marcarEmAnalise}
+      painel={painel} painelCarregando={painelCarregando} carregarPainel={carregarPainel}
             acessos={acessos} acessosCarregando={acessosCarregando} />
         )}
       </main>
@@ -4640,6 +4733,132 @@ function CardCadastrosClientes({ clientes }) {
 
 /* ---- Laudos aguardando aprovação da Gerência: pré-visualiza (reaproveita o componente
    Laudo já existente) e aprova (gera PDF + envia por e-mail automaticamente). ---- */
+/* ---- Painel de laudos da Gerência ----
+   Os oito estados do fluxo, o que está travado no Drive e quanto tempo a operação leva.
+   É uma tela de operação, não de leitura: o que exige ação vem primeiro e com cor própria,
+   e o resto fica quieto. */
+function CardPainelLaudos({ painel, carregando, recarregar, usuarios = [], notify }) {
+  const vazio = { de: "", ate: "", empreendimento: "", cliente: "", vistoriador: "", status: "", bloco: "", unidade: "" };
+  const [filtros, setFiltros] = useState(vazio);
+  const [abertos, setAbertos] = useState(false);
+  const set = (k, v) => setFiltros((f) => ({ ...f, [k]: v }));
+  const ativos = Object.entries(filtros).filter(([, v]) => String(v || "").trim()).length;
+
+  const i = painel?.indicadores;
+  const t = painel?.tempos;
+
+  /* Ordem por urgência, não por etapa do fluxo: o que espera decisão da gerência primeiro.
+     "Precisa de ação" ganha cor; o resto é acompanhamento e fica neutro. */
+  const cartoes = [
+    { r: "Aguardando análise", v: i?.aguardandoAnalise, cor: "#B26A00", acao: true },
+    { r: "Reenviadas", v: i?.reenviadas, cor: "#B26A00", acao: true },
+    { r: "Erro no Drive", v: i?.arquivosComErro, cor: "#C62828", acao: true,
+      apoio: i?.laudosComErroDrive ? `em ${i.laudosComErroDrive} laudo(s)` : null },
+    { r: "Em análise", v: i?.emAnalise, cor: AZUL_MEDIO },
+    { r: "Devolvidas", v: i?.devolvidas, cor: "#C62828" },
+    { r: "Aprovadas", v: i?.aprovadas, cor: "#2E7D32" },
+    { r: "Finalizados", v: i?.finalizados, cor: "#2E7D32" },
+    { r: "Enviados ao cliente", v: i?.enviadosAoCliente, cor: "#2E7D32" },
+    { r: "Sem laudo ainda", v: i?.emRascunho, cor: "#65758b", apoio: "vistorias atribuídas" },
+  ];
+
+  const campo = { padding: "7px 9px", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, fontSize: 12.5, width: "100%", fontFamily: "inherit" };
+  const rotulo = { fontSize: 11, fontWeight: 600, color: "#65758b", display: "block", marginBottom: 3 };
+
+  return (
+    <Card icon={BarChart3} titulo="Painel de laudos">
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: 0, flex: 1, minWidth: 200 }}>
+          Onde está cada laudo, o que travou no arquivamento e quanto tempo a operação leva.
+        </p>
+        <button className="btn-ghost" onClick={() => setAbertos((a) => !a)}>
+          <Filter size={14} /> Filtros{ativos ? ` (${ativos})` : ""}
+        </button>
+        <button className="btn-ghost" onClick={() => recarregar(filtros)}>
+          {carregando ? <Loader2 size={14} className="spin" /> : <RefreshCcw size={14} />} Atualizar
+        </button>
+      </div>
+
+      {abertos && (
+        <div style={{ background: CINZA_CLARO, borderRadius: 10, padding: 14, marginBottom: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
+            <div><label style={rotulo}>Vistoria de</label><input type="date" style={campo} value={filtros.de} onChange={(e) => set("de", e.target.value)} /></div>
+            <div><label style={rotulo}>até</label><input type="date" style={campo} value={filtros.ate} onChange={(e) => set("ate", e.target.value)} /></div>
+            {/* Condomínio e empreendimento são o mesmo campo no cadastro — um filtro só. */}
+            <div><label style={rotulo}>Empreendimento / condomínio</label><input style={campo} value={filtros.empreendimento} onChange={(e) => set("empreendimento", e.target.value)} placeholder="parte do nome" /></div>
+            <div><label style={rotulo}>Cliente</label><input style={campo} value={filtros.cliente} onChange={(e) => set("cliente", e.target.value)} placeholder="parte do nome" /></div>
+            <div><label style={rotulo}>Bloco / torre</label><input style={campo} value={filtros.bloco} onChange={(e) => set("bloco", e.target.value)} /></div>
+            <div><label style={rotulo}>Unidade</label><input style={campo} value={filtros.unidade} onChange={(e) => set("unidade", e.target.value)} /></div>
+            <div>
+              <label style={rotulo}>Vistoriador</label>
+              <select style={campo} value={filtros.vistoriador} onChange={(e) => set("vistoriador", e.target.value)}>
+                <option value="">todos</option>
+                {usuarios.filter((u) => u.role === "vistoriador").map((u) => <option key={u.id} value={u.id}>{u.nome}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={rotulo}>Situação</label>
+              <select style={campo} value={filtros.status} onChange={(e) => set("status", e.target.value)}>
+                <option value="">todas</option>
+                {(painel?.statusDisponiveis || []).map((s) => <option key={s.valor} value={s.valor}>{s.label}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 12, justifyContent: "flex-end" }}>
+            <button className="btn-ghost" onClick={() => { setFiltros(vazio); recarregar({}); }}>Limpar</button>
+            <button className="btn-solid" onClick={() => recarregar(filtros)}>Aplicar</button>
+          </div>
+        </div>
+      )}
+
+      {!painel && carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+
+      {painel && (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(132px, 1fr))", gap: 9 }}>
+            {cartoes.map((c) => (
+              <div key={c.r} style={{
+                border: `1px solid ${c.acao && c.v > 0 ? `${c.cor}55` : CINZA_BORDA}`,
+                background: c.acao && c.v > 0 ? `${c.cor}0d` : "#fff",
+                borderRadius: 10, padding: "11px 13px",
+              }}>
+                <div style={{ fontSize: 23, fontWeight: 800, lineHeight: 1.1, color: c.v > 0 ? c.cor : "#c2cbd8", fontVariantNumeric: "tabular-nums" }}>
+                  {c.v ?? 0}
+                </div>
+                <div style={{ fontSize: 11.5, color: "#65758b", marginTop: 2 }}>{c.r}</div>
+                {c.apoio && <div style={{ fontSize: 10.5, color: "#8593a8", marginTop: 1 }}>{c.apoio}</div>}
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 10, marginTop: 12 }}>
+            {[
+              { r: "Da vistoria à aprovação", v: t?.diasVistoriaAteAprovacao, apoio: "inclui o tempo do técnico redigindo" },
+              { r: "Do envio à aprovação", v: t?.diasEnvioAteAprovacao, apoio: "só a revisão da gerência" },
+            ].map((m) => (
+              <div key={m.r} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "11px 13px" }}>
+                <div style={{ fontSize: 19, fontWeight: 800, color: AZUL_MARINHO, fontVariantNumeric: "tabular-nums" }}>
+                  {m.v === null || m.v === undefined ? "—" : `${String(m.v).replace(".", ",")} dia(s)`}
+                </div>
+                <div style={{ fontSize: 11.5, color: "#65758b", marginTop: 2 }}>{m.r}</div>
+                <div style={{ fontSize: 10.5, color: "#8593a8", marginTop: 1 }}>{m.apoio}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Média sem base é número solto: 12 dias apurados sobre 1 laudo parecem iguais a
+              12 dias sobre 200. A base fica escrita junto. */}
+          <p style={{ fontSize: 11.5, color: "#8593a8", margin: "9px 0 0" }}>
+            {t?.base
+              ? `Médias apuradas sobre ${t.base} laudo(s) já aprovado(s).`
+              : "Ainda não há laudo aprovado no recorte selecionado — sem base para calcular as médias."}
+          </p>
+        </>
+      )}
+    </Card>
+  );
+}
+
 /* Estado do arquivamento no Drive, em uma linha. O laudo não deve ser aprovado como
    "finalizado" enquanto houver obrigatório pendente — então a gerência precisa ver isso
    antes de clicar em aprovar, não depois. */
@@ -5412,7 +5631,7 @@ function CardProspeccao({ prospeccao = [], carregando, atualizar, publicarNoDriv
   );
 }
 
-function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendimento, excluirCliente, empreendimentosRef = [], carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, reenviarDrive, marcarEmAnalise, acessos, acessosCarregando }) {
+function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendimento, excluirCliente, empreendimentosRef = [], carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando }) {
   const porVistoria = docs.reduce((acc, d) => { acc[d.vistoria] = (acc[d.vistoria] || 0) + 1; return acc; }, {});
   const porStatusProducao = docs.reduce((acc, d) => { acc[d.statusProducao] = (acc[d.statusProducao] || 0) + 1; return acc; }, {});
   const totalRegistrosDocs = docs.length;
@@ -5429,7 +5648,9 @@ function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendi
     <div style={{ display: "grid", gap: 16 }}>
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando indicadores…</p>}
 
-      <CardLaudosPendentes laudosPendentes={laudosPendentes} carregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} reenviarDrive={reenviarDrive} marcarEmAnalise={marcarEmAnalise} assinatura={assinatura} notify={notify} />
+      <CardPainelLaudos painel={painel} carregando={painelCarregando} recarregar={carregarPainel} usuarios={usuarios} notify={notify} />
+      <CardLaudosPendentes laudosPendentes={laudosPendentes} carregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} reenviarDrive={reenviarDrive} marcarEmAnalise={marcarEmAnalise}
+      painel={painel} painelCarregando={painelCarregando} carregarPainel={carregarPainel} assinatura={assinatura} notify={notify} />
 
       <CardCancelamentosPendentes clientes={clientes} usuarios={usuarios} updCliente={updCliente} notify={notify} />
 
@@ -5888,7 +6109,7 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, reenviarDrive, marcarEmAnalise, acessos, acessosCarregando }) {
+function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando }) {
   if (sub === "parceiros") {
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} vales={vales} valesCarregando={valesCarregando} notify={notify} />;
   }
@@ -5907,6 +6128,7 @@ function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, pad
       usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={usuarioAtualId}
       avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
       laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} reenviarDrive={reenviarDrive} marcarEmAnalise={marcarEmAnalise}
+      painel={painel} painelCarregando={painelCarregando} carregarPainel={carregarPainel}
       acessos={acessos} acessosCarregando={acessosCarregando} />
   );
 }
