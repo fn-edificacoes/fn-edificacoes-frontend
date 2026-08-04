@@ -1705,7 +1705,7 @@ function AppInterno({ session, onLogout }) {
      nunca passa parceiroId porque o backend já resolve pelo token). */
   const salvarItemCatalogoAdmin = async (parceiroId, item) => {
     try {
-      const body = { parceiroId, titulo: item.titulo || "", categoria: item.categoria || "", preco: item.preco || "", descricao: item.descricao || "", foto: item.foto || "" };
+      const body = { parceiroId, titulo: item.titulo || "", categoria: item.categoria || "", preco: item.preco || "", preco_de: item.preco_de || "", descricao: item.descricao || "", foto: item.foto || "" };
       if (item.id) await apiFetch(`/api/parceiros/servicos/${item.id}`, { method: "PATCH", token, body });
       else await apiFetch("/api/parceiros/servicos", { method: "POST", token, body });
       return true;
@@ -7309,6 +7309,18 @@ function ModalCriarParceiroManual({ onFechar, criarParceiroManual, notify }) {
 
 /* ---- Página pública: portfólio do parceiro ("mini site de vendas"), acessível pelo link
    individual (?portfolio=<id>) sem precisar de login — é o que atrai o cliente. ---- */
+function calcularDesconto(precoDe, preco) {
+  if (!precoDe || !preco) return null;
+  const paraNumero = (s) => {
+    const n = parseFloat(String(s).replace(/[^0-9,.-]/g, "").replace(/\.(?=.*\.)/g, "").replace(",", "."));
+    return Number.isNaN(n) ? null : n;
+  };
+  const de = paraNumero(precoDe);
+  const por = paraNumero(preco);
+  if (de === null || por === null || de <= por || de <= 0) return null;
+  return Math.round((1 - por / de) * 100);
+}
+
 function PaginaPortfolioParceiro({ parceiroId }) {
   const [parceiro, setParceiro] = useState(null);
   const [itens, setItens] = useState([]);
@@ -7374,17 +7386,26 @@ function PaginaPortfolioParceiro({ parceiroId }) {
           <p style={{ color: "#8593a8", fontSize: 14, textAlign: "center", marginTop: 40 }}>Este portfólio ainda não tem itens cadastrados.</p>
         ) : (
           <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))" }}>
-            {itens.map((s) => (
-              <div key={s.id} style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, overflow: "hidden" }}>
-                {s.foto && <img src={s.foto} alt={s.titulo || ""} style={{ width: "100%", height: 150, objectFit: "cover", display: "block" }} />}
-                <div style={{ padding: 12 }}>
-                  {s.categoria && <div style={{ fontSize: 10.5, fontWeight: 700, color: AZUL_MEDIO, textTransform: "uppercase", marginBottom: 4 }}>{s.categoria}</div>}
-                  {s.titulo && <div style={{ fontSize: 14.5, fontWeight: 700, marginBottom: 4 }}>{s.titulo}</div>}
-                  {s.descricao && <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 6px" }}>{s.descricao}</p>}
-                  {s.preco && <div style={{ fontSize: 13, fontWeight: 700, color: "#2E7D32" }}>{s.preco}</div>}
+            {itens.map((s) => {
+              const desconto = calcularDesconto(s.preco_de, s.preco);
+              return (
+                <div key={s.id} style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, overflow: "hidden", position: "relative" }}>
+                  {desconto && (
+                    <span style={{ position: "absolute", top: 8, left: 8, background: "#FDECEA", color: "#C62828", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 6, zIndex: 1 }}>
+                      -{desconto}%
+                    </span>
+                  )}
+                  {s.foto && <img src={s.foto} alt={s.titulo || ""} style={{ width: "100%", height: 150, objectFit: "cover", display: "block" }} />}
+                  <div style={{ padding: 12 }}>
+                    {s.categoria && <div style={{ fontSize: 10.5, fontWeight: 700, color: AZUL_MEDIO, textTransform: "uppercase", marginBottom: 4 }}>{s.categoria}</div>}
+                    {s.titulo && <div style={{ fontSize: 14.5, fontWeight: 700, marginBottom: 4 }}>{s.titulo}</div>}
+                    {s.descricao && <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 6px" }}>{s.descricao}</p>}
+                    {s.preco_de && <div style={{ fontSize: 12, color: "#8593a8", textDecoration: "line-through" }}>{s.preco_de}</div>}
+                    {s.preco && <div style={{ fontSize: 13, fontWeight: 700, color: "#2E7D32" }}>{s.preco}</div>}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -7765,6 +7786,7 @@ function EditorCatalogoParceiro({ itens = [], carregando, onSalvar, onExcluir, l
               <div style={{ padding: 10 }}>
                 {s.categoria && <div style={{ fontSize: 10.5, fontWeight: 700, color: AZUL_MEDIO, textTransform: "uppercase" }}>{s.categoria}</div>}
                 {s.titulo && <div style={{ fontWeight: 700, fontSize: 13 }}>{s.titulo}</div>}
+                {s.preco_de && <div style={{ fontSize: 11, color: "#8593a8", textDecoration: "line-through" }}>{s.preco_de}</div>}
                 {s.preco && <div style={{ fontSize: 12, color: "#2E7D32", fontWeight: 700 }}>{s.preco}</div>}
                 <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
                   <button className="icon-btn" onClick={() => setEditando({ ...s })} title="Editar"><Edit3 size={13} color={AZUL_MEDIO} /></button>
@@ -7803,7 +7825,8 @@ function EditorCatalogoParceiro({ itens = [], carregando, onSalvar, onExcluir, l
             </div>
             <Grid>
               <Field label="Categoria" value={editando.categoria || ""} onChange={(v) => setEditando((ed) => ({ ...ed, categoria: v }))} />
-              <Field label="Preço / condições" value={editando.preco || ""} onChange={(v) => setEditando((ed) => ({ ...ed, preco: v }))} />
+              <Field label="De (opcional)" value={editando.preco_de || ""} onChange={(v) => setEditando((ed) => ({ ...ed, preco_de: v }))} placeholder="R$ 450,00" />
+              <Field label="Por / condições" value={editando.preco || ""} onChange={(v) => setEditando((ed) => ({ ...ed, preco: v }))} placeholder="R$ 380,00" />
             </Grid>
             <Area label="Descrição" value={editando.descricao || ""} onChange={(v) => setEditando((ed) => ({ ...ed, descricao: v }))} rows={3} placeholder="O que torna esse serviço/produto atrativo pro cliente" />
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
@@ -7848,7 +7871,7 @@ function PainelParceiro({ session, onLogout }) {
 
   const salvarItemCatalogo = async (item) => {
     try {
-      const body = { titulo: item.titulo || "", categoria: item.categoria || "", preco: item.preco || "", descricao: item.descricao || "", foto: item.foto || "" };
+      const body = { titulo: item.titulo || "", categoria: item.categoria || "", preco: item.preco || "", preco_de: item.preco_de || "", descricao: item.descricao || "", foto: item.foto || "" };
       if (item.id) await apiFetch(`/api/parceiros/servicos/${item.id}`, { method: "PATCH", token: session.token, body });
       else await apiFetch("/api/parceiros/servicos", { method: "POST", token: session.token, body });
       await carregarCatalogo();
