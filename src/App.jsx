@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import * as Rascunho from "./rascunho-local.js";
-import { listarAmbientes, getPatologiasPorAmbiente, getPatologiasUnidadeInteira, paraItemDeLaudo } from "./patologias-consulta.js";
+import { listarAmbientes, getPatologiasPorAmbiente, getPatologiasUnidadeInteira, getPatologia, paraItemDeLaudo } from "./patologias-consulta.js";
 import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
   Building2, User, ClipboardList, ChevronDown, ChevronRight, ChevronLeft, Check,
@@ -2136,17 +2136,30 @@ function AppInterno({ session, onLogout }) {
 
 
   const updItem = (id, patch) => setItens((l) => l.map((i) => (i.id === id ? { ...i, ...patch } : i)));
+  /* "bp-<id>" vem do banco de patologias por ambiente (mesmo catálogo usado em "Conferir
+     por ambiente"), agora também disponível aqui, item a item — o técnico não precisa
+     abrir a tela separada só pra aproveitar o catálogo. Prefixo "bp-" distingue do id do
+     BANCO antigo (chaves como "rejunte", "pintura"), que continua funcionando do mesmo jeito. */
   const escolherPatologia = (id, tipo) => {
+    const item = itens.find((i) => i.id === id);
+    const tituloAtual = (item?.titulo || "").trim();
+    const eraAutoPreenchido = !tituloAtual || tituloAtual === item?.patologia;
+
+    if (tipo.startsWith("bp-")) {
+      const p = getPatologia(tipo.slice(3));
+      if (!p) return updItem(id, { tipo, patologia: "" });
+      const gerado = paraItemDeLaudo(p, item?.local || "");
+      updItem(id, { ...gerado, ...(eraAutoPreenchido ? {} : { titulo: tituloAtual }) });
+      return;
+    }
+
     const b = BANCO[tipo];
     if (!b) return updItem(id, { tipo, patologia: "" });
     // O título fica editável: começa com o rótulo da patologia e o técnico detalha se quiser.
-    const item = itens.find((i) => i.id === id);
-    const tituloAtual = (item?.titulo || "").trim();
-    const eraDoBancoAnterior = !tituloAtual || tituloAtual === BANCO[item?.tipo]?.label;
     updItem(id, {
       tipo, patologia: b.label, severidade: b.sev, descricao: b.desc, recomendacao: b.rec,
       categoria: b.categoria || "", norma: b.norma || "",
-      ...(eraDoBancoAnterior ? { titulo: b.label } : {}),
+      ...(eraAutoPreenchido ? { titulo: b.label } : {}),
     });
   };
   /* Selecionar várias fotos de uma vez precisa acrescentar TODAS.
@@ -4320,6 +4333,18 @@ function ItemCard({ item, num, onChange, onPatologia, onFotos, onRemoveFoto, onD
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
   const m = sevMeta[item.severidade];
 
+  /* Casa o "Local" digitado (texto livre, com sugestão da datalist) com um ambiente do
+     banco por planilha — quando bate, o dropdown abaixo já entra filtrado para aquele
+     cômodo, na frente das que valem em qualquer lugar. */
+  const ambienteSlug = useMemo(() => {
+    const termo = (item.local || "").trim().toLowerCase();
+    if (!termo) return "";
+    return listarAmbientes().find((a) => a.nome.toLowerCase() === termo)?.slug || "";
+  }, [item.local]);
+  const opcoesPatologia = useMemo(() => getPatologiasPorAmbiente(ambienteSlug), [ambienteSlug]);
+  const especificasDoAmbiente = opcoesPatologia.filter((p) => p.especificaDoAmbiente);
+  const genericasQualquerAmbiente = opcoesPatologia.filter((p) => !p.especificaDoAmbiente);
+
   return (
     <div style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 14, padding: 18, marginBottom: 14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
@@ -4368,7 +4393,18 @@ function ItemCard({ item, num, onChange, onPatologia, onFotos, onRemoveFoto, onD
         <label style={{ ...lab, display: "block", marginBottom: 6 }}>Patologia (preenche o restante automaticamente)</label>
         <select style={{ ...inp, width: "100%" }} value={item.tipo} onChange={(e) => onPatologia(e.target.value)}>
           <option value="">selecionar patologia…</option>
-          {Object.entries(BANCO).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          {especificasDoAmbiente.length > 0 && (
+            <optgroup label={`Específicas de ${item.local}`}>
+              {especificasDoAmbiente.map((p) => <option key={`bp-${p.id}`} value={`bp-${p.id}`}>{p.nome}</option>)}
+            </optgroup>
+          )}
+          <optgroup label="Aplicam-se a qualquer ambiente">
+            {genericasQualquerAmbiente.map((p) => <option key={`bp-${p.id}`} value={`bp-${p.id}`}>{p.nome}</option>)}
+          </optgroup>
+          <optgroup label="Modelos rápidos">
+            {Object.entries(BANCO).filter(([k]) => k !== "outro").map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </optgroup>
+          <option value="outro">Outro (personalizado)</option>
         </select>
         {item.categoria && (
           <div style={{ fontSize: 11.5, color: "#65758b", marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
