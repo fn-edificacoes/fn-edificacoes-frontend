@@ -5155,6 +5155,11 @@ function EditorLaudoGerencia({ laudo, onSalvar, onCancelar, salvando }) {
           {itens.map((item, i) => (
             <div key={item.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: "#8593a8", marginBottom: 8 }}>Item {i + 1}</div>
+              {/* Mesmo cartão que aparece no laudo final, com as fotos — atualiza junto com a
+                  edição abaixo, pra a gerência ver exatamente o que está corrigindo. */}
+              <div style={{ marginBottom: 12 }}>
+                <ItemLaudo item={item} num={i + 1} />
+              </div>
               <Grid>
                 <Field label="Local" value={item.local} onChange={(v) => setItemCampo(item.id, "local", v)} />
                 <Field label="Patologia" value={item.patologia} onChange={(v) => setItemCampo(item.id, "patologia", v)} />
