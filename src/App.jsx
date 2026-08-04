@@ -1464,7 +1464,12 @@ export default function App() {
 
   if (!session) {
     if (mostrarCadastroParceiro) {
-      return <TelaCadastroParceiro onVoltar={() => setMostrarCadastroParceiro(false)} />;
+      return (
+        <TelaCadastroParceiro
+          onVoltar={() => setMostrarCadastroParceiro(false)}
+          onIrParaLogin={() => { setMostrarCadastroParceiro(false); setMostrarLogin(true); }}
+        />
+      );
     }
     return mostrarLogin
       ? <TelaLogin onLogin={setSession} onVoltar={() => setMostrarLogin(false)} />
@@ -7395,7 +7400,7 @@ function PaginaPortfolioParceiro({ parceiroId }) {
 }
 
 /* ---- Tela pública: cadastro de Parceiro/Afiliado (sem login) ---- */
-function TelaCadastroParceiro({ onVoltar }) {
+function TelaCadastroParceiro({ onVoltar, onIrParaLogin }) {
   const [form, setForm] = useState(novoCadastroParceiro());
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState("");
@@ -7468,6 +7473,7 @@ function TelaCadastroParceiro({ onVoltar }) {
             <div style={{ fontWeight: 700, fontSize: 15 }}>FN Edificações</div>
             <div style={{ fontSize: 11, opacity: 0.7 }}>Seja um Parceiro</div>
           </div>
+          <button className="btn-ghost" onClick={onIrParaLogin}><Lock size={13} /> Entrar</button>
           <button className="btn-ghost" onClick={onVoltar}>← Voltar</button>
         </div>
       </header>
@@ -7475,6 +7481,7 @@ function TelaCadastroParceiro({ onVoltar }) {
         <Card icon={Users} titulo="Cadastro de Parceiro / Afiliado">
           <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
             Cadastre sua empresa para se tornar parceira FN Edificações e oferecer benefícios aos nossos clientes.
+            Já é cadastrado? <a onClick={onIrParaLogin} style={{ color: AZUL_MARINHO, fontWeight: 600, cursor: "pointer" }}>Entre com seu e-mail e senha</a>.
           </p>
           <div style={{ background: "#FFF4E0", color: "#B26A00", padding: "10px 12px", borderRadius: 8, fontSize: 12.5, marginBottom: 16, display: "flex", gap: 8, alignItems: "flex-start" }}>
             <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
@@ -7584,8 +7591,77 @@ function CardStatusParceiro({ parceiro }) {
   );
 }
 
-function CardPerfilParceiro({ parceiro }) {
+function CardPerfilParceiro({ parceiro, token, onSalvo }) {
+  const [editando, setEditando] = useState(false);
+  const [form, setForm] = useState(null);
+  const [enviando, setEnviando] = useState(false);
+  const [erro, setErro] = useState("");
+
   const comissaoTexto = parceiro.comissao.length > 0 ? parceiro.comissao.map((c) => `${c.name}: ${c.p}%`).join(" · ") : "";
+  const setF = (campo, v) => setForm((f) => ({ ...f, [campo]: v }));
+
+  const iniciarEdicao = () => {
+    setForm({
+      responsavel: parceiro.responsavel || "", whatsapp: parceiro.whatsapp || "", instagram: parceiro.instagram || "",
+      site: parceiro.site || "", cidade: parceiro.cidade || "", uf: parceiro.uf || "", logo: parceiro.logo || "",
+    });
+    setErro("");
+    setEditando(true);
+  };
+
+  const onLogo = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { setErro("Envie uma imagem (PNG ou JPG) para a logo."); return; }
+    const reader = new FileReader();
+    reader.onload = () => setF("logo", reader.result);
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const salvar = async () => {
+    setErro("");
+    if (!form.whatsapp.trim()) { setErro("Informe um WhatsApp para contato."); return; }
+    if (!form.cidade.trim() || !form.uf.trim()) { setErro("Informe cidade e UF."); return; }
+    setEnviando(true);
+    try {
+      await apiFetch("/api/parceiros/me", { method: "PATCH", token, body: form });
+      setEditando(false);
+      await onSalvo();
+    } catch (e) { setErro(e.message); }
+    setEnviando(false);
+  };
+
+  if (editando && form) {
+    return (
+      <Card icon={User} titulo="Dados do parceiro">
+        {erro && <p style={{ color: "#C62828", fontSize: 13, margin: "0 0 10px" }}>{erro}</p>}
+        <Grid>
+          <Field label="Responsável" value={form.responsavel} onChange={(v) => setF("responsavel", v)} />
+          <Field label="WhatsApp" value={form.whatsapp} onChange={(v) => setF("whatsapp", v)} />
+          <Field label="Cidade" value={form.cidade} onChange={(v) => setF("cidade", v)} />
+          <Field label="UF" value={form.uf} onChange={(v) => setF("uf", v.toUpperCase().slice(0, 2))} />
+          <Field label="Instagram" value={form.instagram} onChange={(v) => setF("instagram", v)} />
+          <Field label="Site" value={form.site} onChange={(v) => setF("site", v)} />
+        </Grid>
+        <div style={{ ...cell(true), marginTop: 12 }}>
+          <label style={lab}>Logo da empresa</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {form.logo && <img src={form.logo} alt="Logo" style={{ width: 52, height: 52, objectFit: "contain", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, background: "#fff" }} />}
+            <label className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, cursor: "pointer" }}>
+              <Camera size={14} /> {form.logo ? "Trocar logo" : "Enviar logo"}
+              <input type="file" accept="image/*" onChange={onLogo} style={{ display: "none" }} />
+            </label>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+          <button type="button" className="btn-solid" onClick={salvar} disabled={enviando}>{enviando ? "Salvando…" : "Salvar alterações"}</button>
+          <button type="button" className="btn-ghost" onClick={() => setEditando(false)} disabled={enviando}>Cancelar</button>
+        </div>
+      </Card>
+    );
+  }
+
   return (
     <Card icon={User} titulo="Dados do parceiro">
       <TabelaDados rows={[
@@ -7595,7 +7671,8 @@ function CardPerfilParceiro({ parceiro }) {
         ["WhatsApp", parceiro.whatsapp], ["Instagram", parceiro.instagram], ["Site", parceiro.site],
         ["Comissão combinada", comissaoTexto], ["Benefício oferecido", parceiro.beneficio],
       ]} />
-      {parceiro.descricaoBeneficio && <p style={{ fontSize: 13.5, color: "#4a5a70", margin: 0 }}>{parceiro.descricaoBeneficio}</p>}
+      {parceiro.descricaoBeneficio && <p style={{ fontSize: 13.5, color: "#4a5a70", margin: "0 0 12px" }}>{parceiro.descricaoBeneficio}</p>}
+      <button type="button" className="btn-ghost" onClick={iniciarEdicao}><Edit3 size={14} /> Editar meus dados</button>
     </Card>
   );
 }
@@ -7822,7 +7899,7 @@ function PainelParceiro({ session, onLogout }) {
         {!carregando && !erro && parceiro && (
           <>
             <CardStatusParceiro parceiro={parceiro} />
-            <CardPerfilParceiro parceiro={parceiro} />
+            <CardPerfilParceiro parceiro={parceiro} token={session.token} onSalvo={carregar} />
             <EditorCatalogoParceiro itens={itensCatalogo} carregando={itensCarregando}
               onSalvar={salvarItemCatalogo} onExcluir={excluirItemCatalogo}
               linkPortfolio={`${window.location.origin}${window.location.pathname}?portfolio=${parceiro.id}`}
