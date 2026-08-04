@@ -5,8 +5,8 @@ import {
   Building2, User, ClipboardList, ChevronDown, ChevronRight, ChevronLeft, Check,
   AlertTriangle, CircleAlert, Info, Copy, Sparkles, Loader2,
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
-  TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, LockOpen, Bell,
-  ExternalLink
+  TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
+  ExternalLink, Undo2
 } from "lucide-react";
 
 /* ============================================================
@@ -596,6 +596,11 @@ function montarLaudoModelo(dados = {}, itens = []) {
     horaFim: paraHora(vistoria.termino),
     presentes: vistoria.presentes || "",
     ambientesVistoriados: Number(vistoria.ambientesVistoriados) || 0,
+    /* Esta linha faltava, e era a causa de a foto com o cliente sumir do laudo: o técnico
+       anexava a foto, o envio exigia ela e o PDF do backend a desenhava — mas a prévia da
+       tela (e qualquer impressão pelo navegador) montava o laudo sem o campo. O gêmeo desta
+       função no backend (laudo-modelo.js) sempre teve. */
+    fotoCliente: dados.fotoCliente || "",
     responsavel: { nome: rt.nome || "", qualificacao: rt.qualificacao || "", registro: rt.registro || "" },
     itens: itens.map((item, i) => ({
       n: String(i + 1).padStart(2, "0"),
@@ -725,6 +730,11 @@ function CartaoIndicador({ titulo, valor, apoio, cor }) {
 
 function LaudoModelo({ laudo, assinatura, aprovado = true }) {
   const ind = calcularIndicadoresLaudo(laudo);
+  /* Se a foto com o cliente não decodificar, a página final inteira some — no laudo do
+     cliente não pode sobrar o ícone de imagem quebrada nem um quadro vazio. Mesma regra
+     do PDF, que valida a imagem antes de criar a página (ver laudo-pdf.js). */
+  const [fotoQuebrada, setFotoQuebrada] = useState(false);
+  useEffect(() => { setFotoQuebrada(false); }, [laudo.fotoCliente]);
   const itens = laudo.itens || [];
   const corSeveridade = { alta: "#C62828", media: "#B26A00", baixa: "#2C75B5" };
   const corStatus = { pendente: "#B26A00", corrigido: "#2E7D32", reincidente: "#C62828" };
@@ -938,6 +948,47 @@ function LaudoModelo({ laudo, assinatura, aprovado = true }) {
           {laudo.local}{laudo.local && laudo.dataEmissao ? ", " : ""}{laudo.dataEmissao} · Protocolo {laudo.protocolo}
         </div>
       </section>
+
+      {/* ---------- Página final: foto com o cliente ----------
+          Só existe se houver foto — sem ela a página inteira some, em vez de sobrar um
+          quadro vazio no documento. Espelha a última página do PDF (laudo-pdf.js). */}
+      {laudo.fotoCliente && !fotoQuebrada && (
+        <section className="laudo-pagina">
+          <div style={{ background: AZUL_MARINHO, margin: "-28px -28px 0", padding: "22px 28px", textAlign: "center" }}>
+            <div style={{ fontSize: 17, fontWeight: 800, color: "#fff" }}>Agradecemos a confiança</div>
+          </div>
+
+          <div style={{ display: "grid", placeItems: "center", marginTop: 26 }}>
+            {/* objectFit "contain" e não "cover": a foto é um retrato, cortar a borda corta rosto. */}
+            <img
+              src={laudo.fotoCliente}
+              alt="Foto da vistoria com o cliente"
+              onError={() => setFotoQuebrada(true)}
+              style={{ maxWidth: "100%", maxHeight: 360, objectFit: "contain", borderRadius: 10, border: `1px solid ${CINZA_BORDA}` }}
+            />
+          </div>
+
+          <div style={{ marginTop: 26, background: CINZA_CLARO, borderRadius: 9, padding: "14px 18px" }}>
+            {[
+              ["Cliente", laudo.proprietario],
+              ["Vistoriador", laudo.responsavel?.nome],
+              ["Data da vistoria", laudo.dataVistoria],
+              ["Condomínio", laudo.empreendimento],
+              ["Bloco / unidade", laudo.unidade],
+            ].filter(([, v]) => (v || "").toString().trim()).map(([rotulo, valor]) => (
+              <div key={rotulo} style={{ display: "flex", gap: 8, fontSize: 11.5, padding: "3px 0" }}>
+                <span style={{ color: "#65758b", width: 120, flexShrink: 0 }}>{rotulo}</span>
+                <strong style={{ fontWeight: 600 }}>{valor}</strong>
+              </div>
+            ))}
+          </div>
+
+          <p style={{ marginTop: 26, fontSize: 12, fontStyle: "italic", color: AZUL_MARINHO, textAlign: "center", lineHeight: 1.6 }}>
+            Vistoria concluída com segurança, responsabilidade técnica e o compromisso da
+            FN Edificações com a tranquilidade do cliente.
+          </p>
+        </section>
+      )}
     </div>
   );
 }
@@ -1352,9 +1403,13 @@ function AppInterno({ session, onLogout }) {
   const [dados, setDados] = useState(DADOS_INICIAIS);
   const [itens, setItens] = useState([novoItem()]);
   const [clienteAtualId, setClienteAtualId] = useState(null); // id do cliente carregado no laudo em edição — necessário para "Enviar para gerência"
-  const [laudoBloqueado, setLaudoBloqueado] = useState(false); // trava local após envio à gerência — evita edição acidental do que já foi emitido
+  /* Trava do laudo após o envio à gerência.
+     Isto já existiu como useState solto com um botão de "desbloquear" ao lado: o próprio
+     técnico reabria o laudo que tinha acabado de enviar, e um F5 destravava sozinho. Como o
+     backend também aceitava o reenvio (e ainda zerava a aprovação), a trava não segurava
+     nada. Agora quem decide é o servidor — aqui só refletimos a resposta dele, e a única
+     forma de reabrir a edição é a gerência devolver o laudo para correção. */
   const [confirmandoDesbloqueio, setConfirmandoDesbloqueio] = useState(false);
-  useEffect(() => { setLaudoBloqueado(false); }, [clienteAtualId]);
   const [rascunhos, setRascunhos] = useState([]);
   const [toast, setToast] = useState("");
   const [showLoad, setShowLoad] = useState(false);
@@ -1665,6 +1720,42 @@ function AppInterno({ session, onLogout }) {
       return false;
     }
   };
+  /* Abrir o laudo marca "Em análise": o técnico passa a saber que o documento saiu da fila
+     e alguém está olhando, em vez de ficar dias vendo "Enviado". O backend ignora a chamada
+     quando o laudo já passou desse ponto, então abrir um aprovado não o faz retroceder. */
+  const marcarEmAnalise = async (docId) => {
+    try {
+      const r = await apiFetch(`/api/laudos/${docId}/em-analise`, { method: "POST", token });
+      if (r.alterado) carregarLaudosPendentes();
+    } catch { /* silencioso: é um efeito colateral de abrir, não pode atrapalhar a leitura */ }
+  };
+  /* Reenvio manual do que falhou ao subir para o Drive. Fica com a gerência porque um erro
+     que sobreviveu às 3 tentativas automáticas costuma ser credencial ou cota. */
+  const reenviarDrive = async (docId) => {
+    try {
+      const r = await apiFetch(`/api/laudos/${docId}/drive/reenviar`, { method: "POST", token });
+      notify(r.recolocados ? `${r.recolocados} arquivo(s) recolocados na fila do Drive ✓` : "Nada pendente para reenviar.");
+      setTimeout(carregarLaudosPendentes, 1500); // dá um instante para a fila andar
+      return true;
+    } catch (e) {
+      notify(`Não foi possível reenviar: ${e.message}`);
+      return false;
+    }
+  };
+  /* Devolver é o único caminho que reabre a edição para o vistoriador — sem isto, um laudo
+     enviado ficaria travado para sempre, já que o técnico não destrava mais o próprio laudo. */
+  const devolverLaudo = async (docId, motivo) => {
+    try {
+      await apiFetch(`/api/laudos/${docId}/devolver`, { method: "POST", token, body: { motivo } });
+      notify("Laudo devolvido ao vistoriador para correção ✓");
+      setLaudosPendentes((atual) => atual.filter((p) => p.doc_id !== docId));
+      carregarDocs();
+      return true;
+    } catch (e) {
+      notify(`Não foi possível devolver: ${e.message}`);
+      return false;
+    }
+  };
 
   /* Cliente cancelado sai das telas de trabalho: ele não é mais atendimento, e ficar
      no meio dos ativos faz a equipe contar errado e clicar no lugar errado. A Gerência
@@ -1685,6 +1776,14 @@ function AppInterno({ session, onLogout }) {
     setMeusLaudosCarregando(false);
   };
   useEffect(() => { carregarMeusLaudos(); }, []);
+
+  /* ---- Estado do laudo em edição, do ponto de vista do servidor ----
+     "editavelPeloTecnico" vem do backend (ver LAUDO_STATUS em server.js): é verdadeiro só
+     enquanto o laudo nunca foi enviado ou foi devolvido para correção. A gerência não é
+     travada aqui — é ela quem corrige o laudo depois da análise. */
+  const laudoNoServidor = meusLaudos.find((l) => l.cliente_id && l.cliente_id === clienteAtualId) || null;
+  const laudoBloqueado = perfil === "vistoriador" && !!laudoNoServidor && !laudoNoServidor.editavelPeloTecnico;
+  const laudoDevolvido = laudoNoServidor?.laudo_status === "devolvido_correcao";
 
   /* ---- Calendário do vistoriador: agendamentos atribuídos a ele ---- */
   const [agendaVistoriador, setAgendaVistoriador] = useState([]);
@@ -1803,12 +1902,15 @@ function AppInterno({ session, onLogout }) {
         body: { clienteId: clienteAtualId, dados: dadosComprimidos, itens: itensComprimidos },
       });
       notify("Laudo enviado para a gerência ✓");
-      setLaudoBloqueado(true);
+      /* A trava agora vem do servidor: recarregar a lista é o que a aplica na tela. */
+      await carregarMeusLaudos();
       carregarDocs();
     } catch (e) { notify(`Não foi possível enviar para a gerência: ${e.message}`); }
     setEnviandoParaGerencia(false);
   };
-  const desbloquearLaudo = () => { setLaudoBloqueado(false); setConfirmandoDesbloqueio(false); notify("Laudo desbloqueado para correção — envie novamente para a gerência depois de ajustar."); };
+  /* O técnico não destrava mais o próprio laudo — quem reabre a edição é a gerência, ao
+     devolver para correção (POST /api/laudos/:docId/devolver). O modal virou explicação. */
+  const fecharAvisoBloqueio = () => setConfirmandoDesbloqueio(false);
 
   /* ---- Rascunhos de laudo em andamento: guardados neste navegador ----
      Isto usava `window.storage`, que NÃO existe em navegador nenhum — era uma API do
@@ -2056,7 +2158,9 @@ function AppInterno({ session, onLogout }) {
           <AbaItens itens={itens} setItens={setItens} updItem={updItem} escolherPatologia={escolherPatologia}
             addFotos={addFotos} removerFoto={removerFoto} contagem={contagem} dados={dados} setD={setD}
             fotoCliente={dados.fotoCliente} setFotoCliente={setFotoCliente} notify={notify} setAba={setAba}
-            bloqueado={laudoBloqueado} onPedirDesbloqueio={() => setConfirmandoDesbloqueio(true)} />
+            bloqueado={laudoBloqueado} onPedirDesbloqueio={() => setConfirmandoDesbloqueio(true)}
+            statusLaudo={laudoNoServidor?.laudoStatusLabel} devolvido={laudoDevolvido}
+            motivoDevolucao={laudoNoServidor?.motivo_devolucao} />
         )}
         {abaTop === "laudos" && aba === "laudo" && <LaudoModelo laudo={montarLaudoModelo(dados, itens)} assinatura={assinatura} aprovado={perfil === "gerencia"} />}
         {abaTop === "laudos" && aba === "realizados" && (
@@ -2092,7 +2196,7 @@ function AppInterno({ session, onLogout }) {
             prospeccao={prospeccao} prospeccaoCarregando={prospeccaoCarregando} atualizarProspeccao={atualizarProspeccao}
             publicarProspeccaoDrive={publicarProspeccaoDrive}
             adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento}
-            laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo}
+            laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} reenviarDrive={reenviarDrive} marcarEmAnalise={marcarEmAnalise}
             acessos={acessos} acessosCarregando={acessosCarregando} />
         )}
       </main>
@@ -2117,9 +2221,11 @@ function AppInterno({ session, onLogout }) {
 
       {toast && <div className="no-print" style={toastStyle}><Check size={15} /> {toast}</div>}
 
-      <ConfirmModal aberto={confirmandoDesbloqueio} titulo="Desbloquear laudo para correção"
-        mensagem="Este laudo já foi enviado para a gerência e está travado. Desbloquear permite editar os dados e itens novamente, mas a correção precisa ser reenviada para valer. Deseja continuar?"
-        onConfirm={desbloquearLaudo} onCancel={() => setConfirmandoDesbloqueio(false)} />
+      <ConfirmModal aberto={confirmandoDesbloqueio} titulo="Laudo em análise pela gerência"
+        mensagem={"Este laudo já foi enviado e está sob responsabilidade da gerência, por isso não pode mais ser editado aqui. "
+          + "Se algo precisa ser corrigido, peça à gerência que devolva o laudo para correção — assim a edição é reaberta "
+          + "e o motivo da devolução fica registrado no histórico."}
+        onConfirm={fecharAvisoBloqueio} onCancel={fecharAvisoBloqueio} />
     </div>
   );
 }
@@ -3771,7 +3877,7 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
   );
 }
 
-function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, dados, setD, fotoCliente, setFotoCliente, notify, setAba, bloqueado, onPedirDesbloqueio }) {
+function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, dados, setD, fotoCliente, setFotoCliente, notify, setAba, bloqueado, onPedirDesbloqueio, statusLaudo, devolvido, motivoDevolucao }) {
   const fotoClienteRef = useRef();
   const handleFotoCliente = (file) => {
     if (!file) return;
@@ -3791,10 +3897,29 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
       {bloqueado && (
         <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 10, background: "#FFF4E0", border: "1px solid #f0c987", borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
           <Lock size={16} color="#B26A00" />
-          <span style={{ fontSize: 13, color: "#7a4e00", flex: 1 }}>Este laudo já foi enviado para a gerência e está travado contra edição.</span>
+          <span style={{ fontSize: 13, color: "#7a4e00", flex: 1 }}>
+            Este laudo está com a gerência{statusLaudo ? ` (${statusLaudo})` : ""} e não pode mais ser editado aqui.
+          </span>
           <button className="btn-ghost" style={{ color: "#B26A00", background: "#fff", padding: "6px 12px" }} onClick={onPedirDesbloqueio}>
-            <LockOpen size={14} /> Desbloquear para correção
+            Entenda
           </button>
+        </div>
+      )}
+
+      {/* Devolvido: a edição está liberada de novo, e o técnico precisa ver o que corrigir
+          sem ter de procurar. Por isso o motivo aparece aqui, no topo do formulário. */}
+      {devolvido && motivoDevolucao && (
+        <div className="no-print" style={{ display: "flex", gap: 10, background: "#FCEAEA", border: "1px solid #e8a9a9", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+          <AlertTriangle size={16} color="#C62828" style={{ flexShrink: 0, marginTop: 2 }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#8f2020", marginBottom: 3 }}>
+              Laudo devolvido pela gerência para correção
+            </div>
+            <div style={{ fontSize: 12.5, color: "#7a2323", lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{motivoDevolucao}</div>
+            <div style={{ fontSize: 11.5, color: "#a05252", marginTop: 6 }}>
+              Depois de ajustar, envie novamente para a gerência.
+            </div>
+          </div>
         </div>
       )}
       <div style={{ pointerEvents: bloqueado ? "none" : "auto", opacity: bloqueado ? 0.55 : 1 }}>
@@ -4515,9 +4640,44 @@ function CardCadastrosClientes({ clientes }) {
 
 /* ---- Laudos aguardando aprovação da Gerência: pré-visualiza (reaproveita o componente
    Laudo já existente) e aprova (gera PDF + envia por e-mail automaticamente). ---- */
-function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, assinatura, notify }) {
+/* Estado do arquivamento no Drive, em uma linha. O laudo não deve ser aprovado como
+   "finalizado" enquanto houver obrigatório pendente — então a gerência precisa ver isso
+   antes de clicar em aprovar, não depois. */
+function SeloSincronizacao({ drive }) {
+  if (!drive || !drive.total) {
+    return <span style={{ fontSize: 11.5, color: "#8593a8" }}>Drive: aguardando envio</span>;
+  }
+  const { sincronizados, total, comErro, completo, linkPasta } = drive;
+  const cor = comErro ? "#C62828" : completo ? "#2E7D32" : "#B26A00";
+  const fundo = comErro ? "#FCEAEA" : completo ? "#E6F4EA" : "#FFF4E0";
+  const texto = comErro
+    ? `Erro de sincronização (${comErro} de ${total})`
+    : completo ? `Sincronizado (${sincronizados}/${total})`
+    : `Enviando para o Drive (${sincronizados}/${total})`;
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+      <span style={{ fontSize: 11, fontWeight: 700, color: cor, background: fundo, border: `1px solid ${cor}33`, borderRadius: 20, padding: "1px 9px" }}>
+        {texto}
+      </span>
+      {/* Abrir a pasta do cliente direto do sistema. O link não torna nada público: só
+          quem já tem acesso à conta do Drive da FN consegue abrir. */}
+      {linkPasta && (
+        <a href={linkPasta} target="_blank" rel="noreferrer"
+          style={{ fontSize: 11.5, color: AZUL_MEDIO, display: "inline-flex", alignItems: "center", gap: 3 }}>
+          <ExternalLink size={12} /> pasta no Drive
+        </a>
+      )}
+    </span>
+  );
+}
+
+function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, devolverLaudo, reenviarDrive, marcarEmAnalise, assinatura, notify }) {
   const [previewId, setPreviewId] = useState(null);
   const [aprovandoId, setAprovandoId] = useState(null);
+  /* Devolver exige motivo: é ele que o técnico vê no topo do formulário ao reabrir o laudo. */
+  const [devolvendoId, setDevolvendoId] = useState(null);
+  const [motivoDevolucao, setMotivoDevolucao] = useState("");
+  const [enviandoDevolucao, setEnviandoDevolucao] = useState(false);
   const laudoPreview = laudosPendentes.find((l) => l.doc_id === previewId);
 
   const aprovar = async (docId) => {
@@ -4525,6 +4685,20 @@ function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, a
     await aprovarLaudo(docId);
     setAprovandoId(null);
     if (previewId === docId) setPreviewId(null);
+  };
+
+  const abrirDevolucao = (docId) => { setDevolvendoId(docId); setMotivoDevolucao(""); };
+  const confirmarDevolucao = async () => {
+    const motivo = motivoDevolucao.trim();
+    if (!motivo) { notify("Descreva o que precisa ser corrigido."); return; }
+    setEnviandoDevolucao(true);
+    const ok = await devolverLaudo(devolvendoId, motivo);
+    setEnviandoDevolucao(false);
+    if (ok) {
+      if (previewId === devolvendoId) setPreviewId(null);
+      setDevolvendoId(null);
+      setMotivoDevolucao("");
+    }
   };
 
   const contagemPreview = { Baixa: 0, Média: 0, Alta: 0 };
@@ -4543,13 +4717,33 @@ function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, a
         {laudosPendentes.map((l) => (
           <div key={l.doc_id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <div style={{ flex: 1, minWidth: 200 }}>
-              <div style={{ fontWeight: 700, fontSize: 14 }}>{l.cliente}</div>
+              <div style={{ fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                {l.cliente}
+                {/* Reenvio é retrabalho: já passou por aqui e voltou corrigido. */}
+                {l.ehReenvio && (
+                  <span style={{ fontSize: 10.5, fontWeight: 700, color: "#B26A00", background: "#FFF4E0", border: "1px solid #f0c987", borderRadius: 20, padding: "1px 8px" }}>
+                    Reenviado · v{l.laudo_versao}
+                  </span>
+                )}
+              </div>
               <div style={{ fontSize: 12.5, color: "#65758b" }}>
                 {l.empreendimento}{l.bloco_torre ? ` · ${l.bloco_torre}` : ""} · enviado em {new Date(l.laudo_criado_em).toLocaleString("pt-BR")}
               </div>
+              <div style={{ marginTop: 5, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <SeloSincronizacao drive={l.drive} />
+                {l.drive?.comErro > 0 && (
+                  <button className="btn-ghost" style={{ color: "#C62828", background: "#fff", padding: "2px 9px", fontSize: 11.5 }}
+                    onClick={() => reenviarDrive(l.doc_id)}>
+                    <RefreshCcw size={12} /> Reenviar ao Drive
+                  </button>
+                )}
+              </div>
             </div>
-            <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setPreviewId(l.doc_id)}>
+            <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => { setPreviewId(l.doc_id); marcarEmAnalise?.(l.doc_id); }}>
               <Eye size={14} /> Pré-visualizar
+            </button>
+            <button className="btn-ghost" style={{ color: "#B26A00", background: "#FFF4E0" }} onClick={() => abrirDevolucao(l.doc_id)}>
+              <Undo2 size={14} /> Devolver para correção
             </button>
             <button className="btn-solid" onClick={() => aprovar(l.doc_id)} disabled={aprovandoId === l.doc_id}>
               {aprovandoId === l.doc_id ? <Loader2 size={14} className="spin" /> : <Mail size={14} />} Aprovar e enviar por e-mail
@@ -4569,8 +4763,45 @@ function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, a
             <LaudoModelo laudo={montarLaudoModelo(laudoPreview.dados, laudoPreview.itens || [])} assinatura={assinatura} />
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
               <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setPreviewId(null)}>Fechar</button>
+              <button className="btn-ghost" style={{ color: "#B26A00", background: "#FFF4E0" }} onClick={() => abrirDevolucao(laudoPreview.doc_id)}>
+                <Undo2 size={14} /> Devolver para correção
+              </button>
               <button className="btn-solid" onClick={() => aprovar(laudoPreview.doc_id)} disabled={aprovandoId === laudoPreview.doc_id}>
                 {aprovandoId === laudoPreview.doc_id ? <Loader2 size={14} className="spin" /> : <Mail size={14} />} Aprovar e enviar por e-mail
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Motivo da devolução: o texto vai para o topo do formulário do técnico, então
+          precisa dizer o que corrigir — não é um campo de registro interno. */}
+      {devolvendoId && (
+        <div className="no-print" style={overlay} onClick={() => setDevolvendoId(null)}>
+          <div style={{ ...modal, maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <strong>Devolver laudo para correção</strong>
+              <button className="icon-btn" onClick={() => setDevolvendoId(null)}><X size={16} /></button>
+            </div>
+            <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 12px", lineHeight: 1.55 }}>
+              O vistoriador volta a poder editar este laudo e vê o motivo abaixo em destaque no
+              formulário. Depois de corrigir, ele reenvia e o laudo aparece de novo nesta fila.
+            </p>
+            <label style={{ fontSize: 12, fontWeight: 600, color: AZUL_MARINHO, display: "block", marginBottom: 5 }}>
+              O que precisa ser corrigido
+            </label>
+            <textarea
+              value={motivoDevolucao}
+              onChange={(e) => setMotivoDevolucao(e.target.value)}
+              rows={5}
+              autoFocus
+              placeholder="Ex.: A foto do item 3 está desfocada e a descrição da infiltração do banheiro não cita a norma."
+              style={{ width: "100%", padding: "10px 12px", border: `1px solid ${CINZA_BORDA}`, borderRadius: 9, fontSize: 13.5, fontFamily: "inherit", resize: "vertical" }}
+            />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setDevolvendoId(null)}>Cancelar</button>
+              <button className="btn-solid" style={{ background: "#B26A00" }} onClick={confirmarDevolucao} disabled={enviandoDevolucao || !motivoDevolucao.trim()}>
+                {enviandoDevolucao ? <Loader2 size={14} className="spin" /> : <Undo2 size={14} />} Devolver ao vistoriador
               </button>
             </div>
           </div>
@@ -4895,13 +5126,19 @@ function AbaLaudosRealizados({ laudos = [], carregando, recarregar, assinatura, 
 
   const lista = laudos.filter((l) =>
     filtro === "entregues" ? l.status_cliente === "Laudo enviado por e-mail"
+    : filtro === "devolvidos" ? l.laudo_status === "devolvido_correcao"
     : filtro === "analise" ? l.status_cliente === "Laudo em análise"
     : filtro === "avaliados" ? !!l.avaliacao_nota
     : true
   );
 
+  /* Devolvido é a única situação desta lista que exige ação do técnico, então ganha filtro
+     próprio — no status voltado ao cliente ("Laudo em análise") ela fica invisível. */
+  const devolvidos = laudos.filter((l) => l.laudo_status === "devolvido_correcao");
+
   const indicadores = [
     { k: "", rotulo: "Todos", valor: laudos.length, cor: AZUL_MEDIO },
+    ...(devolvidos.length ? [{ k: "devolvidos", rotulo: "Devolvidos para correção", valor: devolvidos.length, cor: "#C62828" }] : []),
     { k: "analise", rotulo: "Aguardando Gerência", valor: emAnalise.length, cor: "#B26A00" },
     { k: "entregues", rotulo: "Entregues ao cliente", valor: entregues.length, cor: "#2E7D32" },
     { k: "avaliados", rotulo: "Com feedback", valor: avaliados.length, cor: "#E8A317" },
@@ -4959,6 +5196,19 @@ function AbaLaudosRealizados({ laudos = [], carregando, recarregar, assinatura, 
                 <span style={{ background: etapa.bg, color: etapa.cor, borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 800, whiteSpace: "nowrap" }}>
                   {etapa.rotulo}
                 </span>
+                {/* Etapa acima é o que o CLIENTE vê; esta é a situação interna do laudo.
+                    Só aparece enquanto o documento está em trânsito na equipe — depois de
+                    entregue as duas diriam a mesma coisa e virariam ruído. */}
+                {l.laudo_status && !entregue && (
+                  <span style={{
+                    borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 800, whiteSpace: "nowrap",
+                    ...(l.laudo_status === "devolvido_correcao"
+                      ? { background: "#FCEAEA", color: "#C62828" }
+                      : { background: CINZA_CLARO, color: "#65758b" }),
+                  }}>
+                    {l.laudoStatusLabel}{l.laudo_versao > 1 ? ` · v${l.laudo_versao}` : ""}
+                  </span>
+                )}
                 <span style={{ flex: 1, minWidth: 160 }}>
                   <strong style={{ fontSize: 13.5, display: "block" }}>{l.cliente}</strong>
                   <span style={{ fontSize: 12, color: "#65758b" }}>
@@ -4973,6 +5223,22 @@ function AbaLaudosRealizados({ laudos = [], carregando, recarregar, assinatura, 
 
               {aberto && (
                 <div style={{ padding: "0 12px 12px" }}>
+                  {/* O que a gerência pediu para corrigir. Fica no topo do laudo aberto
+                      porque é a única informação aqui que exige ação. */}
+                  {l.laudo_status === "devolvido_correcao" && l.motivo_devolucao && (
+                    <div style={{ display: "flex", gap: 9, background: "#FCEAEA", border: "1px solid #e8a9a9", borderRadius: 8, padding: "10px 12px", marginBottom: 12 }}>
+                      <AlertTriangle size={15} color="#C62828" style={{ flexShrink: 0, marginTop: 2 }} />
+                      <div>
+                        <div style={{ fontSize: 12.5, fontWeight: 700, color: "#8f2020", marginBottom: 3 }}>
+                          A gerência devolveu este laudo para correção
+                        </div>
+                        <div style={{ fontSize: 12.5, color: "#7a2323", lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{l.motivo_devolucao}</div>
+                        <div style={{ fontSize: 11.5, color: "#a05252", marginTop: 6 }}>
+                          Abra a vistoria deste cliente na aba "Vistoria" para corrigir e reenviar.
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   {l.avaliacao_nota && (
                     <div style={{ background: "#FFFBF0", border: "1px solid #f0dfae", borderRadius: 8, padding: "10px 12px", marginBottom: 12 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
@@ -5146,7 +5412,7 @@ function CardProspeccao({ prospeccao = [], carregando, atualizar, publicarNoDriv
   );
 }
 
-function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendimento, excluirCliente, empreendimentosRef = [], carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, acessos, acessosCarregando }) {
+function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendimento, excluirCliente, empreendimentosRef = [], carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, reenviarDrive, marcarEmAnalise, acessos, acessosCarregando }) {
   const porVistoria = docs.reduce((acc, d) => { acc[d.vistoria] = (acc[d.vistoria] || 0) + 1; return acc; }, {});
   const porStatusProducao = docs.reduce((acc, d) => { acc[d.statusProducao] = (acc[d.statusProducao] || 0) + 1; return acc; }, {});
   const totalRegistrosDocs = docs.length;
@@ -5163,7 +5429,7 @@ function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendi
     <div style={{ display: "grid", gap: 16 }}>
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando indicadores…</p>}
 
-      <CardLaudosPendentes laudosPendentes={laudosPendentes} carregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} assinatura={assinatura} notify={notify} />
+      <CardLaudosPendentes laudosPendentes={laudosPendentes} carregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} reenviarDrive={reenviarDrive} marcarEmAnalise={marcarEmAnalise} assinatura={assinatura} notify={notify} />
 
       <CardCancelamentosPendentes clientes={clientes} usuarios={usuarios} updCliente={updCliente} notify={notify} />
 
@@ -5622,7 +5888,7 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, acessos, acessosCarregando }) {
+function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, reenviarDrive, marcarEmAnalise, acessos, acessosCarregando }) {
   if (sub === "parceiros") {
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} vales={vales} valesCarregando={valesCarregando} notify={notify} />;
   }
@@ -5640,7 +5906,7 @@ function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, pad
       padronizarEmpreendimento={padronizarEmpreendimento} excluirCliente={excluirCliente} empreendimentosRef={empreendimentosRef} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
       usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={usuarioAtualId}
       avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
-      laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo}
+      laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} reenviarDrive={reenviarDrive} marcarEmAnalise={marcarEmAnalise}
       acessos={acessos} acessosCarregando={acessosCarregando} />
   );
 }
