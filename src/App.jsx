@@ -7,7 +7,7 @@ import {
   AlertTriangle, CircleAlert, Info, Copy, Sparkles, Loader2,
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
-  ExternalLink, Undo2
+  ExternalLink, Undo2, Handshake
 } from "lucide-react";
 
 /* ============================================================
@@ -378,6 +378,11 @@ const STATUS_INTERNO_OPCOES = ["Agendado", "Em vistoria", "Laudo em elaboração
    qualidade     -> enxerga o módulo Agendamento (chave interna "qualidade"), mas só leitura (não
                     aprova nada — isso agora é exclusivo do Atendimento; ver "podeAgir" nos
                     componentes de Agendamento)
+   vendas        -> só enxerga Parceiros e Afiliados: analisa/aprova cadastros, acompanha cupons
+                    (vales) e cadastra parceiro manualmente. NÃO calcula nem controla comissão
+                    individual de vendedor — vendedor recebe fixo, fora do sistema (ajuste de
+                    modelo comercial, ver ROLE_DESCRICAO.vendas). Reaproveita o mesmo componente
+                    que a Gerência já usava (AbaGerenciaParceiros), sem duplicar tela.
    gerencia      -> acesso restrito, mas enxerga tudo (incl. financeiro)
    O cadastro/acompanhamento de Cliente em si continua sendo uma tela pública separada, sem login.
 ------------------------------------------------------------------ */
@@ -386,9 +391,10 @@ const MODULOS_POR_PERFIL = {
   documentacao: ["documentacao"],
   atendimento: ["clientes", "qualidade"],
   qualidade: ["qualidade"],
+  vendas: ["vendas"],
   gerencia: ["laudos", "documentacao", "gerencia", "clientes", "qualidade"],
 };
-const PERFIL_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", qualidade: "Agendamento", gerencia: "Gerência" };
+const PERFIL_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", qualidade: "Agendamento", vendas: "Vendas", gerencia: "Gerência" };
 
 /* ---------- Cor fixa por técnico (vistoriador) no calendário do Agendamento ----------
    Não existe campo "cor"/"sigla" cadastrado no técnico (nem no front, nem no backend).
@@ -1648,11 +1654,11 @@ function AppInterno({ session, onLogout }) {
     catch (e) { notify(`Não foi possível excluir: ${e.message}`); carregarAvaliacoes(); }
   };
 
-  /* ---- Parceiros/Afiliados: homologação (somente perfil Gerência) ---- */
+  /* ---- Parceiros/Afiliados: homologação (perfis Gerência e Vendas) ---- */
   const [parceiros, setParceiros] = useState([]);
   const [parceirosCarregando, setParceirosCarregando] = useState(false);
   const carregarParceiros = async () => {
-    if (perfil !== "gerencia") return;
+    if (perfil !== "gerencia" && perfil !== "vendas") return;
     setParceirosCarregando(true);
     try {
       const r = await apiFetch("/api/parceiros", { token });
@@ -1671,12 +1677,25 @@ function AppInterno({ session, onLogout }) {
       return false;
     }
   };
+  /* Cadastro manual de parceiro (feito por Vendas/Gerência já logados, ex.: parceiro que
+     negociou por telefone) — reaproveita a MESMA rota pública do autocadastro, já que ela
+     não exige token; só embute o formulário direto no sistema em vez da tela pública. */
+  const criarParceiroManual = async (dadosParceiro) => {
+    try {
+      const r = await apiFetch("/api/parceiros/signup", { method: "POST", body: dadosParceiro });
+      await carregarParceiros();
+      return { ok: true, status: r.status };
+    } catch (e) {
+      notify(`Não foi possível cadastrar o parceiro: ${e.message}`);
+      return { ok: false };
+    }
+  };
 
-  /* ---- Vales (todos, para a gerência acompanhar leads/conversão de Parceiros) ---- */
+  /* ---- Vales (todos, para Gerência/Vendas acompanharem leads/conversão de Parceiros) ---- */
   const [vales, setVales] = useState([]);
   const [valesCarregando, setValesCarregando] = useState(false);
   const carregarVales = async () => {
-    if (perfil !== "gerencia") return;
+    if (perfil !== "gerencia" && perfil !== "vendas") return;
     setValesCarregando(true);
     try {
       const r = await apiFetch("/api/vales", { token });
@@ -2197,7 +2216,7 @@ function AppInterno({ session, onLogout }) {
 
         {/* Navegação de módulos (filtrada pelo perfil de acesso) */}
         <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, borderTop: "1px solid rgba(255,255,255,.12)", overflowX: "auto" }}>
-          {[["laudos", "Laudos", FileText], ["documentacao", "Documentação", ClipboardCheck], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["gerencia", "Gerência", BarChart3]]
+          {[["laudos", "Laudos", FileText], ["documentacao", "Documentação", ClipboardCheck], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["vendas", "Vendas", Handshake], ["gerencia", "Gerência", BarChart3]]
             .filter(([k]) => modulosPermitidos.includes(k))
             .map(([k, label, Icon]) => (
               <button key={k} onClick={() => setAbaTop(k)} className="tab" style={{ borderBottomColor: abaTop === k ? "#fff" : "transparent", color: abaTop === k ? "#fff" : "rgba(255,255,255,.55)", whiteSpace: "nowrap", flexShrink: 0 }}>
@@ -2278,11 +2297,15 @@ function AppInterno({ session, onLogout }) {
             agendarAgoraId={agendarAgoraId} setAgendarAgoraId={setAgendarAgoraId}
             podeAgir={perfil === "atendimento" || perfil === "gerencia"} ehGerencia={perfil === "gerencia"} />
         )}
+        {abaTop === "vendas" && (
+          <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
+            vales={vales} valesCarregando={valesCarregando} criarParceiroManual={criarParceiroManual} notify={notify} />
+        )}
         {abaTop === "gerencia" && (
           <AbaGerencia sub={abaGerencia} docs={docs} clientes={clientes} updCliente={updCliente} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
             usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={session.usuario.id}
             avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
-            parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
+            parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual}
             vales={vales} valesCarregando={valesCarregando}
             precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
             padronizarEmpreendimento={padronizarEmpreendimento} excluirCliente={delCliente}
@@ -5904,11 +5927,20 @@ function CardIndicadoresParceiros({ parceiros, vales, valesCarregando }) {
     </Card>
   );
 }
-function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, notify }) {
+function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, vales, valesCarregando, notify }) {
+  const [cadastrando, setCadastrando] = useState(false);
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <CardIndicadoresParceiros parceiros={parceiros} vales={vales} valesCarregando={valesCarregando} />
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }} onClick={() => setCadastrando(true)}>
+          <Plus size={15} /> Cadastrar parceiro
+        </button>
+      </div>
       <CardParceiros parceiros={parceiros} carregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} notify={notify} />
+      {cadastrando && (
+        <ModalCriarParceiroManual onFechar={() => setCadastrando(false)} criarParceiroManual={criarParceiroManual} notify={notify} />
+      )}
     </div>
   );
 }
@@ -6276,9 +6308,9 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando }) {
+function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando }) {
   if (sub === "parceiros") {
-    return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} vales={vales} valesCarregando={valesCarregando} notify={notify} />;
+    return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual} vales={vales} valesCarregando={valesCarregando} notify={notify} />;
   }
   if (sub === "prospeccao") {
     return <CardProspeccao prospeccao={prospeccao} carregando={prospeccaoCarregando} atualizar={atualizarProspeccao}
@@ -6300,13 +6332,14 @@ function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, pad
   );
 }
 
-const ROLE_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", qualidade: "Agendamento", gerencia: "Gerência" };
+const ROLE_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", qualidade: "Agendamento", vendas: "Vendas", gerencia: "Gerência" };
 const ROLE_DESCRICAO = {
   vistoriador: "Só acessa Laudos. Sem acesso a Documentação nem Gerência.",
   documentacao: "Só acessa Documentação/TRT. Sem acesso a Laudos nem Gerência.",
   atendimento: "Acessa Clientes (cadastro, agendamento, aprovação e encaminhamento ao técnico) e Agendamento (aprova avaliações que entram na vitrine).",
   qualidade: "Só acessa Agendamento, em modo leitura: acompanha avaliações e agendamentos, mas não aprova nada — isso é do Atendimento.",
-  gerencia: "Acesso completo: Laudos, Documentação, Clientes, Agendamento, Gerência e financeiro.",
+  vendas: "Só acessa Parceiros e Afiliados: analisa/aprova cadastros, cadastra parceiro manualmente e acompanha cupons. Recebe salário fixo — o sistema não calcula comissão individual.",
+  gerencia: "Acesso completo: Laudos, Documentação, Clientes, Agendamento, Vendas, Gerência e financeiro.",
 };
 
 function CardUsuarios({ usuarios, carregando, criarUsuario, atualizarUsuario, excluirUsuario, notify, usuarioAtualId }) {
@@ -7145,6 +7178,102 @@ const novoCadastroParceiro = () => ({
   cidade: "", uf: "", whatsapp: "", instagram: "", site: "", logo: "",
   comissao: [novaComissaoLinha()], beneficio: "", descricaoBeneficio: "",
 });
+
+/* ---- Modal interno: Vendas/Gerência cadastra um parceiro em nome dele (ex.: negociou por
+   telefone) — mesmos campos e mesma rota pública de autocadastro (/api/parceiros/signup),
+   só que preenchidos por quem já está logado, em vez do próprio parceiro pelo portal. */
+function ModalCriarParceiroManual({ onFechar, criarParceiroManual, notify }) {
+  const [form, setForm] = useState(novoCadastroParceiro());
+  const [enviando, setEnviando] = useState(false);
+  const [erro, setErro] = useState("");
+
+  const setF = (campo, v) => setForm((f) => ({ ...f, [campo]: v }));
+  const setComissaoLinha = (idx, patch) => setForm((f) => ({ ...f, comissao: f.comissao.map((l, i) => (i === idx ? { ...l, ...patch } : l)) }));
+  const addComissaoLinha = () => setForm((f) => ({ ...f, comissao: [...f.comissao, novaComissaoLinha()] }));
+  const removerComissaoLinha = (idx) => setForm((f) => ({ ...f, comissao: f.comissao.filter((_, i) => i !== idx) }));
+
+  const enviar = async () => {
+    setErro("");
+    if (!form.email.trim() || !form.senha.trim()) { setErro("Informe e-mail e senha de acesso do parceiro."); return; }
+    if (form.senha.length < 6) { setErro("A senha precisa ter pelo menos 6 caracteres."); return; }
+    if (!form.empresa.trim() || !form.responsavel.trim()) { setErro("Informe a empresa e o responsável."); return; }
+    if (!form.cidade.trim() || !form.uf.trim()) { setErro("Informe cidade e UF."); return; }
+    if (!form.whatsapp.trim()) { setErro("Informe um WhatsApp para contato."); return; }
+    const comissaoValida = form.comissao.filter((l) => l.name.trim() && l.p !== "");
+    if (comissaoValida.length === 0) { setErro("Adicione ao menos uma categoria de comissão com percentual."); return; }
+
+    setEnviando(true);
+    const body = { ...form, comissao: comissaoValida.map((l) => ({ name: l.name.trim(), p: Number(l.p) })) };
+    const r = await criarParceiroManual(body);
+    setEnviando(false);
+    if (r.ok) { notify("Parceiro cadastrado ✓"); onFechar(); }
+  };
+
+  return (
+    <div className="no-print" style={overlay} onClick={onFechar}>
+      <div style={{ ...modal, maxWidth: 560, maxHeight: "85vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <strong>Cadastrar parceiro</strong>
+          <button className="icon-btn" onClick={onFechar}><X size={16} /></button>
+        </div>
+        <p style={{ fontSize: 12.5, color: "#65758b", margin: "0 0 14px" }}>
+          A senha de acesso é do próprio parceiro (ele usa pra entrar na área dele). Combine com ele antes de cadastrar.
+        </p>
+
+        <Grid>
+          <Field label="E-mail de acesso" type="email" value={form.email} onChange={(v) => setF("email", v)} />
+          <Field label="Senha de acesso" type="password" value={form.senha} onChange={(v) => setF("senha", v)} />
+          <div style={cell()}>
+            <label style={lab}>Tipo de parceria</label>
+            <select style={inp} value={form.tipo} onChange={(e) => setF("tipo", e.target.value)}>
+              {PARCEIRO_TIPO_OPCOES.map((o) => <option key={o.valor} value={o.valor}>{o.label}</option>)}
+            </select>
+          </div>
+          <Field label="CNPJ" value={form.cnpj} onChange={(v) => setF("cnpj", v)} />
+          <Field label="Empresa" value={form.empresa} onChange={(v) => setF("empresa", v)} full />
+          <Field label="Responsável" value={form.responsavel} onChange={(v) => setF("responsavel", v)} />
+          <Field label="WhatsApp" value={form.whatsapp} onChange={(v) => setF("whatsapp", v)} />
+          <Field label="Cidade" value={form.cidade} onChange={(v) => setF("cidade", v)} />
+          <Field label="UF" value={form.uf} onChange={(v) => setF("uf", v.toUpperCase().slice(0, 2))} />
+          <Field label="Instagram" value={form.instagram} onChange={(v) => setF("instagram", v)} />
+          <Field label="Site" value={form.site} onChange={(v) => setF("site", v)} />
+        </Grid>
+
+        <div style={{ marginTop: 16 }}>
+          <label style={lab}>Categorias e percentual de comissão</label>
+          <div style={{ display: "grid", gap: 8, marginTop: 6 }}>
+            {form.comissao.map((linha, idx) => (
+              <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input style={{ ...inp, flex: 1 }} placeholder="Categoria (ex.: Mão de obra)" value={linha.name}
+                  onChange={(e) => setComissaoLinha(idx, { name: e.target.value })} />
+                <input style={{ ...inp, width: 90 }} type="number" min="0" max="100" placeholder="%" value={linha.p}
+                  onChange={(e) => setComissaoLinha(idx, { p: e.target.value })} />
+                <button type="button" className="icon-btn" onClick={() => removerComissaoLinha(idx)} disabled={form.comissao.length === 1}>
+                  <Trash2 size={15} color="#c62828" />
+                </button>
+              </div>
+            ))}
+          </div>
+          <button type="button" className="btn-add" style={{ marginTop: 10, padding: 10, fontSize: 13 }} onClick={addComissaoLinha}>
+            <Plus size={15} /> Adicionar categoria de comissão
+          </button>
+        </div>
+
+        <Field label="Benefício oferecido (resumo)" value={form.beneficio} onChange={(v) => setF("beneficio", v)} full />
+        <Area label="Descrição do benefício" value={form.descricaoBeneficio} onChange={(v) => setF("descricaoBeneficio", v)} rows={3} placeholder="Explique as condições do benefício oferecido aos clientes FN" />
+
+        {erro && <div style={{ marginTop: 12, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>{erro}</div>}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={onFechar}>Cancelar</button>
+          <button className="btn-solid" onClick={enviar} disabled={enviando}>
+            {enviando ? <><Loader2 size={15} className="spin" /> Cadastrando…</> : <><Check size={15} /> Cadastrar parceiro</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /* ---- Tela pública: cadastro de Parceiro/Afiliado (sem login) ---- */
 function TelaCadastroParceiro({ onVoltar }) {
