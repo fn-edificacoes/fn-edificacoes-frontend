@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import * as Rascunho from "./rascunho-local.js";
+import { listarAmbientes, getPatologiasPorAmbiente, getPatologiasUnidadeInteira, paraItemDeLaudo } from "./patologias-consulta.js";
 import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
   Building2, User, ClipboardList, ChevronDown, ChevronRight, ChevronLeft, Check,
@@ -3970,8 +3971,147 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
   );
 }
 
+/* ---- Conferir por ambiente ----
+   O técnico escolhe o cômodo e marca o que encontrou, em vez de lembrar de cabeça o que
+   conferir. A lista sai do banco de patologias gerado da planilha: as específicas daquele
+   ambiente primeiro, depois as que valem em qualquer lugar. */
+function SeletorAmbientePatologias({ onFechar, onAdicionar }) {
+  const ambientes = useMemo(() => listarAmbientes(), []);
+  const [ambiente, setAmbiente] = useState(ambientes[0]?.slug || "");
+  const [busca, setBusca] = useState("");
+  const [marcados, setMarcados] = useState({}); // { "slug:id": patologia }
+  const [verUnidade, setVerUnidade] = useState(false);
+
+  const nomeAmbiente = ambientes.find((a) => a.slug === ambiente)?.nome || "";
+  const lista = useMemo(
+    () => (verUnidade ? getPatologiasUnidadeInteira() : getPatologiasPorAmbiente(ambiente)),
+    [ambiente, verUnidade]
+  );
+
+  const termo = busca.trim().toLowerCase();
+  const visiveis = termo
+    ? lista.filter((p) => `${p.nome} ${p.sistema} ${p.elemento} ${p.manifestacao}`.toLowerCase().includes(termo))
+    : lista;
+
+  /* A marcação é por ambiente + patologia: a mesma patologia em dois cômodos são duas não
+     conformidades diferentes no laudo, e o técnico troca de ambiente sem perder o que já
+     marcou no anterior. */
+  const chaveDe = (p) => `${verUnidade ? "unidade" : ambiente}:${p.id}`;
+  const alternar = (p) => setMarcados((m) => {
+    const k = chaveDe(p);
+    if (m[k]) { const { [k]: _, ...resto } = m; return resto; }
+    return { ...m, [k]: { patologia: p, ambienteNome: verUnidade ? "Unidade" : nomeAmbiente } };
+  });
+
+  const total = Object.keys(marcados).length;
+  const confirmar = () => {
+    if (!total) return;
+    onAdicionar(Object.values(marcados).map(({ patologia, ambienteNome }) => paraItemDeLaudo(patologia, ambienteNome)));
+  };
+
+  const corSev = { Alta: "#C62828", "Média": "#B26A00", Baixa: "#2E7D32" };
+  const bgSev = { Alta: "#FCEAEA", "Média": "#FFF4E0", Baixa: "#E6F4EA" };
+
+  return (
+    <div className="no-print" style={overlay} onClick={onFechar}>
+      <div style={{ ...modal, maxWidth: 720, maxHeight: "88vh", display: "flex", flexDirection: "column", padding: 0 }}
+        onClick={(e) => e.stopPropagation()}>
+
+        <div style={{ padding: "16px 18px 12px", borderBottom: `1px solid ${CINZA_BORDA}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <strong style={{ fontSize: 15.5 }}>Conferir por ambiente</strong>
+            <button className="icon-btn" onClick={onFechar}><X size={16} /></button>
+          </div>
+
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+            {ambientes.map((a) => {
+              const ativo = !verUnidade && a.slug === ambiente;
+              const nesteAmbiente = Object.keys(marcados).filter((k) => k.startsWith(`${a.slug}:`)).length;
+              return (
+                <button key={a.slug} onClick={() => { setVerUnidade(false); setAmbiente(a.slug); }} aria-pressed={ativo}
+                  style={{ padding: "5px 11px", borderRadius: 20, cursor: "pointer", fontSize: 12.5, fontWeight: 600,
+                    border: `1.5px solid ${ativo ? AZUL_MARINHO : CINZA_BORDA}`,
+                    background: ativo ? AZUL_MARINHO : "#fff", color: ativo ? "#fff" : "#4a5a70" }}>
+                  {a.nome}{nesteAmbiente ? ` · ${nesteAmbiente}` : ""}
+                </button>
+              );
+            })}
+            {/* Manual do proprietário, pé-direito, medidores: não pertencem a cômodo nenhum. */}
+            <button onClick={() => setVerUnidade(true)} aria-pressed={verUnidade}
+              style={{ padding: "5px 11px", borderRadius: 20, cursor: "pointer", fontSize: 12.5, fontWeight: 600,
+                border: `1.5px dashed ${verUnidade ? AZUL_MARINHO : CINZA_BORDA}`,
+                background: verUnidade ? AZUL_MARINHO : "#fff", color: verUnidade ? "#fff" : "#4a5a70" }}>
+              Unidade inteira
+            </button>
+          </div>
+
+          <input value={busca} onChange={(e) => setBusca(e.target.value)}
+            placeholder={`Buscar em ${visiveis.length} item(ns) de ${verUnidade ? "unidade inteira" : nomeAmbiente}…`}
+            style={{ width: "100%", padding: "8px 11px", border: `1px solid ${CINZA_BORDA}`, borderRadius: 9, fontSize: 13, fontFamily: "inherit" }} />
+        </div>
+
+        <div style={{ overflowY: "auto", flex: 1, padding: "10px 18px" }}>
+          {visiveis.length === 0 && (
+            <p style={{ color: "#8593a8", fontSize: 13.5, textAlign: "center", padding: "24px 0" }}>
+              Nada encontrado para “{busca}”.
+            </p>
+          )}
+          <div style={{ display: "grid", gap: 6 }}>
+            {visiveis.map((p) => {
+              const marcado = !!marcados[chaveDe(p)];
+              return (
+                <label key={p.id} style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer",
+                  border: `1px solid ${marcado ? AZUL_MEDIO : CINZA_BORDA}`, background: marcado ? "#f4f8fd" : "#fff",
+                  borderRadius: 9, padding: "9px 11px" }}>
+                  <input type="checkbox" checked={marcado} onChange={() => alternar(p)} style={{ marginTop: 3, flexShrink: 0 }} />
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                      <strong style={{ fontSize: 13.5, fontWeight: 600 }}>{p.nome}</strong>
+                      <span style={{ fontSize: 10, fontWeight: 800, color: corSev[p.severidade], background: bgSev[p.severidade], borderRadius: 20, padding: "1px 7px" }}>
+                        {p.severidade}
+                      </span>
+                      {/* Distingue o que aquele cômodo cobra do que vale em qualquer lugar. */}
+                      {p.especificaDoAmbiente && (
+                        <span style={{ fontSize: 10, fontWeight: 700, color: AZUL_MARINHO, background: CINZA_CLARO, borderRadius: 20, padding: "1px 7px" }}>
+                          deste ambiente
+                        </span>
+                      )}
+                      {p.exigeEspecialista && (
+                        <span style={{ fontSize: 10, fontWeight: 700, color: "#6E36BE", background: "#F1EAFB", borderRadius: 20, padding: "1px 7px" }}>
+                          exige especialista
+                        </span>
+                      )}
+                    </span>
+                    <span style={{ display: "block", fontSize: 11.5, color: "#65758b", marginTop: 2 }}>{p.sistema}</span>
+                    {p.comoVerificar && (
+                      <span style={{ display: "block", fontSize: 11.5, color: "#8593a8", marginTop: 3, lineHeight: 1.45 }}>
+                        Como verificar: {p.comoVerificar}
+                      </span>
+                    )}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={{ padding: "12px 18px", borderTop: `1px solid ${CINZA_BORDA}`, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12.5, color: "#65758b", flex: 1, minWidth: 140 }}>
+            {total ? `${total} marcada(s) — vira(m) item(ns) do laudo` : "Marque o que foi encontrado na vistoria"}
+          </span>
+          <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={onFechar}>Cancelar</button>
+          <button className="btn-solid" onClick={confirmar} disabled={!total}>
+            <Plus size={14} /> Adicionar {total || ""}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, dados, setD, fotoCliente, setFotoCliente, notify, setAba, bloqueado, onPedirDesbloqueio, statusLaudo, devolvido, motivoDevolucao }) {
   const fotoClienteRef = useRef();
+  const [seletorAberto, setSeletorAberto] = useState(false);
   const handleFotoCliente = (file) => {
     if (!file) return;
     if (!file.type.startsWith("image/")) { notify("Envie uma imagem (PNG ou JPG)"); return; }
@@ -4077,10 +4217,37 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
           onDelete={() => setItens((l) => l.filter((x) => x.id !== item.id))} />
       ))}
 
-      <button className="btn-add" onClick={() => setItens((l) => [...l, novoItem()])}>
-        <Plus size={17} /> Adicionar item de vistoria
-      </button>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <button className="btn-add" style={{ flex: 1, minWidth: 200 }} onClick={() => setItens((l) => [...l, novoItem()])}>
+          <Plus size={17} /> Adicionar item de vistoria
+        </button>
+        {/* Caminho guiado: em vez de lembrar o que conferir em cada cômodo, o técnico escolhe
+            o ambiente e marca na lista. O botão acima continua, para o item que não está
+            no banco. */}
+        <button className="btn-add" style={{ flex: 1, minWidth: 200, borderStyle: "solid", borderColor: AZUL_MEDIO, color: AZUL_MEDIO }}
+          onClick={() => setSeletorAberto(true)}>
+          <ClipboardList size={17} /> Conferir por ambiente
+        </button>
       </div>
+      </div>
+
+      {seletorAberto && (
+        <SeletorAmbientePatologias
+          onFechar={() => setSeletorAberto(false)}
+          onAdicionar={(novos) => {
+            setItens((l) => {
+              /* O primeiro item nasce vazio junto com o formulário. Se o técnico não tocou
+                 nele, é ele que deve ser preenchido — senão sobra uma linha em branco no
+                 laudo, que o modelo cobra como não conformidade sem descrição. */
+              const soVazio = l.length === 1 && !l[0].patologia && !l[0].local && !l[0].descricao && !l[0].fotos?.length;
+              const base = soVazio ? [] : l;
+              return [...base, ...novos.map((n) => ({ ...novoItem(), ...n }))];
+            });
+            setSeletorAberto(false);
+            notify(`${novos.length} não conformidade(s) adicionada(s) ✓`);
+          }}
+        />
+      )}
     </div>
   );
 }
