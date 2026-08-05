@@ -5235,6 +5235,7 @@ function SeloSincronizacao({ drive }) {
 function EditorLaudoGerencia({ laudo, onSalvar, onCancelar, salvando, patologiasBanco = [] }) {
   const [dados, setDadosEdit] = useState(() => JSON.parse(JSON.stringify(laudo.dados || {})));
   const [itens, setItensEdit] = useState(() => (laudo.itens || []).map((i) => ({ ...i })));
+  const [excluindoItemId, setExcluindoItemId] = useState(null);
 
   const setD = (grupo, campo, val) => setDadosEdit((d) => ({ ...d, [grupo]: { ...(d[grupo] || {}), [campo]: val } }));
   const setItemCampo = (id, campo, val) => setItensEdit((arr) => arr.map((i) => (i.id === id ? { ...i, [campo]: val } : i)));
@@ -5246,6 +5247,10 @@ function EditorLaudoGerencia({ laudo, onSalvar, onCancelar, salvando, patologias
     if (!p) return;
     setItensEdit((arr) => arr.map((i) => (i.id === itemId ? { ...i, ...paraItemDeLaudo(p, i.local || "") } : i)));
   };
+  /* A gerência remove um item direto na correção (ex.: item sem descrição/recomendação,
+     duplicado, ou lançado por engano) — sem precisar devolver pro vistoriador só por isso.
+     A exclusão só existe na cópia local; só vira definitiva quando "Salvar correções". */
+  const excluirItem = (itemId) => setItensEdit((arr) => arr.filter((i) => i.id !== itemId));
 
   return (
     <div style={{ display: "grid", gap: 18 }}>
@@ -5277,7 +5282,12 @@ function EditorLaudoGerencia({ laudo, onSalvar, onCancelar, salvando, patologias
             const genericasItem = opcoesItem.filter((p) => !p.especificaDoAmbiente);
             return (
             <div key={item.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#8593a8", marginBottom: 8 }}>Item {i + 1}</div>
+              <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#8593a8", flex: 1 }}>Item {i + 1}</div>
+                <button type="button" className="icon-btn" onClick={() => setExcluindoItemId(item.id)} title="Excluir item">
+                  <Trash2 size={14} color="#c62828" />
+                </button>
+              </div>
               {/* Mesmo cartão que aparece no laudo final, com as fotos — atualiza junto com a
                   edição abaixo, pra a gerência ver exatamente o que está corrigindo. */}
               <div style={{ marginBottom: 12 }}>
@@ -5328,6 +5338,11 @@ function EditorLaudoGerencia({ laudo, onSalvar, onCancelar, salvando, patologias
           {salvando ? <Loader2 size={14} className="spin" /> : <Mail size={14} />} Salvar e enviar por e-mail
         </button>
       </div>
+
+      <ConfirmModal aberto={!!excluindoItemId} titulo="Excluir item"
+        mensagem={`Tem certeza que deseja excluir este item do laudo? A exclusão só é definitiva ao clicar em "Salvar correções" ou "Salvar e enviar por e-mail".`}
+        onConfirm={() => { excluirItem(excluindoItemId); setExcluindoItemId(null); }}
+        onCancel={() => setExcluindoItemId(null)} />
     </div>
   );
 }
