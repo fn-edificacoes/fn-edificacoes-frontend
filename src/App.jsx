@@ -4484,6 +4484,7 @@ function ItemLaudo({ item, num }) {
      fallback aqui, um severidade/fotos inesperado derrubava a tela inteira em branco. */
   const m = sevMeta[item.severidade] || sevMeta.Média;
   const fotos = item.fotos || [];
+  const pTexto = { fontSize: 13, color: "#4a5a70", lineHeight: 1.6 };
   return (
     <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, overflow: "hidden", marginBottom: 16, breakInside: "avoid" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, background: CINZA_CLARO, padding: "10px 14px" }}>
