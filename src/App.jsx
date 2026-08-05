@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import * as Rascunho from "./rascunho-local.js";
-import { listarAmbientes, getPatologiasPorAmbiente, getPatologiasUnidadeInteira, getPatologia, paraItemDeLaudo } from "./patologias-consulta.js";
+import { listarAmbientes, paraItemDeLaudo, todasParaImportacao } from "./patologias-consulta.js";
 import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
   Building2, User, ClipboardList, ChevronDown, ChevronRight, ChevronLeft, Check,
@@ -323,6 +323,23 @@ const sevMeta = {
   Média: { cor: "#B26A00", bg: "#FFF4E0", icon: CircleAlert },
   Alta: { cor: "#C62828", bg: "#FCEAEA", icon: AlertTriangle },
 };
+
+/* ---- Banco de patologias (agora editável, vem da API — ver src/patologias.js no backend).
+   Estas duas funções fazem localmente o mesmo filtro que antes vinha pronto de
+   patologias-consulta.js, só que sobre o array que a API devolve em vez do arquivo estático. */
+function patologiasPorAmbiente(bancos, slug) {
+  return bancos
+    .filter((p) => !p.escopoUnidadeInteira && (p.aplicaTodosAmbientes || (p.ambientes || []).includes(slug)))
+    .map((p) => ({ ...p, especificaDoAmbiente: (p.ambientes || []).includes(slug) }))
+    .sort((a, b) => {
+      if (a.especificaDoAmbiente !== b.especificaDoAmbiente) return a.especificaDoAmbiente ? -1 : 1;
+      const peso = { Alta: 0, Média: 1, Baixa: 2 };
+      return (peso[a.severidade] ?? 1) - (peso[b.severidade] ?? 1);
+    });
+}
+function patologiasUnidadeInteira(bancos) {
+  return bancos.filter((p) => p.escopoUnidadeInteira);
+}
 
 let idCounter = 1;
 /* Campos "categoria", "norma", "titulo" e "status" atendem o modelo novo de laudo:
@@ -1716,6 +1733,53 @@ function AppInterno({ session, onLogout }) {
     catch (e) { notify(`Não foi possível excluir: ${e.message}`); return false; }
   };
 
+  /* ---- Banco de patologias por ambiente — editável pela gerência; o vistoriador só lê,
+     pra preencher o item da vistoria e o "Conferir por ambiente". */
+  const [patologiasBanco, setPatologiasBanco] = useState([]);
+  const [patologiasBancoCarregando, setPatologiasBancoCarregando] = useState(false);
+  const carregarPatologiasBanco = async () => {
+    if (perfil !== "gerencia" && perfil !== "vistoriador") return;
+    setPatologiasBancoCarregando(true);
+    try {
+      const r = await apiFetch("/api/patologias", { token });
+      setPatologiasBanco(r.patologias || []);
+    } catch (e) { notify(`Não foi possível carregar o banco de patologias: ${e.message}`); }
+    setPatologiasBancoCarregando(false);
+  };
+  useEffect(() => { carregarPatologiasBanco(); }, []);
+  const criarPatologia = async (dadosPatologia) => {
+    try {
+      await apiFetch("/api/patologias", { method: "POST", token, body: dadosPatologia });
+      await carregarPatologiasBanco();
+      return true;
+    } catch (e) { notify(`Não foi possível cadastrar a patologia: ${e.message}`); return false; }
+  };
+  const atualizarPatologia = async (id, patch) => {
+    try {
+      await apiFetch(`/api/patologias/${id}`, { method: "PATCH", token, body: patch });
+      await carregarPatologiasBanco();
+      return true;
+    } catch (e) { notify(`Não foi possível salvar a patologia: ${e.message}`); return false; }
+  };
+  const excluirPatologia = async (id) => {
+    try {
+      await apiFetch(`/api/patologias/${id}`, { method: "DELETE", token });
+      setPatologiasBanco((atual) => atual.filter((p) => p.id !== id));
+      return true;
+    } catch (e) { notify(`Não foi possível excluir a patologia: ${e.message}`); return false; }
+  };
+  /* Roda uma única vez: traz o catálogo que já existia no arquivo estático (gerado de
+     planilha) pra dentro do banco editável. O backend recusa se já houver alguma
+     cadastrada, então não precisa de trava extra aqui. */
+  const importarPatologiasEstaticas = async () => {
+    try {
+      const r = await apiFetch("/api/patologias/importar-lote", { method: "POST", token, body: { patologias: todasParaImportacao() } });
+      await carregarPatologiasBanco();
+      notify(`${r.importadas} patologia(s) importada(s) ✓`);
+      return true;
+    } catch (e) { notify(`Não foi possível importar: ${e.message}`); return false; }
+  };
+
   /* ---- Vales (todos, para Gerência/Vendas acompanharem leads/conversão de Parceiros) ---- */
   const [vales, setVales] = useState([]);
   const [valesCarregando, setValesCarregando] = useState(false);
@@ -2146,7 +2210,7 @@ function AppInterno({ session, onLogout }) {
     const eraAutoPreenchido = !tituloAtual || tituloAtual === item?.patologia;
 
     if (tipo.startsWith("bp-")) {
-      const p = getPatologia(tipo.slice(3));
+      const p = patologiasBanco.find((x) => x.id === tipo.slice(3));
       if (!p) return updItem(id, { tipo, patologia: "" });
       const gerado = paraItemDeLaudo(p, item?.local || "");
       updItem(id, { ...gerado, ...(eraAutoPreenchido ? {} : { titulo: tituloAtual }) });
@@ -2293,7 +2357,7 @@ function AppInterno({ session, onLogout }) {
         {/* Sub-navegação (somente dentro do módulo Gerência) */}
         {abaTop === "gerencia" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
-            {[["visao-geral", "Visão geral", LayoutGrid], ["parceiros", "Parceiros e Afiliados", Users], ["financeiro", "Financeiro", DollarSign], ["prospeccao", "Prospecção", TrendingUp]].map(([k, label, Icon]) => (
+            {[["visao-geral", "Visão geral", LayoutGrid], ["parceiros", "Parceiros e Afiliados", Users], ["financeiro", "Financeiro", DollarSign], ["prospeccao", "Prospecção", TrendingUp], ["patologias", "Banco de patologias", AlertTriangle]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setAbaGerencia(k)} className="tab" style={{ borderBottomColor: abaGerencia === k ? AZUL_MEDIO : "transparent", color: abaGerencia === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
                 <Icon size={15} /> {label}
               </button>
@@ -2323,7 +2387,7 @@ function AppInterno({ session, onLogout }) {
             fotoCliente={dados.fotoCliente} setFotoCliente={setFotoCliente} notify={notify} setAba={setAba}
             bloqueado={laudoBloqueado} onPedirDesbloqueio={() => setConfirmandoDesbloqueio(true)}
             statusLaudo={laudoNoServidor?.laudoStatusLabel} devolvido={laudoDevolvido}
-            motivoDevolucao={laudoNoServidor?.motivo_devolucao} />
+            motivoDevolucao={laudoNoServidor?.motivo_devolucao} patologiasBanco={patologiasBanco} />
         )}
         {abaTop === "laudos" && aba === "laudo" && <LaudoModelo laudo={montarLaudoModelo(dados, itens)} assinatura={assinatura} aprovado={perfil === "gerencia"} />}
         {abaTop === "laudos" && aba === "realizados" && (
@@ -2367,7 +2431,10 @@ function AppInterno({ session, onLogout }) {
             adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento}
             laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} editarLaudo={editarLaudo} reenviarDrive={reenviarDrive} marcarEmAnalise={marcarEmAnalise}
       painel={painel} painelCarregando={painelCarregando} carregarPainel={carregarPainel}
-            acessos={acessos} acessosCarregando={acessosCarregando} />
+            acessos={acessos} acessosCarregando={acessosCarregando}
+            patologiasBanco={patologiasBanco} patologiasBancoCarregando={patologiasBancoCarregando}
+            criarPatologia={criarPatologia} atualizarPatologia={atualizarPatologia} excluirPatologia={excluirPatologia}
+            importarPatologiasEstaticas={importarPatologiasEstaticas} />
         )}
       </main>
 
@@ -4051,7 +4118,7 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
    O técnico escolhe o cômodo e marca o que encontrou, em vez de lembrar de cabeça o que
    conferir. A lista sai do banco de patologias gerado da planilha: as específicas daquele
    ambiente primeiro, depois as que valem em qualquer lugar. */
-function SeletorAmbientePatologias({ onFechar, onAdicionar }) {
+function SeletorAmbientePatologias({ onFechar, onAdicionar, patologiasBanco = [] }) {
   const ambientes = useMemo(() => listarAmbientes(), []);
   const [ambiente, setAmbiente] = useState(ambientes[0]?.slug || "");
   const [busca, setBusca] = useState("");
@@ -4060,8 +4127,8 @@ function SeletorAmbientePatologias({ onFechar, onAdicionar }) {
 
   const nomeAmbiente = ambientes.find((a) => a.slug === ambiente)?.nome || "";
   const lista = useMemo(
-    () => (verUnidade ? getPatologiasUnidadeInteira() : getPatologiasPorAmbiente(ambiente)),
-    [ambiente, verUnidade]
+    () => (verUnidade ? patologiasUnidadeInteira(patologiasBanco) : patologiasPorAmbiente(patologiasBanco, ambiente)),
+    [patologiasBanco, ambiente, verUnidade]
   );
 
   const termo = busca.trim().toLowerCase();
@@ -4185,7 +4252,7 @@ function SeletorAmbientePatologias({ onFechar, onAdicionar }) {
   );
 }
 
-function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, dados, setD, fotoCliente, setFotoCliente, notify, setAba, bloqueado, onPedirDesbloqueio, statusLaudo, devolvido, motivoDevolucao }) {
+function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, dados, setD, fotoCliente, setFotoCliente, notify, setAba, bloqueado, onPedirDesbloqueio, statusLaudo, devolvido, motivoDevolucao, patologiasBanco = [] }) {
   const fotoClienteRef = useRef();
   const [seletorAberto, setSeletorAberto] = useState(false);
   const handleFotoCliente = (file) => {
@@ -4290,7 +4357,8 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
           onPatologia={(t) => escolherPatologia(item.id, t)}
           onFotos={(fl) => addFotos(item.id, fl)}
           onRemoveFoto={(i) => removerFoto(item.id, i)}
-          onDelete={() => setItens((l) => l.filter((x) => x.id !== item.id))} />
+          onDelete={() => setItens((l) => l.filter((x) => x.id !== item.id))}
+          patologiasBanco={patologiasBanco} />
       ))}
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -4309,6 +4377,7 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
 
       {seletorAberto && (
         <SeletorAmbientePatologias
+          patologiasBanco={patologiasBanco}
           onFechar={() => setSeletorAberto(false)}
           onAdicionar={(novos) => {
             setItens((l) => {
@@ -4328,20 +4397,20 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
   );
 }
 
-function ItemCard({ item, num, onChange, onPatologia, onFotos, onRemoveFoto, onDelete }) {
+function ItemCard({ item, num, onChange, onPatologia, onFotos, onRemoveFoto, onDelete, patologiasBanco = [] }) {
   const fileRef = useRef();
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
   const m = sevMeta[item.severidade];
 
   /* Casa o "Local" digitado (texto livre, com sugestão da datalist) com um ambiente do
-     banco por planilha — quando bate, o dropdown abaixo já entra filtrado para aquele
+     banco de patologias — quando bate, o dropdown abaixo já entra filtrado para aquele
      cômodo, na frente das que valem em qualquer lugar. */
   const ambienteSlug = useMemo(() => {
     const termo = (item.local || "").trim().toLowerCase();
     if (!termo) return "";
     return listarAmbientes().find((a) => a.nome.toLowerCase() === termo)?.slug || "";
   }, [item.local]);
-  const opcoesPatologia = useMemo(() => getPatologiasPorAmbiente(ambienteSlug), [ambienteSlug]);
+  const opcoesPatologia = useMemo(() => patologiasPorAmbiente(patologiasBanco, ambienteSlug), [patologiasBanco, ambienteSlug]);
   const especificasDoAmbiente = opcoesPatologia.filter((p) => p.especificaDoAmbiente);
   const genericasQualquerAmbiente = opcoesPatologia.filter((p) => !p.especificaDoAmbiente);
 
@@ -5163,12 +5232,20 @@ function SeloSincronizacao({ drive }) {
 /* Edição do laudo pela própria Gerência (sem devolver pro vistoriador) — pensada pra
    ajuste pontual de texto/severidade, não pra trocar foto. Trabalha em cópia local e só
    grava (via editarLaudo) quando a gerência clica em salvar. */
-function EditorLaudoGerencia({ laudo, onSalvar, onCancelar, salvando }) {
+function EditorLaudoGerencia({ laudo, onSalvar, onCancelar, salvando, patologiasBanco = [] }) {
   const [dados, setDadosEdit] = useState(() => JSON.parse(JSON.stringify(laudo.dados || {})));
   const [itens, setItensEdit] = useState(() => (laudo.itens || []).map((i) => ({ ...i })));
 
   const setD = (grupo, campo, val) => setDadosEdit((d) => ({ ...d, [grupo]: { ...(d[grupo] || {}), [campo]: val } }));
   const setItemCampo = (id, campo, val) => setItensEdit((arr) => arr.map((i) => (i.id === id ? { ...i, [campo]: val } : i)));
+  /* Mesmo banco de patologias do item de vistoria (ver ItemCard) — a gerência troca a
+     patologia do item direto por aqui, sem precisar devolver pro vistoriador. */
+  const escolherPatologiaItem = (itemId, tipo) => {
+    if (!tipo.startsWith("bp-")) return;
+    const p = patologiasBanco.find((x) => x.id === tipo.slice(3));
+    if (!p) return;
+    setItensEdit((arr) => arr.map((i) => (i.id === itemId ? { ...i, ...paraItemDeLaudo(p, i.local || "") } : i)));
+  };
 
   return (
     <div style={{ display: "grid", gap: 18 }}>
@@ -5192,7 +5269,13 @@ function EditorLaudoGerencia({ laudo, onSalvar, onCancelar, salvando }) {
         <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>Itens da vistoria ({itens.length})</div>
         {itens.length === 0 && <p style={{ color: "#8593a8", fontSize: 13 }}>Nenhum item registrado.</p>}
         <div style={{ display: "grid", gap: 12 }}>
-          {itens.map((item, i) => (
+          {itens.map((item, i) => {
+            const termoLocal = (item.local || "").trim().toLowerCase();
+            const ambienteSlugItem = listarAmbientes().find((a) => a.nome.toLowerCase() === termoLocal)?.slug || "";
+            const opcoesItem = patologiasPorAmbiente(patologiasBanco, ambienteSlugItem);
+            const especificasItem = opcoesItem.filter((p) => p.especificaDoAmbiente);
+            const genericasItem = opcoesItem.filter((p) => !p.especificaDoAmbiente);
+            return (
             <div key={item.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: "#8593a8", marginBottom: 8 }}>Item {i + 1}</div>
               {/* Mesmo cartão que aparece no laudo final, com as fotos — atualiza junto com a
@@ -5210,10 +5293,29 @@ function EditorLaudoGerencia({ laudo, onSalvar, onCancelar, salvando }) {
                   </select>
                 </div>
               </Grid>
+              {/* Troca a patologia inteira (texto, severidade, norma, recomendação) pela do
+                  banco — a gerência não precisa reescrever tudo na mão pra corrigir um item
+                  que só tem a patologia errada. Sempre volta pro placeholder depois de
+                  escolher: é uma ação de substituição, não um campo que reflete o item. */}
+              <div style={{ marginTop: 10, background: "#f4f8fd", border: "1px solid #dbe7f4", borderRadius: 11, padding: 13 }}>
+                <label style={{ ...lab, display: "block", marginBottom: 6 }}>Trocar por outra patologia do banco (opcional)</label>
+                <select style={{ ...inp, width: "100%" }} value="" onChange={(e) => escolherPatologiaItem(item.id, e.target.value)}>
+                  <option value="">selecionar patologia…</option>
+                  {especificasItem.length > 0 && (
+                    <optgroup label={`Específicas de ${item.local}`}>
+                      {especificasItem.map((p) => <option key={`bp-${p.id}`} value={`bp-${p.id}`}>{p.nome}</option>)}
+                    </optgroup>
+                  )}
+                  <optgroup label="Aplicam-se a qualquer ambiente">
+                    {genericasItem.map((p) => <option key={`bp-${p.id}`} value={`bp-${p.id}`}>{p.nome}</option>)}
+                  </optgroup>
+                </select>
+              </div>
               <Area label="Descrição" value={item.descricao} onChange={(v) => setItemCampo(item.id, "descricao", v)} rows={3} />
               <Area label="Recomendação" value={item.recomendacao} onChange={(v) => setItemCampo(item.id, "recomendacao", v)} rows={2} />
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -5230,7 +5332,7 @@ function EditorLaudoGerencia({ laudo, onSalvar, onCancelar, salvando }) {
   );
 }
 
-function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, assinatura, notify }) {
+function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, assinatura, notify, patologiasBanco = [] }) {
   const [previewId, setPreviewId] = useState(null);
   const [aprovandoId, setAprovandoId] = useState(null);
   /* Devolver exige motivo: é ele que o técnico vê no topo do formulário ao reabrir o laudo. */
@@ -5338,7 +5440,8 @@ function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, d
             {editando ? (
               <EditorLaudoGerencia laudo={laudoPreview} salvando={salvandoEdicao}
                 onCancelar={() => setEditando(false)}
-                onSalvar={(patch, enviarTambem) => salvarEdicao(patch, enviarTambem)} />
+                onSalvar={(patch, enviarTambem) => salvarEdicao(patch, enviarTambem)}
+                patologiasBanco={patologiasBanco} />
             ) : (
               <>
                 {/* Mesma peça que o cliente recebe — a gerência aprova vendo o resultado final. */}
@@ -5999,7 +6102,7 @@ function CardProspeccao({ prospeccao = [], carregando, atualizar, publicarNoDriv
   );
 }
 
-function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendimento, excluirCliente, empreendimentosRef = [], carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando }) {
+function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendimento, excluirCliente, empreendimentosRef = [], carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco }) {
   const porVistoria = docs.reduce((acc, d) => { acc[d.vistoria] = (acc[d.vistoria] || 0) + 1; return acc; }, {});
   const porStatusProducao = docs.reduce((acc, d) => { acc[d.statusProducao] = (acc[d.statusProducao] || 0) + 1; return acc; }, {});
   const totalRegistrosDocs = docs.length;
@@ -6018,7 +6121,7 @@ function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendi
 
       <CardPainelLaudos painel={painel} carregando={painelCarregando} recarregar={carregarPainel} usuarios={usuarios} notify={notify} />
       <CardLaudosPendentes laudosPendentes={laudosPendentes} carregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} editarLaudo={editarLaudo} reenviarDrive={reenviarDrive} marcarEmAnalise={marcarEmAnalise}
-      painel={painel} painelCarregando={painelCarregando} carregarPainel={carregarPainel} assinatura={assinatura} notify={notify} />
+      painel={painel} painelCarregando={painelCarregando} carregarPainel={carregarPainel} assinatura={assinatura} notify={notify} patologiasBanco={patologiasBanco} />
 
       <CardCancelamentosPendentes clientes={clientes} usuarios={usuarios} updCliente={updCliente} notify={notify} />
 
@@ -6105,6 +6208,181 @@ function CardIndicadoresParceiros({ parceiros, vales, valesCarregando }) {
     </Card>
   );
 }
+/* ---- Banco de patologias por ambiente — CRUD da gerência ----
+   O catálogo nasce vazio no banco: o botão "Importar catálogo atual" traz de uma vez as
+   patologias que já existiam no arquivo estático (gerado de planilha). Dali em diante, o
+   cadastro é feito por aqui — o mesmo banco alimenta o dropdown do item de vistoria, o
+   "Conferir por ambiente" e a correção de laudo da gerência. */
+function CardBancoPatologias({ patologias = [], carregando, onCriar, onAtualizar, onExcluir, onImportar, notify }) {
+  const ambientes = useMemo(() => listarAmbientes(), []);
+  const [busca, setBusca] = useState("");
+  const [editando, setEditando] = useState(null); // objeto da patologia, ou {} pra nova
+  const [salvando, setSalvando] = useState(false);
+  const [importando, setImportando] = useState(false);
+  const [excluindoId, setExcluindoId] = useState(null);
+
+  const termo = busca.trim().toLowerCase();
+  const visiveis = termo
+    ? patologias.filter((p) => `${p.nome} ${p.sistema} ${p.elemento}`.toLowerCase().includes(termo))
+    : patologias;
+
+  const importar = async () => {
+    setImportando(true);
+    await onImportar();
+    setImportando(false);
+  };
+
+  const iniciarNova = () => setEditando({
+    sistema: "", elemento: "", nome: "", manifestacao: "", causas: "", comoVerificar: "",
+    severidade: "Média", criticidade: "", norma: "", normasComplementares: "", acaoRecomendada: "",
+    exigeEspecialista: false, registroMinimo: "", aplicaTodosAmbientes: false, escopoUnidadeInteira: false,
+    ambientes: [],
+  });
+
+  const salvar = async () => {
+    if (!editando.nome?.trim()) { notify("Informe o nome da patologia."); return; }
+    setSalvando(true);
+    const ok = editando.id ? await onAtualizar(editando.id, editando) : await onCriar(editando);
+    setSalvando(false);
+    if (ok) setEditando(null);
+  };
+
+  const excluir = async (id) => {
+    setExcluindoId(id);
+    await onExcluir(id);
+    setExcluindoId(null);
+  };
+
+  const alternarAmbiente = (slug) => setEditando((ed) => ({
+    ...ed,
+    ambientes: ed.ambientes.includes(slug) ? ed.ambientes.filter((s) => s !== slug) : [...ed.ambientes, slug],
+  }));
+
+  return (
+    <Card icon={AlertTriangle} titulo={`Banco de patologias (${patologias.length})`}>
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Catálogo que alimenta o item de vistoria, o "Conferir por ambiente" e a correção de laudo — ajuste, adicione ou remova entradas aqui.
+      </p>
+
+      {!carregando && patologias.length === 0 && (
+        <div style={{ background: "#FFF4E0", border: "1px solid #f0c987", borderRadius: 10, padding: 14, marginBottom: 16, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <AlertTriangle size={16} color="#B26A00" style={{ flexShrink: 0 }} />
+          <span style={{ fontSize: 13, color: "#7a4e00", flex: 1, minWidth: 200 }}>
+            O banco ainda está vazio. Importe o catálogo que já existe (feito uma única vez) pra começar a editar a partir dele.
+          </span>
+          <button className="btn-solid" onClick={importar} disabled={importando}>
+            {importando ? <Loader2 size={14} className="spin" /> : <RefreshCcw size={14} />} Importar catálogo atual
+          </button>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <input style={{ ...inp, flex: 1, minWidth: 200 }} value={busca} onChange={(e) => setBusca(e.target.value)}
+          placeholder={`Buscar em ${patologias.length} patologia(s)…`} />
+        <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }} onClick={iniciarNova}>
+          <Plus size={15} /> Nova patologia
+        </button>
+      </div>
+
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && visiveis.length === 0 && patologias.length > 0 && (
+        <p style={{ color: "#8593a8", fontSize: 14 }}>Nada encontrado para "{busca}".</p>
+      )}
+
+      <div style={{ display: "grid", gap: 8 }}>
+        {visiveis.map((p) => (
+          <div key={p.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontWeight: 700, fontSize: 13.5 }}>{p.nome}</div>
+              <div style={{ fontSize: 12, color: "#65758b" }}>
+                {p.sistema}{p.elemento ? ` · ${p.elemento}` : ""}
+                {p.aplicaTodosAmbientes && " · qualquer ambiente"}
+                {p.escopoUnidadeInteira && " · unidade inteira"}
+                {p.ambientes.length > 0 && ` · ${p.ambientes.length} ambiente(s) específico(s)`}
+              </div>
+            </div>
+            <span style={{ fontSize: 11, fontWeight: 700, color: sevMeta[p.severidade]?.cor, background: sevMeta[p.severidade]?.bg, borderRadius: 20, padding: "2px 10px" }}>
+              {p.severidade}
+            </span>
+            <button className="icon-btn" onClick={() => setEditando({ ...p })} title="Editar"><Edit3 size={15} color={AZUL_MEDIO} /></button>
+            <button className="icon-btn" onClick={() => excluir(p.id)} title="Excluir" disabled={excluindoId === p.id}>
+              {excluindoId === p.id ? <Loader2 size={15} className="spin" /> : <Trash2 size={15} color="#c62828" />}
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {editando && (
+        <div className="no-print" style={overlay} onClick={() => setEditando(null)}>
+          <div style={{ ...modal, maxWidth: 640, maxHeight: "88vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <strong>{editando.id ? "Editar patologia" : "Nova patologia"}</strong>
+              <button className="icon-btn" onClick={() => setEditando(null)}><X size={16} /></button>
+            </div>
+            <Grid>
+              <Field label="Nome" value={editando.nome} onChange={(v) => setEditando((ed) => ({ ...ed, nome: v }))} full />
+              <Field label="Sistema" value={editando.sistema} onChange={(v) => setEditando((ed) => ({ ...ed, sistema: v }))} />
+              <Field label="Elemento" value={editando.elemento} onChange={(v) => setEditando((ed) => ({ ...ed, elemento: v }))} />
+              <div style={cell(false)}>
+                <label style={lab}>Severidade</label>
+                <select style={inp} value={editando.severidade} onChange={(e) => setEditando((ed) => ({ ...ed, severidade: e.target.value }))}>
+                  {["Baixa", "Média", "Alta"].map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <Field label="Norma" value={editando.norma} onChange={(v) => setEditando((ed) => ({ ...ed, norma: v }))} />
+              <Field label="Normas complementares" value={editando.normasComplementares} onChange={(v) => setEditando((ed) => ({ ...ed, normasComplementares: v }))} />
+            </Grid>
+            <Area label="Manifestação (vira a descrição técnica do item)" value={editando.manifestacao} onChange={(v) => setEditando((ed) => ({ ...ed, manifestacao: v }))} rows={2} />
+            <Area label="Ação recomendada (vira a recomendação técnica do item)" value={editando.acaoRecomendada} onChange={(v) => setEditando((ed) => ({ ...ed, acaoRecomendada: v }))} rows={2} />
+            <Area label="Como verificar" value={editando.comoVerificar} onChange={(v) => setEditando((ed) => ({ ...ed, comoVerificar: v }))} rows={2} />
+
+            <div style={{ display: "flex", gap: 16, marginTop: 14, flexWrap: "wrap" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+                <input type="checkbox" checked={editando.exigeEspecialista} onChange={(e) => setEditando((ed) => ({ ...ed, exigeEspecialista: e.target.checked }))} />
+                Exige especialista
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+                <input type="checkbox" checked={editando.aplicaTodosAmbientes} onChange={(e) => setEditando((ed) => ({ ...ed, aplicaTodosAmbientes: e.target.checked, escopoUnidadeInteira: false }))} />
+                Aplica-se a qualquer ambiente
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+                <input type="checkbox" checked={editando.escopoUnidadeInteira} onChange={(e) => setEditando((ed) => ({ ...ed, escopoUnidadeInteira: e.target.checked, aplicaTodosAmbientes: false }))} />
+                Escopo de unidade inteira (não é de um cômodo)
+              </label>
+            </div>
+
+            {!editando.aplicaTodosAmbientes && !editando.escopoUnidadeInteira && (
+              <div style={{ marginTop: 14 }}>
+                <label style={lab}>Específica destes ambientes</label>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                  {ambientes.map((a) => {
+                    const marcado = editando.ambientes.includes(a.slug);
+                    return (
+                      <button key={a.slug} type="button" onClick={() => alternarAmbiente(a.slug)} aria-pressed={marcado}
+                        style={{ padding: "5px 11px", borderRadius: 20, cursor: "pointer", fontSize: 12.5, fontWeight: 600,
+                          border: `1.5px solid ${marcado ? AZUL_MARINHO : CINZA_BORDA}`,
+                          background: marcado ? AZUL_MARINHO : "#fff", color: marcado ? "#fff" : "#4a5a70" }}>
+                        {a.nome}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setEditando(null)} disabled={salvando}>Cancelar</button>
+              <button className="btn-solid" onClick={salvar} disabled={salvando}>
+                {salvando ? <Loader2 size={14} className="spin" /> : <Save size={14} />} Salvar patologia
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, notify }) {
   const [cadastrando, setCadastrando] = useState(false);
   return (
@@ -6487,10 +6765,15 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando }) {
+function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
   if (sub === "parceiros") {
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual}
       salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} vales={vales} valesCarregando={valesCarregando} notify={notify} />;
+  }
+  if (sub === "patologias") {
+    return <CardBancoPatologias patologias={patologiasBanco} carregando={patologiasBancoCarregando}
+      onCriar={criarPatologia} onAtualizar={atualizarPatologia} onExcluir={excluirPatologia}
+      onImportar={importarPatologiasEstaticas} notify={notify} />;
   }
   if (sub === "prospeccao") {
     return <CardProspeccao prospeccao={prospeccao} carregando={prospeccaoCarregando} atualizar={atualizarProspeccao}
@@ -6508,7 +6791,7 @@ function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, pad
       avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
       laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} editarLaudo={editarLaudo} reenviarDrive={reenviarDrive} marcarEmAnalise={marcarEmAnalise}
       painel={painel} painelCarregando={painelCarregando} carregarPainel={carregarPainel}
-      acessos={acessos} acessosCarregando={acessosCarregando} />
+      acessos={acessos} acessosCarregando={acessosCarregando} patologiasBanco={patologiasBanco} />
   );
 }
 

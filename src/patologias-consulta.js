@@ -50,6 +50,16 @@ export function getPatologia(id) {
   return POR_ID.get(Number(id)) || null;
 }
 
+/* Devolve o catálogo estático inteiro, com a lista de slugs de ambiente de cada patologia
+   embutida — o formato que a rota de importação em lote espera. Usado uma única vez, pela
+   tela de administração, para trazer o catálogo pra dentro do banco editável. */
+export function todasParaImportacao() {
+  return PATOLOGIAS.map((p) => ({
+    ...p,
+    ambientes: AMBIENTE_PATOLOGIAS.filter((v) => v.patologiaId === p.id).map((v) => v.ambiente),
+  }));
+}
+
 /* Converte uma patologia do banco nos campos que o item do laudo espera. O texto vira o que
    o laudo exige: "Verifica-se..." descreve o observado, "Recomenda-se..." a correção. */
 export function paraItemDeLaudo(patologia, nomeDoAmbiente) {
