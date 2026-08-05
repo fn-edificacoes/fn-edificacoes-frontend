@@ -312,7 +312,11 @@ const TEXTOS_PADRAO = {
 const DADOS_INICIAIS = {
   contratante: { nome: "", cpf: "" },
   imovel: { construtora: "", empreendimento: "", endereco: "", unidade: "", descricao: "", tipologia: "", areaPrivativa: "" },
-  rt: { nome: "ANTONIO FELIPE NEVES BARBOSA", qualificacao: "Técnico em Edificações / Eletrotécnico", registro: "CFT-03 nº 09753183496" },
+  /* Vazio de propósito: antes vinha fixo com o nome e o registro profissional (CFT) de uma
+     pessoa específica, atribuídos a toda vistoria — mesmo as feitas por outro técnico. Quem
+     está fazendo a vistoria preenche o próprio nome/qualificação/registro em "Dados do
+     imóvel vistoriado"; o nome já vem sugerido a partir do login (ver AppInterno). */
+  rt: { nome: "", qualificacao: "", registro: "" },
   vistoria: { data: "", inicio: "", termino: "", presentes: "", cidade: "Paulista - PE", ambientesVistoriados: "" },
   textos: { ...TEXTOS_PADRAO },
   fotoCliente: null, // foto do vistoriador com o cliente (opcional) — aparece na última página do laudo e na página de acompanhamento do cliente
@@ -1508,7 +1512,10 @@ function AppInterno({ session, onLogout }) {
   const [abaGerencia, setAbaGerencia] = useState("visao-geral"); // "visao-geral" | "parceiros" | "financeiro" | "prospeccao"
   const [abaQualidade, setAbaQualidade] = useState("analise"); // "analise" | "vistoria" | "feedback"
   const [agendarAgoraId, setAgendarAgoraId] = useState(null); // id do cliente recém-aprovado, pra abrir direto o card dele em "Vistoria"
-  const [dados, setDados] = useState(DADOS_INICIAIS);
+  // Sugere o nome de quem está logado como responsável técnico — evita repetir o bug
+  // antigo de sair com o nome de outra pessoa fixo. Qualificação e registro (CFT) o
+  // sistema não tem como saber automaticamente; quem faz a vistoria confirma/preenche.
+  const [dados, setDados] = useState(() => ({ ...DADOS_INICIAIS, rt: { ...DADOS_INICIAIS.rt, nome: session.usuario.nome || "" } }));
   const [itens, setItens] = useState([novoItem()]);
   const [clienteAtualId, setClienteAtualId] = useState(null); // id do cliente carregado no laudo em edição — necessário para "Enviar para gerência"
   /* Trava do laudo após o envio à gerência.
@@ -4317,6 +4324,21 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
       </div>
 
       <div style={{ marginBottom: 16 }}>
+        <Card icon={User} titulo="Responsável técnico">
+          <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
+            Aparece na última página do laudo, como quem assina a vistoria — confirme se é você mesmo.
+          </p>
+          <Grid>
+            <Field label="Nome" value={dados?.rt?.nome || ""} onChange={(v) => setD("rt", "nome", v)} />
+            <Field label="Qualificação" value={dados?.rt?.qualificacao || ""} onChange={(v) => setD("rt", "qualificacao", v)}
+              placeholder="Ex.: Técnico em Edificações" />
+            <Field label="Registro profissional" value={dados?.rt?.registro || ""} onChange={(v) => setD("rt", "registro", v)}
+              placeholder="Ex.: CFT-03 nº 00000000000" full />
+          </Grid>
+        </Card>
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
         <Card icon={Camera} titulo="Foto com o cliente (obrigatória)">
           <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
             Tire uma foto sua com o cliente durante a vistoria, igual às fotos dos itens. Necessária pra enviar o laudo para a gerência — assim que tirar, você já vai direto pro laudo final.
@@ -5262,6 +5284,15 @@ function EditorLaudoGerencia({ laudo, onSalvar, onCancelar, salvando, patologias
           <Field label="Empreendimento" value={dados.imovel?.empreendimento || ""} onChange={(v) => setD("imovel", "empreendimento", v)} />
           <Field label="Unidade" value={dados.imovel?.unidade || ""} onChange={(v) => setD("imovel", "unidade", v)} />
           <Field label="Endereço" value={dados.imovel?.endereco || ""} onChange={(v) => setD("imovel", "endereco", v)} full />
+        </Grid>
+      </div>
+
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>Responsável técnico</div>
+        <Grid>
+          <Field label="Nome" value={dados.rt?.nome || ""} onChange={(v) => setD("rt", "nome", v)} />
+          <Field label="Qualificação" value={dados.rt?.qualificacao || ""} onChange={(v) => setD("rt", "qualificacao", v)} />
+          <Field label="Registro profissional" value={dados.rt?.registro || ""} onChange={(v) => setD("rt", "registro", v)} full />
         </Grid>
       </div>
 
