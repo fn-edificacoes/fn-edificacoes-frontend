@@ -1036,7 +1036,7 @@ function diasDesde(quando) {
   return (Date.now() - d.getTime()) / 86400000;
 }
 
-function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], avaliacoes = [], documentosArt = [], agendaVistoriador = [], meusLaudos = [] }) {
+function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], avaliacoes = [], documentosArt = [], agendaVistoriador = [], meusLaudos = [], parceiros = [] }) {
   const itens = [];
   const hojeISO = paraChaveISO(new Date());
 
@@ -1123,6 +1123,21 @@ function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], ava
         id: "exclusoes",
         texto: `${exclusoes.length} exclusão(ões) de avaliação para decidir`,
         onde: { aba: "qualidade", sub: "feedback" },
+      });
+    }
+  }
+
+  // --- Parceiros novos aguardando homologação: sem isto, ninguém era avisado — o cadastro
+  // só aparecia se alguém abrisse a aba "Parceiros" por conta própria e reparasse na tabela. ---
+  if (["gerencia", "vendas", "atendimento"].includes(perfil)) {
+    const aguardandoHomologacao = parceiros.filter((p) => p.status === "em_analise");
+    if (aguardandoHomologacao.length) {
+      itens.push({
+        id: "parceiros-em-analise", urgente: true,
+        texto: `${aguardandoHomologacao.length} parceiro(s) aguardando homologação`,
+        // Gerência acessa parceiros dentro da própria aba (sub-nav); vendas/atendimento têm
+        // uma aba própria "vendas" sem sub-nav — cada perfil precisa do destino certo.
+        onde: perfil === "gerencia" ? { aba: "gerencia", sub: "parceiros" } : { aba: "vendas" },
       });
     }
   }
@@ -1516,7 +1531,7 @@ function AppInterno({ session, onLogout }) {
   // antigo de sair com o nome de outra pessoa fixo. Qualificação e registro (CFT) o
   // sistema não tem como saber automaticamente; quem faz a vistoria confirma/preenche.
   const [dados, setDados] = useState(() => ({ ...DADOS_INICIAIS, rt: { ...DADOS_INICIAIS.rt, nome: session.usuario.nome || "" } }));
-  const [itens, setItens] = useState([novoItem()]);
+  const [itens, setItens] = useState(() => [novoItem()]);
   const [clienteAtualId, setClienteAtualId] = useState(null); // id do cliente carregado no laudo em edição — necessário para "Enviar para gerência"
   /* Trava do laudo após o envio à gerência.
      Isto já existiu como useState solto com um botão de "desbloquear" ao lado: o próprio
@@ -2078,6 +2093,21 @@ function AppInterno({ session, onLogout }) {
 
   const preencherComCliente = (cli, { irParaItens = false } = {}) => {
     if (!cli) return;
+    /* Troca de cliente: sem isto, itens/fotoCliente da vistoria anterior continuavam no
+       estado — o laudo do novo cliente nascia com não conformidades e foto de outro imóvel,
+       e a validação de "foto obrigatória" passava porque o campo já estava preenchido (com a
+       foto errada). Se o laudo deste cliente foi devolvido pela gerência para correção, retoma
+       o que foi de fato enviado ao servidor — não o que sobrou na memória do navegador, que
+       pode já ter sido sobrescrito por outra vistoria feita nesse meio tempo. */
+    const trocouDeCliente = clienteAtualId !== null && clienteAtualId !== cli.id;
+    const laudoDoCliente = meusLaudos.find((l) => l.cliente_id === cli.id) || null;
+    if (laudoDoCliente?.laudo_status === "devolvido_correcao") {
+      setDados(laudoDoCliente.dados);
+      setItens((laudoDoCliente.itens || []).map((i) => ({ ...i, id: idCounter++, fotos: i.fotos || [] })));
+    } else if (trocouDeCliente) {
+      setItens([novoItem()]);
+      setDados((d) => ({ ...d, fotoCliente: null }));
+    }
     setDados((d) => ({
       ...d,
       contratante: { ...d.contratante, nome: cli.nome || d.contratante.nome, cpf: cli.cpf || d.contratante.cpf },
@@ -2298,7 +2328,7 @@ function AppInterno({ session, onLogout }) {
               <div style={{ opacity: 0.7 }}>{PERFIL_LABEL[perfil] || perfil}</div>
             </div>
             <SinoNotificacoes
-              itens={calcularNotificacoes({ perfil, clientes: clientesAtivos, laudosPendentes, avaliacoes, documentosArt, agendaVistoriador, meusLaudos })}
+              itens={calcularNotificacoes({ perfil, clientes: clientesAtivos, laudosPendentes, avaliacoes, documentosArt, agendaVistoriador, meusLaudos, parceiros })}
               onIr={({ aba, sub }) => {
                 if (aba) setAbaTop(aba);
                 if (sub && aba === "qualidade") setAbaQualidade(sub);
@@ -4422,7 +4452,7 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
 function ItemCard({ item, num, onChange, onPatologia, onFotos, onRemoveFoto, onDelete, patologiasBanco = [] }) {
   const fileRef = useRef();
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
-  const m = sevMeta[item.severidade];
+  const m = sevMeta[item.severidade] || sevMeta.Média;
 
   /* Casa o "Local" digitado (texto livre, com sugestão da datalist) com um ambiente do
      banco de patologias — quando bate, o dropdown abaixo já entra filtrado para aquele
