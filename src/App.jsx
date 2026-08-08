@@ -410,7 +410,7 @@ const STATUS_INTERNO_OPCOES = ["Agendado", "Em vistoria", "Laudo em elaboração
 const MODULOS_POR_PERFIL = {
   vistoriador: ["laudos"],
   documentacao: ["documentacao"],
-  atendimento: ["clientes", "qualidade"],
+  atendimento: ["clientes", "qualidade", "vendas"],
   qualidade: ["qualidade"],
   vendas: ["vendas"],
   gerencia: ["laudos", "documentacao", "gerencia", "clientes", "qualidade"],
@@ -1692,7 +1692,7 @@ function AppInterno({ session, onLogout }) {
   const [parceiros, setParceiros] = useState([]);
   const [parceirosCarregando, setParceirosCarregando] = useState(false);
   const carregarParceiros = async () => {
-    if (perfil !== "gerencia" && perfil !== "vendas") return;
+    if (!["gerencia", "vendas", "atendimento"].includes(perfil)) return;
     setParceirosCarregando(true);
     try {
       const r = await apiFetch("/api/parceiros", { token });
@@ -1791,7 +1791,7 @@ function AppInterno({ session, onLogout }) {
   const [vales, setVales] = useState([]);
   const [valesCarregando, setValesCarregando] = useState(false);
   const carregarVales = async () => {
-    if (perfil !== "gerencia" && perfil !== "vendas") return;
+    if (!["gerencia", "vendas", "atendimento"].includes(perfil)) return;
     setValesCarregando(true);
     try {
       const r = await apiFetch("/api/vales", { token });
@@ -8485,6 +8485,115 @@ function PainelParceiro({ session, onLogout }) {
   );
 }
 
+/* ---- Perfil de venda do parceiro, editado pela equipe ----
+   O parceiro edita o dele pelo login de afiliado; aqui a Gerência/Atendimento edita o de
+   qualquer um. Existe porque na prática o parceiro manda a logo e o texto pelo WhatsApp e
+   pede pra equipe montar — e antes disso a equipe só conseguia aprovar/suspender, sem
+   conseguir arrumar uma logo torta ou um WhatsApp errado.
+
+   Benefício e descrição ficam aqui, e não no editor do afiliado, porque são o que a FN
+   negociou com o parceiro: quem promete o desconto é a FN, não o parceiro sozinho. */
+function ModalPerfilParceiroAdmin({ parceiro, onFechar, atualizarParceiro, notify }) {
+  const [form, setForm] = useState({
+    empresa: parceiro.empresa || "",
+    responsavel: parceiro.responsavel || "",
+    whatsapp: parceiro.whatsapp || "",
+    cidade: parceiro.cidade || "",
+    uf: parceiro.uf || "",
+    instagram: parceiro.instagram || "",
+    site: parceiro.site || "",
+    logo: parceiro.logo || "",
+    beneficio: parceiro.beneficio || "",
+    descricao_beneficio: parceiro.descricaoBeneficio ?? parceiro.descricao_beneficio ?? "",
+  });
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState("");
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const onLogo = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { setErro("Envie uma imagem (PNG ou JPG) para a logo."); return; }
+    const reader = new FileReader();
+    reader.onload = () => set("logo", reader.result);
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const salvar = async () => {
+    if (!form.empresa.trim()) { setErro("A empresa não pode ficar sem nome."); return; }
+    setErro(""); setSalvando(true);
+    /* atualizarParceiro devolve false e já avisa o usuário quando falha — não lança. Fechar
+       o modal aqui faria a edição parecer salva justamente quando não foi. */
+    const ok = await atualizarParceiro(parceiro.id, form);
+    setSalvando(false);
+    if (!ok) { setErro("Não foi possível salvar. Confira sua conexão e tente de novo."); return; }
+    notify("Perfil do parceiro atualizado ✓");
+    onFechar();
+  };
+
+  return (
+    <div className="no-print" style={overlay} onClick={onFechar}>
+      <div style={{ ...modal, maxWidth: 520, maxHeight: "88vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <strong>Perfil de venda — {parceiro.empresa}</strong>
+          <button className="icon-btn" onClick={onFechar}><X size={16} /></button>
+        </div>
+        <p style={{ fontSize: 12.5, color: "#65758b", margin: "0 0 14px" }}>
+          É o que o cliente vê na página pública deste parceiro.
+        </p>
+
+        <div style={{ ...cell(true), marginBottom: 12 }}>
+          <label style={lab}>Logo</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 56, height: 56, borderRadius: 10, background: CINZA_CLARO, display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
+              {form.logo ? <img src={form.logo} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                : <Building2 size={22} color={AZUL_MEDIO} />}
+            </div>
+            <label className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, cursor: "pointer" }}>
+              <Camera size={14} /> {form.logo ? "Trocar logo" : "Enviar logo"}
+              <input type="file" accept="image/*" onChange={onLogo} style={{ display: "none" }} />
+            </label>
+          </div>
+        </div>
+
+        <Grid>
+          <Field label="Empresa" value={form.empresa} onChange={(v) => set("empresa", v)} />
+          <Field label="Responsável" value={form.responsavel} onChange={(v) => set("responsavel", v)} />
+          <Field label="WhatsApp" value={form.whatsapp} onChange={(v) => set("whatsapp", v)} />
+          <Field label="Cidade" value={form.cidade} onChange={(v) => set("cidade", v)} />
+          <Field label="UF" value={form.uf} onChange={(v) => set("uf", v.toUpperCase().slice(0, 2))} />
+          <Field label="Instagram" value={form.instagram} onChange={(v) => set("instagram", v)} />
+          <Field label="Site" value={form.site} onChange={(v) => set("site", v)} />
+        </Grid>
+
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${CINZA_BORDA}` }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: AZUL_MARINHO, textTransform: "uppercase", letterSpacing: .3, marginBottom: 8 }}>
+            Benefício para clientes FN
+          </div>
+          <Field label="Benefício" value={form.beneficio} onChange={(v) => set("beneficio", v)} placeholder="Ex.: 10% de desconto" />
+          <Area label="Como funciona" value={form.descricao_beneficio} onChange={(v) => set("descricao_beneficio", v)} rows={3}
+            placeholder="Regras: primeira compra, não acumulável, prazo…" />
+          {/* O texto do benefício é copiado para dentro do cupom na hora em que ele é gerado.
+              Mudar aqui vale para os próximos, não para quem já tem o código na mão. */}
+          <p style={{ fontSize: 11.5, color: "#8593a8", margin: "6px 0 0" }}>
+            Cupons já gerados mantêm o benefício que foi prometido na época.
+          </p>
+        </div>
+
+        {erro && <div style={{ marginTop: 12, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>{erro}</div>}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={onFechar}>Cancelar</button>
+          <button className="btn-solid" onClick={salvar} disabled={salvando}>
+            {salvando ? <Loader2 size={15} className="spin" /> : <Save size={15} />} Salvar perfil
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* Wrapper do EditorCatalogoParceiro pra uso da Gerência/Vendas: carrega o catálogo público
    de um parceiro específico e liga onSalvar/onExcluir nas versões "admin" (que informam
    parceiroId, diferente do fluxo do próprio parceiro logado). */
@@ -8523,6 +8632,7 @@ function ModalCatalogoParceiro({ parceiro, onFechar, salvarItemCatalogo, excluir
 function CardParceiros({ parceiros, carregando, atualizarParceiro, salvarItemCatalogo, excluirItemCatalogo, notify }) {
   const [editando, setEditando] = useState(null); // { id, status, avaliacao }
   const [catalogoDe, setCatalogoDe] = useState(null); // parceiro cujo portfólio está aberto
+  const [perfilDe, setPerfilDe] = useState(null); // parceiro cujo perfil de venda está sendo editado
 
   const abrirEdicao = (p) => setEditando({ id: p.id, status: p.status, avaliacao: p.avaliacao || "" });
   const salvar = async () => {
@@ -8564,6 +8674,7 @@ function CardParceiros({ parceiros, carregando, atualizarParceiro, salvarItemCat
                     {p.comissao.length > 0 ? p.comissao.map((c) => `${c.name} ${c.p}%`).join(", ") : "—"}
                   </td>
                   <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+                    <button className="icon-btn" onClick={() => setPerfilDe(p)} title="Editar perfil de venda"><User size={15} color={AZUL_MEDIO} /></button>
                     <button className="icon-btn" onClick={() => setCatalogoDe(p)} title="Portfólio"><Camera size={15} color={AZUL_MEDIO} /></button>
                     <button className="icon-btn" onClick={() => abrirEdicao(p)} title="Homologação"><Edit3 size={15} color={AZUL_MEDIO} /></button>
                   </td>
@@ -8599,6 +8710,11 @@ function CardParceiros({ parceiros, carregando, atualizarParceiro, salvarItemCat
       {catalogoDe && (
         <ModalCatalogoParceiro parceiro={catalogoDe} onFechar={() => setCatalogoDe(null)}
           salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} notify={notify} />
+      )}
+
+      {perfilDe && (
+        <ModalPerfilParceiroAdmin parceiro={perfilDe} onFechar={() => setPerfilDe(null)}
+          atualizarParceiro={atualizarParceiro} notify={notify} />
       )}
     </Card>
   );
