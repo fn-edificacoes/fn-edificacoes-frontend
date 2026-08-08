@@ -7614,6 +7614,8 @@ function AbaCliente({ notify }) {
 
       <SecaoFeedbackVitrine notify={notify} />
       <SecaoParceirosVitrine notify={notify} />
+      {/* Logo abaixo da vitrine: quem acabou de pegar um cupom volta por aqui. */}
+      <SecaoMeusCupons notify={notify} />
     </div>
   );
 }
@@ -8735,16 +8737,26 @@ function LogoParceiro({ p, onClick }) {
 function ModalBeneficioParceiro({ parceiro, onClose, notify }) {
   const [nome, setNome] = useState("");
   const [whatsapp, setWhatsapp] = useState("");
+  const [email, setEmail] = useState("");
   const [gerando, setGerando] = useState(false);
   const [vale, setVale] = useState(null); // { codigo, beneficio, expiraEm }
   const [erro, setErro] = useState("");
 
+  /* Link da página do parceiro: é onde o cliente vê os serviços e resgata. Vai junto na
+     criação para o e-mail poder levá-lo — antes o código aparecia só nesta tela, e quem
+     fechava a aba ficava sem benefício e sem para onde ir. */
+  const linkParceiro = `${window.location.origin}${window.location.pathname}?portfolio=${parceiro.id}`;
+
   const gerar = async () => {
     setErro("");
     if (!nome.trim() || !whatsapp.trim()) { setErro("Informe seu nome e WhatsApp."); return; }
+    if (email.trim() && !/^\S+@\S+\.\S+$/.test(email.trim())) { setErro("Confira o e-mail digitado."); return; }
     setGerando(true);
     try {
-      const r = await apiFetch("/api/vales", { method: "POST", body: { parceiroId: parceiro.id, clienteNome: nome, clienteWhatsapp: whatsapp } });
+      const r = await apiFetch("/api/vales", {
+        method: "POST",
+        body: { parceiroId: parceiro.id, clienteNome: nome, clienteWhatsapp: whatsapp, clienteEmail: email, linkParceiro },
+      });
       setVale(r);
       notify("Código do benefício gerado ✓");
     } catch (e) { setErro(e.message); }
@@ -8773,6 +8785,12 @@ function ModalBeneficioParceiro({ parceiro, onClose, notify }) {
               <label style={lab}>Seu WhatsApp</label>
               <input style={inp} value={whatsapp} onChange={(e) => setWhatsapp(e.target.value.replace(/\D/g, "").slice(0, 11))} />
             </div>
+            {/* Opcional de propósito: exigir e-mail afastaria quem só quer o desconto na
+                hora. Quem informa recebe o cupom por escrito e não depende desta tela. */}
+            <div style={{ ...cell(true), marginTop: 10 }}>
+              <label style={lab}>Seu e-mail (opcional — recebe o cupom por escrito)</label>
+              <input style={inp} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@email.com" />
+            </div>
 
             {erro && <div style={{ marginTop: 12, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>{erro}</div>}
 
@@ -8793,7 +8811,18 @@ function ModalBeneficioParceiro({ parceiro, onClose, notify }) {
             </div>
             {vale.beneficio && <div style={{ fontSize: 13, color: "#4a5a70", marginTop: 10 }}>{vale.beneficio}</div>}
             {vale.expiraEm && <div style={{ fontSize: 12, color: "#8593a8", marginTop: 6 }}>Válido até {new Date(vale.expiraEm).toLocaleDateString("pt-BR")}</div>}
-            <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, marginTop: 16 }} onClick={onClose}>Fechar</button>
+            {vale.emailEnviadoPara && (
+              <div style={{ fontSize: 12, color: "#2E7D32", marginTop: 8 }}>
+                Enviamos o cupom para {vale.emailEnviadoPara}
+              </div>
+            )}
+            {/* O passo que faltava: daqui o cliente vai para a página onde vê os serviços
+                e digita o código para resgatar. Antes o fluxo terminava no código na tela. */}
+            <a href={linkParceiro} className="btn-solid"
+              style={{ marginTop: 16, width: "100%", justifyContent: "center", textDecoration: "none", display: "inline-flex" }}>
+              Ver serviços e resgatar
+            </a>
+            <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, marginTop: 8, width: "100%", justifyContent: "center" }} onClick={onClose}>Fechar</button>
           </div>
         )}
       </div>
@@ -8841,6 +8870,122 @@ function SecaoFeedbackVitrine({ notify }) {
           </div>
         ))}
       </div>
+    </Card>
+  );
+}
+
+/* ---- "Meus cupons" ----
+   O cliente gerava o código e ele aparecia uma única vez, na tela. Fechou a aba, perdeu:
+   não havia onde reencontrar, nem como saber se ainda valia ou se já tinha sido usado.
+   Aqui ele volta pelo WhatsApp (ou e-mail) que digitou ao pedir o benefício — a mesma
+   informação que ele já deu, sem inventar login para quem não é da equipe. */
+function SecaoMeusCupons({ notify }) {
+  const [contato, setContato] = useState("");
+  const [buscando, setBuscando] = useState(false);
+  const [cupons, setCupons] = useState(null);
+  const [erro, setErro] = useState("");
+
+  const ehEmail = contato.includes("@");
+
+  const buscar = async () => {
+    const v = contato.trim();
+    if (!v) { setErro("Digite seu WhatsApp ou o e-mail que você usou."); return; }
+    setErro(""); setBuscando(true);
+    try {
+      const r = await apiFetch("/api/vales/meus", {
+        method: "POST",
+        body: ehEmail ? { email: v } : { whatsapp: v },
+      });
+      setCupons(r.cupons || []);
+    } catch (e) { setErro(e.message); }
+    setBuscando(false);
+  };
+
+  const visual = {
+    ativo: { rotulo: "Disponível", cor: "#2E7D32", bg: "#E6F4EA" },
+    usado: { rotulo: "Já resgatado", cor: "#65758b", bg: CINZA_CLARO },
+    expirado: { rotulo: "Expirado", cor: "#C62828", bg: "#FCEAEA" },
+    cancelado: { rotulo: "Cancelado", cor: "#C62828", bg: "#FCEAEA" },
+  };
+
+  return (
+    <Card icon={Sparkles} titulo="Meus cupons">
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Já pediu um benefício de parceiro? Veja aqui seus códigos, onde usar e se ainda estão valendo.
+      </p>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input
+          value={contato}
+          onChange={(e) => { setContato(e.target.value); setErro(""); }}
+          onKeyDown={(e) => { if (e.key === "Enter") buscar(); }}
+          placeholder="WhatsApp com DDD ou seu e-mail"
+          style={{ flex: 1, minWidth: 190, padding: "10px 12px", border: `1px solid ${CINZA_BORDA}`, borderRadius: 9, fontSize: 14, fontFamily: "inherit" }}
+        />
+        <button className="btn-solid" onClick={buscar} disabled={buscando || !contato.trim()}>
+          {buscando ? <Loader2 size={15} className="spin" /> : <Search size={15} />} Buscar
+        </button>
+      </div>
+
+      {erro && <div style={{ marginTop: 10, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>{erro}</div>}
+
+      {cupons !== null && cupons.length === 0 && (
+        <p style={{ color: "#8593a8", fontSize: 13.5, marginTop: 14 }}>
+          Nenhum cupom encontrado para esse contato. Use o mesmo WhatsApp ou e-mail que você
+          informou ao pedir o benefício.
+        </p>
+      )}
+
+      {cupons !== null && cupons.length > 0 && (
+        <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
+          {cupons.map((c) => {
+            const v = visual[c.situacao] || visual.ativo;
+            const link = `${window.location.origin}${window.location.pathname}?portfolio=${c.parceiro.id}`;
+            return (
+              <div key={c.codigo} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 11, padding: 13 }}>
+                <div style={{ display: "flex", gap: 11, alignItems: "flex-start" }}>
+                  <div style={{ width: 44, height: 44, borderRadius: 9, background: CINZA_CLARO, display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
+                    {c.parceiro.logo ? <img src={c.parceiro.logo} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                      : <Building2 size={19} color={AZUL_MEDIO} />}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
+                      <strong style={{ fontSize: 14 }}>{c.parceiro.empresa}</strong>
+                      <span style={{ fontSize: 10.5, fontWeight: 800, color: v.cor, background: v.bg, borderRadius: 20, padding: "1px 9px" }}>
+                        {v.rotulo}
+                      </span>
+                    </div>
+                    {c.beneficio && <div style={{ fontSize: 13, color: "#4a5a70", marginTop: 3 }}>{c.beneficio}</div>}
+                    {c.parceiro.cidade && (
+                      <div style={{ fontSize: 11.5, color: "#8593a8", marginTop: 2 }}>{c.parceiro.cidade}/{c.parceiro.uf}</div>
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ fontFamily: "monospace", fontSize: 16, fontWeight: 800, color: c.situacao === "ativo" ? AZUL_MARINHO : "#8593a8",
+                  background: CINZA_CLARO, borderRadius: 8, padding: "9px 12px", marginTop: 11, letterSpacing: 1.5, textAlign: "center",
+                  textDecoration: c.situacao === "ativo" ? "none" : "line-through" }}>
+                  {c.codigo}
+                </div>
+
+                <div style={{ fontSize: 11.5, color: "#8593a8", marginTop: 7 }}>
+                  {c.situacao === "usado" && c.usadoEm && `Resgatado em ${new Date(c.usadoEm).toLocaleDateString("pt-BR")}`}
+                  {c.situacao === "ativo" && c.expiraEm && `Válido até ${new Date(c.expiraEm).toLocaleDateString("pt-BR")}`}
+                  {c.situacao === "expirado" && c.expiraEm && `Venceu em ${new Date(c.expiraEm).toLocaleDateString("pt-BR")}`}
+                </div>
+
+                {/* Ver os serviços vale mesmo com o cupom usado — o cliente pode querer
+                    comprar de novo. O que muda é o texto do botão, não o acesso. */}
+                <a href={link} className={c.situacao === "ativo" ? "btn-solid" : "btn-ghost"}
+                  style={{ marginTop: 10, width: "100%", justifyContent: "center", textDecoration: "none", display: "inline-flex",
+                    ...(c.situacao === "ativo" ? {} : { color: AZUL_MARINHO, background: CINZA_CLARO }) }}>
+                  {c.situacao === "ativo" ? "Ver serviços e resgatar" : "Ver serviços do parceiro"}
+                </a>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </Card>
   );
 }
