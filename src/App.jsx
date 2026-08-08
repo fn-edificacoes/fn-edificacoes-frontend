@@ -7786,6 +7786,89 @@ function calcularDesconto(precoDe, preco) {
   return Math.round((1 - por / de) * 100);
 }
 
+/* ---- Resgate do cupom na página do parceiro ----
+   O cliente gerava o código na Área do Cliente e ficava sem onde usar: a rota de resgate
+   existia no servidor, mas nenhuma tela chamava. É aqui que o ciclo fecha — na hora da
+   compra, o cliente digita o código e o parceiro vê o benefício confirmado na tela.
+   O parceiroId vai junto na chamada: cupom da Loja A não pode ser aceito na página da
+   Loja B, senão a B dá o desconto e a comissão fica registrada para a A. */
+function ResgateCupom({ parceiroId, empresa }) {
+  const [codigo, setCodigo] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [erro, setErro] = useState("");
+  const [resgate, setResgate] = useState(null);
+
+  const resgatar = async () => {
+    const cod = codigo.trim().toUpperCase();
+    if (!cod) { setErro("Digite o código do seu cupom."); return; }
+    setErro(""); setEnviando(true);
+    try {
+      const r = await apiFetch(`/api/vales/${encodeURIComponent(cod)}/ativar`, {
+        method: "POST", body: { parceiroId },
+      });
+      setResgate(r);
+    } catch (e) { setErro(e.message); }
+    setEnviando(false);
+  };
+
+  if (resgate) {
+    return (
+      <div style={{ background: "#fff", border: "1px solid #a5d6b0", borderRadius: 12, padding: 18, marginBottom: 22, textAlign: "center" }}>
+        <div style={{ width: 48, height: 48, borderRadius: "50%", background: "#E6F4EA", display: "grid", placeItems: "center", margin: "0 auto 12px" }}>
+          <Check size={22} color="#2E7D32" />
+        </div>
+        <div style={{ fontSize: 15.5, fontWeight: 800, color: "#2E7D32" }}>Cupom resgatado</div>
+        {resgate.beneficio && (
+          <div style={{ fontSize: 14, fontWeight: 700, color: AZUL_MARINHO, marginTop: 8 }}>{resgate.beneficio}</div>
+        )}
+        <div style={{ fontFamily: "monospace", fontSize: 15, fontWeight: 700, color: "#4a5a70", background: CINZA_CLARO, borderRadius: 8, padding: "8px 12px", margin: "12px auto 0", display: "inline-block", letterSpacing: 1 }}>
+          {resgate.codigo}
+        </div>
+        <p style={{ fontSize: 12.5, color: "#65758b", margin: "12px 0 0", lineHeight: 1.55 }}>
+          Mostre esta tela para {empresa} aplicar o benefício.
+          {resgate.cliente?.nome ? ` Cupom em nome de ${resgate.cliente.nome}.` : ""}
+        </p>
+        {/* O código só vale uma vez — deixar isso explícito evita a pessoa achar que
+            perdeu o benefício se fechar a página e voltar. */}
+        <p style={{ fontSize: 11.5, color: "#8593a8", margin: "8px 0 0" }}>
+          Este código já foi usado e não pode ser resgatado de novo.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: 16, marginBottom: 22 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 4, textTransform: "uppercase", letterSpacing: .3 }}>
+        Já tem seu cupom?
+      </div>
+      <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 12px" }}>
+        Digite o código que você gerou na Área do Cliente para resgatar o benefício aqui na {empresa}.
+      </p>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input
+          value={codigo}
+          onChange={(e) => { setCodigo(e.target.value.toUpperCase()); setErro(""); }}
+          onKeyDown={(e) => { if (e.key === "Enter") resgatar(); }}
+          placeholder="FN-EMPRESA-0000"
+          autoCapitalize="characters"
+          spellCheck={false}
+          style={{ flex: 1, minWidth: 180, padding: "11px 13px", border: `1px solid ${CINZA_BORDA}`, borderRadius: 9,
+            fontSize: 15, fontFamily: "monospace", letterSpacing: 1, textTransform: "uppercase" }}
+        />
+        <button className="btn-solid" onClick={resgatar} disabled={enviando || !codigo.trim()} style={{ padding: "11px 20px" }}>
+          {enviando ? <Loader2 size={15} className="spin" /> : <Check size={15} />} Resgatar
+        </button>
+      </div>
+      {erro && (
+        <div style={{ marginTop: 10, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>
+          {erro}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PaginaPortfolioParceiro({ parceiroId }) {
   const [parceiro, setParceiro] = useState(null);
   const [itens, setItens] = useState([]);
@@ -7846,6 +7929,8 @@ function PaginaPortfolioParceiro({ parceiroId }) {
             {parceiro.descricao_beneficio && <p style={{ fontSize: 13, color: "#65758b", margin: "6px 0 0" }}>{parceiro.descricao_beneficio}</p>}
           </div>
         )}
+
+        <ResgateCupom parceiroId={parceiroId} empresa={parceiro.empresa} />
 
         {itens.length === 0 ? (
           <p style={{ color: "#8593a8", fontSize: 14, textAlign: "center", marginTop: 40 }}>Este portfólio ainda não tem itens cadastrados.</p>
