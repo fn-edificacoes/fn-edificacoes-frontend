@@ -1617,8 +1617,9 @@ function PortalCliente({ onIrParaLogin, onLogin }) {
 /* ---------- Sessão guardada no navegador ----------
    A sessão vivia só na memória da aba: qualquer F5 — sem querer, ou o navegador do celular
    reciclando a aba em segundo plano — derrubava o login e levava junto a vistoria em edição.
-   Agora ela é gravada com a validade do próprio token (12h, definida pelo backend) e
-   descartada sozinha quando vence. */
+   sessionStorage resolve isso (sobrevive a F5/navegação) sem o risco do localStorage: fechou
+   a aba ou o navegador, a sessão some sozinha — computador compartilhado não fica logado
+   depois que a pessoa sai. Continua descartada sozinha quando o token vence (12h). */
 const CHAVE_SESSAO = "fn_sessao";
 
 function lerValidadeDoToken(token) {
@@ -1629,13 +1630,13 @@ function lerValidadeDoToken(token) {
 }
 function carregarSessaoSalva() {
   try {
-    const bruto = window.localStorage.getItem(CHAVE_SESSAO);
+    const bruto = window.sessionStorage.getItem(CHAVE_SESSAO);
     if (!bruto) return null;
     const s = JSON.parse(bruto);
     if (!s?.token || !s?.usuario) return null;
     // Token vencido não adianta: seria erro em toda chamada até a pessoa perceber.
     if (lerValidadeDoToken(s.token) <= Date.now()) {
-      window.localStorage.removeItem(CHAVE_SESSAO);
+      window.sessionStorage.removeItem(CHAVE_SESSAO);
       return null;
     }
     return s;
@@ -1643,8 +1644,8 @@ function carregarSessaoSalva() {
 }
 function guardarSessao(s) {
   try {
-    if (s) window.localStorage.setItem(CHAVE_SESSAO, JSON.stringify(s));
-    else window.localStorage.removeItem(CHAVE_SESSAO);
+    if (s) window.sessionStorage.setItem(CHAVE_SESSAO, JSON.stringify(s));
+    else window.sessionStorage.removeItem(CHAVE_SESSAO);
   } catch { /* navegador sem storage: segue só na memória, como era antes */ }
 }
 
