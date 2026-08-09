@@ -6676,15 +6676,18 @@ function CardPrecoEmpreendimento({ precos, carregando, salvarPreco, empreendimen
 /* Receita cruzando empreendimento x tipo de serviço: uma linha por combinação, com o valor
    unitário ao lado, o total da linha e o total geral no rodapé. Conta só o que foi
    efetivamente entregue — vistoria atendida e documentação concluída. */
-/* "Vila das Palmeiras" e "VILA DAS PALMEIRAS" são o mesmo prédio digitado com caixa
-   diferente — sem isso, cada variação de maiúscula/minúscula virava uma linha própria no
-   relatório, duplicando quantidade e diluindo o total. Não resolve nomes genuinamente
-   diferentes para o mesmo lugar (ex.: "Residencial Vila das Palmeiras" vs "Vila das
-   Palmeiras") — isso é decisão de quem conhece o cadastro, não algo pra adivinhar por
-   código; a tela "Padronização de empreendimentos" (aba Clientes) já existe pra isso e
-   corrige na origem, em todos os cadastros, não só neste relatório. */
+/* "Vila das Palmeiras", "VILA DAS PALMEIRAS" e "Residencial Vila das Palmeiras" são o mesmo
+   prédio digitado de formas diferentes — sem isso, cada variação virava uma linha própria no
+   relatório, duplicando quantidade e diluindo o total. Além de ignorar maiúscula/minúscula,
+   acento e espaço, remove qualificadores genéricos do começo do nome ("residencial",
+   "condomínio", "edifício") — pedido explícito da Gerência, ciente de que isso pode juntar
+   dois empreendimentos que só coincidentemente têm o mesmo nome-base. Continua sem resolver
+   nomes de fato diferentes ("Vila das Palmeiras" x "Vila das Flores") — pra isso existe a
+   tela "Padronização de empreendimentos" (aba Clientes), que corrige na origem. */
 function normalizarChaveEmpreendimento(s) {
-  return String(s || "").trim().toLowerCase();
+  const semAcento = String(s || "").trim().toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return semAcento.replace(/^(residencial|condominio|edificio|cond\.?|ed\.?|res\.?)\s+/, "").trim();
 }
 
 function CardReceitaEstimada({ precos, clientes, docs = [] }) {
