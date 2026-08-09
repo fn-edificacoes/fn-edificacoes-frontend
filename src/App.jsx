@@ -120,6 +120,7 @@ function mapPrecoDaApi(p) {
     id: p.id, empreendimento: p.empreendimento || "",
     precoVistoria: Number(p.preco_vistoria) || 0,
     precoDocumentacao: Number(p.preco_documentacao) || 0,
+    custoVistoria: Number(p.custo_vistoria) || 0,
     atualizadoEm: p.atualizado_em || null,
   };
 }
@@ -6510,18 +6511,21 @@ function LinhaPrecoEmpreendimento({ empreendimento, construtora, preco, salvarPr
   const [editando, setEditando] = useState(false);
   const [vistoria, setVistoria] = useState("");
   const [documentacao, setDocumentacao] = useState("");
+  const [custoVistoria, setCustoVistoria] = useState("");
   const [salvando, setSalvando] = useState(false);
 
   const abrir = () => {
     setVistoria(preco ? String(preco.precoVistoria) : "");
     setDocumentacao(preco ? String(preco.precoDocumentacao) : "");
+    setCustoVistoria(preco ? String(preco.custoVistoria) : "");
     setEditando(true);
   };
   const confirmar = async () => {
     const corpo = {};
     if (vistoria !== "") corpo.precoVistoria = Number(vistoria);
     if (documentacao !== "") corpo.precoDocumentacao = Number(documentacao);
-    if (Object.keys(corpo).length === 0) { notify("Informe pelo menos um preço"); return; }
+    if (custoVistoria !== "") corpo.custoVistoria = Number(custoVistoria);
+    if (Object.keys(corpo).length === 0) { notify("Informe pelo menos um valor"); return; }
     if (Object.values(corpo).some((v) => !Number.isFinite(v) || v < 0)) { notify("Informe valores válidos"); return; }
     setSalvando(true);
     const ok = await salvarPreco(empreendimento, corpo);
@@ -6545,6 +6549,11 @@ function LinhaPrecoEmpreendimento({ empreendimento, construtora, preco, salvarPr
         {editando
           ? <input type="number" min="0" step="0.01" style={{ ...inp, width: 120, padding: "5px 8px" }} placeholder="0,00" value={documentacao} onChange={(e) => setDocumentacao(e.target.value)} />
           : (preco?.precoDocumentacao ? fmtReal(preco.precoDocumentacao) : <span style={{ color: "#9AA6B5" }}>—</span>)}
+      </td>
+      <td style={{ padding: "8px 10px" }}>
+        {editando
+          ? <input type="number" min="0" step="0.01" style={{ ...inp, width: 120, padding: "5px 8px" }} placeholder="0,00" value={custoVistoria} onChange={(e) => setCustoVistoria(e.target.value)} />
+          : (preco?.custoVistoria ? fmtReal(preco.custoVistoria) : <span style={{ color: "#9AA6B5" }}>—</span>)}
       </td>
       <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
         {editando ? (
@@ -6666,7 +6675,7 @@ function CardPrecoEmpreendimento({ precos, carregando, salvarPreco, empreendimen
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ background: CINZA_CLARO }}>
-                {["Empreendimento", "Vistoria", "Documentação ART/TRT", ""].map((h) => (
+                {["Empreendimento", "Vistoria", "Documentação ART/TRT", "Custo vistoria (por vistoriador)", ""].map((h) => (
                   <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}`, position: "sticky", top: 0, background: CINZA_CLARO }}>{h}</th>
                 ))}
               </tr>
@@ -6703,8 +6712,8 @@ function normalizarChaveEmpreendimento(s) {
 
 // Taxa de emissão que a FN paga por documentação ART/TRT — fixa, não varia por empreendimento.
 const CUSTO_UNITARIO_DOCUMENTACAO = 69;
-// Pagamento fixo ao vistoriador por vistoria entregue — não varia por empreendimento.
-const CUSTO_UNITARIO_VISTORIA = 80;
+// Pagamento ao vistoriador por vistoria entregue: varia por empreendimento — definido em
+// "Preços por empreendimento" (custoVistoria). Sem valor cadastrado ali, entra como zero.
 
 function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
   const nomeVistoriadorPorId = {};
@@ -6752,8 +6761,9 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
     if (c.pagamento === "Pago") cruzamento[k].qtdPagos += 1;
   };
 
-  // vistoriadorId -> qtd de vistorias entregues (base do indicador de pagamento por vistoria).
-  const vistoriasPorTecnico = {};
+  // "vistoriadorId||chaveEmpreendimento" -> qtd de vistorias entregues ali por aquele técnico
+  // (o custo por vistoria varia por empreendimento, então precisa saber onde, não só quem).
+  const vistoriasPorTecnicoEmp = {};
 
   let foraDoRelatorio = 0;
   clientes.forEach((c) => {
@@ -6763,7 +6773,11 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
     } else if (c.servico === SERVICO_VISTORIA) {
       if (vistoriaEntregue(c)) {
         registrar(c, "vistoria");
-        if (c.vistoriadorId) vistoriasPorTecnico[c.vistoriadorId] = (vistoriasPorTecnico[c.vistoriadorId] || 0) + 1;
+        if (c.vistoriadorId) {
+          const chaveEmp = normalizarChaveEmpreendimento(c.empreendimento?.trim() || "(sem empreendimento)");
+          const k2 = `${c.vistoriadorId}||${chaveEmp}`;
+          vistoriasPorTecnicoEmp[k2] = (vistoriasPorTecnicoEmp[k2] || 0) + 1;
+        }
       }
     } else if (c.servico) {
       // Serviço "Outro" não tem preço de tabela e sumia daqui sem avisar ninguém.
@@ -6771,8 +6785,18 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
     }
   });
 
-  const pagamentosTecnicos = Object.entries(vistoriasPorTecnico)
-    .map(([id, qtd]) => ({ id, nome: nomeVistoriadorPorId[id] || "(vistoriador removido)", qtd, valor: qtd * CUSTO_UNITARIO_VISTORIA }))
+  const porTecnico = {};
+  let vistoriasSemCustoDefinido = 0;
+  Object.entries(vistoriasPorTecnicoEmp).forEach(([k, qtd]) => {
+    const [vistoriadorId, chaveEmp] = k.split("||");
+    const custoUnit = Number(precoPorChave[chaveEmp]?.custoVistoria) || 0;
+    if (!custoUnit) vistoriasSemCustoDefinido += qtd;
+    if (!porTecnico[vistoriadorId]) porTecnico[vistoriadorId] = { qtd: 0, valor: 0 };
+    porTecnico[vistoriadorId].qtd += qtd;
+    porTecnico[vistoriadorId].valor += custoUnit * qtd;
+  });
+  const pagamentosTecnicos = Object.entries(porTecnico)
+    .map(([id, v]) => ({ id, nome: nomeVistoriadorPorId[id] || "(vistoriador removido)", ...v }))
     .sort((a, b) => b.valor - a.valor);
   const totalPagamentosTecnicos = pagamentosTecnicos.reduce((s, p) => s + p.valor, 0);
 
@@ -6781,7 +6805,7 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
       const def = SERVICOS.find((s) => s.chave === l.servico);
       const unitario = Number(precoPorChave[l.chaveEmp]?.[def.campoPreco]) || 0;
       const custo = l.servico === "documentacao" ? CUSTO_UNITARIO_DOCUMENTACAO * l.qtd
-        : l.servico === "vistoria" ? CUSTO_UNITARIO_VISTORIA * l.qtd : 0;
+        : l.servico === "vistoria" ? (Number(precoPorChave[l.chaveEmp]?.custoVistoria) || 0) * l.qtd : 0;
       const total = unitario * l.qtd;
       return { ...l, rotulo: def.rotulo, unitario, total, recebido: unitario * l.qtdPagos, custo, lucro: total - custo };
     })
@@ -6803,8 +6827,8 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
         Uma linha por empreendimento e tipo de serviço, com o valor unitário cadastrado acima.
         Entram só os serviços entregues: vistorias com <strong>laudo já enviado ao cliente</strong> e
         documentações concluídas. Cada documentação ART/TRT tem custo fixo de {fmtReal(CUSTO_UNITARIO_DOCUMENTACAO)}
-        (taxa de emissão) e cada vistoria custa {fmtReal(CUSTO_UNITARIO_VISTORIA)} (pagamento ao vistoriador) —
-        a coluna "Lucro" já desconta isso do total.
+        (taxa de emissão) e cada vistoria tem o custo (pagamento ao vistoriador) definido por empreendimento
+        em "Preços por empreendimento" — a coluna "Lucro" já desconta isso do total.
       </p>
 
       {linhas.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum serviço concluído ainda.</p>}
@@ -6877,7 +6901,8 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
     {pagamentosTecnicos.length > 0 && (
       <Card icon={Users} titulo="Pagamento aos vistoriadores">
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-          {fmtReal(CUSTO_UNITARIO_VISTORIA)} por vistoria entregue (laudo já enviado ao cliente), por vistoriador.
+          Por vistoria entregue (laudo já enviado ao cliente), no valor de custo fixado por empreendimento
+          em "Preços por empreendimento".
         </p>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -6906,13 +6931,19 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
             </tfoot>
           </table>
         </div>
+        {vistoriasSemCustoDefinido > 0 && (
+          <div style={{ marginTop: 10, background: "#FFF4E0", color: "#B26A00", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>
+            {vistoriasSemCustoDefinido} vistoria(s) sem "Custo vistoria" cadastrado para o empreendimento —
+            não entram no valor a pagar. Defina o custo em "Preços por empreendimento".
+          </div>
+        )}
       </Card>
     )}
     </>
   );
 }
 
-function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salvarPreco, empreendimentosRef = [], adicionarEmpreendimento, removerEmpreendimento, notify }) {
+function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salvarPreco, empreendimentosRef = [], adicionarEmpreendimento, removerEmpreendimento, notify, usuarios = [] }) {
   const somaCampo = (campo, filtro) => docs.filter(filtro).reduce((s, d) => s + (Number(d[campo]) || 0), 0);
   const pago = (d) => d.pagamento === "Pago";
   const naoPago = (d) => d.pagamento !== "Pago";
@@ -6977,7 +7008,7 @@ function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, pad
   }
   if (sub === "financeiro") {
     return <AbaGerenciaFinanceiro docs={docs} clientes={clientes} precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
-      adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento} notify={notify} />;
+      adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento} notify={notify} usuarios={usuarios} />;
   }
   return (
     <AbaGerenciaVisaoGeral docs={docs} clientes={clientes} updCliente={updCliente} carregando={carregando}
