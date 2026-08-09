@@ -5051,10 +5051,18 @@ function DadosParaDocumentacao({ cliente, notify }) {
   );
 }
 
-function CardDocumentosArt({ cliente, documentos = [], precoDocumentacao = 0, enviarDocumento, excluirDocumento, atualizarPagamento, notify, onExcluirCadastro }) {
+function CardDocumentosArt({ cliente, documentos = [], precoDocumentacao = 0, enviarDocumento, excluirDocumento, atualizarPagamento, atualizarEmpreendimento, empreendimentosComPreco = [], notify, onExcluirCadastro }) {
   const [enviandoTipo, setEnviandoTipo] = useState(null);
+  const [editandoEmpreendimento, setEditandoEmpreendimento] = useState(false);
+  const [novoEmpreendimento, setNovoEmpreendimento] = useState(cliente.empreendimento || "");
   const doTipo = (tipo) => documentos.find((d) => d.tipo === tipo);
   const completo = TIPOS_DOCUMENTO_ART.every((t) => doTipo(t));
+
+  const salvarEmpreendimento = async () => {
+    if (!novoEmpreendimento.trim()) { notify("Informe o empreendimento"); return; }
+    await atualizarEmpreendimento(cliente.id, novoEmpreendimento.trim());
+    setEditandoEmpreendimento(false);
+  };
 
   const aoEscolherArquivo = async (tipo, arquivo) => {
     if (!arquivo) return;
@@ -5077,10 +5085,31 @@ function CardDocumentosArt({ cliente, documentos = [], precoDocumentacao = 0, en
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
         <div>
           <div style={{ fontWeight: 700, fontSize: 14 }}>{cliente.nome}</div>
-          <div style={{ fontSize: 12.5, color: "#65758b" }}>
-            {cliente.empreendimento || cliente.endereco || "—"}{cliente.blocoTorre ? ` · ${cliente.blocoTorre}` : ""}
-            {cliente.telefone ? ` · ${cliente.telefone}` : ""}
-          </div>
+          {editandoEmpreendimento ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+              <input style={{ ...inp, padding: "4px 8px", fontSize: 12.5, width: 200 }} value={novoEmpreendimento}
+                onChange={(e) => setNovoEmpreendimento(e.target.value)} list={`empreendimentos-precos-${cliente.id}`}
+                placeholder="Empreendimento" autoFocus onKeyDown={(e) => e.key === "Enter" && salvarEmpreendimento()} />
+              <datalist id={`empreendimentos-precos-${cliente.id}`}>
+                {empreendimentosComPreco.map((e) => <option key={e} value={e} />)}
+              </datalist>
+              <button className="icon-btn" onClick={salvarEmpreendimento} title="Salvar"><Check size={14} color="#2E7D32" /></button>
+              <button className="icon-btn" onClick={() => { setEditandoEmpreendimento(false); setNovoEmpreendimento(cliente.empreendimento || ""); }} title="Cancelar"><X size={14} /></button>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12.5, color: "#65758b", display: "flex", alignItems: "center", gap: 4 }}>
+              {cliente.empreendimento || cliente.endereco || "sem empreendimento"}{cliente.blocoTorre ? ` · ${cliente.blocoTorre}` : ""}
+              {cliente.telefone ? ` · ${cliente.telefone}` : ""}
+              {/* Sem empreendimento cadastrado, o preço não casa com nada em "Preços por
+                  empreendimento" e fica "sem preço fixado" mesmo que o valor já esteja lá —
+                  a lista abaixo só sugere os que já têm preço, para não repetir o erro de digitação. */}
+              {atualizarEmpreendimento && (
+                <button className="icon-btn" style={{ padding: 2 }} onClick={() => setEditandoEmpreendimento(true)} title="Editar empreendimento">
+                  <Edit3 size={12} color={AZUL_MEDIO} />
+                </button>
+              )}
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           {/* Valor fixado pela Gerência para o empreendimento deste cliente. */}
@@ -5169,7 +5198,10 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, cli
                 documentos={documentosArt.filter((d) => d.clienteId === c.id)}
                 precoDocumentacao={precos.find((p) => p.empreendimento === (c.empreendimento || "").trim())?.precoDocumentacao || 0}
                 enviarDocumento={enviarDocumentoArt} excluirDocumento={excluirDocumentoArt}
-                atualizarPagamento={(id, pagamento) => updCliente(id, { pagamento })} notify={notify}
+                atualizarPagamento={(id, pagamento) => updCliente(id, { pagamento })}
+                atualizarEmpreendimento={(id, empreendimento) => updCliente(id, { empreendimento })}
+                empreendimentosComPreco={precos.filter((p) => p.precoDocumentacao > 0).map((p) => p.empreendimento)}
+                notify={notify}
                 onExcluirCadastro={perfil === "gerencia" ? setRemovendoCliente : null} />
             ))}
           </div>
