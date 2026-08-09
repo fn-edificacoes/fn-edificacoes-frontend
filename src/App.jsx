@@ -1726,6 +1726,17 @@ function AppInterno({ session, onLogout }) {
       return false;
     }
   };
+  const excluirParceiro = async (id) => {
+    try {
+      await apiFetch(`/api/parceiros/${id}`, { method: "DELETE", token });
+      setParceiros((atual) => atual.filter((p) => p.id !== id));
+      notify("Parceiro apagado ✓");
+      return true;
+    } catch (e) {
+      notify(`Não foi possível apagar o parceiro: ${e.message}`);
+      return false;
+    }
+  };
   /* Cadastro manual de parceiro (feito por Vendas/Gerência já logados, ex.: parceiro que
      negociou por telefone) — reaproveita a MESMA rota pública do autocadastro, já que ela
      não exige token; só embute o formulário direto no sistema em vez da tela pública. */
@@ -2452,13 +2463,15 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "vendas" && (
           <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
             vales={vales} valesCarregando={valesCarregando} criarParceiroManual={criarParceiroManual}
-            salvarItemCatalogo={salvarItemCatalogoAdmin} excluirItemCatalogo={excluirItemCatalogoAdmin} notify={notify} />
+            salvarItemCatalogo={salvarItemCatalogoAdmin} excluirItemCatalogo={excluirItemCatalogoAdmin} notify={notify}
+            podeExcluir={perfil === "gerencia"} excluirParceiro={excluirParceiro} />
         )}
         {abaTop === "gerencia" && (
           <AbaGerencia sub={abaGerencia} docs={docs} clientes={clientes} updCliente={updCliente} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
             usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={session.usuario.id}
             avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
             parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual}
+            excluirParceiro={excluirParceiro}
             salvarItemCatalogo={salvarItemCatalogoAdmin} excluirItemCatalogo={excluirItemCatalogoAdmin}
             vales={vales} valesCarregando={valesCarregando}
             precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
@@ -6444,7 +6457,7 @@ function CardBancoPatologias({ patologias = [], carregando, onCriar, onAtualizar
   );
 }
 
-function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, notify }) {
+function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, notify }) {
   const [cadastrando, setCadastrando] = useState(false);
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -6455,6 +6468,7 @@ function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceir
         </button>
       </div>
       <CardParceiros parceiros={parceiros} carregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
+        podeExcluir={podeExcluir} excluirParceiro={excluirParceiro}
         salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} notify={notify} />
       {cadastrando && (
         <ModalCriarParceiroManual onFechar={() => setCadastrando(false)} criarParceiroManual={criarParceiroManual} notify={notify} />
@@ -6647,9 +6661,25 @@ function CardPrecoEmpreendimento({ precos, carregando, salvarPreco, empreendimen
 /* Receita cruzando empreendimento x tipo de serviço: uma linha por combinação, com o valor
    unitário ao lado, o total da linha e o total geral no rodapé. Conta só o que foi
    efetivamente entregue — vistoria atendida e documentação concluída. */
+/* "Vila das Palmeiras" e "VILA DAS PALMEIRAS" são o mesmo prédio digitado com caixa
+   diferente — sem isso, cada variação de maiúscula/minúscula virava uma linha própria no
+   relatório, duplicando quantidade e diluindo o total. Não resolve nomes genuinamente
+   diferentes para o mesmo lugar (ex.: "Residencial Vila das Palmeiras" vs "Vila das
+   Palmeiras") — isso é decisão de quem conhece o cadastro, não algo pra adivinhar por
+   código; a tela "Padronização de empreendimentos" (aba Clientes) já existe pra isso e
+   corrige na origem, em todos os cadastros, não só neste relatório. */
+function normalizarChaveEmpreendimento(s) {
+  return String(s || "").trim().toLowerCase();
+}
+
 function CardReceitaEstimada({ precos, clientes, docs = [] }) {
-  const precoPorNome = {};
-  precos.forEach((p) => { precoPorNome[p.empreendimento] = p; });
+  const precoPorChave = {};
+  const nomeCanonicoPorChave = {};
+  precos.forEach((p) => {
+    const chave = normalizarChaveEmpreendimento(p.empreendimento);
+    precoPorChave[chave] = p;
+    nomeCanonicoPorChave[chave] = p.empreendimento;
+  });
 
   /* O que conta como serviço entregue.
      Antes a vistoria entrava na receita quando o cadastro estava marcado como "atendido" —
@@ -6670,12 +6700,17 @@ function CardReceitaEstimada({ precos, clientes, docs = [] }) {
     { chave: "documentacao", rotulo: SERVICO_DOCUMENTACAO, campoPreco: "precoDocumentacao" },
   ];
 
-  // chave "empreendimento||servico" -> { qtd, recebidos }
+  // chave "empreendimento-normalizado||servico" -> { qtd, recebidos }
   const cruzamento = {};
   const registrar = (c, servico) => {
-    const emp = c.empreendimento?.trim() || "(sem empreendimento)";
-    const k = `${emp}||${servico}`;
-    if (!cruzamento[k]) cruzamento[k] = { empreendimento: emp, servico, qtd: 0, qtdPagos: 0 };
+    const bruto = c.empreendimento?.trim() || "(sem empreendimento)";
+    const chaveEmp = normalizarChaveEmpreendimento(bruto);
+    const k = `${chaveEmp}||${servico}`;
+    if (!cruzamento[k]) {
+      // Nome exibido: prioriza a grafia cadastrada em "Preço por empreendimento" (é a que a
+      // Gerência definiu como padrão); sem isso, a primeira grafia que aparecer decide.
+      cruzamento[k] = { chaveEmp, empreendimento: nomeCanonicoPorChave[chaveEmp] || bruto, servico, qtd: 0, qtdPagos: 0 };
+    }
     cruzamento[k].qtd += 1;
     if (c.pagamento === "Pago") cruzamento[k].qtdPagos += 1;
   };
@@ -6696,7 +6731,7 @@ function CardReceitaEstimada({ precos, clientes, docs = [] }) {
   const linhas = Object.values(cruzamento)
     .map((l) => {
       const def = SERVICOS.find((s) => s.chave === l.servico);
-      const unitario = Number(precoPorNome[l.empreendimento]?.[def.campoPreco]) || 0;
+      const unitario = Number(precoPorChave[l.chaveEmp]?.[def.campoPreco]) || 0;
       return { ...l, rotulo: def.rotulo, unitario, total: unitario * l.qtd, recebido: unitario * l.qtdPagos };
     })
     .sort((a, b) => b.total - a.total || a.empreendimento.localeCompare(b.empreendimento, "pt-BR"));
@@ -6826,10 +6861,11 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
+function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
   if (sub === "parceiros") {
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual}
-      salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} vales={vales} valesCarregando={valesCarregando} notify={notify} />;
+      salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} vales={vales} valesCarregando={valesCarregando} notify={notify}
+      podeExcluir excluirParceiro={excluirParceiro} />;
   }
   if (sub === "patologias") {
     return <CardBancoPatologias patologias={patologiasBanco} carregando={patologiasBancoCarregando}
@@ -8661,10 +8697,11 @@ function ModalCatalogoParceiro({ parceiro, onFechar, salvarItemCatalogo, excluir
 }
 
 /* ---- Aba Parceiros dentro da Gerência (homologação) ---- */
-function CardParceiros({ parceiros, carregando, atualizarParceiro, salvarItemCatalogo, excluirItemCatalogo, notify }) {
+function CardParceiros({ parceiros, carregando, atualizarParceiro, podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, notify }) {
   const [editando, setEditando] = useState(null); // { id, status, avaliacao }
   const [catalogoDe, setCatalogoDe] = useState(null); // parceiro cujo portfólio está aberto
   const [perfilDe, setPerfilDe] = useState(null); // parceiro cujo perfil de venda está sendo editado
+  const [excluindo, setExcluindo] = useState(null); // parceiro sendo confirmado para exclusão
 
   const abrirEdicao = (p) => setEditando({ id: p.id, status: p.status, avaliacao: p.avaliacao || "" });
   const salvar = async () => {
@@ -8673,6 +8710,11 @@ function CardParceiros({ parceiros, carregando, atualizarParceiro, salvarItemCat
       setEditando(null);
       notify("Status do parceiro atualizado ✓");
     }
+  };
+  const confirmarExclusao = async () => {
+    const alvo = excluindo;
+    setExcluindo(null);
+    if (alvo) await excluirParceiro(alvo.id);
   };
 
   return (
@@ -8709,6 +8751,9 @@ function CardParceiros({ parceiros, carregando, atualizarParceiro, salvarItemCat
                     <button className="icon-btn" onClick={() => setPerfilDe(p)} title="Editar perfil de venda"><User size={15} color={AZUL_MEDIO} /></button>
                     <button className="icon-btn" onClick={() => setCatalogoDe(p)} title="Portfólio"><Camera size={15} color={AZUL_MEDIO} /></button>
                     <button className="icon-btn" onClick={() => abrirEdicao(p)} title="Homologação"><Edit3 size={15} color={AZUL_MEDIO} /></button>
+                    {podeExcluir && (
+                      <button className="icon-btn" onClick={() => setExcluindo(p)} title="Apagar parceiro"><Trash2 size={15} color="#c62828" /></button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -8748,6 +8793,10 @@ function CardParceiros({ parceiros, carregando, atualizarParceiro, salvarItemCat
         <ModalPerfilParceiroAdmin parceiro={perfilDe} onFechar={() => setPerfilDe(null)}
           atualizarParceiro={atualizarParceiro} notify={notify} />
       )}
+
+      <ConfirmModal aberto={!!excluindo} titulo="Apagar parceiro"
+        mensagem={`Tem certeza que deseja apagar "${excluindo?.empresa}"? O login do afiliado também será removido. Essa ação não pode ser desfeita.`}
+        onConfirm={confirmarExclusao} onCancel={() => setExcluindo(null)} />
     </Card>
   );
 }
