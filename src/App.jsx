@@ -1537,6 +1537,13 @@ function PortalCliente({ onIrParaLogin, onLogin }) {
           </div>
           <button className="btn-ghost" onClick={onIrParaLogin}>Sou da equipe →</button>
         </div>
+        {/* Acesso rápido às 3 áreas da FN Serviços direto na barra — sem precisar rolar
+            até os blocos explicativos mais abaixo. */}
+        <div style={{ maxWidth: 720, margin: "0 auto", padding: "0 18px 14px", display: "flex", gap: 20, fontSize: 13, fontWeight: 700 }}>
+          <a href="#solicitar-servico" style={{ color: "#fff", opacity: 0.85, textDecoration: "none" }}>Serviços FN</a>
+          <a href="?pagina=fn-clube" style={{ color: "#fff", opacity: 0.85, textDecoration: "none" }}>FN Clube</a>
+          <a href="?pagina=fn-home" style={{ color: "#fff", opacity: 0.85, textDecoration: "none" }}>FN Home</a>
+        </div>
       </header>
       <main style={{ maxWidth: 720, margin: "0 auto", padding: "22px 18px 80px" }}>
         {/* CTA principal, bem em cima: quem já é cliente não devia ter que rolar a página
@@ -8786,6 +8793,7 @@ function PaginaBeneficiosFn({ tipo }) {
   const info = FN_AREA_INFO[tipo] || FN_AREA_INFO.servico;
   const [toast, setToast] = useState("");
   const notify = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
+  const home = `${window.location.origin}${window.location.pathname}`;
   return (
     <div style={{ minHeight: "100vh", background: CINZA_CLARO, fontFamily: "'Inter', system-ui, sans-serif" }}>
       <header style={{ background: AZUL_MARINHO, color: "#fff" }}>
@@ -8797,7 +8805,12 @@ function PaginaBeneficiosFn({ tipo }) {
             <div style={{ fontWeight: 700, fontSize: 15 }}>FN Serviços</div>
             <div style={{ fontSize: 11, opacity: 0.7 }}>{info.titulo}</div>
           </div>
-          <a href={`${window.location.origin}${window.location.pathname}`} className="btn-ghost" style={{ textDecoration: "none" }}>← Início</a>
+          <a href={home} className="btn-ghost" style={{ textDecoration: "none" }}>← Início</a>
+        </div>
+        <div style={{ maxWidth: 780, margin: "0 auto", padding: "0 18px 14px", display: "flex", gap: 20, fontSize: 13, fontWeight: 700 }}>
+          <a href={`${home}#solicitar-servico`} style={{ color: "#fff", opacity: 0.85, textDecoration: "none" }}>Serviços FN</a>
+          <a href="?pagina=fn-clube" style={{ color: "#fff", opacity: tipo === "servico" ? 1 : 0.85, textDecoration: "none" }}>FN Clube</a>
+          <a href="?pagina=fn-home" style={{ color: "#fff", opacity: tipo === "produto" ? 1 : 0.85, textDecoration: "none" }}>FN Home</a>
         </div>
       </header>
       <main style={{ maxWidth: 780, margin: "0 auto", padding: "22px 18px 80px" }}>
