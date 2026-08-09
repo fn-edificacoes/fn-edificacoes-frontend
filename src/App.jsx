@@ -1363,7 +1363,6 @@ function TelaLogin({ onLogin, onVoltar, onCadastroParceiro }) {
   const [carregando, setCarregando] = useState(false);
   const [primeiroAcesso, setPrimeiroAcesso] = useState(false);
   const [emailPrimeiroAcesso, setEmailPrimeiroAcesso] = useState("");
-  const [cpfPrimeiroAcesso, setCpfPrimeiroAcesso] = useState("");
   const [erroPrimeiroAcesso, setErroPrimeiroAcesso] = useState("");
   const [liberandoAcesso, setLiberandoAcesso] = useState(false);
 
@@ -1380,19 +1379,18 @@ function TelaLogin({ onLogin, onVoltar, onCadastroParceiro }) {
   };
 
   /* Só para quem é cliente e nunca criou senha (cadastro antigo, ou feito por telefone pelo
-     Atendimento). Prova que é o dono do cadastro batendo e-mail + CPF com o que já está
-     gravado — sem depender de e-mail sair (o link por e-mail existia só por isso). O acesso
-     libera com a senha padrão "123456", provisória: o portal já entra pedindo pra trocar.
-     Quem já tem senha e esqueceu fala com o suporte — não é este fluxo. */
+     Atendimento). Basta o e-mail cadastrado no perfil dele (o mesmo do "Sou cliente") — o
+     acesso libera com a senha padrão "123456", provisória: o portal já entra pedindo pra
+     trocar. Quem já tem senha e esqueceu fala com o suporte — não é este fluxo. */
   const liberarPrimeiroAcesso = async () => {
     setErroPrimeiroAcesso("");
-    if (!emailPrimeiroAcesso.trim() || cpfPrimeiroAcesso.length !== 11) {
-      setErroPrimeiroAcesso("Informe o e-mail e o CPF (11 dígitos) usados no cadastro."); return;
+    if (!emailPrimeiroAcesso.trim()) {
+      setErroPrimeiroAcesso("Informe o e-mail cadastrado."); return;
     }
     setLiberandoAcesso(true);
     try {
       const r = await apiFetch("/api/clientes/criar-senha-existente", {
-        method: "POST", body: { email: emailPrimeiroAcesso.trim(), cpf: cpfPrimeiroAcesso },
+        method: "POST", body: { email: emailPrimeiroAcesso.trim() },
       });
       onLogin({ token: r.token, usuario: r.usuario });
     } catch (e) { setErroPrimeiroAcesso(e.message); }
@@ -1405,17 +1403,12 @@ function TelaLogin({ onLogin, onVoltar, onCadastroParceiro }) {
         <div style={{ background: "#fff", borderRadius: 16, padding: "32px 30px", width: "100%", maxWidth: 380, boxShadow: "0 10px 30px rgba(18,51,91,.12)" }}>
           <h2 style={{ textAlign: "center", color: AZUL_MARINHO, fontSize: 18, margin: "0 0 4px" }}>Primeiro acesso</h2>
           <p style={{ textAlign: "center", color: "#65758b", fontSize: 13, margin: "0 0 20px" }}>
-            Digite o e-mail e o CPF usados no cadastro. Seu acesso é liberado na hora, com uma senha temporária — você troca assim que entrar.
+            Digite o e-mail cadastrado no seu perfil. Seu acesso é liberado na hora, com uma senha temporária — você troca assim que entrar.
           </p>
           <div style={cell(true)}>
             <label style={lab}>E-mail cadastrado</label>
-            <input style={inp} type="email" value={emailPrimeiroAcesso} onChange={(e) => setEmailPrimeiroAcesso(e.target.value)} autoFocus />
-          </div>
-          <div style={{ ...cell(true), marginTop: 12 }}>
-            <label style={lab}>CPF (11 dígitos)</label>
-            <input style={inp} value={cpfPrimeiroAcesso} inputMode="numeric"
-              onChange={(e) => setCpfPrimeiroAcesso(e.target.value.replace(/\D/g, "").slice(0, 11))}
-              onKeyDown={(e) => e.key === "Enter" && liberarPrimeiroAcesso()} />
+            <input style={inp} type="email" value={emailPrimeiroAcesso} onChange={(e) => setEmailPrimeiroAcesso(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && liberarPrimeiroAcesso()} autoFocus />
           </div>
 
           {erroPrimeiroAcesso && (
@@ -1427,7 +1420,7 @@ function TelaLogin({ onLogin, onVoltar, onCadastroParceiro }) {
             {liberandoAcesso ? <><Loader2 size={15} className="spin" /> Liberando…</> : "Liberar meu acesso"}
           </button>
           <button type="button" onClick={() => {
-            setPrimeiroAcesso(false); setErroPrimeiroAcesso(""); setEmailPrimeiroAcesso(""); setCpfPrimeiroAcesso("");
+            setPrimeiroAcesso(false); setErroPrimeiroAcesso(""); setEmailPrimeiroAcesso("");
           }} style={{ width: "100%", marginTop: 14, background: "none", border: "none", color: AZUL_MEDIO, fontSize: 13, cursor: "pointer" }}>
             ← Voltar para o login
           </button>
