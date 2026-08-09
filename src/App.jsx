@@ -8875,9 +8875,6 @@ function TelaCadastroParceiro({ onVoltar, onIrParaLogin }) {
   const [resultado, setResultado] = useState(null); // { id, status }
 
   const setF = (campo, v) => setForm((f) => ({ ...f, [campo]: v }));
-  const setComissaoLinha = (idx, patch) => setForm((f) => ({ ...f, comissao: f.comissao.map((l, i) => (i === idx ? { ...l, ...patch } : l)) }));
-  const addComissaoLinha = () => setForm((f) => ({ ...f, comissao: [...f.comissao, novaComissaoLinha()] }));
-  const removerComissaoLinha = (idx) => setForm((f) => ({ ...f, comissao: f.comissao.filter((_, i) => i !== idx) }));
 
   const onLogo = (e) => {
     const file = e.target.files?.[0];
@@ -8889,6 +8886,10 @@ function TelaCadastroParceiro({ onVoltar, onIrParaLogin }) {
     e.target.value = "";
   };
 
+  /* Comissão e benefício saíram daqui: quem chega nesta tela ainda está decidindo se vira
+     parceiro, e a proposta comercial é justamente a parte que exige pensar. Agora ele cria
+     o acesso com o essencial e completa proposta e portfólio já logado, no painel, com
+     tempo — a homologação da gerência acontece depois, sobre o conjunto pronto. */
   const enviar = async () => {
     setErro("");
     if (!form.email.trim() || !form.senha.trim()) { setErro("Informe e-mail e senha de acesso."); return; }
@@ -8896,13 +8897,11 @@ function TelaCadastroParceiro({ onVoltar, onIrParaLogin }) {
     if (!form.empresa.trim() || !form.responsavel.trim()) { setErro("Informe a empresa e o responsável."); return; }
     if (!form.cidade.trim() || !form.uf.trim()) { setErro("Informe cidade e UF."); return; }
     if (!form.whatsapp.trim()) { setErro("Informe um WhatsApp para contato."); return; }
-    const comissaoValida = form.comissao.filter((l) => l.name.trim() && l.p !== "");
-    if (comissaoValida.length === 0) { setErro("Adicione ao menos uma categoria de comissão com percentual."); return; }
 
     setEnviando(true);
     try {
-      const body = { ...form, comissao: comissaoValida.map((l) => ({ name: l.name.trim(), p: Number(l.p) })) };
-      const r = await apiFetch("/api/parceiros/signup", { method: "POST", body });
+      const { comissao, beneficio, descricaoBeneficio, ...dadosDoCadastro } = form;
+      const r = await apiFetch("/api/parceiros/signup", { method: "POST", body: dadosDoCadastro });
       setResultado({ id: r.id, status: r.status || "em_analise" });
     } catch (e) {
       setErro(e.message === "Failed to fetch" ? "Não foi possível conectar à API. Verifique sua internet e tente novamente." : e.message);
@@ -8917,21 +8916,29 @@ function TelaCadastroParceiro({ onVoltar, onIrParaLogin }) {
           <div style={{ width: 56, height: 56, borderRadius: "50%", background: "#E6F4EA", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
             <Check size={28} color="#2E7D32" />
           </div>
-          <h2 style={{ color: AZUL_MARINHO, fontSize: 19, margin: "0 0 8px" }}>Cadastro enviado!</h2>
+          <h2 style={{ color: AZUL_MARINHO, fontSize: 19, margin: "0 0 8px" }}>Acesso criado!</h2>
           <p style={{ color: "#65758b", fontSize: 13.5, margin: "0 0 16px" }}>
-            Recebemos os dados da <strong>{form.empresa}</strong>. Nossa equipe vai avaliar o cadastro e entrar em contato pelo WhatsApp informado.
+            Recebemos os dados da <strong>{form.empresa}</strong>. O próximo passo é seu: entre com
+            <strong> {form.email}</strong> e a senha que acabou de cadastrar para completar a proposta
+            (comissão e benefício) e montar seu portfólio.
           </p>
-          {/* O acesso só abre depois da homologação (o backend cria o login desativado). Sem
-              dizer isso aqui, o parceiro tentava entrar no mesmo minuto e achava que a senha
-              tinha dado errado. */}
+          {/* Antes o cadastro terminava aqui e a pessoa ia embora esperar um contato. O que
+              decide se a parceria entra no ar é o perfil completo, e quem monta é ela — por
+              isso o botão principal agora leva direto para o login. */}
           <p style={{ color: "#65758b", fontSize: 13, margin: "0 0 16px" }}>
-            Assim que o cadastro for aprovado, você entra nesta mesma tela de login com o e-mail
-            <strong> {form.email}</strong> e a senha que acabou de cadastrar.
+            Quando estiver pronto, nossa equipe homologa e sua empresa passa a aparecer para os
+            clientes FN.
           </p>
           <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}>
             <Selo valor={PARCEIRO_STATUS_LABEL[resultado.status] || resultado.status} />
           </div>
-          <button type="button" className="btn-solid" style={{ width: "100%", justifyContent: "center" }} onClick={onVoltar}>Voltar</button>
+          <button type="button" className="btn-solid" style={{ width: "100%", justifyContent: "center" }} onClick={onIrParaLogin}>
+            <Lock size={14} /> Entrar e completar meu perfil
+          </button>
+          <button type="button" onClick={onVoltar}
+            style={{ width: "100%", marginTop: 10, background: "none", border: "none", color: AZUL_MEDIO, fontSize: 13, cursor: "pointer" }}>
+            Depois eu completo
+          </button>
         </div>
       </div>
     );
@@ -8960,7 +8967,7 @@ function TelaCadastroParceiro({ onVoltar, onIrParaLogin }) {
           </p>
           <div style={{ background: "#FFF4E0", color: "#B26A00", padding: "10px 12px", borderRadius: 8, fontSize: 12.5, marginBottom: 16, display: "flex", gap: 8, alignItems: "flex-start" }}>
             <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
-            <span>A senha de acesso é única — guarde-a bem. Os percentuais de comissão informados abaixo ficam travados assim que o cadastro é enviado.</span>
+            <span>A senha de acesso é única — guarde-a bem. Comissão, benefício e portfólio você preenche depois, já logado no painel.</span>
           </div>
 
           <Grid>
@@ -8993,33 +9000,15 @@ function TelaCadastroParceiro({ onVoltar, onIrParaLogin }) {
             </div>
           </div>
 
-          <div style={{ marginTop: 18 }}>
-            <label style={lab}>Categorias e percentual de comissão</label>
-            <div style={{ display: "grid", gap: 8, marginTop: 6 }}>
-              {form.comissao.map((linha, idx) => (
-                <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <input style={{ ...inp, flex: 1 }} placeholder="Categoria (ex.: Mão de obra)" value={linha.name}
-                    onChange={(e) => setComissaoLinha(idx, { name: e.target.value })} />
-                  <input style={{ ...inp, width: 90 }} type="number" min="0" max="100" placeholder="%" value={linha.p}
-                    onChange={(e) => setComissaoLinha(idx, { p: e.target.value })} />
-                  <button type="button" className="icon-btn" onClick={() => removerComissaoLinha(idx)} disabled={form.comissao.length === 1}>
-                    <Trash2 size={15} color="#c62828" />
-                  </button>
-                </div>
-              ))}
-            </div>
-            <button type="button" className="btn-add" style={{ marginTop: 10, padding: 10, fontSize: 13 }} onClick={addComissaoLinha}>
-              <Plus size={15} /> Adicionar categoria de comissão
-            </button>
-          </div>
-
-          <Field label="Benefício oferecido (resumo)" value={form.beneficio} onChange={(v) => setF("beneficio", v)} full />
-          <Area label="Descrição do benefício" value={form.descricaoBeneficio} onChange={(v) => setF("descricaoBeneficio", v)} rows={3} placeholder="Explique as condições do benefício oferecido aos clientes FN" />
+          <p style={{ fontSize: 12.5, color: "#8593a8", margin: "18px 0 0" }}>
+            Depois de criar o acesso, você entra no painel e monta a proposta comercial (categorias
+            de comissão e o benefício aos clientes FN) e o portfólio dos seus serviços.
+          </p>
 
           {erro && <div style={{ marginTop: 12, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>{erro}</div>}
 
           <button type="button" className="btn-solid" style={{ marginTop: 16 }} onClick={enviar} disabled={enviando}>
-            {enviando ? <><Loader2 size={15} className="spin" /> Enviando…</> : <><Check size={15} /> Enviar cadastro</>}
+            {enviando ? <><Loader2 size={15} className="spin" /> Criando…</> : <><Check size={15} /> Criar meu acesso</>}
           </button>
         </Card>
       </main>
@@ -9029,7 +9018,7 @@ function TelaCadastroParceiro({ onVoltar, onIrParaLogin }) {
 
 /* ---- Painel do Parceiro (área logada do afiliado, papel "afiliado") ---- */
 const PARCEIRO_STATUS_INFO = {
-  em_analise: "Seu cadastro está em análise pela nossa equipe. Assim que for aprovado, sua logo aparecerá para os clientes.",
+  em_analise: "Complete seus dados, a comissão, o benefício e o portfólio aqui embaixo. Com o perfil pronto, nossa equipe homologa e sua logo passa a aparecer para os clientes.",
   aprovado: "Sua parceria está ativa! Sua logo já aparece na vitrine para os clientes da FN Edificações.",
   suspenso: "Sua parceria está temporariamente suspensa. Entre em contato com a FN Edificações para mais informações.",
   encerrado: "Sua parceria foi encerrada. Entre em contato com a FN Edificações caso tenha dúvidas.",
@@ -9079,10 +9068,21 @@ function CardPerfilParceiro({ parceiro, token, onSalvo }) {
   const comissaoTexto = parceiro.comissao.length > 0 ? parceiro.comissao.map((c) => `${c.name}: ${c.p}%`).join(" · ") : "";
   const setF = (campo, v) => setForm((f) => ({ ...f, [campo]: v }));
 
+  /* A proposta comercial (comissão e benefício) saiu do cadastro público e é montada aqui,
+     enquanto o cadastro está em análise — é o que a gerência homologa. Depois de aprovada
+     ela trava, e mudar desconto combinado vira conversa com a FN: o backend recusa a
+     alteração, então nem mostramos os campos. */
+  const propostaEditavel = parceiro.status === "em_analise";
+  const setComissaoLinha = (idx, patch) => setForm((f) => ({ ...f, comissao: f.comissao.map((l, i) => (i === idx ? { ...l, ...patch } : l)) }));
+  const addComissaoLinha = () => setForm((f) => ({ ...f, comissao: [...f.comissao, novaComissaoLinha()] }));
+  const removerComissaoLinha = (idx) => setForm((f) => ({ ...f, comissao: f.comissao.filter((_, i) => i !== idx) }));
+
   const iniciarEdicao = () => {
     setForm({
       responsavel: parceiro.responsavel || "", whatsapp: parceiro.whatsapp || "", instagram: parceiro.instagram || "",
       site: parceiro.site || "", cidade: parceiro.cidade || "", uf: parceiro.uf || "", logo: parceiro.logo || "",
+      comissao: parceiro.comissao.length > 0 ? parceiro.comissao.map((c) => ({ name: c.name || "", p: c.p ?? "" })) : [novaComissaoLinha()],
+      beneficio: parceiro.beneficio || "", descricaoBeneficio: parceiro.descricaoBeneficio || "",
     });
     setErro("");
     setEditando(true);
@@ -9104,7 +9104,13 @@ function CardPerfilParceiro({ parceiro, token, onSalvo }) {
     if (!form.cidade.trim() || !form.uf.trim()) { setErro("Informe cidade e UF."); return; }
     setEnviando(true);
     try {
-      await apiFetch("/api/parceiros/me", { method: "PATCH", token, body: form });
+      const { comissao, beneficio, descricaoBeneficio, ...contato } = form;
+      // Parceiro já aprovado não manda a proposta de volta: o backend recusaria a chamada
+      // inteira, e ele perderia também a edição de contato que estava fazendo.
+      const body = propostaEditavel
+        ? { ...contato, comissao: comissao.filter((l) => l.name.trim() && l.p !== "").map((l) => ({ name: l.name.trim(), p: Number(l.p) })), beneficio, descricaoBeneficio }
+        : contato;
+      await apiFetch("/api/parceiros/me", { method: "PATCH", token, body });
       setEditando(false);
       await onSalvo();
     } catch (e) { setErro(e.message); }
@@ -9133,6 +9139,40 @@ function CardPerfilParceiro({ parceiro, token, onSalvo }) {
             </label>
           </div>
         </div>
+
+        {propostaEditavel && (
+          <>
+            <div style={{ background: "#FFF4E0", color: "#B26A00", padding: "10px 12px", borderRadius: 8, fontSize: 12.5, margin: "18px 0 0", display: "flex", gap: 8, alignItems: "flex-start" }}>
+              <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>Comissão e benefício travam quando a FN homologar sua parceria — revise antes de pedir a aprovação.</span>
+            </div>
+
+            <div style={{ marginTop: 16 }}>
+              <label style={lab}>Categorias e percentual de comissão</label>
+              <div style={{ display: "grid", gap: 8, marginTop: 6 }}>
+                {form.comissao.map((linha, idx) => (
+                  <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <input style={{ ...inp, flex: 1 }} placeholder="Categoria (ex.: Mão de obra)" value={linha.name}
+                      onChange={(e) => setComissaoLinha(idx, { name: e.target.value })} />
+                    <input style={{ ...inp, width: 90 }} type="number" min="0" max="100" placeholder="%" value={linha.p}
+                      onChange={(e) => setComissaoLinha(idx, { p: e.target.value })} />
+                    <button type="button" className="icon-btn" onClick={() => removerComissaoLinha(idx)} disabled={form.comissao.length === 1}>
+                      <Trash2 size={15} color="#c62828" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button type="button" className="btn-add" style={{ marginTop: 10, padding: 10, fontSize: 13 }} onClick={addComissaoLinha}>
+                <Plus size={15} /> Adicionar categoria de comissão
+              </button>
+            </div>
+
+            <Field label="Benefício oferecido (resumo)" value={form.beneficio} onChange={(v) => setF("beneficio", v)} full />
+            <Area label="Descrição do benefício" value={form.descricaoBeneficio} onChange={(v) => setF("descricaoBeneficio", v)} rows={3}
+              placeholder="Explique as condições do benefício oferecido aos clientes FN" />
+          </>
+        )}
+
         <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
           <button type="button" className="btn-solid" onClick={salvar} disabled={enviando}>{enviando ? "Salvando…" : "Salvar alterações"}</button>
           <button type="button" className="btn-ghost" onClick={() => setEditando(false)} disabled={enviando}>Cancelar</button>
@@ -9151,7 +9191,14 @@ function CardPerfilParceiro({ parceiro, token, onSalvo }) {
         ["Comissão combinada", comissaoTexto], ["Benefício oferecido", parceiro.beneficio],
       ]} />
       {parceiro.descricaoBeneficio && <p style={{ fontSize: 13.5, color: "#4a5a70", margin: "0 0 12px" }}>{parceiro.descricaoBeneficio}</p>}
-      <button type="button" className="btn-ghost" onClick={iniciarEdicao}><Edit3 size={14} /> Editar meus dados</button>
+      {propostaEditavel && (!comissaoTexto || !parceiro.beneficio) && (
+        <p style={{ fontSize: 12.5, color: "#B26A00", background: "#FFF4E0", borderRadius: 8, padding: "9px 12px", margin: "0 0 12px" }}>
+          Falta informar {[!comissaoTexto && "a comissão", !parceiro.beneficio && "o benefício"].filter(Boolean).join(" e ")} — é o que a FN analisa para homologar a parceria.
+        </p>
+      )}
+      <button type="button" className="btn-ghost" onClick={iniciarEdicao}>
+        <Edit3 size={14} /> {propostaEditavel ? "Completar meu perfil" : "Editar meus dados"}
+      </button>
     </Card>
   );
 }
