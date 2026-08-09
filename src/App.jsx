@@ -4007,13 +4007,39 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
 }
 
 /* Painel lateral: agenda completa do dia clicado + atalho pra agendar uma nova vistoria. */
-function PainelDiaAgendamento({ diaISO, clientes = [], vistoriadores = [], onFechar, onAgendarNovo, podeAgir, ehGerencia = false, updCliente, notify }) {
+function PainelDiaAgendamento({ diaISO, clientes = [], todosClientes = [], vistoriadores = [], onFechar, onAgendarNovo, podeAgir, ehGerencia = false, updCliente, notify }) {
   const [confirmandoCancelamento, setConfirmandoCancelamento] = useState(null);
+  const [trocandoId, setTrocandoId] = useState(null);
   const dataFmt = new Date(`${diaISO}T00:00:00`).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
   // Mostra todo cliente já cadastrado com vistoria desejada nesse dia, não só os que já
   // têm técnico confirmado — "Cancelado" fica de fora por não ser mais um compromisso ativo.
   const agenda = clientes.filter((c) => c.status !== "Cancelado" && !ehServicoDocumentacao(c)).sort((a, b) => (a.horarioDesejado || "").localeCompare(b.horarioDesejado || ""));
   const nomeVistoriador = (id) => vistoriadores.find((v) => String(v.id) === String(id))?.nome || null;
+
+  /* Trocar o técnico direto no painel do dia — é aqui que a remanejada acontece, olhando a
+     agenda inteira da data. Mesma regra da sub-aba Vistoria: não desmarca nada e recusa
+     quem já tem outra vistoria no mesmo horário. O conflito é conferido contra a agenda
+     completa (todosClientes), porque o painel pode estar filtrado por etapa. */
+  const trocarTecnico = async (c, novoId) => {
+    if (!novoId || String(novoId) === String(c.vistoriadorId)) return;
+    const universo = todosClientes.length ? todosClientes : clientes;
+    const conflito = universo.find((o) =>
+      o.id !== c.id && (o.status === "Vistoria agendada" || o.status === "Em vistoria") &&
+      String(o.vistoriadorId) === String(novoId) &&
+      o.dataDesejada === c.dataDesejada && o.horarioDesejado === c.horarioDesejado
+    );
+    const nomeNovo = vistoriadores.find((v) => String(v.id) === String(novoId))?.nome || "O técnico";
+    if (conflito) {
+      notify(`${nomeNovo} já tem vistoria às ${c.horarioDesejado} nesse dia (${conflito.nome}). Escolha outro.`);
+      return;
+    }
+    setTrocandoId(c.id);
+    try {
+      await updCliente(c.id, { vistoriadorId: novoId });
+      notify(`Vistoria transferida para ${nomeNovo} ✓`);
+    } catch (e) { notify(`Não foi possível trocar o técnico: ${e.message}`); }
+    setTrocandoId(null);
+  };
 
   return (
     <div className="no-print" style={{ ...overlay, justifyItems: "end" }} onClick={onFechar}>
@@ -4048,7 +4074,20 @@ function PainelDiaAgendamento({ diaISO, clientes = [], vistoriadores = [], onFec
                     <div style={{ fontSize: 13.5, fontWeight: 700 }}>{c.nome}</div>
                     <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.endereco || c.empreendimento || "—"}</div>
                     <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.servico}</div>
-                    <div style={{ fontSize: 12, color: "#65758b" }}>Técnico: {nomeTecnico || "ainda não atribuído"}</div>
+                    {podeAgir && (c.status === "Vistoria agendada" || c.status === "Em vistoria") ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+                        <span style={{ fontSize: 12, color: "#65758b" }}>Técnico:</span>
+                        <select style={{ ...inp, width: "auto", minWidth: 165, padding: "5px 8px", fontSize: 12.5 }}
+                          value={c.vistoriadorId || ""} disabled={trocandoId === c.id}
+                          onChange={(e) => trocarTecnico(c, e.target.value)}>
+                          <option value="">ainda não atribuído</option>
+                          {vistoriadores.map((v) => <option key={v.id} value={v.id}>{v.nome}</option>)}
+                        </select>
+                        {trocandoId === c.id && <Loader2 size={13} className="spin" />}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12, color: "#65758b" }}>Técnico: {nomeTecnico || "ainda não atribuído"}</div>
+                    )}
                     <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                       <Selo valor={c.status} />
                       {podeAgir && c.status === "Vistoria agendada" && (
@@ -4249,7 +4288,7 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
       </Card>
 
       {diaSelecionado && (
-        <PainelDiaAgendamento diaISO={diaSelecionado} clientes={doDiaSelecionado} vistoriadores={vistoriadores} podeAgir={podeAgir} ehGerencia={ehGerencia}
+        <PainelDiaAgendamento diaISO={diaSelecionado} clientes={doDiaSelecionado} todosClientes={clientes} vistoriadores={vistoriadores} podeAgir={podeAgir} ehGerencia={ehGerencia}
           updCliente={updCliente} notify={notify}
           onFechar={() => setDiaSelecionado(null)}
           onAgendarNovo={() => setAgendando({ dataDesejada: diaSelecionado })} />
