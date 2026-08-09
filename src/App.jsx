@@ -2044,6 +2044,29 @@ function AppInterno({ session, onLogout }) {
     } catch (e) { notify(`Não foi possível atualizar a venda: ${e.message}`); return false; }
   };
 
+  /* ---- Catálogo do parceiro pendente de aprovação (FN Clube/FN Home) ----
+     Item criado/editado pelo próprio afiliado nasce "pendente" e some da vitrine pública
+     até a Gerência aprovar aqui (ver POST/PATCH /api/parceiros/servicos no backend). */
+  const [catalogoPendente, setCatalogoPendente] = useState([]);
+  const [catalogoPendenteCarregando, setCatalogoPendenteCarregando] = useState(false);
+  const carregarCatalogoPendente = async () => {
+    if (!["gerencia", "vendas", "atendimento"].includes(perfil)) return;
+    setCatalogoPendenteCarregando(true);
+    try {
+      const r = await apiFetch("/api/parceiros/servicos/pendentes", { token });
+      setCatalogoPendente(r.servicos || []);
+    } catch (e) { notify(`Não foi possível carregar o catálogo pendente: ${e.message}`); }
+    setCatalogoPendenteCarregando(false);
+  };
+  useEffect(() => { carregarCatalogoPendente(); }, []);
+  const revisarItemCatalogo = async (id, corpo) => {
+    try {
+      await apiFetch(`/api/parceiros/servicos/${id}`, { method: "PATCH", token, body: corpo });
+      await carregarCatalogoPendente();
+      return true;
+    } catch (e) { notify(`Não foi possível atualizar o item: ${e.message}`); return false; }
+  };
+
   /* ---- Preço de vistoria por empreendimento (alimenta o Financeiro) ---- */
   const [precos, setPrecos] = useState([]);
   const [precosCarregando, setPrecosCarregando] = useState(false);
@@ -2726,6 +2749,7 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "vendas" && (
           <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
             vales={vales} valesCarregando={valesCarregando} vendas={vendas} vendasCarregando={vendasCarregando} atualizarVenda={atualizarVenda}
+            catalogoPendente={catalogoPendente} catalogoPendenteCarregando={catalogoPendenteCarregando} revisarItemCatalogo={revisarItemCatalogo}
             criarParceiroManual={criarParceiroManual}
             salvarItemCatalogo={salvarItemCatalogoAdmin} excluirItemCatalogo={excluirItemCatalogoAdmin} notify={notify}
             podeExcluir={perfil === "gerencia"} excluirParceiro={excluirParceiro} />
@@ -2739,6 +2763,7 @@ function AppInterno({ session, onLogout }) {
             salvarItemCatalogo={salvarItemCatalogoAdmin} excluirItemCatalogo={excluirItemCatalogoAdmin}
             vales={vales} valesCarregando={valesCarregando}
             vendas={vendas} vendasCarregando={vendasCarregando} atualizarVenda={atualizarVenda}
+            catalogoPendente={catalogoPendente} catalogoPendenteCarregando={catalogoPendenteCarregando} revisarItemCatalogo={revisarItemCatalogo}
             precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
             padronizarEmpreendimento={padronizarEmpreendimento} excluirCliente={delCliente}
             prospeccao={prospeccao} prospeccaoCarregando={prospeccaoCarregando} atualizarProspeccao={atualizarProspeccao}
@@ -6953,7 +6978,7 @@ function CardBancoPatologias({ patologias = [], carregando, onCriar, onAtualizar
   );
 }
 
-function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas = [], vendasCarregando, atualizarVenda, notify }) {
+function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas = [], vendasCarregando, atualizarVenda, catalogoPendente = [], catalogoPendenteCarregando, revisarItemCatalogo, notify }) {
   const [cadastrando, setCadastrando] = useState(false);
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -6963,6 +6988,7 @@ function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceir
           <Plus size={15} /> Cadastrar parceiro
         </button>
       </div>
+      <CardCatalogoPendente itens={catalogoPendente} carregando={catalogoPendenteCarregando} onRevisar={revisarItemCatalogo} notify={notify} />
       <CardParceiros parceiros={parceiros} carregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
         podeExcluir={podeExcluir} excluirParceiro={excluirParceiro}
         salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} notify={notify} />
@@ -6971,6 +6997,84 @@ function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceir
         <ModalCriarParceiroManual onFechar={() => setCadastrando(false)} criarParceiroManual={criarParceiroManual} notify={notify} />
       )}
     </div>
+  );
+}
+
+/* Item de catálogo criado/editado pelo próprio parceiro/afiliado — nasce "pendente" e só
+   entra na vitrine pública (FN Clube/FN Home) depois que a Gerência aprova aqui. Item que a
+   própria equipe cria ou edita em CardParceiros já sai aprovado, então não passa por aqui. */
+function CardCatalogoPendente({ itens, carregando, onRevisar, notify }) {
+  const [salvandoId, setSalvandoId] = useState(null);
+  const [rejeitando, setRejeitando] = useState(null); // item sendo rejeitado
+  const [motivo, setMotivo] = useState("");
+
+  const aprovar = async (id) => {
+    setSalvandoId(id);
+    const ok = await onRevisar(id, { status: "aprovado" });
+    setSalvandoId(null);
+    if (ok) notify("Item aprovado e publicado ✓");
+  };
+  const abrirRejeicao = (item) => { setRejeitando(item); setMotivo(""); };
+  const confirmarRejeicao = async () => {
+    const id = rejeitando.id;
+    setSalvandoId(id);
+    const ok = await onRevisar(id, { status: "rejeitado", motivoRejeicao: motivo });
+    setSalvandoId(null);
+    if (ok) { notify("Item rejeitado ✓"); setRejeitando(null); }
+  };
+
+  return (
+    <Card icon={ClipboardCheck} titulo={`Catálogo pendente de aprovação (${itens.length})`}>
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Itens criados ou editados pelos próprios parceiros/afiliados — só entram na vitrine (FN Clube/FN Home) depois de aprovados aqui.
+      </p>
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && itens.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nada pendente no momento.</p>}
+      {itens.length > 0 && (
+        <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))" }}>
+          {itens.map((s) => (
+            <div key={s.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, overflow: "hidden" }}>
+              {s.foto && <img src={s.foto} alt="" style={{ width: "100%", height: 100, objectFit: "cover", display: "block" }} />}
+              <div style={{ padding: 10 }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: AZUL_MEDIO, textTransform: "uppercase" }}>
+                  {s.parceiro_empresa} · {s.parceiro_tipo === "produto" ? "FN Home" : "FN Clube"}
+                </div>
+                {s.categoria && <div style={{ fontSize: 10.5, color: "#8593a8", marginTop: 2 }}>{s.categoria}</div>}
+                {s.titulo && <div style={{ fontWeight: 700, fontSize: 13, marginTop: 2 }}>{s.titulo}</div>}
+                {s.descricao && <p style={{ fontSize: 12, color: "#65758b", margin: "4px 0" }}>{s.descricao}</p>}
+                {s.preco_de && <div style={{ fontSize: 11, color: "#8593a8", textDecoration: "line-through" }}>{s.preco_de}</div>}
+                {s.preco && <div style={{ fontSize: 12, color: "#2E7D32", fontWeight: 700 }}>{s.preco}</div>}
+                <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                  {salvandoId === s.id ? <Loader2 size={15} className="spin" /> : (
+                    <>
+                      <button className="btn-solid" style={{ padding: "5px 10px", fontSize: 12 }} onClick={() => aprovar(s.id)}>Aprovar</button>
+                      <button className="btn-ghost" style={{ color: "#c62828", padding: "5px 10px", fontSize: 12 }} onClick={() => abrirRejeicao(s)}>Rejeitar</button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {rejeitando && (
+        <div className="no-print" style={overlay} onClick={() => setRejeitando(null)}>
+          <div style={{ ...modal, maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <strong>Rejeitar "{rejeitando.titulo || "item"}"</strong>
+              <button className="icon-btn" onClick={() => setRejeitando(null)}><X size={16} /></button>
+            </div>
+            <Area label="Motivo (o parceiro vê isso)" value={motivo} onChange={setMotivo} rows={3}
+              placeholder="Ex.: foto de baixa qualidade, preço não bate com o combinado..." />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setRejeitando(null)}>Cancelar</button>
+              <button className="btn-solid" style={{ background: "#c62828" }} onClick={confirmarRejeicao}>Rejeitar</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -7530,7 +7634,7 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, addDoc, updDoc, delDoc, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
+function AbaGerencia({ sub = "visao-geral", docs, addDoc, updDoc, delDoc, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, catalogoPendente, catalogoPendenteCarregando, revisarItemCatalogo, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
   if (sub === "acompanhamento") {
     return <TabelaRegistrosVistoriaDoc docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc}
       carregando={carregando} notify={notify} clientes={clientes} />;
@@ -7538,7 +7642,8 @@ function AbaGerencia({ sub = "visao-geral", docs, addDoc, updDoc, delDoc, client
   if (sub === "parceiros") {
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual}
       salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} vales={vales} valesCarregando={valesCarregando}
-      vendas={vendas} vendasCarregando={vendasCarregando} atualizarVenda={atualizarVenda} notify={notify}
+      vendas={vendas} vendasCarregando={vendasCarregando} atualizarVenda={atualizarVenda}
+      catalogoPendente={catalogoPendente} catalogoPendenteCarregando={catalogoPendenteCarregando} revisarItemCatalogo={revisarItemCatalogo} notify={notify}
       podeExcluir excluirParceiro={excluirParceiro} />;
   }
   if (sub === "patologias") {
@@ -8978,6 +9083,12 @@ STATUS_COR["Cancelado"] = { cor: "#C62828", bg: "#FCEAEA" };
    "Cancelada" já usados no financeiro, é o mesmo conceito. */
 const STATUS_COMISSAO_LABEL = { pendente: "Pendente", paga: "Pago", cancelada: "Cancelada" };
 
+/* Item do catálogo do parceiro: pendente/rejeitado não aparece na vitrine pública, só
+   aprovado aparece — "aprovado" não precisa de selo (é o esperado), só os outros dois. */
+const CATALOGO_STATUS_LABEL = { pendente: "Pendente de aprovação", rejeitado: "Rejeitado" };
+STATUS_COR["Pendente de aprovação"] = { cor: "#B26A00", bg: "#FFF4E0" };
+STATUS_COR["Rejeitado"] = { cor: "#C62828", bg: "#FCEAEA" };
+
 /* Converte um vale vindo do banco (snake_case) para o formato usado no app (camelCase) */
 function mapValeDaApi(v) {
   return {
@@ -9317,6 +9428,7 @@ function EditorCatalogoParceiro({ itens = [], carregando, onSalvar, onExcluir, l
     <Card icon={Camera} titulo={`Portfólio (${itens.length} ${itens.length === 1 ? "item" : "itens"})`}>
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
         Fotos e descrições dos serviços/produtos que aparecem na página pública do parceiro — o "catálogo de vendas" que atrai o cliente.
+        Item criado ou editado pelo parceiro passa por aprovação da Gerência antes de aparecer para o cliente.
       </p>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap", background: CINZA_CLARO, borderRadius: 8, padding: "8px 10px" }}>
         <span style={{ fontSize: 12, color: "#4a5a70", flex: 1, minWidth: 180, wordBreak: "break-all" }}>
@@ -9334,10 +9446,16 @@ function EditorCatalogoParceiro({ itens = [], carregando, onSalvar, onExcluir, l
             <div key={s.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, overflow: "hidden" }}>
               {s.foto && <img src={s.foto} alt="" style={{ width: "100%", height: 100, objectFit: "cover", display: "block" }} />}
               <div style={{ padding: 10 }}>
+                {s.status && s.status !== "aprovado" && (
+                  <div style={{ marginBottom: 4 }}><Selo valor={CATALOGO_STATUS_LABEL[s.status] || s.status} /></div>
+                )}
                 {s.categoria && <div style={{ fontSize: 10.5, fontWeight: 700, color: AZUL_MEDIO, textTransform: "uppercase" }}>{s.categoria}</div>}
                 {s.titulo && <div style={{ fontWeight: 700, fontSize: 13 }}>{s.titulo}</div>}
                 {s.preco_de && <div style={{ fontSize: 11, color: "#8593a8", textDecoration: "line-through" }}>{s.preco_de}</div>}
                 {s.preco && <div style={{ fontSize: 12, color: "#2E7D32", fontWeight: 700 }}>{s.preco}</div>}
+                {s.status === "rejeitado" && s.motivo_rejeicao && (
+                  <p style={{ fontSize: 11, color: "#C62828", margin: "4px 0 0" }}>Motivo: {s.motivo_rejeicao}</p>
+                )}
                 <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
                   <button className="icon-btn" onClick={() => setEditando({ ...s })} title="Editar"><Edit3 size={13} color={AZUL_MEDIO} /></button>
                   <button className="icon-btn" onClick={() => onExcluir(s.id)} title="Excluir"><Trash2 size={13} color="#c62828" /></button>
