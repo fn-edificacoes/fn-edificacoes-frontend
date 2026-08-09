@@ -1520,7 +1520,7 @@ function TelaCriarSenhaCliente({ token, onConcluido }) {
 }
 
 /* ================= Portal público do cliente (sem login) ================= */
-function PortalCliente({ onIrParaLogin, onIrParaCadastroParceiro, onLogin }) {
+function PortalCliente({ onIrParaLogin, onLogin }) {
   const [toast, setToast] = useState("");
   const notify = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
 
@@ -1535,11 +1535,19 @@ function PortalCliente({ onIrParaLogin, onIrParaCadastroParceiro, onLogin }) {
             <div style={{ fontWeight: 700, fontSize: 15 }}>FN Edificações</div>
             <div style={{ fontSize: 11, opacity: 0.7 }}>Área do Cliente</div>
           </div>
-          {onIrParaCadastroParceiro && <button className="btn-ghost" onClick={onIrParaCadastroParceiro}>Seja um parceiro</button>}
           <button className="btn-ghost" onClick={onIrParaLogin}>Sou da equipe →</button>
         </div>
       </header>
       <main style={{ maxWidth: 720, margin: "0 auto", padding: "22px 18px 80px" }}>
+        {/* CTA principal, bem em cima: quem já é cliente não devia ter que rolar a página
+            inteira do cadastro pra achar onde entrar. */}
+        <button onClick={onIrParaLogin} style={{
+          width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+          background: "#fff", color: AZUL_MARINHO, border: `2px solid ${AZUL_MARINHO}`, borderRadius: 14,
+          padding: "18px 20px", marginBottom: 18, fontSize: 18, fontWeight: 800, cursor: "pointer",
+        }}>
+          <Lock size={20} /> SOU CLIENTE — ENTRAR
+        </button>
         <AbaCliente notify={notify} onLogin={onLogin} onIrParaLogin={onIrParaLogin} />
       </main>
       {toast && (
@@ -1589,7 +1597,7 @@ function guardarSessao(s) {
 export default function App() {
   const [session, setSessionEstado] = useState(() => carregarSessaoSalva());
   const [mostrarLogin, setMostrarLogin] = useState(false);
-  const [mostrarCadastroParceiro, setMostrarCadastroParceiro] = useState(false);
+  const [linkParceiroFechado, setLinkParceiroFechado] = useState(false);
 
   const setSession = (s) => { guardarSessao(s); setSessionEstado(s); };
 
@@ -1630,18 +1638,23 @@ export default function App() {
     );
   }
 
+  /* Link privado de cadastro de parceiro (?parceiro-cadastro=1) — a FN envia esse link direto
+     para quem vai virar parceiro pelo WhatsApp/e-mail; não existe mais botão público pra isso
+     na página, só quem recebe o link chega aqui. */
+  const linkCadastroParceiro = new URLSearchParams(window.location.search).get("parceiro-cadastro");
+
   if (!session) {
-    if (mostrarCadastroParceiro) {
+    if (linkCadastroParceiro && !linkParceiroFechado) {
       return (
         <TelaCadastroParceiro
-          onVoltar={() => setMostrarCadastroParceiro(false)}
-          onIrParaLogin={() => { setMostrarCadastroParceiro(false); setMostrarLogin(true); }}
+          onVoltar={() => setLinkParceiroFechado(true)}
+          onIrParaLogin={() => { setLinkParceiroFechado(true); setMostrarLogin(true); }}
         />
       );
     }
     return mostrarLogin
       ? <TelaLogin onLogin={setSession} onVoltar={() => setMostrarLogin(false)} />
-      : <PortalCliente onIrParaLogin={() => setMostrarLogin(true)} onIrParaCadastroParceiro={() => setMostrarCadastroParceiro(true)} onLogin={setSession} />;
+      : <PortalCliente onIrParaLogin={() => setMostrarLogin(true)} onLogin={setSession} />;
   }
   if (session.usuario.role === "afiliado") {
     return <PainelParceiro session={session} onLogout={() => { setSession(null); setMostrarLogin(false); }} />;
@@ -2216,14 +2229,30 @@ function AppInterno({ session, onLogout }) {
 
   /* ---- Assinatura própria do vistoriador — aparece no laudo final ao lado da da Gerência ---- */
   const [minhaAssinatura, setMinhaAssinatura] = useState(null); // { imagem }
+  const [meuPerfilTecnico, setMeuPerfilTecnico] = useState({ qualificacao: "", registro: "" });
   const carregarMinhaAssinatura = async () => {
     if (perfil !== "vistoriador" && perfil !== "gerencia") return;
     try {
       const r = await apiFetch("/api/usuarios/me/assinatura", { token });
       setMinhaAssinatura(r.assinatura || null);
+      setMeuPerfilTecnico({ qualificacao: r.qualificacao || "", registro: r.registro || "" });
     } catch { setMinhaAssinatura(null); }
   };
   useEffect(() => { carregarMinhaAssinatura(); }, []);
+  /* Qualificação e registro cadastrados pela Gerência preenchem o laudo sozinhos — o técnico
+     só digita se precisar corrigir para uma vistoria específica, não em toda vez. Só entra
+     quando o campo ainda está vazio, para não sobrescrever o que já foi ajustado à mão. */
+  useEffect(() => {
+    if (!meuPerfilTecnico.qualificacao && !meuPerfilTecnico.registro) return;
+    setDados((d) => ({
+      ...d,
+      rt: {
+        ...d.rt,
+        qualificacao: d.rt.qualificacao || meuPerfilTecnico.qualificacao,
+        registro: d.rt.registro || meuPerfilTecnico.registro,
+      },
+    }));
+  }, [meuPerfilTecnico]);
   const salvarMinhaAssinatura = async (obj) => {
     setMinhaAssinatura(obj);
     try { await apiFetch("/api/usuarios/me/assinatura", { method: "POST", token, body: obj }); notify("Assinatura salva ✓"); }
@@ -2261,6 +2290,13 @@ function AppInterno({ session, onLogout }) {
   const excluirUsuario = async (id) => {
     await apiFetch(`/api/users/${id}`, { method: "DELETE", token });
     notify("Usuário removido ✓");
+    carregarUsuarios();
+  };
+  /* Qualificação, registro e assinatura do vistoriador — a Gerência cadastra uma vez aqui e
+     o laudo já nasce preenchido sozinho, sem o técnico digitar em toda vistoria. */
+  const salvarPerfilTecnico = async (id, patch) => {
+    await apiFetch(`/api/users/${id}/perfil-tecnico`, { method: "PATCH", token, body: patch });
+    notify("Perfil técnico atualizado ✓");
     carregarUsuarios();
   };
 
@@ -2633,7 +2669,7 @@ function AppInterno({ session, onLogout }) {
         )}
         {abaTop === "gerencia" && (
           <AbaGerencia sub={abaGerencia} docs={docs} clientes={clientes} updCliente={updCliente} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
-            usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} usuarioAtualId={session.usuario.id}
+            usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} salvarPerfilTecnico={salvarPerfilTecnico} usuarioAtualId={session.usuario.id}
             avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
             parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual}
             excluirParceiro={excluirParceiro}
@@ -6598,7 +6634,7 @@ function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendi
         </Card>
       )}
 
-      <CardUsuarios usuarios={usuarios} carregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} notify={notify} usuarioAtualId={usuarioAtualId} />
+      <CardUsuarios usuarios={usuarios} carregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} salvarPerfilTecnico={salvarPerfilTecnico} notify={notify} usuarioAtualId={usuarioAtualId} />
 
       <CardAssinaturaGerencia assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify} />
     </div>
@@ -7310,7 +7346,7 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
+function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
   if (sub === "parceiros") {
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual}
       salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} vales={vales} valesCarregando={valesCarregando} notify={notify}
@@ -7351,13 +7387,14 @@ const ROLE_DESCRICAO = {
   gerencia: "Acesso completo: Laudos, Documentação, Clientes, Agendamento, Vendas, Gerência e financeiro.",
 };
 
-function CardUsuarios({ usuarios, carregando, criarUsuario, atualizarUsuario, excluirUsuario, notify, usuarioAtualId }) {
+function CardUsuarios({ usuarios, carregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, notify, usuarioAtualId }) {
   const [novo, setNovo] = useState(null); // { nome, email, senha, role } quando o modal de criação está aberto
   const [salvando, setSalvando] = useState(false);
   const [resetandoId, setResetandoId] = useState(null);
   const [novaSenha, setNovaSenha] = useState("");
   const [busca, setBusca] = useState("");
   const [filtroPapel, setFiltroPapel] = useState("");
+  const [perfilTecnicoDe, setPerfilTecnicoDe] = useState(null); // usuário sendo editado
 
   const usuariosFiltrados = usuarios.filter((u) => {
     if (filtroPapel && u.role !== filtroPapel) return false;
@@ -7451,6 +7488,11 @@ function CardUsuarios({ usuarios, carregando, criarUsuario, atualizarUsuario, ex
                     <button className="icon-btn" onClick={() => { setResetandoId(u.id); setNovaSenha(""); }} title="Redefinir senha">
                       <Edit3 size={15} color={AZUL_MEDIO} />
                     </button>
+                    {u.role === "vistoriador" && salvarPerfilTecnico && (
+                      <button className="icon-btn" onClick={() => setPerfilTecnicoDe(u)} title="Qualificação, registro e assinatura para o laudo">
+                        <FileText size={15} color={AZUL_MEDIO} />
+                      </button>
+                    )}
                     {u.id !== usuarioAtualId && (
                       <button className="icon-btn" onClick={() => pedirRemocao(u)} title="Remover do sistema"><Trash2 size={15} color="#c62828" /></button>
                     )}
@@ -7523,7 +7565,86 @@ function CardUsuarios({ usuarios, carregando, criarUsuario, atualizarUsuario, ex
       <ConfirmModal aberto={!!removendo} titulo="Remover do sistema"
         mensagem={removendo ? `"${removendo.nome}" perde o acesso imediatamente. O histórico e os laudos assinados por essa pessoa continuam guardados, como exige a responsabilidade técnica. Você pode reativar o acesso depois.` : ""}
         onConfirm={remover} onCancel={() => setRemovendo(null)} />
+
+      {perfilTecnicoDe && (
+        <ModalPerfilTecnicoVistoriador usuario={perfilTecnicoDe} salvarPerfilTecnico={salvarPerfilTecnico}
+          notify={notify} onFechar={() => setPerfilTecnicoDe(null)} />
+      )}
     </Card>
+  );
+}
+
+/* A Gerência cadastra qualificação, registro e assinatura do vistoriador uma única vez —
+   o laudo passa a vir preenchido sozinho em toda vistoria dele, sem precisar digitar de novo. */
+function ModalPerfilTecnicoVistoriador({ usuario, salvarPerfilTecnico, notify, onFechar }) {
+  const [qualificacao, setQualificacao] = useState(usuario.qualificacao_tecnica || "");
+  const [registro, setRegistro] = useState(usuario.registro_profissional || "");
+  const [novaAssinatura, setNovaAssinatura] = useState(null); // data URL escolhida agora, ou null = mantém a atual
+  const [salvando, setSalvando] = useState(false);
+
+  const onArquivo = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { notify("Envie uma imagem (PNG ou JPG) da assinatura"); return; }
+    const reader = new FileReader();
+    reader.onload = () => setNovaAssinatura(reader.result);
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const salvar = async () => {
+    setSalvando(true);
+    try {
+      const patch = { qualificacao, registro };
+      if (novaAssinatura !== null) patch.assinaturaImagem = novaAssinatura;
+      await salvarPerfilTecnico(usuario.id, patch);
+      onFechar();
+    } catch (e) { notify(`Não foi possível salvar: ${e.message}`); }
+    setSalvando(false);
+  };
+
+  return (
+    <div className="no-print" style={overlay} onClick={onFechar}>
+      <div style={{ ...modal, maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <strong>Perfil técnico de {usuario.nome}</strong>
+          <button className="icon-btn" onClick={onFechar}><X size={16} /></button>
+        </div>
+        <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 14px" }}>
+          Preenche o laudo sozinho em toda vistoria deste técnico — ele não precisa mais digitar isso a cada vez.
+        </p>
+        <div style={cell(true)}>
+          <label style={lab}>Qualificação</label>
+          <input style={inp} value={qualificacao} onChange={(e) => setQualificacao(e.target.value)} placeholder="Ex.: Técnico em Edificações" />
+        </div>
+        <div style={{ ...cell(true), marginTop: 10 }}>
+          <label style={lab}>Registro profissional</label>
+          <input style={inp} value={registro} onChange={(e) => setRegistro(e.target.value)} placeholder="Ex.: CFT-03 nº 00000000000" />
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <label style={lab}>Assinatura</label>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 5, flexWrap: "wrap" }}>
+            <label className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO, cursor: "pointer" }}>
+              <Camera size={15} /> {usuario.tem_assinatura || novaAssinatura ? "Trocar" : "Enviar"}
+              <input type="file" accept="image/*" style={{ display: "none" }} onChange={onArquivo} />
+            </label>
+            {novaAssinatura ? (
+              <img src={novaAssinatura} alt="Nova assinatura" style={{ height: 40, background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 6, padding: 4 }} />
+            ) : usuario.tem_assinatura ? (
+              <span style={{ fontSize: 12.5, color: "#2E7D32" }}>✓ Já tem assinatura cadastrada</span>
+            ) : (
+              <span style={{ fontSize: 12.5, color: "#8593a8" }}>Nenhuma assinatura cadastrada ainda</span>
+            )}
+          </div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+          <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={onFechar}>Cancelar</button>
+          <button className="btn-solid" onClick={salvar} disabled={salvando}>
+            {salvando ? <Loader2 size={15} className="spin" /> : <Save size={15} />} Salvar
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -7677,22 +7798,27 @@ function AvaliarServico({ doc, notify, fotoCliente, cpf }) {
    Mesma proteção do laudo final: só libera depois de conferir CPF + e-mail cadastrados, e o
    download é sempre proxy do backend com token curto. São dois arquivos (documentação
    assinada e placa de identificação de obra). */
-function AcessoDocumentosArt({ cpf, notify }) {
-  const [aberto, setAberto] = useState(false);
+function AcessoDocumentosArt({ cpf, notify, emailConhecido }) {
+  const [aberto, setAberto] = useState(!!emailConhecido);
   const [email, setEmail] = useState("");
   const [consultando, setConsultando] = useState(false);
   const [documentos, setDocumentos] = useState(null); // null = ainda não confirmou o e-mail
 
-  const consultar = async () => {
-    if (!email.trim()) { notify("Informe seu e-mail cadastrado"); return; }
+  const consultar = async (emailParaUsar) => {
+    const alvo = emailParaUsar || email;
+    if (!alvo.trim()) { notify("Informe seu e-mail cadastrado"); return; }
     setConsultando(true);
     try {
-      const r = await apiFetch("/api/documentos-art/consultar", { method: "POST", body: { cpf, email } });
+      const r = await apiFetch("/api/documentos-art/consultar", { method: "POST", body: { cpf, email: alvo } });
       setDocumentos(r.documentos || []);
-      if ((r.documentos || []).length === 0) notify("Ainda não há documentos disponíveis para esse e-mail.");
+      if ((r.documentos || []).length === 0 && !emailConhecido) notify("Ainda não há documentos disponíveis para esse e-mail.");
     } catch (e) { notify(`Não foi possível confirmar: ${e.message}`); setDocumentos(null); }
     setConsultando(false);
   };
+
+  /* Já logado no portal: o e-mail é o do próprio cadastro, não precisa confirmar de novo —
+     era um passo redundante, autenticação já fez essa parte. */
+  useEffect(() => { if (emailConhecido) consultar(emailConhecido); }, [emailConhecido]);
 
   if (!aberto) {
     return (
@@ -7704,16 +7830,19 @@ function AcessoDocumentosArt({ cpf, notify }) {
 
   return (
     <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${CINZA_BORDA}` }}>
-      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Confirme seu e-mail para acessar a documentação</div>
-      {!documentos && (
+      {!emailConhecido && <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Confirme seu e-mail para acessar a documentação</div>}
+      {!emailConhecido && !documentos && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <input style={{ ...inp, flex: 1, minWidth: 180 }} type="email" placeholder="Seu e-mail cadastrado" value={email}
             onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && consultar()} />
-          <button className="btn-solid" onClick={consultar} disabled={consultando}>{consultando ? "Confirmando…" : "Confirmar"}</button>
+          <button className="btn-solid" onClick={() => consultar()} disabled={consultando}>{consultando ? "Confirmando…" : "Confirmar"}</button>
         </div>
       )}
+      {consultando && emailConhecido && <p style={{ color: "#8593a8", fontSize: 13, margin: 0 }}>Carregando…</p>}
       {documentos && documentos.length === 0 && (
-        <p style={{ color: "#8593a8", fontSize: 13, margin: 0 }}>E-mail não confere ou os documentos ainda não foram anexados.</p>
+        <p style={{ color: "#8593a8", fontSize: 13, margin: 0 }}>
+          {emailConhecido ? "Os documentos ainda não foram anexados." : "E-mail não confere ou os documentos ainda não foram anexados."}
+        </p>
       )}
       {documentos && documentos.length > 0 && (
         <div style={{ display: "grid", gap: 8 }}>
@@ -7734,25 +7863,29 @@ function AcessoDocumentosArt({ cpf, notify }) {
    O Drive nunca fica público: o backend só libera o download depois de confirmar CPF + e-mail
    cadastrados, e devolve um link com token curto (expira em minutos) que faz o backend buscar
    o arquivo no Drive e entregar diretamente — o cliente nunca vê nem precisa de conta Google. */
-function AcessoLaudoFinal({ cpf, notify, aoDescobrirFoto }) {
-  const [aberto, setAberto] = useState(false);
+function AcessoLaudoFinal({ cpf, notify, aoDescobrirFoto, emailConhecido }) {
+  const [aberto, setAberto] = useState(!!emailConhecido);
   const [email, setEmail] = useState("");
   const [consultando, setConsultando] = useState(false);
   const [laudos, setLaudos] = useState(null); // null = ainda não confirmou o e-mail
 
-  const consultar = async () => {
-    if (!email.trim()) { notify("Informe seu e-mail cadastrado"); return; }
+  const consultar = async (emailParaUsar) => {
+    const alvo = emailParaUsar || email;
+    if (!alvo.trim()) { notify("Informe seu e-mail cadastrado"); return; }
     setConsultando(true);
     try {
-      const r = await apiFetch("/api/laudo-final/consultar", { method: "POST", body: { cpf, email } });
+      const r = await apiFetch("/api/laudo-final/consultar", { method: "POST", body: { cpf, email: alvo } });
       setLaudos(r.laudos || []);
       // A foto vem junto com o laudo, mas quem a exibe é o convite de avaliação, logo abaixo.
       const comFoto = (r.laudos || []).find((l) => l.fotoCliente);
       if (comFoto) aoDescobrirFoto?.(comFoto.fotoCliente);
-      if ((r.laudos || []).length === 0) notify("Não encontramos laudo disponível para esse e-mail.");
+      if ((r.laudos || []).length === 0 && !emailConhecido) notify("Não encontramos laudo disponível para esse e-mail.");
     } catch (e) { notify(`Não foi possível confirmar: ${e.message}`); setLaudos(null); }
     setConsultando(false);
   };
+
+  /* Já logado no portal: o e-mail é o do próprio cadastro, não precisa confirmar de novo. */
+  useEffect(() => { if (emailConhecido) consultar(emailConhecido); }, [emailConhecido]);
 
   if (!aberto) {
     return (
@@ -7764,16 +7897,19 @@ function AcessoLaudoFinal({ cpf, notify, aoDescobrirFoto }) {
 
   return (
     <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${CINZA_BORDA}` }}>
-      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Confirme seu e-mail para acessar o laudo</div>
-      {!laudos && (
+      {!emailConhecido && <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Confirme seu e-mail para acessar o laudo</div>}
+      {!emailConhecido && !laudos && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <input style={{ ...inp, flex: 1, minWidth: 180 }} type="email" placeholder="Seu e-mail cadastrado" value={email}
             onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && consultar()} />
-          <button className="btn-solid" onClick={consultar} disabled={consultando}>{consultando ? "Confirmando…" : "Confirmar"}</button>
+          <button className="btn-solid" onClick={() => consultar()} disabled={consultando}>{consultando ? "Confirmando…" : "Confirmar"}</button>
         </div>
       )}
+      {consultando && emailConhecido && <p style={{ color: "#8593a8", fontSize: 13, margin: 0 }}>Carregando…</p>}
       {laudos && laudos.length === 0 && (
-        <p style={{ color: "#8593a8", fontSize: 13, margin: 0 }}>E-mail não confere ou nenhum laudo disponível ainda.</p>
+        <p style={{ color: "#8593a8", fontSize: 13, margin: 0 }}>
+          {emailConhecido ? "Nenhum laudo disponível ainda." : "E-mail não confere ou nenhum laudo disponível ainda."}
+        </p>
       )}
       {laudos && laudos.length > 0 && (
         <div style={{ display: "grid", gap: 12 }}>
@@ -7795,15 +7931,15 @@ function AcessoLaudoFinal({ cpf, notify, aoDescobrirFoto }) {
 /* Um atendimento na tela do cliente: acesso aos arquivos e convite para avaliar.
    Existe como componente separado porque precisa guardar a foto da vistoria — ela chega
    junto com o laudo, mas quem a mostra é o convite de avaliação, logo abaixo. */
-function CartaoAtendimentoCliente({ doc, cpf, notify }) {
+function CartaoAtendimentoCliente({ doc, cpf, notify, emailConhecido }) {
   const [fotoCliente, setFotoCliente] = useState(null);
 
   return (
     <>
       {doc.status === "Laudo enviado por e-mail" && (
-        <AcessoLaudoFinal cpf={cpf} notify={notify} aoDescobrirFoto={setFotoCliente} />
+        <AcessoLaudoFinal cpf={cpf} notify={notify} aoDescobrirFoto={setFotoCliente} emailConhecido={emailConhecido} />
       )}
-      {doc.status === STATUS_DOC_CONCLUIDA && <AcessoDocumentosArt cpf={cpf} notify={notify} />}
+      {doc.status === STATUS_DOC_CONCLUIDA && <AcessoDocumentosArt cpf={cpf} notify={notify} emailConhecido={emailConhecido} />}
       <AvaliarServico doc={doc} notify={notify} fotoCliente={fotoCliente} cpf={cpf} />
     </>
   );
@@ -8889,6 +9025,20 @@ function PainelCliente({ session, onLogout }) {
   };
   useEffect(() => { carregar(); }, []);
 
+  /* Cross-sell: quem já é cliente (fez vistoria, por ex.) pede Documentação ART/TRT sem
+     preencher o cadastro de novo — os dados vêm do cadastro já existente. */
+  const [solicitandoDoc, setSolicitandoDoc] = useState(false);
+  const jaTemDocumentacao = resultados.some((r) => r.servico === SERVICO_DOCUMENTACAO);
+  const solicitarDocumentacao = async () => {
+    setSolicitandoDoc(true);
+    try {
+      await apiFetch("/api/clientes/nova-solicitacao", { method: "POST", token: session.token });
+      notify("Solicitação enviada ✓ Nossa equipe já foi avisada.");
+      await carregar();
+    } catch (e) { notify(`Não foi possível solicitar: ${e.message}`); }
+    setSolicitandoDoc(false);
+  };
+
   return (
     <div style={{ fontFamily: "'Inter', system-ui, sans-serif", color: "#1a2330", background: CINZA_CLARO, minHeight: "100vh" }}>
       <style>{estilos}</style>
@@ -8952,13 +9102,25 @@ function PainelCliente({ session, onLogout }) {
                         Atualizado em {new Date(d.atualizadoEm).toLocaleString("pt-BR")}
                       </div>
                     )}
-                    <CartaoAtendimentoCliente doc={d} cpf={cliente?.cpf || ""} notify={notify} />
+                    <CartaoAtendimentoCliente doc={d} cpf={cliente?.cpf || ""} notify={notify} emailConhecido={cliente?.email || ""} />
                   </div>
                 );
               })}
             </div>
           )}
         </Card>
+
+        {!carregando && resultados.length > 0 && !jaTemDocumentacao && (
+          <Card icon={FileText} titulo="Precisa de mais um serviço?">
+            <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+              Peça a Documentação ART/TRT do seu imóvel sem preencher o cadastro de novo —
+              usamos os mesmos dados que você já enviou.
+            </p>
+            <button className="btn-solid" onClick={solicitarDocumentacao} disabled={solicitandoDoc}>
+              {solicitandoDoc ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} Solicitar Documentação ART/TRT
+            </button>
+          </Card>
+        )}
 
         <SecaoParceirosVitrine notify={notify} clienteLogado={cliente} token={session.token} />
       </main>
