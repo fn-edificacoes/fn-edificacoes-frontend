@@ -1976,6 +1976,20 @@ function AppInterno({ session, onLogout }) {
       return false;
     }
   };
+  /* Aprova ou recusa a comissão que o parceiro propôs para um item do portfólio. Recarrega
+     a lista porque é dela que sai o aviso de quantas ainda esperam decisão. */
+  const decidirComissaoItem = async (itemId, acao) => {
+    try {
+      await apiFetch(`/api/parceiros/servicos/${itemId}`, { method: "PATCH", token, body: { comissao_pendente_acao: acao } });
+      await carregarParceiros();
+      notify(acao === "aprovar" ? "Nova comissão aprovada ✓" : "Alteração de comissão recusada");
+      return true;
+    } catch (e) {
+      notify(`Não foi possível decidir a comissão: ${e.message}`);
+      return false;
+    }
+  };
+
   /* Cadastro manual de parceiro (feito por Vendas/Gerência já logados, ex.: parceiro que
      negociou por telefone) — reaproveita a MESMA rota pública do autocadastro, já que ela
      não exige token; só embute o formulário direto no sistema em vez da tela pública. */
@@ -2773,12 +2787,12 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "vendas" && (
           <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
             vales={vales} valesCarregando={valesCarregando} vendas={vendas} vendasCarregando={vendasCarregando} atualizarVenda={atualizarVenda}
-            criarParceiroManual={criarParceiroManual}
+            criarParceiroManual={criarParceiroManual} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem}
             salvarItemCatalogo={salvarItemCatalogoAdmin} excluirItemCatalogo={excluirItemCatalogoAdmin} notify={notify}
             podeExcluir={perfil === "gerencia"} excluirParceiro={excluirParceiro} />
         )}
         {abaTop === "gerencia" && (
-          <AbaGerencia sub={abaGerencia} docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} clientes={clientes} updCliente={updCliente} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
+          <AbaGerencia sub={abaGerencia} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem} docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} clientes={clientes} updCliente={updCliente} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
             usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} salvarPerfilTecnico={salvarPerfilTecnico} usuarioAtualId={session.usuario.id}
             avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
             parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual}
@@ -7039,7 +7053,7 @@ function CardBancoPatologias({ patologias = [], carregando, onCriar, onAtualizar
   );
 }
 
-function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas = [], vendasCarregando, atualizarVenda, notify }) {
+function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas = [], vendasCarregando, atualizarVenda, notify, token, perfil, decidirComissaoItem }) {
   const [cadastrando, setCadastrando] = useState(false);
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -7050,8 +7064,9 @@ function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceir
         </button>
       </div>
       <CardParceiros parceiros={parceiros} carregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
-        podeExcluir={podeExcluir} excluirParceiro={excluirParceiro} token={token}
-        salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} notify={notify} />
+        podeExcluir={podeExcluir} excluirParceiro={excluirParceiro} token={token} perfil={perfil}
+        salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo}
+        decidirComissaoItem={decidirComissaoItem} notify={notify} />
       <CardVendasComissoes vendas={vendas} carregando={vendasCarregando} atualizarVenda={atualizarVenda} notify={notify} />
       {cadastrando && (
         <ModalCriarParceiroManual onFechar={() => setCadastrando(false)} criarParceiroManual={criarParceiroManual} notify={notify} />
@@ -7616,7 +7631,7 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, addDoc, updDoc, delDoc, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
+function AbaGerencia({ sub = "visao-geral", token, perfil, decidirComissaoItem, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
   if (sub === "acompanhamento") {
     return <TabelaRegistrosVistoriaDoc docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc}
       carregando={carregando} notify={notify} clientes={clientes} />;
@@ -7625,6 +7640,7 @@ function AbaGerencia({ sub = "visao-geral", docs, addDoc, updDoc, delDoc, client
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual}
       salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} vales={vales} valesCarregando={valesCarregando}
       vendas={vendas} vendasCarregando={vendasCarregando} atualizarVenda={atualizarVenda} notify={notify}
+      token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem}
       podeExcluir excluirParceiro={excluirParceiro} />;
   }
   if (sub === "patologias") {
@@ -8548,6 +8564,7 @@ function mapParceiroDaApi(p) {
     comissao: safeParseArray(p.comissao),
     beneficio: p.beneficio || "", descricaoBeneficio: p.descricao_beneficio || p.descricaoBeneficio || "",
     avaliacao: p.avaliacao || "",
+    comissoesPendentes: Number(p.comissoes_pendentes || 0),
   };
 }
 
@@ -8656,6 +8673,12 @@ function ModalCriarParceiroManual({ onFechar, criarParceiroManual, notify }) {
 
 /* ---- Página pública: portfólio do parceiro ("mini site de vendas"), acessível pelo link
    individual (?portfolio=<id>) sem precisar de login — é o que atrai o cliente. ---- */
+/* Comissão informada? 0% é um valor legítimo ("não pago comissão neste item"), então não
+   dá para testar por veracidade — só vazio e nulo é que significam "não informado". */
+function temComissao(v) {
+  return v !== null && v !== undefined && v !== "";
+}
+
 function calcularDesconto(precoDe, preco) {
   if (!precoDe || !preco) return null;
   const paraNumero = (s) => {
@@ -9427,7 +9450,7 @@ function CardVendasParceiro({ vendas, carregando }) {
    parceiro (PainelParceiro, sem precisar informar parceiroId) quanto por Vendas/Gerência
    editando em nome dele (CardParceiros). Puramente de apresentação: quem chama decide como
    carregar/salvar/excluir (onSalvar/onExcluir), pra não duplicar a lógica de autenticação. */
-function EditorCatalogoParceiro({ itens = [], carregando, onSalvar, onExcluir, linkPortfolio, notify }) {
+function EditorCatalogoParceiro({ itens = [], carregando, onSalvar, onExcluir, linkPortfolio, notify, ehEquipe = false, onDecidirComissao = null }) {
   const [editando, setEditando] = useState(null);
   const [salvando, setSalvando] = useState(false);
 
@@ -9457,6 +9480,10 @@ function EditorCatalogoParceiro({ itens = [], carregando, onSalvar, onExcluir, l
   };
 
   const descontoItem = editando ? calcularDesconto(editando.preco_de, editando.preco) : null;
+  /* "Já acertada" é o item que existe e tem comissão vigente — item novo, ou item sem
+     comissão nenhuma, o parceiro ainda define sozinho. */
+  const comissaoVigente = editando?._comissaoVigente ?? null;
+  const comissaoJaAcertada = temComissao(comissaoVigente);
 
   return (
     <Card icon={Camera} titulo={`Portfólio (${itens.length} ${itens.length === 1 ? "item" : "itens"})`}>
@@ -9493,14 +9520,34 @@ function EditorCatalogoParceiro({ itens = [], carregando, onSalvar, onExcluir, l
                       -{calcularDesconto(s.preco_de, s.preco)}% cliente
                     </span>
                   )}
-                  {s.comissao_percentual !== null && s.comissao_percentual !== undefined && s.comissao_percentual !== "" && (
+                  {temComissao(s.comissao_percentual) && (
                     <span style={{ background: "#EAF2FB", color: AZUL_MEDIO, padding: "2px 7px", borderRadius: 6 }}>
                       {Number(s.comissao_percentual)}% FN
                     </span>
                   )}
+                  {temComissao(s.comissao_percentual_pendente) && (
+                    <span style={{ background: "#FFF4E0", color: "#B26A00", padding: "2px 7px", borderRadius: 6 }}>
+                      {Number(s.comissao_percentual_pendente)}% aguardando aprovação
+                    </span>
+                  )}
                 </div>
+
+                {/* A decisão fica onde o número aparece: a Gerência abre o portfólio, vê o
+                    valor proposto ao lado do vigente e resolve ali, sem outra tela. */}
+                {onDecidirComissao && temComissao(s.comissao_percentual_pendente) && (
+                  <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                    <button className="btn-solid" style={{ padding: "5px 10px", fontSize: 11.5 }}
+                      onClick={() => onDecidirComissao(s.id, "aprovar")}>
+                      <Check size={12} /> Aprovar {Number(s.comissao_percentual_pendente)}%
+                    </button>
+                    <button className="btn-ghost" style={{ padding: "5px 10px", fontSize: 11.5, color: "#c62828", background: "#FCEAEA" }}
+                      onClick={() => onDecidirComissao(s.id, "recusar")}>
+                      Recusar
+                    </button>
+                  </div>
+                )}
                 <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                  <button className="icon-btn" onClick={() => setEditando({ ...s })} title="Editar"><Edit3 size={13} color={AZUL_MEDIO} /></button>
+                  <button className="icon-btn" onClick={() => setEditando({ ...s, _comissaoVigente: s.comissao_percentual ?? null })} title="Editar"><Edit3 size={13} color={AZUL_MEDIO} /></button>
                   <button className="icon-btn" onClick={() => onExcluir(s.id)} title="Excluir"><Trash2 size={13} color="#c62828" /></button>
                 </div>
               </div>
@@ -9561,6 +9608,21 @@ function EditorCatalogoParceiro({ itens = [], carregando, onSalvar, onExcluir, l
                 Percentual que você repassa à FN quando este item é vendido. O cliente não vê.
                 Em branco, vale a comissão da categoria combinada no seu cadastro.
               </p>
+              {/* Comissão acertada é acordo, não configuração: o parceiro propõe o valor novo,
+                  a FN aprova, e até lá o vigente continua valendo. Sem este aviso ele salvaria
+                  achando que já mudou. */}
+              {!ehEquipe && comissaoJaAcertada && (
+                <p style={{ fontSize: 12, color: "#B26A00", background: "#FFF4E0", borderRadius: 8, padding: "9px 12px", margin: "8px 0 0" }}>
+                  A comissão deste item já foi acertada em <strong>{Number(comissaoVigente)}%</strong>. Alterar aqui
+                  envia o novo valor para aprovação da FN — até a resposta, vale o percentual atual.
+                </p>
+              )}
+              {temComissao(editando.comissao_percentual_pendente) && (
+                <p style={{ fontSize: 12, color: "#B26A00", margin: "8px 0 0" }}>
+                  Já existe uma alteração para <strong>{Number(editando.comissao_percentual_pendente)}%</strong> aguardando
+                  {ehEquipe ? " sua aprovação." : " aprovação da FN."}
+                </p>
+              )}
             </div>
 
             <Area label="Descrição" value={editando.descricao || ""} onChange={(v) => setEditando((ed) => ({ ...ed, descricao: v }))} rows={3} placeholder="O que torna esse serviço/produto atrativo pro cliente" />
@@ -10039,7 +10101,7 @@ function ModalPerfilParceiroAdmin({ parceiro, onFechar, atualizarParceiro, notif
 /* Wrapper do EditorCatalogoParceiro pra uso da Gerência/Vendas: carrega o catálogo público
    de um parceiro específico e liga onSalvar/onExcluir nas versões "admin" (que informam
    parceiroId, diferente do fluxo do próprio parceiro logado). */
-function ModalCatalogoParceiro({ parceiro, onFechar, salvarItemCatalogo, excluirItemCatalogo, notify, token }) {
+function ModalCatalogoParceiro({ parceiro, onFechar, salvarItemCatalogo, excluirItemCatalogo, notify, token, decidirComissaoItem, podeDecidirComissao }) {
   const [itens, setItens] = useState([]);
   const [carregando, setCarregando] = useState(true);
 
@@ -10066,14 +10128,17 @@ function ModalCatalogoParceiro({ parceiro, onFechar, salvarItemCatalogo, excluir
           <button className="icon-btn" onClick={onFechar}><X size={16} /></button>
         </div>
         <EditorCatalogoParceiro itens={itens} carregando={carregando} onSalvar={onSalvar} onExcluir={onExcluir}
-          linkPortfolio={`${window.location.origin}${window.location.pathname}?portfolio=${parceiro.id}`} notify={notify} />
+          linkPortfolio={`${window.location.origin}${window.location.pathname}?portfolio=${parceiro.id}`} notify={notify}
+          ehEquipe onDecidirComissao={podeDecidirComissao
+            ? async (id, acao) => { const ok = await decidirComissaoItem(id, acao); if (ok) await carregar(); return ok; }
+            : null} />
       </div>
     </div>
   );
 }
 
 /* ---- Aba Parceiros dentro da Gerência (homologação) ---- */
-function CardParceiros({ parceiros, carregando, atualizarParceiro, podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, notify, token }) {
+function CardParceiros({ parceiros, carregando, atualizarParceiro, podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, notify, token, perfil, decidirComissaoItem }) {
   const [editando, setEditando] = useState(null); // { id, status, avaliacao }
   const [catalogoDe, setCatalogoDe] = useState(null); // parceiro cujo portfólio está aberto
   const [perfilDe, setPerfilDe] = useState(null); // parceiro cujo perfil de venda está sendo editado
@@ -10092,12 +10157,28 @@ function CardParceiros({ parceiros, carregando, atualizarParceiro, podeExcluir =
     setExcluindo(null);
     if (alvo) await excluirParceiro(alvo.id);
   };
+  const totalComissoesPendentes = parceiros.reduce((soma, p) => soma + (p.comissoesPendentes || 0), 0);
 
   return (
     <Card icon={Users} titulo={`Parceiros / Afiliados (${parceiros.length})`}>
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
         Homologação dos parceiros cadastrados pelo portal público. Aprove, suspenda ou encerre a parceria conforme necessário.
       </p>
+
+      {/* Comissão acertada só muda com aprovação, então a proposta do parceiro precisa
+          esbarrar em alguém: sem este aviso ela ficaria esperando dentro do portfólio, que
+          ninguém abre um a um. O número leva direto ao lugar de decidir. */}
+      {totalComissoesPendentes > 0 && (
+        <div style={{ background: "#FFF4E0", color: "#B26A00", borderRadius: 8, padding: "10px 12px", fontSize: 13, marginBottom: 14, display: "flex", gap: 8, alignItems: "flex-start" }}>
+          <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span>
+            {totalComissoesPendentes === 1
+              ? "1 item de portfólio com nova comissão aguardando sua aprovação"
+              : `${totalComissoesPendentes} itens de portfólio com nova comissão aguardando sua aprovação`} —
+            abra o portfólio (ícone da câmera) do parceiro marcado para aprovar ou recusar.
+          </span>
+        </div>
+      )}
 
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
       {!carregando && parceiros.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum parceiro cadastrado ainda.</p>}
@@ -10118,6 +10199,11 @@ function CardParceiros({ parceiros, carregando, atualizarParceiro, podeExcluir =
                   <td style={{ padding: "8px 10px" }}><Selo valor={PARCEIRO_STATUS_LABEL[p.status] || p.status} /></td>
                   <td style={{ padding: "8px 10px", fontWeight: 600 }}>
                     {p.empresa}<div style={{ fontWeight: 400, fontSize: 12, color: "#8593a8" }}>{p.responsavel}{p.cidade ? ` · ${p.cidade}/${p.uf}` : ""}</div>
+                    {p.comissoesPendentes > 0 && (
+                      <div style={{ marginTop: 4, display: "inline-block", background: "#FFF4E0", color: "#B26A00", fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 6 }}>
+                        {p.comissoesPendentes} comissão(ões) a aprovar
+                      </div>
+                    )}
                   </td>
                   <td style={{ padding: "8px 10px" }}>{PARCEIRO_TIPO_LABEL[p.tipo] || p.tipo}</td>
                   <td style={{ padding: "8px 10px", fontSize: 12 }}>
@@ -10162,7 +10248,8 @@ function CardParceiros({ parceiros, carregando, atualizarParceiro, podeExcluir =
 
       {catalogoDe && (
         <ModalCatalogoParceiro parceiro={catalogoDe} onFechar={() => setCatalogoDe(null)} token={token}
-          salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} notify={notify} />
+          salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo}
+          decidirComissaoItem={decidirComissaoItem} podeDecidirComissao={["gerencia", "vendas"].includes(perfil)} notify={notify} />
       )}
 
       {perfilDe && (
