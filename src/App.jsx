@@ -6701,7 +6701,15 @@ function normalizarChaveEmpreendimento(s) {
   return semAcento.replace(/^(residencial|condominio|edificio|cond\.?|ed\.?|res\.?)\s+/, "").trim();
 }
 
-function CardReceitaEstimada({ precos, clientes, docs = [] }) {
+// Taxa de emissão que a FN paga por documentação ART/TRT — fixa, não varia por empreendimento.
+const CUSTO_UNITARIO_DOCUMENTACAO = 69;
+// Pagamento fixo ao vistoriador por vistoria entregue — não varia por empreendimento.
+const CUSTO_UNITARIO_VISTORIA = 80;
+
+function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
+  const nomeVistoriadorPorId = {};
+  usuarios.forEach((u) => { if (u.role === "vistoriador") nomeVistoriadorPorId[u.id] = u.nome; });
+
   const precoPorChave = {};
   const nomeCanonicoPorChave = {};
   precos.forEach((p) => {
@@ -6744,40 +6752,59 @@ function CardReceitaEstimada({ precos, clientes, docs = [] }) {
     if (c.pagamento === "Pago") cruzamento[k].qtdPagos += 1;
   };
 
+  // vistoriadorId -> qtd de vistorias entregues (base do indicador de pagamento por vistoria).
+  const vistoriasPorTecnico = {};
+
   let foraDoRelatorio = 0;
   clientes.forEach((c) => {
     if (c.status === "Cancelado") return;
     if (ehServicoDocumentacao(c)) {
       if (c.status === STATUS_DOC_CONCLUIDA) registrar(c, "documentacao");
     } else if (c.servico === SERVICO_VISTORIA) {
-      if (vistoriaEntregue(c)) registrar(c, "vistoria");
+      if (vistoriaEntregue(c)) {
+        registrar(c, "vistoria");
+        if (c.vistoriadorId) vistoriasPorTecnico[c.vistoriadorId] = (vistoriasPorTecnico[c.vistoriadorId] || 0) + 1;
+      }
     } else if (c.servico) {
       // Serviço "Outro" não tem preço de tabela e sumia daqui sem avisar ninguém.
       foraDoRelatorio += 1;
     }
   });
 
+  const pagamentosTecnicos = Object.entries(vistoriasPorTecnico)
+    .map(([id, qtd]) => ({ id, nome: nomeVistoriadorPorId[id] || "(vistoriador removido)", qtd, valor: qtd * CUSTO_UNITARIO_VISTORIA }))
+    .sort((a, b) => b.valor - a.valor);
+  const totalPagamentosTecnicos = pagamentosTecnicos.reduce((s, p) => s + p.valor, 0);
+
   const linhas = Object.values(cruzamento)
     .map((l) => {
       const def = SERVICOS.find((s) => s.chave === l.servico);
       const unitario = Number(precoPorChave[l.chaveEmp]?.[def.campoPreco]) || 0;
-      return { ...l, rotulo: def.rotulo, unitario, total: unitario * l.qtd, recebido: unitario * l.qtdPagos };
+      const custo = l.servico === "documentacao" ? CUSTO_UNITARIO_DOCUMENTACAO * l.qtd
+        : l.servico === "vistoria" ? CUSTO_UNITARIO_VISTORIA * l.qtd : 0;
+      const total = unitario * l.qtd;
+      return { ...l, rotulo: def.rotulo, unitario, total, recebido: unitario * l.qtdPagos, custo, lucro: total - custo };
     })
     .sort((a, b) => b.total - a.total || a.empreendimento.localeCompare(b.empreendimento, "pt-BR"));
 
   const totalGeral = linhas.reduce((s, l) => s + l.total, 0);
   const totalRecebido = linhas.reduce((s, l) => s + l.recebido, 0);
   const totalServicos = linhas.reduce((s, l) => s + l.qtd, 0);
+  const totalCusto = linhas.reduce((s, l) => s + l.custo, 0);
+  const totalLucro = totalGeral - totalCusto;
   const semPreco = linhas.filter((l) => l.unitario === 0);
 
   const num = { textAlign: "right", whiteSpace: "nowrap" };
 
   return (
+    <>
     <Card icon={TrendingUp} titulo="Receita por empreendimento e serviço">
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
         Uma linha por empreendimento e tipo de serviço, com o valor unitário cadastrado acima.
         Entram só os serviços entregues: vistorias com <strong>laudo já enviado ao cliente</strong> e
-        documentações concluídas.
+        documentações concluídas. Cada documentação ART/TRT tem custo fixo de {fmtReal(CUSTO_UNITARIO_DOCUMENTACAO)}
+        (taxa de emissão) e cada vistoria custa {fmtReal(CUSTO_UNITARIO_VISTORIA)} (pagamento ao vistoriador) —
+        a coluna "Lucro" já desconta isso do total.
       </p>
 
       {linhas.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum serviço concluído ainda.</p>}
@@ -6788,7 +6815,7 @@ function CardReceitaEstimada({ precos, clientes, docs = [] }) {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: CINZA_CLARO }}>
-                  {["Empreendimento", "Serviço", "Qtd", "Valor unitário", "Total", "Recebido"].map((h, i) => (
+                  {["Empreendimento", "Serviço", "Qtd", "Valor unitário", "Total", "Custo", "Lucro", "Recebido"].map((h, i) => (
                     <th key={h} style={{ textAlign: i >= 2 ? "right" : "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}`, whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
@@ -6803,6 +6830,10 @@ function CardReceitaEstimada({ precos, clientes, docs = [] }) {
                       {l.unitario ? fmtReal(l.unitario) : "sem preço"}
                     </td>
                     <td style={{ padding: "8px 10px", ...num, fontWeight: 700, color: AZUL_MARINHO }}>{fmtReal(l.total)}</td>
+                    <td style={{ padding: "8px 10px", ...num, color: l.custo ? "#C62828" : "#8593a8" }}>
+                      {l.custo ? fmtReal(l.custo) : "—"}
+                    </td>
+                    <td style={{ padding: "8px 10px", ...num, fontWeight: 700, color: "#2E7D32" }}>{fmtReal(l.lucro)}</td>
                     <td style={{ padding: "8px 10px", ...num, color: l.recebido >= l.total && l.total > 0 ? "#2E7D32" : "#65758b" }}>
                       {fmtReal(l.recebido)}
                     </td>
@@ -6815,6 +6846,8 @@ function CardReceitaEstimada({ precos, clientes, docs = [] }) {
                   <td style={{ padding: "9px 10px", ...num, fontWeight: 700 }}>{totalServicos}</td>
                   <td />
                   <td style={{ padding: "9px 10px", ...num, fontWeight: 800, color: AZUL_MARINHO }}>{fmtReal(totalGeral)}</td>
+                  <td style={{ padding: "9px 10px", ...num, fontWeight: 800, color: "#C62828" }}>{fmtReal(totalCusto)}</td>
+                  <td style={{ padding: "9px 10px", ...num, fontWeight: 800, color: "#2E7D32" }}>{fmtReal(totalLucro)}</td>
                   <td style={{ padding: "9px 10px", ...num, fontWeight: 800, color: "#2E7D32" }}>{fmtReal(totalRecebido)}</td>
                 </tr>
               </tfoot>
@@ -6840,6 +6873,42 @@ function CardReceitaEstimada({ precos, clientes, docs = [] }) {
         </>
       )}
     </Card>
+
+    {pagamentosTecnicos.length > 0 && (
+      <Card icon={Users} titulo="Pagamento aos vistoriadores">
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+          {fmtReal(CUSTO_UNITARIO_VISTORIA)} por vistoria entregue (laudo já enviado ao cliente), por vistoriador.
+        </p>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: CINZA_CLARO }}>
+                {["Vistoriador", "Vistorias entregues", "A pagar"].map((h, i) => (
+                  <th key={h} style={{ textAlign: i >= 1 ? "right" : "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}`, whiteSpace: "nowrap" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {pagamentosTecnicos.map((p) => (
+                <tr key={p.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                  <td style={{ padding: "8px 10px", fontWeight: 600 }}>{p.nome}</td>
+                  <td style={{ padding: "8px 10px", ...num }}>{p.qtd}</td>
+                  <td style={{ padding: "8px 10px", ...num, fontWeight: 700, color: AZUL_MARINHO }}>{fmtReal(p.valor)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr style={{ borderTop: `2px solid ${CINZA_BORDA}`, background: CINZA_CLARO }}>
+                <td style={{ padding: "9px 10px", fontWeight: 800, color: AZUL_MARINHO }}>Total</td>
+                <td style={{ padding: "9px 10px", ...num, fontWeight: 700 }}>{pagamentosTecnicos.reduce((s, p) => s + p.qtd, 0)}</td>
+                <td style={{ padding: "9px 10px", ...num, fontWeight: 800, color: AZUL_MARINHO }}>{fmtReal(totalPagamentosTecnicos)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </Card>
+    )}
+    </>
   );
 }
 
@@ -6885,7 +6954,7 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
       <CardPrecoEmpreendimento precos={precos} carregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef} clientes={clientes}
         adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento} notify={notify} />
 
-      <CardReceitaEstimada precos={precos} clientes={clientes} docs={docs} />
+      <CardReceitaEstimada precos={precos} clientes={clientes} docs={docs} usuarios={usuarios} />
     </div>
   );
 }
