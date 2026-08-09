@@ -1557,32 +1557,13 @@ function PortalCliente({ onIrParaLogin, onLogin }) {
         </button>
 
         {/* FN Serviços é a marca guarda-chuva das 3 áreas: contratando um serviço técnico, o
-            cliente também passa a ter acesso ao FN Clube e ao FN Home — por isso os 3 blocos
-            aparecem juntos aqui, antes até do formulário de solicitação. */}
-        <div style={{ textAlign: "center", margin: "6px 0 20px" }}>
+            cliente também passa a ter acesso ao FN Clube e ao FN Home. A navegação entre elas
+            fica só na barra azul do topo — sem repetir os blocos aqui embaixo. */}
+        <div style={{ textAlign: "center", margin: "6px 0 26px" }}>
           <div style={{ fontSize: 20, fontWeight: 800, color: AZUL_MARINHO }}>FN Serviços</div>
           <p style={{ fontSize: 13.5, color: "#65758b", margin: "4px 0 0" }}>
             Contratando a FN, você não recebe apenas um serviço técnico — você passa a ter acesso a um ecossistema de benefícios para cuidar, reformar e equipar seu imóvel.
           </p>
-        </div>
-
-        <div style={{ display: "grid", gap: 12, marginBottom: 26 }}>
-          <div style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 14, padding: 18 }}>
-            <div style={{ fontWeight: 800, color: AZUL_MARINHO, fontSize: 15, marginBottom: 4 }}>Serviços Técnicos FN</div>
-            <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 4px" }}>Proteção técnica desde o recebimento do seu imóvel.</p>
-            <p style={{ fontSize: 12.5, color: "#8593a8", margin: "0 0 12px" }}>Vistoria de Entrega de Chaves · Revistoria · Documentação ART/TRT</p>
-            <a href="#solicitar-servico" className="btn-solid" style={{ width: "auto", padding: "8px 16px", textDecoration: "none", display: "inline-flex" }}>Ver serviços</a>
-          </div>
-          <div style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 14, padding: 18 }}>
-            <div style={{ fontWeight: 800, color: AZUL_MARINHO, fontSize: 15, marginBottom: 4 }}>FN Clube</div>
-            <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 12px" }}>Profissionais e serviços selecionados com vantagens exclusivas para clientes FN.</p>
-            <a href="?pagina=fn-clube" className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, width: "auto", padding: "8px 16px", textDecoration: "none", display: "inline-flex" }}>Ver benefícios</a>
-          </div>
-          <div style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 14, padding: 18 }}>
-            <div style={{ fontWeight: 800, color: AZUL_MARINHO, fontSize: 15, marginBottom: 4 }}>FN Home</div>
-            <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 12px" }}>Produtos para seu novo lar, com condições exclusivas para clientes FN.</p>
-            <a href="?pagina=fn-home" className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, width: "auto", padding: "8px 16px", textDecoration: "none", display: "inline-flex" }}>Ver produtos</a>
-          </div>
         </div>
 
         <div id="solicitar-servico">
