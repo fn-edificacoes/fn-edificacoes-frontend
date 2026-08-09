@@ -1664,6 +1664,14 @@ function BotaoCarrinho({ quantidade, onClick }) {
    só aqui, na hora de fechar — até então dá pra navegar e escolher sem conta nenhuma. */
 function ModalCarrinho({ itens, alterarQuantidade, remover, total, onFechar, token, notify, onIrParaLogin, esvaziar }) {
   const [finalizando, setFinalizando] = useState(false);
+  /* Soma só o que tem "de" maior que o preço cobrado: item sem preço anterior não inventa
+     economia. Itens que já estavam no carrinho antes desta versão não têm precoDe gravado —
+     ficam de fora da conta em vez de quebrar. */
+  const economiaTotal = itens.reduce((soma, i) => {
+    const de = Number(i.precoDe) || 0;
+    const por = Number(i.precoUnitario) || 0;
+    return soma + (de > por ? (de - por) * i.quantidade : 0);
+  }, 0);
 
   const finalizarCompra = async () => {
     if (!token) { onFechar(); onIrParaLogin?.(); return; }
@@ -1700,7 +1708,12 @@ function ModalCarrinho({ itens, alterarQuantidade, remover, total, onFechar, tok
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 700, fontSize: 13 }}>{i.titulo}</div>
                     <div style={{ fontSize: 11.5, color: "#8593a8" }}>{i.parceiroEmpresa}</div>
-                    <div style={{ fontSize: 12.5, color: "#2E7D32", fontWeight: 700 }}>{fmtReal(i.precoUnitario)}</div>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+                      {i.precoDe > i.precoUnitario && (
+                        <span style={{ fontSize: 11.5, color: "#8593a8", textDecoration: "line-through" }}>{fmtReal(i.precoDe)}</span>
+                      )}
+                      <span style={{ fontSize: 12.5, color: "#2E7D32", fontWeight: 700 }}>{fmtReal(i.precoUnitario)}</span>
+                    </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <button className="icon-btn" onClick={() => alterarQuantidade(i.servicoId, i.quantidade - 1)}><Minus size={13} /></button>
@@ -1711,6 +1724,11 @@ function ModalCarrinho({ itens, alterarQuantidade, remover, total, onFechar, tok
                 </div>
               ))}
             </div>
+            {economiaTotal > 0 && (
+              <div style={{ marginTop: 12, background: "#FCEAEA", color: "#C62828", borderRadius: 8, padding: "8px 10px", fontSize: 12.5, fontWeight: 700, textAlign: "center" }}>
+                Você economizou {fmtReal(economiaTotal)} nesta compra
+              </div>
+            )}
             <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${CINZA_BORDA}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <strong style={{ color: AZUL_MARINHO }}>Total: {fmtReal(total)}</strong>
               <button className="btn-solid" style={{ width: "auto", padding: "10px 18px" }} disabled={finalizando} onClick={finalizarCompra}>
@@ -8776,16 +8794,43 @@ function temComissao(v) {
   return v !== null && v !== undefined && v !== "";
 }
 
+/* O parceiro digita "de" e "por" como texto livre ("R$ 500", "500,00", "500"), então o
+   número precisa ser extraído antes de qualquer conta — inclusive para comparar com o
+   preço de venda online, que esse sim é numérico. */
+function precoParaNumero(valor) {
+  if (valor === null || valor === undefined || valor === "") return null;
+  const n = parseFloat(String(valor).replace(/[^0-9,.-]/g, "").replace(/\.(?=.*\.)/g, "").replace(",", "."));
+  return Number.isNaN(n) ? null : n;
+}
+
 function calcularDesconto(precoDe, preco) {
-  if (!precoDe || !preco) return null;
-  const paraNumero = (s) => {
-    const n = parseFloat(String(s).replace(/[^0-9,.-]/g, "").replace(/\.(?=.*\.)/g, "").replace(",", "."));
-    return Number.isNaN(n) ? null : n;
-  };
-  const de = paraNumero(precoDe);
-  const por = paraNumero(preco);
+  const de = precoParaNumero(precoDe);
+  const por = precoParaNumero(preco);
   if (de === null || por === null || de <= por || de <= 0) return null;
   return Math.round((1 - por / de) * 100);
+}
+
+/* Preço de um item comprável. O cliente precisa ver que ganhou desconto, e não só o valor
+   final: sem o "de" riscado ao lado, o benefício de ser cliente FN fica invisível
+   justamente na hora de decidir a compra. O riscado só aparece quando o "de" é um número
+   de verdade e maior que o preço cobrado — desconto inventado seria propaganda enganosa. */
+function PrecoDeVenda({ precoDe, precoVenda, compacto }) {
+  const de = precoParaNumero(precoDe);
+  const por = Number(precoVenda);
+  const temDesconto = de !== null && de > por;
+  return (
+    <div>
+      {temDesconto && (
+        <div style={{ fontSize: compacto ? 11 : 12, color: "#8593a8", textDecoration: "line-through" }}>{fmtReal(de)}</div>
+      )}
+      <div style={{ fontSize: compacto ? 13 : 15, fontWeight: compacto ? 700 : 800, color: "#2E7D32" }}>{fmtReal(por)}</div>
+      {temDesconto && (
+        <div style={{ fontSize: compacto ? 10.5 : 11.5, color: "#C62828", fontWeight: 700 }}>
+          Você economiza {fmtReal(de - por)}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /* ---- Resgate do cupom na página do parceiro ----
@@ -8949,7 +8994,9 @@ function PaginaPortfolioParceiro({ parceiroId }) {
         ) : (
           <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))" }}>
             {itens.map((s) => {
-              const desconto = calcularDesconto(s.preco_de, s.preco);
+              /* Quando o item é comprável, o selo tem de bater com o valor que vai ser
+                 cobrado — senão a vitrine anuncia -10% e cobra outro desconto. */
+              const desconto = calcularDesconto(s.preco_de, s.preco_venda || s.preco);
               return (
                 <div key={s.id} style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, overflow: "hidden", position: "relative" }}>
                   {desconto && (
@@ -8966,7 +9013,7 @@ function PaginaPortfolioParceiro({ parceiroId }) {
                     {s.titulo && <div style={{ fontSize: 14.5, fontWeight: 700, marginBottom: 4 }}>{s.titulo}</div>}
                     {s.descricao && <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 6px" }}>{s.descricao}</p>}
                     {s.preco_venda ? (
-                      <div style={{ fontSize: 15, fontWeight: 800, color: "#2E7D32" }}>{fmtReal(s.preco_venda)}</div>
+                      <PrecoDeVenda precoDe={s.preco_de} precoVenda={s.preco_venda} />
                     ) : (
                       <>
                         {s.preco_de && <div style={{ fontSize: 12, color: "#8593a8", textDecoration: "line-through" }}>{s.preco_de}</div>}
@@ -8975,7 +9022,7 @@ function PaginaPortfolioParceiro({ parceiroId }) {
                     )}
                     {s.preco_venda > 0 && (
                       <button className="btn-solid" style={{ width: "100%", justifyContent: "center", marginTop: 10, padding: "8px" }}
-                        onClick={() => { carrinho.adicionar({ servicoId: s.id, titulo: s.titulo || "Serviço", precoUnitario: Number(s.preco_venda), parceiroEmpresa: parceiro.empresa, foto: s.foto }); notify("Adicionado ao carrinho ✓"); }}>
+                        onClick={() => { carrinho.adicionar({ servicoId: s.id, titulo: s.titulo || "Serviço", precoUnitario: Number(s.preco_venda), precoDe: precoParaNumero(s.preco_de), parceiroEmpresa: parceiro.empresa, foto: s.foto }); notify("Adicionado ao carrinho ✓"); }}>
                         <ShoppingCart size={14} /> Comprar
                       </button>
                     )}
@@ -10632,13 +10679,13 @@ function ModalBeneficioParceiro({ parceiro, onClose, notify, clienteLogado, toke
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13, fontWeight: 600 }}>{s.titulo || "Serviço"}</div>
                         {s.preco_venda ? (
-                          <div style={{ fontSize: 13, color: "#2E7D32", fontWeight: 700 }}>{fmtReal(s.preco_venda)}</div>
+                          <PrecoDeVenda precoDe={s.preco_de} precoVenda={s.preco_venda} compacto />
                         ) : s.preco && <div style={{ fontSize: 11.5, color: "#8593a8" }}>a partir de {s.preco}</div>}
                       </div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                         {s.preco_venda > 0 && (
                           <button className="btn-solid" style={{ width: "auto", padding: "7px 12px", fontSize: 12.5, whiteSpace: "nowrap" }}
-                            onClick={() => { adicionarAoCarrinho({ servicoId: s.id, titulo: s.titulo || "Serviço", precoUnitario: Number(s.preco_venda), parceiroEmpresa: parceiro.empresa, foto: s.foto }); notify("Adicionado ao carrinho ✓"); }}>
+                            onClick={() => { adicionarAoCarrinho({ servicoId: s.id, titulo: s.titulo || "Serviço", precoUnitario: Number(s.preco_venda), precoDe: precoParaNumero(s.preco_de), parceiroEmpresa: parceiro.empresa, foto: s.foto }); notify("Adicionado ao carrinho ✓"); }}>
                             <ShoppingCart size={13} /> Comprar
                           </button>
                         )}
