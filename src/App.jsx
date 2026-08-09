@@ -510,7 +510,7 @@ function etapaClienteCompleta(cliente, docs = []) {
 
 const novoCadastroCliente = () => ({
   id: `cli_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-  nome: "", cpf: "", telefone: "", email: "",
+  nome: "", cpf: "", telefone: "", email: "", senha: "",
   construtora: "", empreendimento: "", blocoTorre: "", endereco: "", cep: "",
   servico: SERVICO_OPCOES[0], dataDesejada: "", horarioDesejado: "", areaPrivativa: "", observacoes: "",
   atendido: false,
@@ -1354,6 +1354,10 @@ function TelaLogin({ onLogin, onVoltar }) {
   const [senha, setSenha] = useState("");
   const [erro, setErro] = useState("");
   const [carregando, setCarregando] = useState(false);
+  const [primeiroAcesso, setPrimeiroAcesso] = useState(false);
+  const [emailPrimeiroAcesso, setEmailPrimeiroAcesso] = useState("");
+  const [enviandoLink, setEnviandoLink] = useState(false);
+  const [linkEnviado, setLinkEnviado] = useState(false);
 
   const entrar = async () => {
     if (!email || !senha) { setErro("Informe e-mail e senha."); return; }
@@ -1366,6 +1370,52 @@ function TelaLogin({ onLogin, onVoltar }) {
     }
     setCarregando(false);
   };
+
+  /* Só para quem é cliente e nunca criou senha (cadastro antigo, ou feito por telefone pelo
+     Atendimento). Quem já tem senha e esqueceu fala com o suporte — não é este fluxo. */
+  const pedirLinkPrimeiroAcesso = async () => {
+    if (!emailPrimeiroAcesso.trim()) return;
+    setEnviandoLink(true);
+    try {
+      await apiFetch("/api/clientes/solicitar-senha", { method: "POST", body: { email: emailPrimeiroAcesso.trim() } });
+      setLinkEnviado(true);
+    } catch { setLinkEnviado(true); } // mensagem é sempre genérica, mesmo se a chamada falhar
+    setEnviandoLink(false);
+  };
+
+  if (primeiroAcesso) {
+    return (
+      <div style={{ minHeight: "100vh", background: CINZA_CLARO, display: "grid", placeItems: "center", padding: 18, fontFamily: "'Inter', system-ui, sans-serif" }}>
+        <div style={{ background: "#fff", borderRadius: 16, padding: "32px 30px", width: "100%", maxWidth: 380, boxShadow: "0 10px 30px rgba(18,51,91,.12)" }}>
+          <h2 style={{ textAlign: "center", color: AZUL_MARINHO, fontSize: 18, margin: "0 0 4px" }}>Primeiro acesso</h2>
+          <p style={{ textAlign: "center", color: "#65758b", fontSize: 13, margin: "0 0 20px" }}>
+            Digite o e-mail que você usou no cadastro. Enviamos um link para você criar sua senha.
+          </p>
+          {linkEnviado ? (
+            <div style={{ background: "#E6F4EA", border: "1px solid #A5D6B0", color: "#2E7D32", borderRadius: 10, padding: "12px 14px", fontSize: 13.5 }}>
+              Se esse e-mail estiver cadastrado, você vai receber um link em instantes. Confira também a caixa de spam.
+            </div>
+          ) : (
+            <>
+              <div style={cell(true)}>
+                <label style={lab}>E-mail cadastrado</label>
+                <input style={inp} type="email" value={emailPrimeiroAcesso} onChange={(e) => setEmailPrimeiroAcesso(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && pedirLinkPrimeiroAcesso()} autoFocus />
+              </div>
+              <button type="button" className="btn-solid" style={{ width: "100%", justifyContent: "center", marginTop: 18, padding: "11px" }}
+                disabled={enviandoLink} onClick={pedirLinkPrimeiroAcesso}>
+                {enviandoLink ? <><Loader2 size={15} className="spin" /> Enviando…</> : "Enviar link"}
+              </button>
+            </>
+          )}
+          <button type="button" onClick={() => { setPrimeiroAcesso(false); setLinkEnviado(false); setEmailPrimeiroAcesso(""); }}
+            style={{ width: "100%", marginTop: 14, background: "none", border: "none", color: AZUL_MEDIO, fontSize: 13, cursor: "pointer" }}>
+            ← Voltar para o login
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: CINZA_CLARO, display: "grid", placeItems: "center", padding: 18, fontFamily: "'Inter', system-ui, sans-serif" }}>
@@ -1395,8 +1445,67 @@ function TelaLogin({ onLogin, onVoltar }) {
           {carregando ? <><Loader2 size={15} className="spin" /> Entrando…</> : "Entrar"}
         </button>
 
+        <div style={{ display: "flex", justifyContent: "center", gap: 14, marginTop: 14, fontSize: 12.5, flexWrap: "wrap" }}>
+          <button type="button" onClick={() => setPrimeiroAcesso(true)} style={{ background: "none", border: "none", color: AZUL_MEDIO, cursor: "pointer", padding: 0 }}>
+            Sou cliente e é meu primeiro acesso
+          </button>
+          <a href="https://wa.me/5581983061305" target="_blank" rel="noopener noreferrer" style={{ color: "#8593a8", textDecoration: "none" }}>
+            Esqueci minha senha
+          </a>
+        </div>
+
         <button type="button" onClick={onVoltar} style={{ width: "100%", marginTop: 14, background: "none", border: "none", color: AZUL_MEDIO, fontSize: 13, cursor: "pointer" }}>
-          ← Sou cliente, quero me cadastrar ou acompanhar meu atendimento
+          ← Sou cliente e quero me cadastrar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* Tela do link enviado por e-mail (?criar-senha=<token>) — primeiro acesso do cliente ao
+   portal, ou recuperação depois que a Gerência já reabriu o caminho (ver rota no backend). */
+function TelaCriarSenhaCliente({ token, onConcluido }) {
+  const [senha, setSenha] = useState("");
+  const [confirmacao, setConfirmacao] = useState("");
+  const [erro, setErro] = useState("");
+  const [enviando, setEnviando] = useState(false);
+
+  const confirmar = async () => {
+    if (senha.length < 6) { setErro("A senha precisa ter no mínimo 6 caracteres."); return; }
+    if (senha !== confirmacao) { setErro("As senhas não conferem."); return; }
+    setErro(""); setEnviando(true);
+    try {
+      const r = await apiFetch("/api/clientes/confirmar-senha", { method: "POST", body: { token, senha } });
+      onConcluido({ token: r.token, usuario: r.usuario });
+    } catch (e) { setErro(e.message); }
+    setEnviando(false);
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: CINZA_CLARO, display: "grid", placeItems: "center", padding: 18, fontFamily: "'Inter', system-ui, sans-serif" }}>
+      <div style={{ background: "#fff", borderRadius: 16, padding: "32px 30px", width: "100%", maxWidth: 380, boxShadow: "0 10px 30px rgba(18,51,91,.12)" }}>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}>
+          <img src={LOGO_URL} alt="FN Edificações" style={{ height: "clamp(56px, 14vw, 72px)", width: "auto" }} />
+        </div>
+        <h2 style={{ textAlign: "center", color: AZUL_MARINHO, fontSize: 18, margin: "0 0 4px" }}>Criar sua senha</h2>
+        <p style={{ textAlign: "center", color: "#65758b", fontSize: 13, margin: "0 0 20px" }}>Portal do Cliente FN Edificações</p>
+
+        <div style={cell(true)}>
+          <label style={lab}>Nova senha</label>
+          <input style={inp} type="password" value={senha} onChange={(e) => setSenha(e.target.value)} autoFocus />
+        </div>
+        <div style={{ ...cell(true), marginTop: 12 }}>
+          <label style={lab}>Confirme a senha</label>
+          <input style={inp} type="password" value={confirmacao} onChange={(e) => setConfirmacao(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && confirmar()} />
+        </div>
+
+        {erro && (
+          <div style={{ marginTop: 12, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>{erro}</div>
+        )}
+
+        <button type="button" className="btn-solid" style={{ width: "100%", justifyContent: "center", marginTop: 18, padding: "11px" }} disabled={enviando} onClick={confirmar}>
+          {enviando ? <><Loader2 size={15} className="spin" /> Salvando…</> : "Criar senha e entrar"}
         </button>
       </div>
     </div>
@@ -1404,7 +1513,7 @@ function TelaLogin({ onLogin, onVoltar }) {
 }
 
 /* ================= Portal público do cliente (sem login) ================= */
-function PortalCliente({ onIrParaLogin, onIrParaCadastroParceiro }) {
+function PortalCliente({ onIrParaLogin, onIrParaCadastroParceiro, onLogin }) {
   const [toast, setToast] = useState("");
   const notify = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
 
@@ -1424,7 +1533,7 @@ function PortalCliente({ onIrParaLogin, onIrParaCadastroParceiro }) {
         </div>
       </header>
       <main style={{ maxWidth: 720, margin: "0 auto", padding: "22px 18px 80px" }}>
-        <AbaCliente notify={notify} />
+        <AbaCliente notify={notify} onLogin={onLogin} onIrParaLogin={onIrParaLogin} />
       </main>
       {toast && (
         <div className="no-print" style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: AZUL_MARINHO, color: "#fff", padding: "10px 18px", borderRadius: 10, fontSize: 13.5, boxShadow: "0 6px 20px rgba(0,0,0,.2)" }}>
@@ -1499,6 +1608,21 @@ export default function App() {
   const portfolioId = new URLSearchParams(window.location.search).get("portfolio");
   if (portfolioId) return <PaginaPortfolioParceiro parceiroId={portfolioId} />;
 
+  // Link de criação de senha do portal do cliente (?criar-senha=<token>), vindo do e-mail de
+  // "primeiro acesso" — também funciona sem sessão, e tem prioridade sobre ela.
+  const criarSenhaToken = new URLSearchParams(window.location.search).get("criar-senha");
+  if (criarSenhaToken) {
+    return (
+      <TelaCriarSenhaCliente token={criarSenhaToken}
+        onConcluido={(s) => {
+          setSession(s);
+          const url = new URL(window.location.href);
+          url.searchParams.delete("criar-senha");
+          window.history.replaceState({}, "", url.toString());
+        }} />
+    );
+  }
+
   if (!session) {
     if (mostrarCadastroParceiro) {
       return (
@@ -1510,10 +1634,13 @@ export default function App() {
     }
     return mostrarLogin
       ? <TelaLogin onLogin={setSession} onVoltar={() => setMostrarLogin(false)} />
-      : <PortalCliente onIrParaLogin={() => setMostrarLogin(true)} onIrParaCadastroParceiro={() => setMostrarCadastroParceiro(true)} />;
+      : <PortalCliente onIrParaLogin={() => setMostrarLogin(true)} onIrParaCadastroParceiro={() => setMostrarCadastroParceiro(true)} onLogin={setSession} />;
   }
   if (session.usuario.role === "afiliado") {
     return <PainelParceiro session={session} onLogout={() => { setSession(null); setMostrarLogin(false); }} />;
+  }
+  if (session.usuario.role === "cliente") {
+    return <PainelCliente session={session} onLogout={() => { setSession(null); setMostrarLogin(false); }} />;
   }
   return <AppInterno session={session} onLogout={() => { setSession(null); setMostrarLogin(false); }} />;
 }
@@ -1644,6 +1771,13 @@ function AppInterno({ session, onLogout }) {
     setClientes((atual) => atual.filter((c) => c.id !== id));
     try { await apiFetch(`/api/clientes/${id}`, { method: "DELETE", token }); notify("Cliente excluído"); }
     catch (e) { notify(`Não foi possível excluir: ${e.message}`); carregarClientes(); }
+  };
+  /* "Esqueci minha senha" do cliente não é self-service — ele fala com o suporte pelo
+     WhatsApp e a Gerência define a senha nova aqui (cria a conta na hora, se ele nunca
+     tinha tido uma). */
+  const resetarSenhaCliente = async (id, senha) => {
+    try { await apiFetch(`/api/clientes/${id}/senha`, { method: "PATCH", token, body: { senha } }); return true; }
+    catch (e) { notify(`Não foi possível resetar a senha: ${e.message}`); return false; }
   };
 
   /* ---- Documentação ART/TRT: os dois arquivos finais de cada cliente (ficam no Drive) ---- */
@@ -2453,7 +2587,8 @@ function AppInterno({ session, onLogout }) {
             documentosArt={documentosArt} enviarDocumentoArt={enviarDocumentoArt} excluirDocumentoArt={excluirDocumentoArt} precos={precos} />
         )}
         {abaTop === "clientes" && (
-          <AbaClientesComercial clientes={clientesAtivos} carregando={clientesCarregando} atualizarCliente={updCliente} excluirCliente={delCliente} notify={notify} docs={docs} perfil={perfil} />
+          <AbaClientesComercial clientes={clientesAtivos} carregando={clientesCarregando} atualizarCliente={updCliente} excluirCliente={delCliente}
+            resetarSenhaCliente={resetarSenhaCliente} notify={notify} docs={docs} perfil={perfil} />
         )}
         {abaTop === "qualidade" && (
           <AbaQualidade sub={abaQualidade} setSub={setAbaQualidade} avaliacoes={avaliacoes} carregando={avaliacoesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
@@ -2884,12 +3019,54 @@ function CardEncaminharDocumentacao({ clientes = [], atualizarCliente, notify })
   );
 }
 
-function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirCliente, notify, docs = [], perfil }) {
+/* Caminho manual de "esqueci minha senha": o cliente liga no WhatsApp, a Gerência define uma
+   senha nova aqui e passa por telefone/WhatsApp. Funciona também pra quem nunca teve senha
+   (cria a conta na hora, sem precisar do fluxo de e-mail). */
+function ModalResetarSenhaCliente({ cliente, resetarSenhaCliente, notify, onFechar }) {
+  const [senha, setSenha] = useState("");
+  const [salvando, setSalvando] = useState(false);
+
+  const confirmar = async () => {
+    if (senha.length < 6) { notify("A senha precisa ter no mínimo 6 caracteres"); return; }
+    setSalvando(true);
+    const ok = await resetarSenhaCliente(cliente.id, senha);
+    setSalvando(false);
+    if (ok) { notify("Senha do portal atualizada ✓"); onFechar(); }
+  };
+
+  return (
+    <div className="no-print" style={overlay} onClick={onFechar}>
+      <div style={{ ...modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <strong>Resetar senha do portal</strong>
+          <button className="icon-btn" onClick={onFechar}><X size={16} /></button>
+        </div>
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+          Defina uma senha nova para <strong>{cliente.nome}</strong> e passe para ele por telefone
+          ou WhatsApp. Ela substitui a anterior imediatamente.
+        </p>
+        <div style={cell(true)}>
+          <label style={lab}>Nova senha</label>
+          <input style={inp} type="text" placeholder="mínimo 6 caracteres" value={senha} onChange={(e) => setSenha(e.target.value)} autoFocus />
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={onFechar}>Cancelar</button>
+          <button className="btn-solid" onClick={confirmar} disabled={salvando}>
+            {salvando ? <Loader2 size={15} className="spin" /> : <Save size={15} />} Salvar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirCliente, resetarSenhaCliente, notify, docs = [], perfil }) {
   const [busca, setBusca] = useState("");
   const [editando, setEditando] = useState(null); // cópia do cliente em edição
   const [visualizacao, setVisualizacao] = useState("kanban"); // "kanban" | "tabela"
   const [cpfsRevelados, setCpfsRevelados] = useState({}); // { [clienteId]: true } — revelação é por sessão, não persiste
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(null); // cliente a excluir definitivamente
+  const [resetandoSenha, setResetandoSenha] = useState(null); // cliente cuja senha do portal está sendo resetada
   const podeVerCpfDireto = perfil === "gerencia";
   const podeExcluir = perfil === "gerencia";
   const alternarCpfRevelado = (id) => setCpfsRevelados((s) => ({ ...s, [id]: !s[id] }));
@@ -3072,11 +3249,18 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
             </Grid>
             <Area label="Observações" value={editando.observacoes} onChange={(v) => setEditando({ ...editando, observacoes: v })} rows={2} />
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
-              {podeExcluir ? (
-                <button className="btn-ghost" style={{ color: "#C62828" }} onClick={() => setConfirmandoExclusao(editando)}>
-                  <Trash2 size={15} /> Excluir cliente
-                </button>
-              ) : <span />}
+              <div style={{ display: "flex", gap: 8 }}>
+                {podeExcluir && (
+                  <button className="btn-ghost" style={{ color: "#C62828" }} onClick={() => setConfirmandoExclusao(editando)}>
+                    <Trash2 size={15} /> Excluir cliente
+                  </button>
+                )}
+                {podeExcluir && resetarSenhaCliente && (
+                  <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setResetandoSenha(editando)}>
+                    <Lock size={15} /> Resetar senha do portal
+                  </button>
+                )}
+              </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setEditando(null)}>Cancelar</button>
                 <button className="btn-solid" onClick={salvar}><Save size={15} /> Salvar</button>
@@ -3090,6 +3274,11 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
         titulo="Excluir cliente"
         mensagem={`Tem certeza que deseja excluir o cadastro de "${confirmandoExclusao?.nome || ""}"? Essa ação não pode ser desfeita.`}
         onConfirm={confirmarExclusao} onCancel={() => setConfirmandoExclusao(null)} />
+
+      {resetandoSenha && (
+        <ModalResetarSenhaCliente cliente={resetandoSenha} resetarSenhaCliente={resetarSenhaCliente}
+          notify={notify} onFechar={() => setResetandoSenha(null)} />
+      )}
     </div>
   );
 }
@@ -7562,13 +7751,9 @@ function CartaoAtendimentoCliente({ doc, cpf, notify }) {
 
 const OUTROS = "__outros__";
 
-function AbaCliente({ notify }) {
+function AbaCliente({ notify, onLogin, onIrParaLogin }) {
   const [form, setForm] = useState(novoCadastroCliente());
   const [enviando, setEnviando] = useState(false);
-  const [cpfConsulta, setCpfConsulta] = useState("");
-  const [buscando, setBuscando] = useState(false);
-  const [buscou, setBuscou] = useState(false);
-  const [resultados, setResultados] = useState([]);
 
   const [refEmpreendimentos, setRefEmpreendimentos] = useState([]);
   const [refTipologias, setRefTipologias] = useState([]);
@@ -7631,32 +7816,28 @@ function AbaCliente({ notify }) {
     if (!form.nome.trim() || !form.telefone.trim()) { notify("Informe pelo menos nome e telefone"); return; }
     if (form.cpf && form.cpf.length !== 11) { notify("O CPF deve ter 11 dígitos"); return; }
     if (form.cpf && !cpfValido(form.cpf)) { notify("CPF inválido — confira os números digitados"); return; }
+    if (!form.senha.trim() || form.senha.length < 6) { notify("Crie uma senha de no mínimo 6 caracteres para acessar seu portal"); return; }
+    if (!form.email.trim()) { notify("Informe um e-mail para criar a senha do portal"); return; }
     const construtoraFinal = construtoraSel === OUTROS ? construtoraOutros.trim() : construtoraSel;
     const empreendimentoFinal = empreendimentoSel === OUTROS ? empreendimentoOutros.trim() : empreendimentoSel;
     const precisaCadastroEmpreendimento = construtoraSel === OUTROS || empreendimentoSel === OUTROS;
     setEnviando(true);
     try {
-      await apiFetch("/api/clientes", {
+      const r = await apiFetch("/api/clientes", {
         method: "POST",
         body: { ...form, construtora: construtoraFinal.toUpperCase(), empreendimento: empreendimentoFinal.toUpperCase(), precisaCadastroEmpreendimento },
       });
       setCadastroRealizado(form.servico);
       setForm(novoCadastroCliente());
       setConstrutoraSel(""); setEmpreendimentoSel(""); setConstrutoraOutros(""); setEmpreendimentoOutros("");
-      notify("Cadastro realizado ✓");
+      // Já criou senha no cadastro: entra direto no portal, sem precisar logar de novo.
+      if (r.token && onLogin) {
+        onLogin({ token: r.token, usuario: r.usuario });
+      } else {
+        notify("Cadastro realizado ✓");
+      }
     } catch (e) { notify(`Não foi possível enviar: ${e.message}`); }
     setEnviando(false);
-  };
-
-  const consultar = async () => {
-    const cpfLimpo = cpfConsulta.replace(/\D/g, "");
-    if (cpfLimpo.length !== 11) { notify("Digite um CPF válido (11 dígitos)"); return; }
-    setBuscando(true); setBuscou(true);
-    try {
-      const r = await apiFetch("/api/acompanhamento", { method: "POST", body: { termo: cpfLimpo } });
-      setResultados(r.resultados || []);
-    } catch (e) { notify(`Não foi possível buscar: ${e.message}`); setResultados([]); }
-    setBuscando(false);
   };
 
   return (
@@ -7669,8 +7850,8 @@ function AbaCliente({ notify }) {
             </div>
             <div style={{ fontSize: 13.5, color: "#33683c" }}>
               {cadastroRealizado === SERVICO_DOCUMENTACAO
-                ? "Sua solicitação de Documentação ART/TRT já foi para a nossa equipe de Documentação. Acompanhe pelo seu CPF em \"Acompanhar meu atendimento\" — quando ficar pronta, você baixa os documentos por aqui mesmo."
-                : "Recebemos seus dados. Nossa equipe entra em contato para confirmar o atendimento. Acompanhe pelo seu CPF em \"Acompanhar meu atendimento\" logo abaixo."}
+                ? "Sua solicitação de Documentação ART/TRT já foi para a nossa equipe de Documentação. Entre com seu e-mail e senha para acompanhar — quando ficar pronta, você baixa os documentos por lá."
+                : "Recebemos seus dados. Nossa equipe entra em contato para confirmar o atendimento. Entre com seu e-mail e senha para acompanhar."}
             </div>
             <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: "#fff", marginTop: 10, padding: "6px 12px" }} onClick={() => setCadastroRealizado(null)}>
               Fazer outro cadastro
@@ -7738,6 +7919,15 @@ function AbaCliente({ notify }) {
                 )}
               </span>
             )}
+          </div>
+          <div style={cell(true)}>
+            <label style={lab}>Crie uma senha</label>
+            <input style={inp} type="password" placeholder="mínimo 6 caracteres" value={form.senha}
+              onChange={(e) => setF("senha", e.target.value)} />
+            <span style={{ fontSize: 11.5, color: "#8593a8" }}>
+              Com ela você acessa o portal do cliente: acompanha seu atendimento, baixa a documentação
+              pronta e vê os benefícios exclusivos dos nossos parceiros.
+            </span>
           </div>
           <div style={cell(false)}>
             <label style={lab}>Construtora</label>
@@ -7816,54 +8006,14 @@ function AbaCliente({ notify }) {
         </button>
       </Card>
 
-      <Card icon={ClipboardCheck} titulo="Acompanhar meu atendimento">
+      <Card icon={ClipboardCheck} titulo="Já é cliente?">
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
-          Digite seu CPF para ver o status atual do seu atendimento.
+          Entre com seu e-mail e senha para acompanhar seu atendimento, baixar a documentação
+          pronta e ver os benefícios exclusivos dos nossos parceiros.
         </p>
-        <div style={{ display: "flex", gap: 10 }}>
-          <input style={{ ...inp, flex: 1 }} placeholder="Seu CPF (somente números)" value={cpfConsulta}
-            onChange={(e) => { setCpfConsulta(e.target.value.replace(/\D/g, "").slice(0, 11)); setBuscou(false); }}
-            onKeyDown={(e) => e.key === "Enter" && consultar()} />
-          <button className="btn-solid" onClick={consultar} disabled={buscando}>{buscando ? "Consultando…" : "Consultar"}</button>
-        </div>
-
-        {buscou && !buscando && resultados.length === 0 && (
-          <p style={{ color: "#8593a8", fontSize: 14, marginTop: 14 }}>
-            Nenhum atendimento encontrado ainda com esse CPF. Assim que sua vistoria for agendada pela nossa equipe, ela aparecerá aqui.
-          </p>
-        )}
-
-        {resultados.length > 0 && (
-          <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
-            {resultados.map((d) => {
-              const statusInfo = STATUS_ATENDIMENTO_INFO[d.status] || null;
-              return (
-                <div key={d.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
-                    <strong style={{ fontSize: 14 }}>{d.cliente || "—"}</strong>
-                    {d.status && <Selo valor={d.status} />}
-                  </div>
-                  {(d.empreendimento || d.blocoTorre) && (
-                    <div style={{ fontSize: 12.5, color: "#65758b", marginBottom: 8 }}>
-                      {d.empreendimento}{d.blocoTorre ? ` · ${d.blocoTorre}` : ""}
-                    </div>
-                  )}
-                  {statusInfo && (
-                    <div style={{ fontSize: 13.5, color: "#334", background: CINZA_CLARO, borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
-                      {statusInfo}
-                    </div>
-                  )}
-                  {d.atualizadoEm && (
-                    <div style={{ fontSize: 11.5, color: "#8593a8" }}>
-                      Atualizado em {new Date(d.atualizadoEm).toLocaleString("pt-BR")}
-                    </div>
-                  )}
-                  <CartaoAtendimentoCliente doc={d} cpf={cpfConsulta} notify={notify} />
-                </div>
-              );
-            })}
-          </div>
-        )}
+        <button className="btn-solid" style={{ width: "auto", padding: "9px 18px" }} onClick={onIrParaLogin}>
+          <Lock size={14} /> Entrar no portal do cliente
+        </button>
 
         <div style={{ marginTop: 18, paddingTop: 14, borderTop: `1px solid ${CINZA_BORDA}`, fontSize: 13 }}>
           <strong style={{ color: AZUL_MARINHO }}>Dúvidas? Fale conosco:</strong>
@@ -7879,7 +8029,7 @@ function AbaCliente({ notify }) {
       </Card>
 
       <SecaoFeedbackVitrine notify={notify} />
-      <SecaoParceirosVitrine notify={notify} />
+      <SecaoParceirosVitrine notify={notify} onIrParaLogin={onIrParaLogin} />
       {/* Logo abaixo da vitrine: quem acabou de pegar um cupom volta por aqui. */}
       <SecaoMeusCupons notify={notify} />
     </div>
@@ -8658,6 +8808,112 @@ function EditorCatalogoParceiro({ itens = [], carregando, onSalvar, onExcluir, l
   );
 }
 
+/* ================= Portal do cliente (área logada, papel "cliente") =================
+   Reaproveita ao máximo o que já existia na consulta pública: CartaoAtendimentoCliente
+   (laudo/documentação/avaliação) e a vitrine de parceiros — só troca "CPF digitado" por
+   "CPF do próprio login". */
+function PainelCliente({ session, onLogout }) {
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState("");
+  const [cliente, setCliente] = useState(null);
+  const [resultados, setResultados] = useState([]);
+  const [toast, setToast] = useState("");
+  const notify = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
+
+  const carregar = async () => {
+    setCarregando(true); setErro("");
+    try {
+      const r = await apiFetch("/api/clientes/me", { token: session.token });
+      setCliente(r.cliente || null);
+      setResultados(r.resultados || []);
+    } catch (e) { setErro(e.message); }
+    setCarregando(false);
+  };
+  useEffect(() => { carregar(); }, []);
+
+  return (
+    <div style={{ fontFamily: "'Inter', system-ui, sans-serif", color: "#1a2330", background: CINZA_CLARO, minHeight: "100vh" }}>
+      <style>{estilos}</style>
+
+      <header className="no-print" style={{ background: AZUL_MARINHO, color: "#fff", position: "sticky", top: 0, zIndex: 20 }}>
+        <div style={{ maxWidth: 720, margin: "0 auto", padding: "12px 18px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: "clamp(36px, 9vw, 44px)", height: "clamp(36px, 9vw, 44px)", borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
+              <img src={LOGO_URL} alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+            </div>
+            <div style={{ lineHeight: 1.1 }}>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>FN Edificações</div>
+              <div style={{ fontSize: 11, opacity: 0.7 }}>Área do Cliente</div>
+            </div>
+          </div>
+          <div style={{ flex: 1 }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
+            <div style={{ textAlign: "right", lineHeight: 1.2 }}>
+              <div style={{ fontWeight: 700 }}>{session.usuario.nome}</div>
+              <div style={{ opacity: 0.7 }}>{cliente?.cpfMascarado || ""}</div>
+            </div>
+            <button className="btn-ghost" onClick={onLogout} title="Sair"><X size={14} /> Sair</button>
+          </div>
+        </div>
+      </header>
+
+      <main style={{ maxWidth: 720, margin: "0 auto", padding: "22px 18px 80px", display: "grid", gap: 16 }}>
+        {erro && (
+          <div style={{ background: "#FCEAEA", color: "#C62828", padding: "12px 14px", borderRadius: 10, fontSize: 13.5 }}>{erro}</div>
+        )}
+
+        <Card icon={ClipboardCheck} titulo="Meu atendimento">
+          {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+          {!carregando && resultados.length === 0 && (
+            <p style={{ color: "#8593a8", fontSize: 14 }}>
+              Nenhum atendimento encontrado ainda. Assim que sua vistoria ou documentação for agendada pela nossa equipe, ela aparece aqui.
+            </p>
+          )}
+          {resultados.length > 0 && (
+            <div style={{ display: "grid", gap: 10 }}>
+              {resultados.map((d) => {
+                const statusInfo = STATUS_ATENDIMENTO_INFO[d.status] || null;
+                return (
+                  <div key={d.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
+                      <strong style={{ fontSize: 14 }}>{d.servico || "Atendimento"}</strong>
+                      {d.status && <Selo valor={d.status} />}
+                    </div>
+                    {(d.empreendimento || d.blocoTorre) && (
+                      <div style={{ fontSize: 12.5, color: "#65758b", marginBottom: 8 }}>
+                        {d.empreendimento}{d.blocoTorre ? ` · ${d.blocoTorre}` : ""}
+                      </div>
+                    )}
+                    {statusInfo && (
+                      <div style={{ fontSize: 13.5, color: "#334", background: CINZA_CLARO, borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
+                        {statusInfo}
+                      </div>
+                    )}
+                    {d.atualizadoEm && (
+                      <div style={{ fontSize: 11.5, color: "#8593a8" }}>
+                        Atualizado em {new Date(d.atualizadoEm).toLocaleString("pt-BR")}
+                      </div>
+                    )}
+                    <CartaoAtendimentoCliente doc={d} cpf={cliente?.cpf || ""} notify={notify} />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+
+        <SecaoParceirosVitrine notify={notify} clienteLogado={cliente} token={session.token} />
+      </main>
+
+      {toast && (
+        <div className="no-print" style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: AZUL_MARINHO, color: "#fff", padding: "10px 18px", borderRadius: 10, fontSize: 13.5, boxShadow: "0 6px 20px rgba(0,0,0,.2)" }}>
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PainelParceiro({ session, onLogout }) {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
@@ -9013,10 +9269,7 @@ function LogoParceiro({ p, onClick }) {
   );
 }
 
-function ModalBeneficioParceiro({ parceiro, onClose, notify }) {
-  const [nome, setNome] = useState("");
-  const [whatsapp, setWhatsapp] = useState("");
-  const [email, setEmail] = useState("");
+function ModalBeneficioParceiro({ parceiro, onClose, notify, clienteLogado, token, onIrParaLogin }) {
   const [gerando, setGerando] = useState(false);
   const [vale, setVale] = useState(null); // { codigo, beneficio, expiraEm }
   const [erro, setErro] = useState("");
@@ -9028,13 +9281,11 @@ function ModalBeneficioParceiro({ parceiro, onClose, notify }) {
 
   const gerar = async () => {
     setErro("");
-    if (!nome.trim() || !whatsapp.trim()) { setErro("Informe seu nome e WhatsApp."); return; }
-    if (email.trim() && !/^\S+@\S+\.\S+$/.test(email.trim())) { setErro("Confira o e-mail digitado."); return; }
     setGerando(true);
     try {
       const r = await apiFetch("/api/vales", {
-        method: "POST",
-        body: { parceiroId: parceiro.id, clienteNome: nome, clienteWhatsapp: whatsapp, clienteEmail: email, linkParceiro },
+        method: "POST", token,
+        body: { parceiroId: parceiro.id, linkParceiro },
       });
       setVale(r);
       notify("Código do benefício gerado ✓");
@@ -9056,26 +9307,30 @@ function ModalBeneficioParceiro({ parceiro, onClose, notify }) {
             {parceiro.beneficio && <div style={{ fontWeight: 700, color: AZUL_MARINHO, marginBottom: 6, textAlign: "center" }}>{parceiro.beneficio}</div>}
             {parceiro.descricaoBeneficio && <p style={{ fontSize: 13.5, color: "#4a5a70", textAlign: "center", margin: "0 0 16px" }}>{parceiro.descricaoBeneficio}</p>}
 
-            <div style={cell(true)}>
-              <label style={lab}>Seu nome</label>
-              <input style={inp} value={nome} onChange={(e) => setNome(e.target.value)} />
-            </div>
-            <div style={{ ...cell(true), marginTop: 10 }}>
-              <label style={lab}>Seu WhatsApp</label>
-              <input style={inp} value={whatsapp} onChange={(e) => setWhatsapp(e.target.value.replace(/\D/g, "").slice(0, 11))} />
-            </div>
-            {/* Opcional de propósito: exigir e-mail afastaria quem só quer o desconto na
-                hora. Quem informa recebe o cupom por escrito e não depende desta tela. */}
-            <div style={{ ...cell(true), marginTop: 10 }}>
-              <label style={lab}>Seu e-mail (opcional — recebe o cupom por escrito)</label>
-              <input style={inp} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@email.com" />
-            </div>
-
-            {erro && <div style={{ marginTop: 12, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>{erro}</div>}
-
-            <button className="btn-solid" style={{ width: "100%", justifyContent: "center", marginTop: 14 }} onClick={gerar} disabled={gerando}>
-              {gerando ? <><Loader2 size={15} className="spin" /> Gerando…</> : "Quero esse benefício"}
-            </button>
+            {!clienteLogado ? (
+              /* Resgatar é exclusivo de cliente cadastrado — a vitrine em si continua aberta
+                 para qualquer visitante navegar e conhecer os parceiros. */
+              <div style={{ textAlign: "center" }}>
+                <p style={{ fontSize: 13.5, color: "#4a5a70", margin: "0 0 14px" }}>
+                  Esse benefício é exclusivo para clientes cadastrados. Entre com seu e-mail e senha
+                  (ou cadastre-se) para resgatar o desconto.
+                </p>
+                <button className="btn-solid" style={{ width: "100%", justifyContent: "center" }}
+                  onClick={() => { onClose(); onIrParaLogin?.(); }}>
+                  <Lock size={14} /> Entrar ou cadastrar-se
+                </button>
+              </div>
+            ) : (
+              <>
+                <p style={{ fontSize: 13, color: "#65758b", textAlign: "center", margin: "0 0 14px" }}>
+                  O código vai gerado em nome de <strong>{clienteLogado.nome}</strong>.
+                </p>
+                {erro && <div style={{ marginBottom: 12, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>{erro}</div>}
+                <button className="btn-solid" style={{ width: "100%", justifyContent: "center" }} onClick={gerar} disabled={gerando}>
+                  {gerando ? <><Loader2 size={15} className="spin" /> Gerando…</> : "Quero esse benefício"}
+                </button>
+              </>
+            )}
           </>
         )}
 
@@ -9269,7 +9524,7 @@ function SecaoMeusCupons({ notify }) {
   );
 }
 
-function SecaoParceirosVitrine({ notify }) {
+function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin }) {
   const [parceiros, setParceiros] = useState([]);
   const [carregando, setCarregando] = useState(false);
   const [abaTipo, setAbaTipo] = useState("servico");
@@ -9312,7 +9567,10 @@ function SecaoParceirosVitrine({ notify }) {
         </div>
       )}
 
-      {selecionado && <ModalBeneficioParceiro parceiro={selecionado} onClose={() => setSelecionado(null)} notify={notify} />}
+      {selecionado && (
+        <ModalBeneficioParceiro parceiro={selecionado} onClose={() => setSelecionado(null)} notify={notify}
+          clienteLogado={clienteLogado} token={token} onIrParaLogin={onIrParaLogin} />
+      )}
     </Card>
   );
 }
