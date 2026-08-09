@@ -1363,8 +1363,11 @@ function TelaLogin({ onLogin, onVoltar }) {
   const [carregando, setCarregando] = useState(false);
   const [primeiroAcesso, setPrimeiroAcesso] = useState(false);
   const [emailPrimeiroAcesso, setEmailPrimeiroAcesso] = useState("");
-  const [enviandoLink, setEnviandoLink] = useState(false);
-  const [linkEnviado, setLinkEnviado] = useState(false);
+  const [cpfPrimeiroAcesso, setCpfPrimeiroAcesso] = useState("");
+  const [senhaPrimeiroAcesso, setSenhaPrimeiroAcesso] = useState("");
+  const [confirmacaoPrimeiroAcesso, setConfirmacaoPrimeiroAcesso] = useState("");
+  const [erroPrimeiroAcesso, setErroPrimeiroAcesso] = useState("");
+  const [criandoSenha, setCriandoSenha] = useState(false);
 
   const entrar = async () => {
     if (!email || !senha) { setErro("Informe e-mail e senha."); return; }
@@ -1379,15 +1382,24 @@ function TelaLogin({ onLogin, onVoltar }) {
   };
 
   /* Só para quem é cliente e nunca criou senha (cadastro antigo, ou feito por telefone pelo
-     Atendimento). Quem já tem senha e esqueceu fala com o suporte — não é este fluxo. */
-  const pedirLinkPrimeiroAcesso = async () => {
-    if (!emailPrimeiroAcesso.trim()) return;
-    setEnviandoLink(true);
+     Atendimento). Prova que é o dono do cadastro batendo e-mail + CPF com o que já está
+     gravado — sem depender de e-mail sair (o link por e-mail existia só por isso).
+     Quem já tem senha e esqueceu fala com o suporte — não é este fluxo. */
+  const criarSenhaPrimeiroAcesso = async () => {
+    setErroPrimeiroAcesso("");
+    if (!emailPrimeiroAcesso.trim() || cpfPrimeiroAcesso.length !== 11) {
+      setErroPrimeiroAcesso("Informe o e-mail e o CPF (11 dígitos) usados no cadastro."); return;
+    }
+    if (senhaPrimeiroAcesso.length < 6) { setErroPrimeiroAcesso("A senha precisa ter no mínimo 6 caracteres."); return; }
+    if (senhaPrimeiroAcesso !== confirmacaoPrimeiroAcesso) { setErroPrimeiroAcesso("As senhas não conferem."); return; }
+    setCriandoSenha(true);
     try {
-      await apiFetch("/api/clientes/solicitar-senha", { method: "POST", body: { email: emailPrimeiroAcesso.trim() } });
-      setLinkEnviado(true);
-    } catch { setLinkEnviado(true); } // mensagem é sempre genérica, mesmo se a chamada falhar
-    setEnviandoLink(false);
+      const r = await apiFetch("/api/clientes/criar-senha-existente", {
+        method: "POST", body: { email: emailPrimeiroAcesso.trim(), cpf: cpfPrimeiroAcesso, senha: senhaPrimeiroAcesso },
+      });
+      onLogin({ token: r.token, usuario: r.usuario });
+    } catch (e) { setErroPrimeiroAcesso(e.message); }
+    setCriandoSenha(false);
   };
 
   if (primeiroAcesso) {
@@ -1396,27 +1408,39 @@ function TelaLogin({ onLogin, onVoltar }) {
         <div style={{ background: "#fff", borderRadius: 16, padding: "32px 30px", width: "100%", maxWidth: 380, boxShadow: "0 10px 30px rgba(18,51,91,.12)" }}>
           <h2 style={{ textAlign: "center", color: AZUL_MARINHO, fontSize: 18, margin: "0 0 4px" }}>Primeiro acesso</h2>
           <p style={{ textAlign: "center", color: "#65758b", fontSize: 13, margin: "0 0 20px" }}>
-            Digite o e-mail que você usou no cadastro. Enviamos um link para você criar sua senha.
+            Digite o e-mail e o CPF usados no cadastro e crie sua senha — sem precisar de e-mail.
           </p>
-          {linkEnviado ? (
-            <div style={{ background: "#E6F4EA", border: "1px solid #A5D6B0", color: "#2E7D32", borderRadius: 10, padding: "12px 14px", fontSize: 13.5 }}>
-              Se esse e-mail estiver cadastrado, você vai receber um link em instantes. Confira também a caixa de spam.
-            </div>
-          ) : (
-            <>
-              <div style={cell(true)}>
-                <label style={lab}>E-mail cadastrado</label>
-                <input style={inp} type="email" value={emailPrimeiroAcesso} onChange={(e) => setEmailPrimeiroAcesso(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && pedirLinkPrimeiroAcesso()} autoFocus />
-              </div>
-              <button type="button" className="btn-solid" style={{ width: "100%", justifyContent: "center", marginTop: 18, padding: "11px" }}
-                disabled={enviandoLink} onClick={pedirLinkPrimeiroAcesso}>
-                {enviandoLink ? <><Loader2 size={15} className="spin" /> Enviando…</> : "Enviar link"}
-              </button>
-            </>
+          <div style={cell(true)}>
+            <label style={lab}>E-mail cadastrado</label>
+            <input style={inp} type="email" value={emailPrimeiroAcesso} onChange={(e) => setEmailPrimeiroAcesso(e.target.value)} autoFocus />
+          </div>
+          <div style={{ ...cell(true), marginTop: 12 }}>
+            <label style={lab}>CPF (11 dígitos)</label>
+            <input style={inp} value={cpfPrimeiroAcesso} inputMode="numeric"
+              onChange={(e) => setCpfPrimeiroAcesso(e.target.value.replace(/\D/g, "").slice(0, 11))} />
+          </div>
+          <div style={{ ...cell(true), marginTop: 12 }}>
+            <label style={lab}>Crie uma senha</label>
+            <input style={inp} type="password" value={senhaPrimeiroAcesso} onChange={(e) => setSenhaPrimeiroAcesso(e.target.value)} placeholder="mínimo 6 caracteres" />
+          </div>
+          <div style={{ ...cell(true), marginTop: 12 }}>
+            <label style={lab}>Repita a senha</label>
+            <input style={inp} type="password" value={confirmacaoPrimeiroAcesso} onChange={(e) => setConfirmacaoPrimeiroAcesso(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && criarSenhaPrimeiroAcesso()} />
+          </div>
+
+          {erroPrimeiroAcesso && (
+            <div style={{ marginTop: 12, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>{erroPrimeiroAcesso}</div>
           )}
-          <button type="button" onClick={() => { setPrimeiroAcesso(false); setLinkEnviado(false); setEmailPrimeiroAcesso(""); }}
-            style={{ width: "100%", marginTop: 14, background: "none", border: "none", color: AZUL_MEDIO, fontSize: 13, cursor: "pointer" }}>
+
+          <button type="button" className="btn-solid" style={{ width: "100%", justifyContent: "center", marginTop: 18, padding: "11px" }}
+            disabled={criandoSenha} onClick={criarSenhaPrimeiroAcesso}>
+            {criandoSenha ? <><Loader2 size={15} className="spin" /> Criando…</> : "Criar senha e entrar"}
+          </button>
+          <button type="button" onClick={() => {
+            setPrimeiroAcesso(false); setErroPrimeiroAcesso(""); setEmailPrimeiroAcesso("");
+            setCpfPrimeiroAcesso(""); setSenhaPrimeiroAcesso(""); setConfirmacaoPrimeiroAcesso("");
+          }} style={{ width: "100%", marginTop: 14, background: "none", border: "none", color: AZUL_MEDIO, fontSize: 13, cursor: "pointer" }}>
             ← Voltar para o login
           </button>
         </div>
