@@ -8801,7 +8801,10 @@ function PaginaPortfolioParceiro({ parceiroId }) {
                       -{desconto}%
                     </span>
                   )}
-                  {s.foto && <img src={s.foto} alt={s.titulo || ""} style={{ width: "100%", height: 150, objectFit: "cover", display: "block" }} />}
+                  {/* "contain", não "cover": a foto do portfólio é material de venda pronto —
+                      arte com preço, antes e depois, print de catálogo. Cortar a borda para
+                      preencher o card comia justamente o que o parceiro quis mostrar. */}
+                  {s.foto && <img src={s.foto} alt={s.titulo || ""} style={{ width: "100%", height: 190, objectFit: "contain", display: "block", background: CINZA_CLARO }} />}
                   <div style={{ padding: 12 }}>
                     {s.categoria && <div style={{ fontSize: 10.5, fontWeight: 700, color: AZUL_MEDIO, textTransform: "uppercase", marginBottom: 4 }}>{s.categoria}</div>}
                     {s.titulo && <div style={{ fontSize: 14.5, fontWeight: 700, marginBottom: 4 }}>{s.titulo}</div>}
@@ -9446,7 +9449,9 @@ function EditorCatalogoParceiro({ itens = [], carregando, onSalvar, onExcluir, l
         <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", marginBottom: 14 }}>
           {itens.map((s) => (
             <div key={s.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, overflow: "hidden" }}>
-              {s.foto && <img src={s.foto} alt="" style={{ width: "100%", height: 100, objectFit: "cover", display: "block" }} />}
+              {/* Mesma regra da página pública: a foto aparece inteira, para o parceiro
+                  conferir aqui exatamente o que o cliente vai ver. */}
+              {s.foto && <img src={s.foto} alt="" style={{ width: "100%", height: 150, objectFit: "contain", display: "block", background: CINZA_CLARO }} />}
               <div style={{ padding: 10 }}>
                 {s.categoria && <div style={{ fontSize: 10.5, fontWeight: 700, color: AZUL_MEDIO, textTransform: "uppercase" }}>{s.categoria}</div>}
                 {s.titulo && <div style={{ fontWeight: 700, fontSize: 13 }}>{s.titulo}</div>}
@@ -9476,7 +9481,7 @@ function EditorCatalogoParceiro({ itens = [], carregando, onSalvar, onExcluir, l
             <div style={{ ...cell(true), marginBottom: 10 }}>
               <label style={lab}>Foto</label>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                {editando.foto && <img src={editando.foto} alt="" style={{ width: 52, height: 52, objectFit: "cover", borderRadius: 8, border: `1px solid ${CINZA_BORDA}` }} />}
+                {editando.foto && <img src={editando.foto} alt="" style={{ width: 52, height: 52, objectFit: "contain", borderRadius: 8, border: `1px solid ${CINZA_BORDA}`, background: CINZA_CLARO }} />}
                 <label className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, cursor: "pointer" }}>
                   <Camera size={14} /> {editando.foto ? "Trocar foto" : "Enviar foto"}
                   <input type="file" accept="image/*" onChange={(e) => onFoto(e, (v) => setEditando((ed) => ({ ...ed, foto: v })))} style={{ display: "none" }} />
