@@ -8808,7 +8808,7 @@ function PaginaPortfolioParceiro({ parceiroId }) {
               return (
                 <div key={s.id} style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, overflow: "hidden", position: "relative" }}>
                   {desconto && (
-                    <span style={{ position: "absolute", top: 8, left: 8, background: "#FDECEA", color: "#C62828", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 6, zIndex: 1 }}>
+                    <span style={{ position: "absolute", top: 10, left: 10, background: "#C62828", color: "#fff", fontSize: 20, fontWeight: 800, padding: "6px 14px", borderRadius: 8, zIndex: 1, boxShadow: "0 3px 10px rgba(0,0,0,.25)" }}>
                       -{desconto}%
                     </span>
                   )}
