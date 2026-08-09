@@ -2616,7 +2616,7 @@ function AppInterno({ session, onLogout }) {
         {/* Sub-navegação (somente dentro do módulo Gerência) */}
         {abaTop === "gerencia" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
-            {[["visao-geral", "Visão geral", LayoutGrid], ["parceiros", "Parceiros e Afiliados", Users], ["financeiro", "Financeiro", DollarSign], ["prospeccao", "Prospecção", TrendingUp], ["patologias", "Banco de patologias", AlertTriangle]].map(([k, label, Icon]) => (
+            {[["visao-geral", "Visão geral", LayoutGrid], ["acompanhamento", "Acompanhamento", ClipboardList], ["parceiros", "Parceiros e Afiliados", Users], ["financeiro", "Financeiro", DollarSign], ["prospeccao", "Prospecção", TrendingUp], ["patologias", "Banco de patologias", AlertTriangle]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setAbaGerencia(k)} className="tab" style={{ borderBottomColor: abaGerencia === k ? AZUL_MEDIO : "transparent", color: abaGerencia === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
                 <Icon size={15} /> {label}
               </button>
@@ -2681,7 +2681,7 @@ function AppInterno({ session, onLogout }) {
             podeExcluir={perfil === "gerencia"} excluirParceiro={excluirParceiro} />
         )}
         {abaTop === "gerencia" && (
-          <AbaGerencia sub={abaGerencia} docs={docs} clientes={clientes} updCliente={updCliente} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
+          <AbaGerencia sub={abaGerencia} docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} clientes={clientes} updCliente={updCliente} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
             usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} salvarPerfilTecnico={salvarPerfilTecnico} usuarioAtualId={session.usuario.id}
             avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
             parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual}
@@ -5149,50 +5149,11 @@ function CardDocumentosArt({ cliente, documentos = [], precoDocumentacao = 0, en
 }
 
 function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, clientes = [], updCliente, excluirCliente, perfil, documentosArt = [], enviarDocumentoArt, excluirDocumentoArt, precos = [] }) {
-  const [editando, setEditando] = useState(null); // registro (cópia) em edição, ou null
-  const [filtroVistoria, setFiltroVistoria] = useState("");
-  const [busca, setBusca] = useState("");
-  const [removendo, setRemovendo] = useState(null);
   const [removendoCliente, setRemovendoCliente] = useState(null); // cadastro (clientes) do pedido a apagar
-
-  /* No perfil Documentação a tela mostra só o que é da alçada dele: registros de clientes
-     que pediram "Documentação ART/TRT". Registros de clientes de vistoria ficam de fora.
-     Registro sem cliente correspondente (criado na mão aqui) continua aparecendo.
-     Gerência enxerga tudo, como nas demais telas. */
-  const clientePorCpf = (cpf) => {
-    const cpfLimpo = (cpf || "").replace(/\D/g, "");
-    return cpfLimpo ? clientes.find((c) => (c.cpf || "").replace(/\D/g, "") === cpfLimpo) : null;
-  };
-  const soDocumentacao = perfil === "documentacao";
-
-  const filtrados = docs.filter((d) => {
-    if (soDocumentacao) {
-      const cli = clientePorCpf(d.cpf);
-      if (cli && !ehServicoDocumentacao(cli)) return false;
-    }
-    if (filtroVistoria && d.vistoria !== filtroVistoria) return false;
-    if (busca && !(`${d.cliente} ${d.empreendimento}`.toLowerCase().includes(busca.toLowerCase()))) return false;
-    return true;
-  });
 
   /* Cadastros de "Documentação ART/TRT" vêm direto do portal do cliente pra cá (pulam o
      Agendamento, porque não têm vistoria). É aqui que a equipe anexa os dois documentos. */
   const clientesArt = clientes.filter((c) => ehServicoDocumentacao(c) && c.status !== "Cancelado");
-
-  const abrirNovo = () => setEditando(novoRegistroDoc());
-  const abrirEdicao = (d) => setEditando({ ...d });
-  const salvar = () => {
-    if (!editando.cliente.trim()) { notify("Informe o nome do cliente"); return; }
-    const existe = docs.some((d) => d.id === editando.id);
-    if (existe) updDoc(editando.id, editando); else addDoc(editando);
-    setEditando(null);
-    notify("Registro salvo ✓");
-  };
-  const avancarStatusProducao = (d) => {
-    const i = STATUS_PRODUCAO_OPCOES.indexOf(d.statusProducao);
-    const proximo = STATUS_PRODUCAO_OPCOES[(i + 1) % STATUS_PRODUCAO_OPCOES.length];
-    updDoc(d.id, { statusProducao: proximo });
-  };
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -5215,7 +5176,65 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, cli
         </Card>
       )}
 
-      <Card icon={ClipboardCheck} titulo="ART Documentações — controle de vistorias e documentação">
+      {/* Esta tela é só de Documentação: mostra apenas os registros do serviço "Documentação
+          ART/TRT" (via somenteDocumentacao), mesmo para Gerência. O acompanhamento cruzado com
+          vistoria fica na aba própria da Gerência (AbaGerenciaAcompanhamento), que reaproveita
+          este mesmo componente sem esse filtro. */}
+      <TabelaRegistrosVistoriaDoc docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={carregando}
+        notify={notify} clientes={clientes} somenteDocumentacao />
+
+      <ConfirmModal aberto={!!removendoCliente} titulo="Apagar cadastro do pedido"
+        mensagem={removendoCliente ? `Tem certeza que deseja apagar o cadastro de "${removendoCliente.nome || "cliente sem nome"}"? Os documentos já anexados também somem. Essa ação não pode ser desfeita.` : ""}
+        onConfirm={() => { excluirCliente(removendoCliente.id); setRemovendoCliente(null); }} onCancel={() => setRemovendoCliente(null)} />
+    </div>
+  );
+}
+
+/* Tabela de registros de vistoria/TRT (tabela "docs"), reaproveitada em dois lugares:
+   - AbaDocumentacao: só documentação (somenteDocumentacao=true), inclusive para Gerência.
+   - AbaGerenciaAcompanhamento: os dois juntos (somenteDocumentacao=false) — visão cruzada
+     que só a Gerência tem, pensada pra acompanhar vistoria e documentação lado a lado. */
+function TabelaRegistrosVistoriaDoc({ docs, addDoc, updDoc, delDoc, carregando, notify, clientes = [], somenteDocumentacao = false }) {
+  const [editando, setEditando] = useState(null); // registro (cópia) em edição, ou null
+  const [filtroVistoria, setFiltroVistoria] = useState("");
+  const [busca, setBusca] = useState("");
+  const [removendo, setRemovendo] = useState(null);
+
+  /* Registro sem cliente correspondente (criado na mão aqui) continua aparecendo mesmo
+     filtrando por documentação — não tem como saber a que serviço pertence. */
+  const clientePorCpf = (cpf) => {
+    const cpfLimpo = (cpf || "").replace(/\D/g, "");
+    return cpfLimpo ? clientes.find((c) => (c.cpf || "").replace(/\D/g, "") === cpfLimpo) : null;
+  };
+
+  const filtrados = docs.filter((d) => {
+    if (somenteDocumentacao) {
+      const cli = clientePorCpf(d.cpf);
+      if (cli && !ehServicoDocumentacao(cli)) return false;
+    }
+    if (filtroVistoria && d.vistoria !== filtroVistoria) return false;
+    if (busca && !(`${d.cliente} ${d.empreendimento}`.toLowerCase().includes(busca.toLowerCase()))) return false;
+    return true;
+  });
+
+  const abrirNovo = () => setEditando(novoRegistroDoc());
+  const abrirEdicao = (d) => setEditando({ ...d });
+  const salvar = () => {
+    if (!editando.cliente.trim()) { notify("Informe o nome do cliente"); return; }
+    const existe = docs.some((d) => d.id === editando.id);
+    if (existe) updDoc(editando.id, editando); else addDoc(editando);
+    setEditando(null);
+    notify("Registro salvo ✓");
+  };
+  const avancarStatusProducao = (d) => {
+    const i = STATUS_PRODUCAO_OPCOES.indexOf(d.statusProducao);
+    const proximo = STATUS_PRODUCAO_OPCOES[(i + 1) % STATUS_PRODUCAO_OPCOES.length];
+    updDoc(d.id, { statusProducao: proximo });
+  };
+
+  return (
+    <>
+      <Card icon={ClipboardCheck} titulo={somenteDocumentacao ? "Controle de Documentação ART/TRT" : "Acompanhamento — vistorias e documentação"}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
           <input style={{ ...inp, flex: 1, minWidth: 200 }} placeholder="Buscar por cliente ou empreendimento…" value={busca} onChange={(e) => setBusca(e.target.value)} />
           <select style={inp} value={filtroVistoria} onChange={(e) => setFiltroVistoria(e.target.value)}>
@@ -5319,11 +5338,7 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, cli
       <ConfirmModal aberto={!!removendo} titulo="Excluir registro"
         mensagem={removendo ? `Tem certeza que deseja excluir o registro de "${removendo.cliente || "cliente sem nome"}"? Essa ação não pode ser desfeita.` : ""}
         onConfirm={() => { delDoc(removendo.id); setRemovendo(null); }} onCancel={() => setRemovendo(null)} />
-
-      <ConfirmModal aberto={!!removendoCliente} titulo="Apagar cadastro do pedido"
-        mensagem={removendoCliente ? `Tem certeza que deseja apagar o cadastro de "${removendoCliente.nome || "cliente sem nome"}"? Os documentos já anexados também somem. Essa ação não pode ser desfeita.` : ""}
-        onConfirm={() => { excluirCliente(removendoCliente.id); setRemovendoCliente(null); }} onCancel={() => setRemovendoCliente(null)} />
-    </div>
+    </>
   );
 }
 
@@ -7359,7 +7374,11 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
+function AbaGerencia({ sub = "visao-geral", docs, addDoc, updDoc, delDoc, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
+  if (sub === "acompanhamento") {
+    return <TabelaRegistrosVistoriaDoc docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc}
+      carregando={carregando} notify={notify} clientes={clientes} />;
+  }
   if (sub === "parceiros") {
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual}
       salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} vales={vales} valesCarregando={valesCarregando} notify={notify}
