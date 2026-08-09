@@ -7,7 +7,7 @@ import {
   AlertTriangle, CircleAlert, Info, Copy, Sparkles, Loader2,
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
-  ExternalLink, Undo2, Handshake
+  ExternalLink, Undo2, Handshake, ShoppingCart, Minus
 } from "lucide-react";
 
 /* ============================================================
@@ -1597,6 +1597,136 @@ function guardarSessao(s) {
   } catch { /* navegador sem storage: segue só na memória, como era antes */ }
 }
 
+/* ---------- Carrinho de compras (marketplace de parceiros/afiliados) ----------
+   localStorage de propósito (diferente da sessão de login): o carrinho não é dado sensível,
+   e continuar disponível entre abas/depois de fechar o navegador é o comportamento esperado
+   de um carrinho — perguntar de novo toda vez espantaria cliente no meio da escolha.
+   Guardado por CPF/sessão nenhum: é por navegador mesmo, igual qualquer loja funciona sem
+   login até a hora de fechar a compra. */
+const CHAVE_CARRINHO = "fn_carrinho";
+function lerCarrinho() {
+  try {
+    const bruto = window.localStorage.getItem(CHAVE_CARRINHO);
+    const itens = bruto ? JSON.parse(bruto) : [];
+    return Array.isArray(itens) ? itens : [];
+  } catch { return []; }
+}
+function gravarCarrinho(itens) {
+  try { window.localStorage.setItem(CHAVE_CARRINHO, JSON.stringify(itens)); } catch { /* sem storage, carrinho só dura a sessão da aba */ }
+}
+/* Hook usado em cada página que pode vender (vitrine, portfólio do parceiro, painel do
+   cliente) — cada uma lê o mesmo localStorage ao montar; como nunca duas dessas páginas
+   ficam montadas ao mesmo tempo (a navegação troca a página inteira), não precisa sincronizar
+   entre componentes em tempo real. */
+function useCarrinho() {
+  const [itens, setItens] = useState(() => lerCarrinho());
+  useEffect(() => { gravarCarrinho(itens); }, [itens]);
+
+  const adicionar = (item) => setItens((atual) => {
+    const existe = atual.find((i) => i.servicoId === item.servicoId);
+    if (existe) {
+      return atual.map((i) => i.servicoId === item.servicoId ? { ...i, quantidade: i.quantidade + 1 } : i);
+    }
+    return [...atual, { ...item, quantidade: 1 }];
+  });
+  const remover = (servicoId) => setItens((atual) => atual.filter((i) => i.servicoId !== servicoId));
+  const alterarQuantidade = (servicoId, quantidade) => setItens((atual) => {
+    if (quantidade <= 0) return atual.filter((i) => i.servicoId !== servicoId);
+    return atual.map((i) => i.servicoId === servicoId ? { ...i, quantidade: Math.min(20, quantidade) } : i);
+  });
+  const esvaziar = () => setItens([]);
+  const total = itens.reduce((s, i) => s + (Number(i.precoUnitario) || 0) * i.quantidade, 0);
+  const quantidadeTotal = itens.reduce((s, i) => s + i.quantidade, 0);
+  return { itens, adicionar, remover, alterarQuantidade, esvaziar, total, quantidadeTotal };
+}
+
+/* Botão do carrinho para o cabeçalho — usado em toda página que vende (vitrine pública,
+   portfólio do parceiro, painel do cliente). */
+function BotaoCarrinho({ quantidade, onClick }) {
+  return (
+    <button type="button" onClick={onClick} className="btn-ghost" style={{ position: "relative", padding: "8px 10px" }} title="Carrinho">
+      <ShoppingCart size={16} />
+      {quantidade > 0 && (
+        <span style={{
+          position: "absolute", top: -4, right: -4, background: "#C62828", color: "#fff",
+          borderRadius: 999, fontSize: 10, fontWeight: 700, minWidth: 16, height: 16,
+          display: "grid", placeItems: "center", padding: "0 3px",
+        }}>
+          {quantidade}
+        </span>
+      )}
+    </button>
+  );
+}
+
+/* Carrinho aberto: revisa itens, ajusta quantidade, finaliza a compra (redireciona pro
+   Checkout Pro do Mercado Pago — PIX e cartão, a FN nunca vê o dado do cartão). Login exigido
+   só aqui, na hora de fechar — até então dá pra navegar e escolher sem conta nenhuma. */
+function ModalCarrinho({ itens, alterarQuantidade, remover, total, onFechar, token, notify, onIrParaLogin, esvaziar }) {
+  const [finalizando, setFinalizando] = useState(false);
+
+  const finalizarCompra = async () => {
+    if (!token) { onFechar(); onIrParaLogin?.(); return; }
+    setFinalizando(true);
+    try {
+      const r = await apiFetch("/api/pedidos/checkout", {
+        method: "POST", token,
+        body: { itens: itens.map((i) => ({ servicoId: i.servicoId, quantidade: i.quantidade })) },
+      });
+      esvaziar?.();
+      window.location.href = r.initPoint;
+    } catch (e) {
+      notify(`Não foi possível iniciar o pagamento: ${e.message}`);
+      setFinalizando(false);
+    }
+  };
+
+  return (
+    <div className="no-print" style={overlay} onClick={onFechar}>
+      <div style={{ ...modal, maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <strong>Meu carrinho</strong>
+          <button className="icon-btn" onClick={onFechar}><X size={16} /></button>
+        </div>
+
+        {itens.length === 0 ? (
+          <p style={{ color: "#8593a8", fontSize: 14 }}>Seu carrinho está vazio.</p>
+        ) : (
+          <>
+            <div style={{ display: "grid", gap: 10, maxHeight: "50vh", overflowY: "auto" }}>
+              {itens.map((i) => (
+                <div key={i.servicoId} style={{ display: "flex", gap: 10, alignItems: "center", border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 10 }}>
+                  {i.foto && <img src={i.foto} alt="" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 8, flexShrink: 0 }} />}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13 }}>{i.titulo}</div>
+                    <div style={{ fontSize: 11.5, color: "#8593a8" }}>{i.parceiroEmpresa}</div>
+                    <div style={{ fontSize: 12.5, color: "#2E7D32", fontWeight: 700 }}>{fmtReal(i.precoUnitario)}</div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <button className="icon-btn" onClick={() => alterarQuantidade(i.servicoId, i.quantidade - 1)}><Minus size={13} /></button>
+                    <span style={{ fontSize: 13, fontWeight: 700, minWidth: 16, textAlign: "center" }}>{i.quantidade}</span>
+                    <button className="icon-btn" onClick={() => alterarQuantidade(i.servicoId, i.quantidade + 1)}><Plus size={13} /></button>
+                    <button className="icon-btn" onClick={() => remover(i.servicoId)} title="Remover"><Trash2 size={13} color="#c62828" /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${CINZA_BORDA}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <strong style={{ color: AZUL_MARINHO }}>Total: {fmtReal(total)}</strong>
+              <button className="btn-solid" style={{ width: "auto", padding: "10px 18px" }} disabled={finalizando} onClick={finalizarCompra}>
+                {finalizando ? <><Loader2 size={15} className="spin" /> Redirecionando…</> : (token ? "Finalizar compra" : "Entrar e finalizar")}
+              </button>
+            </div>
+            <p style={{ fontSize: 11.5, color: "#8593a8", marginTop: 10, textAlign: "center" }}>
+              Pagamento seguro via Mercado Pago (PIX ou cartão). A FN não recebe nem guarda dado do seu cartão.
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [session, setSessionEstado] = useState(() => carregarSessaoSalva());
   const [mostrarLogin, setMostrarLogin] = useState(false);
@@ -1939,8 +2069,10 @@ function AppInterno({ session, onLogout }) {
   const salvarItemCatalogoAdmin = async (parceiroId, item) => {
     try {
       const body = { parceiroId, titulo: item.titulo || "", categoria: item.categoria || "", preco: item.preco || "", preco_de: item.preco_de || "", descricao: item.descricao || "", foto: item.foto || "" };
-      // Só vai no corpo se o editor tinha o campo: mandar vazio apagaria a comissão combinada.
+      // Só vai no corpo se o editor tinha o campo: mandar vazio apagaria a comissão combinada
+      // (ou tiraria o item do carrinho, no caso do preço de venda).
       if (item.comissao_percentual !== undefined) body.comissao_percentual = item.comissao_percentual;
+      if (item.preco_venda !== undefined) body.preco_venda = item.preco_venda;
       if (item.id) await apiFetch(`/api/parceiros/servicos/${item.id}`, { method: "PATCH", token, body });
       else await apiFetch("/api/parceiros/servicos", { method: "POST", token, body });
       return true;
@@ -8485,6 +8617,9 @@ const LEAD_STATUS_LABEL = {
   novo: "Aguardando o parceiro", visualizado: "Parceiro visualizou", orcamento_enviado: "Proposta recebida",
   proposta_aceita: "Proposta aceita", perdido: "Encerrado",
 };
+/* Pedido do carrinho (marketplace, pago via Mercado Pago) — ver pedidos.js no backend. */
+const PEDIDO_STATUS_LABEL = { aguardando_pagamento: "Aguardando pagamento", pago: "Pago", cancelado: "Cancelado" };
+STATUS_COR["Aguardando pagamento"] = { cor: "#B26A00", bg: "#FFF4E0" };
 STATUS_COR["Aguardando o parceiro"] = { cor: "#B26A00", bg: "#FFF4E0" };
 STATUS_COR["Parceiro visualizou"] = { cor: "#2C75B5", bg: "#EAF2FB" };
 STATUS_COR["Proposta recebida"] = { cor: "#2C75B5", bg: "#EAF2FB" };
@@ -8741,6 +8876,15 @@ function PaginaPortfolioParceiro({ parceiroId }) {
   const [itens, setItens] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
+  const [carrinhoAberto, setCarrinhoAberto] = useState(false);
+  const [toast, setToast] = useState("");
+  const notify = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
+  const carrinho = useCarrinho();
+  /* Página pública, fora do fluxo normal de login do App() — lê a sessão salva direto do
+     armazenamento pra saber se quem está navegando já está logado como cliente (ex.: outra
+     aba). Sem isso "Finalizar compra" nunca teria token nenhum pra usar, mesmo logado. */
+  const sessaoAtual = carregarSessaoSalva();
+  const tokenCliente = sessaoAtual?.usuario?.role === "cliente" ? sessaoAtual.token : undefined;
 
   useEffect(() => {
     (async () => {
@@ -8779,12 +8923,13 @@ function PaginaPortfolioParceiro({ parceiroId }) {
       <header style={{ background: AZUL_MARINHO, color: "#fff" }}>
         <div style={{ maxWidth: 780, margin: "0 auto", padding: "26px 18px", display: "flex", alignItems: "center", gap: 14 }}>
           {parceiro.logo && <img src={parceiro.logo} alt={parceiro.empresa} style={{ width: 56, height: 56, borderRadius: 10, background: "#fff", objectFit: "contain", flexShrink: 0 }} />}
-          <div>
+          <div style={{ flex: 1 }}>
             <div style={{ fontSize: 20, fontWeight: 800 }}>{parceiro.empresa}</div>
             <div style={{ fontSize: 12.5, opacity: .75 }}>
               {PARCEIRO_TIPO_LABEL[parceiro.tipo] || parceiro.tipo}{parceiro.cidade ? ` · ${parceiro.cidade}/${parceiro.uf}` : ""}
             </div>
           </div>
+          <BotaoCarrinho quantidade={carrinho.quantidadeTotal} onClick={() => setCarrinhoAberto(true)} />
         </div>
       </header>
 
@@ -8820,8 +8965,20 @@ function PaginaPortfolioParceiro({ parceiroId }) {
                     {s.categoria && <div style={{ fontSize: 10.5, fontWeight: 700, color: AZUL_MEDIO, textTransform: "uppercase", marginBottom: 4 }}>{s.categoria}</div>}
                     {s.titulo && <div style={{ fontSize: 14.5, fontWeight: 700, marginBottom: 4 }}>{s.titulo}</div>}
                     {s.descricao && <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 6px" }}>{s.descricao}</p>}
-                    {s.preco_de && <div style={{ fontSize: 12, color: "#8593a8", textDecoration: "line-through" }}>{s.preco_de}</div>}
-                    {s.preco && <div style={{ fontSize: 13, fontWeight: 700, color: "#2E7D32" }}>{s.preco}</div>}
+                    {s.preco_venda ? (
+                      <div style={{ fontSize: 15, fontWeight: 800, color: "#2E7D32" }}>{fmtReal(s.preco_venda)}</div>
+                    ) : (
+                      <>
+                        {s.preco_de && <div style={{ fontSize: 12, color: "#8593a8", textDecoration: "line-through" }}>{s.preco_de}</div>}
+                        {s.preco && <div style={{ fontSize: 13, fontWeight: 700, color: "#2E7D32" }}>{s.preco}</div>}
+                      </>
+                    )}
+                    {s.preco_venda > 0 && (
+                      <button className="btn-solid" style={{ width: "100%", justifyContent: "center", marginTop: 10, padding: "8px" }}
+                        onClick={() => { carrinho.adicionar({ servicoId: s.id, titulo: s.titulo || "Serviço", precoUnitario: Number(s.preco_venda), parceiroEmpresa: parceiro.empresa, foto: s.foto }); notify("Adicionado ao carrinho ✓"); }}>
+                        <ShoppingCart size={14} /> Comprar
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -8836,6 +8993,18 @@ function PaginaPortfolioParceiro({ parceiroId }) {
           </a>
         )}
       </main>
+
+      {carrinhoAberto && (
+        <ModalCarrinho itens={carrinho.itens} alterarQuantidade={carrinho.alterarQuantidade} remover={carrinho.remover}
+          total={carrinho.total} onFechar={() => setCarrinhoAberto(false)} token={tokenCliente} notify={notify}
+          onIrParaLogin={() => { window.location.href = `${window.location.origin}${window.location.pathname}`; }}
+          esvaziar={carrinho.esvaziar} />
+      )}
+      {toast && (
+        <div className="no-print" style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: AZUL_MARINHO, color: "#fff", padding: "10px 18px", borderRadius: 10, fontSize: 13.5, boxShadow: "0 6px 20px rgba(0,0,0,.2)" }}>
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
@@ -8849,6 +9018,11 @@ function PaginaBeneficiosFn({ tipo }) {
   const [toast, setToast] = useState("");
   const notify = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
   const home = `${window.location.origin}${window.location.pathname}`;
+  /* Página fora do fluxo normal de login do App() — lê a sessão salva direto do
+     armazenamento pra saber se quem está navegando já está logado como cliente. */
+  const sessaoAtual = carregarSessaoSalva();
+  const clienteLogado = sessaoAtual?.usuario?.role === "cliente" ? sessaoAtual.usuario : null;
+  const tokenCliente = clienteLogado ? sessaoAtual.token : undefined;
   return (
     <div style={{ minHeight: "100vh", background: CINZA_CLARO, fontFamily: "'Inter', system-ui, sans-serif" }}>
       <header style={{ background: AZUL_MARINHO, color: "#fff" }}>
@@ -8869,7 +9043,7 @@ function PaginaBeneficiosFn({ tipo }) {
         </div>
       </header>
       <main style={{ maxWidth: 780, margin: "0 auto", padding: "22px 18px 80px" }}>
-        <SecaoParceirosVitrine notify={notify} tipoInicial={tipo}
+        <SecaoParceirosVitrine notify={notify} tipoInicial={tipo} clienteLogado={clienteLogado} token={tokenCliente}
           onIrParaLogin={() => { window.location.href = `${window.location.origin}${window.location.pathname}`; }} />
       </main>
       {toast && (
@@ -9558,6 +9732,19 @@ function EditorCatalogoParceiro({ itens = [], carregando, onSalvar, onExcluir, l
                 : "Preencha \"De\" e \"Por\" para o desconto em porcentagem aparecer na vitrine."}
             </div>
 
+            {/* "Preço" acima é texto livre (às vezes é "a combinar"); este aqui é o número de
+                verdade que habilita o botão "Comprar" no carrinho — sem ele o item continua
+                só como vitrine/orçamento, igual sempre foi. */}
+            <div style={{ ...cell(true), marginTop: 10 }}>
+              <label style={lab}>Preço de venda online (opcional)</label>
+              <input style={{ ...inp, maxWidth: 160 }} type="number" min="0" step="0.01" placeholder="Ex.: 380,00"
+                value={editando.preco_venda ?? ""}
+                onChange={(e) => setEditando((ed) => ({ ...ed, preco_venda: e.target.value }))} />
+              <p style={{ fontSize: 12, color: "#8593a8", margin: "6px 0 0" }}>
+                Preenchido, o cliente pode comprar este item direto pelo carrinho (PIX/cartão, via Mercado Pago). Em branco, o item continua só sob consulta/orçamento.
+              </p>
+            </div>
+
             {/* Comissão do item, e não da parceria: o percentual do cadastro vale por
                 categoria, mas a negociação costuma acontecer serviço a serviço. Fica só
                 entre o parceiro e a FN — a rota pública não devolve este campo. */}
@@ -9660,6 +9847,31 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
       await carregarLeads();
     } catch (e) { notify(`Não foi possível encerrar: ${e.message}`); }
   };
+
+  /* Compras do carrinho (marketplace): pedidos pagos via Mercado Pago. Quem volta do
+     pagamento chega com ?pedido=<id> na URL — o pagamento aprovado costuma levar alguns
+     segundos até o webhook do Mercado Pago confirmar aqui, então essa lista é recarregada
+     algumas vezes sozinha logo depois de um retorno de pagamento. */
+  const [pedidos, setPedidos] = useState([]);
+  const [pedidosCarregando, setPedidosCarregando] = useState(true);
+  const pedidoRetorno = new URLSearchParams(window.location.search).get("pedido");
+  const carregarPedidos = async () => {
+    setPedidosCarregando(true);
+    try {
+      const r = await apiFetch("/api/pedidos/meus", { token: session.token });
+      setPedidos(r.pedidos || []);
+    } catch { /* mostra vazio; o card de erro geral já cobre falha de sessão */ }
+    setPedidosCarregando(false);
+  };
+  useEffect(() => { carregarPedidos(); }, []);
+  useEffect(() => {
+    if (!pedidoRetorno) return;
+    // Confere de novo em 3s e 8s — tempo típico do webhook confirmar o pagamento aprovado.
+    const t1 = setTimeout(carregarPedidos, 3000);
+    const t2 = setTimeout(carregarPedidos, 8000);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pedidoRetorno]);
 
   /* Cross-sell: quem já é cliente (fez vistoria, por ex.) pede Documentação ART/TRT sem
      preencher o cadastro de novo — os dados vêm do cadastro já existente. */
@@ -9802,6 +10014,39 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
           </Card>
         )}
 
+        {!pedidosCarregando && pedidos.length > 0 && (
+          <Card icon={ShoppingCart} titulo="Meus pedidos">
+            {pedidoRetorno && (
+              <div style={{ background: "#EAF2FB", border: `1px solid ${AZUL_MEDIO}`, borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 12.5, color: AZUL_MARINHO, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span>Voltando do pagamento — a confirmação pode levar alguns segundos.</span>
+                <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: "#fff", padding: "4px 10px", fontSize: 12 }} onClick={carregarPedidos}>
+                  <RefreshCcw size={12} /> Atualizar
+                </button>
+              </div>
+            )}
+            <div style={{ display: "grid", gap: 10 }}>
+              {pedidos.map((p) => (
+                <div key={p.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                    <strong style={{ fontSize: 14 }}>{fmtReal(p.valor_total)}</strong>
+                    <Selo valor={PEDIDO_STATUS_LABEL[p.status] || p.status} />
+                  </div>
+                  <div style={{ fontSize: 12, color: "#8593a8", marginBottom: 6 }}>
+                    {new Date(p.criado_em).toLocaleString("pt-BR")}
+                  </div>
+                  <div style={{ display: "grid", gap: 4 }}>
+                    {(p.itens || []).map((i) => (
+                      <div key={i.id} style={{ fontSize: 12.5, color: "#4a5a70" }}>
+                        {i.quantidade}x {i.titulo} — {fmtReal(i.preco_unitario * i.quantidade)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+
         {!carregando && resultados.length > 0 && !jaTemDocumentacao && (
           <Card icon={FileText} titulo="Precisa de mais um serviço?">
             <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
@@ -9908,6 +10153,7 @@ function PainelParceiro({ session, onLogout }) {
     try {
       const body = { titulo: item.titulo || "", categoria: item.categoria || "", preco: item.preco || "", preco_de: item.preco_de || "", descricao: item.descricao || "", foto: item.foto || "" };
       if (item.comissao_percentual !== undefined) body.comissao_percentual = item.comissao_percentual;
+      if (item.preco_venda !== undefined) body.preco_venda = item.preco_venda;
       if (item.id) await apiFetch(`/api/parceiros/servicos/${item.id}`, { method: "PATCH", token: session.token, body });
       else await apiFetch("/api/parceiros/servicos", { method: "POST", token: session.token, body });
       await carregarCatalogo();
@@ -10298,7 +10544,7 @@ function LogoParceiro({ p, onClick }) {
   );
 }
 
-function ModalBeneficioParceiro({ parceiro, onClose, notify, clienteLogado, token, onIrParaLogin }) {
+function ModalBeneficioParceiro({ parceiro, onClose, notify, clienteLogado, token, onIrParaLogin, adicionarAoCarrinho }) {
   const [gerando, setGerando] = useState(false);
   const [vale, setVale] = useState(null); // { codigo, beneficio, expiraEm }
   const [erro, setErro] = useState("");
@@ -10369,29 +10615,44 @@ function ModalBeneficioParceiro({ parceiro, onClose, notify, clienteLogado, toke
                 <button className="btn-solid" style={{ width: "100%", justifyContent: "center" }} onClick={gerar} disabled={gerando}>
                   {gerando ? <><Loader2 size={15} className="spin" /> Gerando…</> : "Quero esse benefício"}
                 </button>
+              </>
+            )}
 
-                {servicos.length > 0 && (
-                  <div style={{ marginTop: 18, paddingTop: 14, borderTop: `1px solid ${CINZA_BORDA}` }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 10 }}>
-                      Ou peça um orçamento sob medida:
-                    </div>
-                    <div style={{ display: "grid", gap: 8 }}>
-                      {servicos.map((s) => (
-                        <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, padding: "8px 10px" }}>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 13, fontWeight: 600 }}>{s.titulo || "Serviço"}</div>
-                            {s.preco && <div style={{ fontSize: 11.5, color: "#8593a8" }}>a partir de {s.preco}</div>}
-                          </div>
-                          <button className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO, whiteSpace: "nowrap" }}
+            {/* Catálogo do parceiro: comprar direto (quando o item tem preço definido) não
+                exige login — só na hora de fechar a compra. Pedir orçamento sob medida exige,
+                porque a proposta que volta é vinculada ao cadastro do cliente. */}
+            {servicos.length > 0 && (
+              <div style={{ marginTop: 18, paddingTop: 14, borderTop: `1px solid ${CINZA_BORDA}` }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 10 }}>
+                  Serviços e produtos:
+                </div>
+                <div style={{ display: "grid", gap: 8 }}>
+                  {servicos.map((s) => (
+                    <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, padding: "8px 10px", flexWrap: "wrap" }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{s.titulo || "Serviço"}</div>
+                        {s.preco_venda ? (
+                          <div style={{ fontSize: 13, color: "#2E7D32", fontWeight: 700 }}>{fmtReal(s.preco_venda)}</div>
+                        ) : s.preco && <div style={{ fontSize: 11.5, color: "#8593a8" }}>a partir de {s.preco}</div>}
+                      </div>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {s.preco_venda > 0 && (
+                          <button className="btn-solid" style={{ width: "auto", padding: "7px 12px", fontSize: 12.5, whiteSpace: "nowrap" }}
+                            onClick={() => { adicionarAoCarrinho({ servicoId: s.id, titulo: s.titulo || "Serviço", precoUnitario: Number(s.preco_venda), parceiroEmpresa: parceiro.empresa, foto: s.foto }); notify("Adicionado ao carrinho ✓"); }}>
+                            <ShoppingCart size={13} /> Comprar
+                          </button>
+                        )}
+                        {clienteLogado && (
+                          <button className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO, whiteSpace: "nowrap", padding: "7px 12px", fontSize: 12.5 }}
                             onClick={() => setPedindoOrcamentoDe(s)}>
                             Solicitar orçamento
                           </button>
-                        </div>
-                      ))}
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )}
-              </>
+                  ))}
+                </div>
+              </div>
             )}
           </>
         )}
@@ -10645,6 +10906,8 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, so
   const [carregando, setCarregando] = useState(false);
   const [abaTipo, setAbaTipo] = useState(tipoInicial);
   const [selecionado, setSelecionado] = useState(null);
+  const [carrinhoAberto, setCarrinhoAberto] = useState(false);
+  const carrinho = useCarrinho();
 
   useEffect(() => {
     (async () => {
@@ -10667,7 +10930,7 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, so
       {!somenteLogos && (
         <>
           <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>{info.descricao}</p>
-          <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
             <button onClick={() => setAbaTipo("servico")}
               className={abaTipo === "servico" ? "btn-solid" : "btn-ghost"}
               style={abaTipo === "servico" ? {} : { color: AZUL_MARINHO, background: CINZA_CLARO }}>
@@ -10678,6 +10941,8 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, so
               style={abaTipo === "produto" ? {} : { color: AZUL_MARINHO, background: CINZA_CLARO }}>
               FN Home
             </button>
+            <div style={{ flex: 1 }} />
+            <BotaoCarrinho quantidade={carrinho.quantidadeTotal} onClick={() => setCarrinhoAberto(true)} />
           </div>
         </>
       )}
@@ -10693,7 +10958,13 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, so
 
       {selecionado && (
         <ModalBeneficioParceiro parceiro={selecionado} onClose={() => setSelecionado(null)} notify={notify}
-          clienteLogado={clienteLogado} token={token} onIrParaLogin={onIrParaLogin} />
+          clienteLogado={clienteLogado} token={token} onIrParaLogin={onIrParaLogin} adicionarAoCarrinho={carrinho.adicionar} />
+      )}
+
+      {carrinhoAberto && (
+        <ModalCarrinho itens={carrinho.itens} alterarQuantidade={carrinho.alterarQuantidade} remover={carrinho.remover}
+          total={carrinho.total} onFechar={() => setCarrinhoAberto(false)} token={token} notify={notify} onIrParaLogin={onIrParaLogin}
+          esvaziar={carrinho.esvaziar} />
       )}
     </Card>
   );
