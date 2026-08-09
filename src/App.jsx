@@ -2447,7 +2447,7 @@ function AppInterno({ session, onLogout }) {
         )}
 
         {abaTop === "documentacao" && (
-          <AbaDocumentacao docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={docsCarregando} notify={notify} clientes={clientesAtivos} updCliente={updCliente} perfil={perfil}
+          <AbaDocumentacao docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={docsCarregando} notify={notify} clientes={clientesAtivos} updCliente={updCliente} excluirCliente={delCliente} perfil={perfil}
             documentosArt={documentosArt} enviarDocumentoArt={enviarDocumentoArt} excluirDocumentoArt={excluirDocumentoArt} precos={precos} />
         )}
         {abaTop === "clientes" && (
@@ -4754,7 +4754,7 @@ function DadosParaDocumentacao({ cliente, notify }) {
   );
 }
 
-function CardDocumentosArt({ cliente, documentos = [], precoDocumentacao = 0, enviarDocumento, excluirDocumento, atualizarPagamento, notify }) {
+function CardDocumentosArt({ cliente, documentos = [], precoDocumentacao = 0, enviarDocumento, excluirDocumento, atualizarPagamento, notify, onExcluirCadastro }) {
   const [enviandoTipo, setEnviandoTipo] = useState(null);
   const doTipo = (tipo) => documentos.find((d) => d.tipo === tipo);
   const completo = TIPOS_DOCUMENTO_ART.every((t) => doTipo(t));
@@ -4794,6 +4794,11 @@ function CardDocumentosArt({ cliente, documentos = [], precoDocumentacao = 0, en
             </div>
           </div>
           <Selo valor={completo ? STATUS_DOC_CONCLUIDA : STATUS_DOC_PROCESSANDO} />
+          {onExcluirCadastro && (
+            <button className="icon-btn" onClick={() => onExcluirCadastro(cliente)} title="Apagar cadastro deste pedido">
+              <Trash2 size={15} color="#c62828" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -4846,11 +4851,12 @@ function CardDocumentosArt({ cliente, documentos = [], precoDocumentacao = 0, en
   );
 }
 
-function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, clientes = [], updCliente, perfil, documentosArt = [], enviarDocumentoArt, excluirDocumentoArt, precos = [] }) {
+function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, clientes = [], updCliente, excluirCliente, perfil, documentosArt = [], enviarDocumentoArt, excluirDocumentoArt, precos = [] }) {
   const [editando, setEditando] = useState(null); // registro (cópia) em edição, ou null
   const [filtroVistoria, setFiltroVistoria] = useState("");
   const [busca, setBusca] = useState("");
   const [removendo, setRemovendo] = useState(null);
+  const [removendoCliente, setRemovendoCliente] = useState(null); // cadastro (clientes) do pedido a apagar
 
   /* No perfil Documentação a tela mostra só o que é da alçada dele: registros de clientes
      que pediram "Documentação ART/TRT". Registros de clientes de vistoria ficam de fora.
@@ -4905,7 +4911,8 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, cli
                 documentos={documentosArt.filter((d) => d.clienteId === c.id)}
                 precoDocumentacao={precos.find((p) => p.empreendimento === (c.empreendimento || "").trim())?.precoDocumentacao || 0}
                 enviarDocumento={enviarDocumentoArt} excluirDocumento={excluirDocumentoArt}
-                atualizarPagamento={(id, pagamento) => updCliente(id, { pagamento })} notify={notify} />
+                atualizarPagamento={(id, pagamento) => updCliente(id, { pagamento })} notify={notify}
+                onExcluirCadastro={perfil === "gerencia" ? setRemovendoCliente : null} />
             ))}
           </div>
         </Card>
@@ -5015,6 +5022,10 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, cli
       <ConfirmModal aberto={!!removendo} titulo="Excluir registro"
         mensagem={removendo ? `Tem certeza que deseja excluir o registro de "${removendo.cliente || "cliente sem nome"}"? Essa ação não pode ser desfeita.` : ""}
         onConfirm={() => { delDoc(removendo.id); setRemovendo(null); }} onCancel={() => setRemovendo(null)} />
+
+      <ConfirmModal aberto={!!removendoCliente} titulo="Apagar cadastro do pedido"
+        mensagem={removendoCliente ? `Tem certeza que deseja apagar o cadastro de "${removendoCliente.nome || "cliente sem nome"}"? Os documentos já anexados também somem. Essa ação não pode ser desfeita.` : ""}
+        onConfirm={() => { excluirCliente(removendoCliente.id); setRemovendoCliente(null); }} onCancel={() => setRemovendoCliente(null)} />
     </div>
   );
 }
