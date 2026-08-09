@@ -1364,10 +1364,8 @@ function TelaLogin({ onLogin, onVoltar, onCadastroParceiro }) {
   const [primeiroAcesso, setPrimeiroAcesso] = useState(false);
   const [emailPrimeiroAcesso, setEmailPrimeiroAcesso] = useState("");
   const [cpfPrimeiroAcesso, setCpfPrimeiroAcesso] = useState("");
-  const [senhaPrimeiroAcesso, setSenhaPrimeiroAcesso] = useState("");
-  const [confirmacaoPrimeiroAcesso, setConfirmacaoPrimeiroAcesso] = useState("");
   const [erroPrimeiroAcesso, setErroPrimeiroAcesso] = useState("");
-  const [criandoSenha, setCriandoSenha] = useState(false);
+  const [liberandoAcesso, setLiberandoAcesso] = useState(false);
 
   const entrar = async () => {
     if (!email || !senha) { setErro("Informe e-mail e senha."); return; }
@@ -1383,23 +1381,22 @@ function TelaLogin({ onLogin, onVoltar, onCadastroParceiro }) {
 
   /* Só para quem é cliente e nunca criou senha (cadastro antigo, ou feito por telefone pelo
      Atendimento). Prova que é o dono do cadastro batendo e-mail + CPF com o que já está
-     gravado — sem depender de e-mail sair (o link por e-mail existia só por isso).
+     gravado — sem depender de e-mail sair (o link por e-mail existia só por isso). O acesso
+     libera com a senha padrão "123456", provisória: o portal já entra pedindo pra trocar.
      Quem já tem senha e esqueceu fala com o suporte — não é este fluxo. */
-  const criarSenhaPrimeiroAcesso = async () => {
+  const liberarPrimeiroAcesso = async () => {
     setErroPrimeiroAcesso("");
     if (!emailPrimeiroAcesso.trim() || cpfPrimeiroAcesso.length !== 11) {
       setErroPrimeiroAcesso("Informe o e-mail e o CPF (11 dígitos) usados no cadastro."); return;
     }
-    if (senhaPrimeiroAcesso.length < 6) { setErroPrimeiroAcesso("A senha precisa ter no mínimo 6 caracteres."); return; }
-    if (senhaPrimeiroAcesso !== confirmacaoPrimeiroAcesso) { setErroPrimeiroAcesso("As senhas não conferem."); return; }
-    setCriandoSenha(true);
+    setLiberandoAcesso(true);
     try {
       const r = await apiFetch("/api/clientes/criar-senha-existente", {
-        method: "POST", body: { email: emailPrimeiroAcesso.trim(), cpf: cpfPrimeiroAcesso, senha: senhaPrimeiroAcesso },
+        method: "POST", body: { email: emailPrimeiroAcesso.trim(), cpf: cpfPrimeiroAcesso },
       });
       onLogin({ token: r.token, usuario: r.usuario });
     } catch (e) { setErroPrimeiroAcesso(e.message); }
-    setCriandoSenha(false);
+    setLiberandoAcesso(false);
   };
 
   if (primeiroAcesso) {
@@ -1408,7 +1405,7 @@ function TelaLogin({ onLogin, onVoltar, onCadastroParceiro }) {
         <div style={{ background: "#fff", borderRadius: 16, padding: "32px 30px", width: "100%", maxWidth: 380, boxShadow: "0 10px 30px rgba(18,51,91,.12)" }}>
           <h2 style={{ textAlign: "center", color: AZUL_MARINHO, fontSize: 18, margin: "0 0 4px" }}>Primeiro acesso</h2>
           <p style={{ textAlign: "center", color: "#65758b", fontSize: 13, margin: "0 0 20px" }}>
-            Digite o e-mail e o CPF usados no cadastro e crie sua senha — sem precisar de e-mail.
+            Digite o e-mail e o CPF usados no cadastro. Seu acesso é liberado na hora, com uma senha temporária — você troca assim que entrar.
           </p>
           <div style={cell(true)}>
             <label style={lab}>E-mail cadastrado</label>
@@ -1417,16 +1414,8 @@ function TelaLogin({ onLogin, onVoltar, onCadastroParceiro }) {
           <div style={{ ...cell(true), marginTop: 12 }}>
             <label style={lab}>CPF (11 dígitos)</label>
             <input style={inp} value={cpfPrimeiroAcesso} inputMode="numeric"
-              onChange={(e) => setCpfPrimeiroAcesso(e.target.value.replace(/\D/g, "").slice(0, 11))} />
-          </div>
-          <div style={{ ...cell(true), marginTop: 12 }}>
-            <label style={lab}>Crie uma senha</label>
-            <input style={inp} type="password" value={senhaPrimeiroAcesso} onChange={(e) => setSenhaPrimeiroAcesso(e.target.value)} placeholder="mínimo 6 caracteres" />
-          </div>
-          <div style={{ ...cell(true), marginTop: 12 }}>
-            <label style={lab}>Repita a senha</label>
-            <input style={inp} type="password" value={confirmacaoPrimeiroAcesso} onChange={(e) => setConfirmacaoPrimeiroAcesso(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && criarSenhaPrimeiroAcesso()} />
+              onChange={(e) => setCpfPrimeiroAcesso(e.target.value.replace(/\D/g, "").slice(0, 11))}
+              onKeyDown={(e) => e.key === "Enter" && liberarPrimeiroAcesso()} />
           </div>
 
           {erroPrimeiroAcesso && (
@@ -1434,12 +1423,11 @@ function TelaLogin({ onLogin, onVoltar, onCadastroParceiro }) {
           )}
 
           <button type="button" className="btn-solid" style={{ width: "100%", justifyContent: "center", marginTop: 18, padding: "11px" }}
-            disabled={criandoSenha} onClick={criarSenhaPrimeiroAcesso}>
-            {criandoSenha ? <><Loader2 size={15} className="spin" /> Criando…</> : "Criar senha e entrar"}
+            disabled={liberandoAcesso} onClick={liberarPrimeiroAcesso}>
+            {liberandoAcesso ? <><Loader2 size={15} className="spin" /> Liberando…</> : "Liberar meu acesso"}
           </button>
           <button type="button" onClick={() => {
-            setPrimeiroAcesso(false); setErroPrimeiroAcesso(""); setEmailPrimeiroAcesso("");
-            setCpfPrimeiroAcesso(""); setSenhaPrimeiroAcesso(""); setConfirmacaoPrimeiroAcesso("");
+            setPrimeiroAcesso(false); setErroPrimeiroAcesso(""); setEmailPrimeiroAcesso(""); setCpfPrimeiroAcesso("");
           }} style={{ width: "100%", marginTop: 14, background: "none", border: "none", color: AZUL_MEDIO, fontSize: 13, cursor: "pointer" }}>
             ← Voltar para o login
           </button>
@@ -1744,7 +1732,7 @@ export default function App() {
     return <PainelParceiro session={session} onLogout={() => { setSession(null); setMostrarLogin(false); }} />;
   }
   if (session.usuario.role === "cliente") {
-    return <PainelCliente session={session} onLogout={() => { setSession(null); setMostrarLogin(false); }} />;
+    return <PainelCliente session={session} onLogout={() => { setSession(null); setMostrarLogin(false); }} onSessaoAtualizada={setSession} />;
   }
   return <AppInterno session={session} onLogout={() => { setSession(null); setMostrarLogin(false); }} />;
 }
@@ -9579,13 +9567,24 @@ function EditorCatalogoParceiro({ itens = [], carregando, onSalvar, onExcluir, l
    Reaproveita ao máximo o que já existia na consulta pública: CartaoAtendimentoCliente
    (laudo/documentação/avaliação) e a vitrine de parceiros — só troca "CPF digitado" por
    "CPF do próprio login". */
-function PainelCliente({ session, onLogout }) {
+function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
   const [cliente, setCliente] = useState(null);
   const [resultados, setResultados] = useState([]);
   const [toast, setToast] = useState("");
   const notify = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
+
+  /* Quem entrou pelo "Primeiro acesso" ganhou a senha padrão "123456", provisória — o portal
+     trava numa troca obrigatória antes de mostrar qualquer coisa. A senha atual já é sabida
+     (é a padrão), então só pede a nova, sem repetir a "123456" pro cliente digitar. */
+  const trocarSenhaObrigatoria = async (senhaNova) => {
+    try {
+      await apiFetch("/api/auth/trocar-senha", { method: "POST", token: session.token, body: { senhaAtual: "123456", senhaNova } });
+      onSessaoAtualizada({ ...session, usuario: { ...session.usuario, senhaProvisoria: false } });
+      return true;
+    } catch (e) { notify(e.message); return false; }
+  };
 
   const carregar = async () => {
     setCarregando(true); setErro("");
@@ -9787,6 +9786,55 @@ function PainelCliente({ session, onLogout }) {
           {toast}
         </div>
       )}
+
+      {session.usuario.senhaProvisoria && (
+        <ModalTrocarSenhaObrigatoria onTrocar={trocarSenhaObrigatoria} />
+      )}
+    </div>
+  );
+}
+
+/* Bloqueia o portal até quem entrou com a senha padrão ("123456", do Primeiro acesso) trocar
+   por uma senha só dele — sem botão de fechar/cancelar, de propósito. A senha atual já é
+   sabida (a própria "123456"), então só pede a nova. */
+function ModalTrocarSenhaObrigatoria({ onTrocar }) {
+  const [senhaNova, setSenhaNova] = useState("");
+  const [confirmacao, setConfirmacao] = useState("");
+  const [erro, setErro] = useState("");
+  const [salvando, setSalvando] = useState(false);
+
+  const salvar = async () => {
+    setErro("");
+    if (senhaNova.length < 8) { setErro("A nova senha precisa ter pelo menos 8 caracteres."); return; }
+    if (senhaNova === "123456") { setErro("Escolha uma senha diferente da temporária."); return; }
+    if (senhaNova !== confirmacao) { setErro("As senhas não conferem."); return; }
+    setSalvando(true);
+    const ok = await onTrocar(senhaNova);
+    setSalvando(false);
+    if (!ok) setErro("Não foi possível trocar a senha. Tente novamente.");
+  };
+
+  return (
+    <div className="no-print" style={{ ...overlay, zIndex: 300 }}>
+      <div style={{ ...modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ margin: "0 0 6px", color: AZUL_MARINHO, fontSize: 17 }}>Crie sua senha</h3>
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 18px" }}>
+          Você entrou com a senha temporária. Escolha uma senha só sua para continuar.
+        </p>
+        <div style={cell(true)}>
+          <label style={lab}>Nova senha</label>
+          <input style={inp} type="password" value={senhaNova} onChange={(e) => setSenhaNova(e.target.value)} placeholder="mínimo 8 caracteres" autoFocus />
+        </div>
+        <div style={{ ...cell(true), marginTop: 12 }}>
+          <label style={lab}>Repita a senha</label>
+          <input style={inp} type="password" value={confirmacao} onChange={(e) => setConfirmacao(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && salvar()} />
+        </div>
+        {erro && <div style={{ marginTop: 12, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>{erro}</div>}
+        <button className="btn-solid" style={{ width: "100%", justifyContent: "center", marginTop: 18, padding: "11px" }} disabled={salvando} onClick={salvar}>
+          {salvando ? <><Loader2 size={15} className="spin" /> Salvando…</> : "Salvar e continuar"}
+        </button>
+      </div>
     </div>
   );
 }
