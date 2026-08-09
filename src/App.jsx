@@ -7524,6 +7524,28 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   const receitaTrtPaga = somaCampo("valorTrt", pago);
   const receitaTrtAReceber = somaCampo("valorTrt", naoPago);
 
+  /* Custo operacional, não receita: o que a FN paga pra entregar o serviço, não o que cobra
+     do cliente. Documentação tem custo fixo por unidade (CUSTO_UNITARIO_DOCUMENTACAO);
+     vistoria varia por empreendimento (precos_empreendimento.custoVistoria — é o que a
+     Gerência define na tabela "Preços por empreendimento" logo abaixo). Mesmo critério de
+     "serviço entregue" que CardReceitaEstimada usa: documentação concluída, vistoria com
+     laudo enviado por e-mail — senão contaria custo de serviço ainda não prestado. */
+  const qtdDocumentacaoConcluida = clientes.filter((c) => ehServicoDocumentacao(c) && c.status === STATUS_DOC_CONCLUIDA).length;
+  const custoDocumentacaoTotal = CUSTO_UNITARIO_DOCUMENTACAO * qtdDocumentacaoConcluida;
+
+  const precoPorChave = {};
+  precos.forEach((p) => { precoPorChave[normalizarChaveEmpreendimento(p.empreendimento)] = p; });
+  const cpfsComLaudoEntregue = new Set(
+    docs.filter((d) => d.statusCliente === "Laudo enviado por e-mail")
+        .map((d) => String(d.cpf || "").replace(/\D/g, "")).filter(Boolean)
+  );
+  const custoVistoriadoresTotal = clientes
+    .filter((c) => c.servico === SERVICO_VISTORIA && c.status !== "Cancelado" && cpfsComLaudoEntregue.has(String(c.cpf || "").replace(/\D/g, "")))
+    .reduce((s, c) => {
+      const chave = normalizarChaveEmpreendimento(c.empreendimento?.trim() || "(sem empreendimento)");
+      return s + (Number(precoPorChave[chave]?.custoVistoria) || 0);
+    }, 0);
+
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <Card icon={DollarSign} titulo="Financeiro (acesso restrito · Gerência)">
@@ -7546,10 +7568,20 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
               <KpiCard label="A receber" valor={fmtReal(receitaTrtAReceber)} cor="#C62828" />
             </div>
           </div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+              <Users size={14} /> Custos operacionais
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <KpiCard label="Custo de documentação" valor={fmtReal(custoDocumentacaoTotal)} cor="#C62828" />
+              <KpiCard label="Custo dos vistoriadores" valor={fmtReal(custoVistoriadoresTotal)} cor="#C62828" />
+            </div>
+          </div>
         </div>
         <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${CINZA_BORDA}`, display: "flex", gap: 24, flexWrap: "wrap", fontSize: 13.5 }}>
           <div><strong style={{ color: AZUL_MARINHO }}>Total recebido: </strong>{fmtReal(receitaVistoriaPaga + receitaTrtPaga)}</div>
           <div><strong style={{ color: AZUL_MARINHO }}>Total a receber: </strong>{fmtReal(receitaVistoriaAReceber + receitaTrtAReceber)}</div>
+          <div><strong style={{ color: AZUL_MARINHO }}>Total de custos: </strong>{fmtReal(custoDocumentacaoTotal + custoVistoriadoresTotal)}</div>
         </div>
       </Card>
 
