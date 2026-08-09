@@ -1971,6 +1971,8 @@ function AppInterno({ session, onLogout }) {
   const salvarItemCatalogoAdmin = async (parceiroId, item) => {
     try {
       const body = { parceiroId, titulo: item.titulo || "", categoria: item.categoria || "", preco: item.preco || "", preco_de: item.preco_de || "", descricao: item.descricao || "", foto: item.foto || "" };
+      // Só vai no corpo se o editor tinha o campo: mandar vazio apagaria a comissão combinada.
+      if (item.comissao_percentual !== undefined) body.comissao_percentual = item.comissao_percentual;
       if (item.id) await apiFetch(`/api/parceiros/servicos/${item.id}`, { method: "PATCH", token, body });
       else await apiFetch("/api/parceiros/servicos", { method: "POST", token, body });
       return true;
@@ -7024,7 +7026,7 @@ function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceir
         </button>
       </div>
       <CardParceiros parceiros={parceiros} carregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
-        podeExcluir={podeExcluir} excluirParceiro={excluirParceiro}
+        podeExcluir={podeExcluir} excluirParceiro={excluirParceiro} token={token}
         salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} notify={notify} />
       <CardVendasComissoes vendas={vendas} carregando={vendasCarregando} atualizarVenda={atualizarVenda} notify={notify} />
       {cadastrando && (
@@ -9430,6 +9432,8 @@ function EditorCatalogoParceiro({ itens = [], carregando, onSalvar, onExcluir, l
     notify("Link copiado ✓");
   };
 
+  const descontoItem = editando ? calcularDesconto(editando.preco_de, editando.preco) : null;
+
   return (
     <Card icon={Camera} titulo={`Portfólio (${itens.length} ${itens.length === 1 ? "item" : "itens"})`}>
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
@@ -9457,6 +9461,20 @@ function EditorCatalogoParceiro({ itens = [], carregando, onSalvar, onExcluir, l
                 {s.titulo && <div style={{ fontWeight: 700, fontSize: 13 }}>{s.titulo}</div>}
                 {s.preco_de && <div style={{ fontSize: 11, color: "#8593a8", textDecoration: "line-through" }}>{s.preco_de}</div>}
                 {s.preco && <div style={{ fontSize: 12, color: "#2E7D32", fontWeight: 700 }}>{s.preco}</div>}
+                {/* Os dois percentuais do item, lado a lado: o que o cliente ganha e o que a
+                    FN recebe. O segundo só existe aqui e no acompanhamento da equipe. */}
+                <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap", fontSize: 11, fontWeight: 700 }}>
+                  {calcularDesconto(s.preco_de, s.preco) && (
+                    <span style={{ background: "#FDECEA", color: "#C62828", padding: "2px 7px", borderRadius: 6 }}>
+                      -{calcularDesconto(s.preco_de, s.preco)}% cliente
+                    </span>
+                  )}
+                  {s.comissao_percentual !== null && s.comissao_percentual !== undefined && s.comissao_percentual !== "" && (
+                    <span style={{ background: "#EAF2FB", color: AZUL_MEDIO, padding: "2px 7px", borderRadius: 6 }}>
+                      {Number(s.comissao_percentual)}% FN
+                    </span>
+                  )}
+                </div>
                 <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
                   <button className="icon-btn" onClick={() => setEditando({ ...s })} title="Editar"><Edit3 size={13} color={AZUL_MEDIO} /></button>
                   <button className="icon-btn" onClick={() => onExcluir(s.id)} title="Excluir"><Trash2 size={13} color="#c62828" /></button>
@@ -9497,6 +9515,30 @@ function EditorCatalogoParceiro({ itens = [], carregando, onSalvar, onExcluir, l
               <Field label="De (opcional)" value={editando.preco_de || ""} onChange={(v) => setEditando((ed) => ({ ...ed, preco_de: v }))} placeholder="R$ 450,00" />
               <Field label="Por / condições" value={editando.preco || ""} onChange={(v) => setEditando((ed) => ({ ...ed, preco: v }))} placeholder="R$ 380,00" />
             </Grid>
+
+            {/* O desconto não é digitado: sai do "de" e do "por" que ele acabou de informar,
+                pela mesma conta que o cliente vê na vitrine. Mostrado aqui para o parceiro
+                conferir o percentual antes de salvar, em vez de descobrir depois. */}
+            <div style={{ background: descontoItem ? "#FDECEA" : CINZA_CLARO, color: descontoItem ? "#C62828" : "#8593a8", borderRadius: 8, padding: "9px 12px", fontSize: 12.5, marginTop: 10 }}>
+              {descontoItem
+                ? <>Desconto para o cliente: <strong>{descontoItem}%</strong> — é esse selo que aparece na vitrine.</>
+                : "Preencha \"De\" e \"Por\" para o desconto em porcentagem aparecer na vitrine."}
+            </div>
+
+            {/* Comissão do item, e não da parceria: o percentual do cadastro vale por
+                categoria, mas a negociação costuma acontecer serviço a serviço. Fica só
+                entre o parceiro e a FN — a rota pública não devolve este campo. */}
+            <div style={{ ...cell(true), marginTop: 10 }}>
+              <label style={lab}>Comissão para a FN neste item (%)</label>
+              <input style={{ ...inp, maxWidth: 140 }} type="number" min="0" max="100" placeholder="Ex.: 12"
+                value={editando.comissao_percentual ?? ""}
+                onChange={(e) => setEditando((ed) => ({ ...ed, comissao_percentual: e.target.value }))} />
+              <p style={{ fontSize: 12, color: "#8593a8", margin: "6px 0 0" }}>
+                Percentual que você repassa à FN quando este item é vendido. O cliente não vê.
+                Em branco, vale a comissão da categoria combinada no seu cadastro.
+              </p>
+            </div>
+
             <Area label="Descrição" value={editando.descricao || ""} onChange={(v) => setEditando((ed) => ({ ...ed, descricao: v }))} rows={3} placeholder="O que torna esse serviço/produto atrativo pro cliente" />
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
               <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setEditando(null)}>Cancelar</button>
@@ -9757,6 +9799,7 @@ function PainelParceiro({ session, onLogout }) {
   const salvarItemCatalogo = async (item) => {
     try {
       const body = { titulo: item.titulo || "", categoria: item.categoria || "", preco: item.preco || "", preco_de: item.preco_de || "", descricao: item.descricao || "", foto: item.foto || "" };
+      if (item.comissao_percentual !== undefined) body.comissao_percentual = item.comissao_percentual;
       if (item.id) await apiFetch(`/api/parceiros/servicos/${item.id}`, { method: "PATCH", token: session.token, body });
       else await apiFetch("/api/parceiros/servicos", { method: "POST", token: session.token, body });
       await carregarCatalogo();
@@ -9972,14 +10015,16 @@ function ModalPerfilParceiroAdmin({ parceiro, onFechar, atualizarParceiro, notif
 /* Wrapper do EditorCatalogoParceiro pra uso da Gerência/Vendas: carrega o catálogo público
    de um parceiro específico e liga onSalvar/onExcluir nas versões "admin" (que informam
    parceiroId, diferente do fluxo do próprio parceiro logado). */
-function ModalCatalogoParceiro({ parceiro, onFechar, salvarItemCatalogo, excluirItemCatalogo, notify }) {
+function ModalCatalogoParceiro({ parceiro, onFechar, salvarItemCatalogo, excluirItemCatalogo, notify, token }) {
   const [itens, setItens] = useState([]);
   const [carregando, setCarregando] = useState(true);
 
   const carregar = async () => {
     setCarregando(true);
     try {
-      const r = await apiFetch(`/api/parceiros/${parceiro.id}/servicos`);
+      /* Com token: a rota pública devolve a comissão do item para a equipe, e sem ela o
+         editor salvaria de volta um campo vazio, apagando o combinado com o parceiro. */
+      const r = await apiFetch(`/api/parceiros/${parceiro.id}/servicos`, { token });
       setItens(r.servicos || []);
     } catch (e) { notify(`Não foi possível carregar o portfólio: ${e.message}`); }
     setCarregando(false);
@@ -10004,7 +10049,7 @@ function ModalCatalogoParceiro({ parceiro, onFechar, salvarItemCatalogo, excluir
 }
 
 /* ---- Aba Parceiros dentro da Gerência (homologação) ---- */
-function CardParceiros({ parceiros, carregando, atualizarParceiro, podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, notify }) {
+function CardParceiros({ parceiros, carregando, atualizarParceiro, podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, notify, token }) {
   const [editando, setEditando] = useState(null); // { id, status, avaliacao }
   const [catalogoDe, setCatalogoDe] = useState(null); // parceiro cujo portfólio está aberto
   const [perfilDe, setPerfilDe] = useState(null); // parceiro cujo perfil de venda está sendo editado
@@ -10092,7 +10137,7 @@ function CardParceiros({ parceiros, carregando, atualizarParceiro, podeExcluir =
       )}
 
       {catalogoDe && (
-        <ModalCatalogoParceiro parceiro={catalogoDe} onFechar={() => setCatalogoDe(null)}
+        <ModalCatalogoParceiro parceiro={catalogoDe} onFechar={() => setCatalogoDe(null)} token={token}
           salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} notify={notify} />
       )}
 
