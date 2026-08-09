@@ -1355,8 +1355,8 @@ function ModalTrocarSenha({ token, onFechar, notify }) {
 }
 
 /* ================= Componente principal ================= */
-/* ================= Login da equipe ================= */
-function TelaLogin({ onLogin, onVoltar }) {
+/* ================= Login (equipe, clientes e parceiros) ================= */
+function TelaLogin({ onLogin, onVoltar, onCadastroParceiro }) {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [erro, setErro] = useState("");
@@ -1431,7 +1431,10 @@ function TelaLogin({ onLogin, onVoltar }) {
           <img src={LOGO_URL} alt="FN Edificações" style={{ height: "clamp(56px, 14vw, 72px)", width: "auto" }} />
         </div>
         <h2 style={{ textAlign: "center", color: AZUL_MARINHO, fontSize: 18, margin: "0 0 4px" }}>Entrar no sistema</h2>
-        <p style={{ textAlign: "center", color: "#65758b", fontSize: 13, margin: "0 0 20px" }}>Acesso da equipe FN Edificações</p>
+        {/* A porta é a mesma para todo mundo: equipe, cliente e parceiro/filiado entram com
+            e-mail e senha, e o papel gravado no login decide qual painel abre. Dizer só
+            "equipe" aqui fazia parceiro e cliente acharem que a tela não era para eles. */}
+        <p style={{ textAlign: "center", color: "#65758b", fontSize: 13, margin: "0 0 20px" }}>Acesso da equipe, clientes e parceiros FN</p>
 
         <div style={cell(true)}>
           <label style={lab}>E-mail</label>
@@ -1464,6 +1467,19 @@ function TelaLogin({ onLogin, onVoltar }) {
         <button type="button" onClick={onVoltar} style={{ width: "100%", marginTop: 14, background: "none", border: "none", color: AZUL_MEDIO, fontSize: 13, cursor: "pointer" }}>
           ← Sou cliente e quero me cadastrar
         </button>
+
+        {/* Parceiro/filiado se cadastra por aqui também. Antes o cadastro só existia atrás do
+            link privado ?parceiro-cadastro=1, então quem chegava na tela de login não tinha
+            por onde começar — e nem sabia que era nesta mesma tela que ele entra depois. */}
+        <div style={{ borderTop: `1px solid ${CINZA_BORDA}`, marginTop: 16, paddingTop: 14, textAlign: "center" }}>
+          <button type="button" onClick={onCadastroParceiro}
+            style={{ background: "none", border: "none", color: AZUL_MARINHO, fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0 }}>
+            Sou parceiro ou filiado e quero me cadastrar
+          </button>
+          <p style={{ color: "#8593a8", fontSize: 12, margin: "6px 0 0" }}>
+            Já é parceiro? Entre com o mesmo e-mail e senha do cadastro.
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -1631,6 +1647,7 @@ export default function App() {
   const [session, setSessionEstado] = useState(() => carregarSessaoSalva());
   const [mostrarLogin, setMostrarLogin] = useState(false);
   const [linkParceiroFechado, setLinkParceiroFechado] = useState(false);
+  const [mostrarCadastroParceiro, setMostrarCadastroParceiro] = useState(false);
 
   const setSession = (s) => { guardarSessao(s); setSessionEstado(s); };
 
@@ -1677,22 +1694,26 @@ export default function App() {
     );
   }
 
-  /* Link privado de cadastro de parceiro (?parceiro-cadastro=1) — a FN envia esse link direto
-     para quem vai virar parceiro pelo WhatsApp/e-mail; não existe mais botão público pra isso
-     na página, só quem recebe o link chega aqui. */
+  /* Cadastro de parceiro/filiado: chega aqui de dois jeitos — pelo link direto que a FN manda
+     por WhatsApp/e-mail (?parceiro-cadastro=1) ou pelo botão da própria tela de login, que é
+     onde o parceiro entra depois de aprovado. */
   const linkCadastroParceiro = new URLSearchParams(window.location.search).get("parceiro-cadastro");
 
   if (!session) {
-    if (linkCadastroParceiro && !linkParceiroFechado) {
+    if ((linkCadastroParceiro && !linkParceiroFechado) || mostrarCadastroParceiro) {
+      /* Voltar cai onde a pessoa estava: no login, se ela veio de lá (mostrarLogin segue
+         ligado); no portal do cliente, se ela abriu o link direto. */
+      const fecharCadastro = () => { setLinkParceiroFechado(true); setMostrarCadastroParceiro(false); };
       return (
         <TelaCadastroParceiro
-          onVoltar={() => setLinkParceiroFechado(true)}
-          onIrParaLogin={() => { setLinkParceiroFechado(true); setMostrarLogin(true); }}
+          onVoltar={fecharCadastro}
+          onIrParaLogin={() => { fecharCadastro(); setMostrarLogin(true); }}
         />
       );
     }
     return mostrarLogin
-      ? <TelaLogin onLogin={setSession} onVoltar={() => setMostrarLogin(false)} />
+      ? <TelaLogin onLogin={setSession} onVoltar={() => setMostrarLogin(false)}
+          onCadastroParceiro={() => setMostrarCadastroParceiro(true)} />
       : <PortalCliente onIrParaLogin={() => setMostrarLogin(true)} onLogin={setSession} />;
   }
   if (session.usuario.role === "afiliado") {
@@ -8860,6 +8881,13 @@ function TelaCadastroParceiro({ onVoltar, onIrParaLogin }) {
           <h2 style={{ color: AZUL_MARINHO, fontSize: 19, margin: "0 0 8px" }}>Cadastro enviado!</h2>
           <p style={{ color: "#65758b", fontSize: 13.5, margin: "0 0 16px" }}>
             Recebemos os dados da <strong>{form.empresa}</strong>. Nossa equipe vai avaliar o cadastro e entrar em contato pelo WhatsApp informado.
+          </p>
+          {/* O acesso só abre depois da homologação (o backend cria o login desativado). Sem
+              dizer isso aqui, o parceiro tentava entrar no mesmo minuto e achava que a senha
+              tinha dado errado. */}
+          <p style={{ color: "#65758b", fontSize: 13, margin: "0 0 16px" }}>
+            Assim que o cadastro for aprovado, você entra nesta mesma tela de login com o e-mail
+            <strong> {form.email}</strong> e a senha que acabou de cadastrar.
           </p>
           <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}>
             <Selo valor={PARCEIRO_STATUS_LABEL[resultado.status] || resultado.status} />
