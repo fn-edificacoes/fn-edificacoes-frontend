@@ -1548,7 +1548,39 @@ function PortalCliente({ onIrParaLogin, onLogin }) {
         }}>
           <Lock size={20} /> SOU CLIENTE — ENTRAR
         </button>
-        <AbaCliente notify={notify} onLogin={onLogin} onIrParaLogin={onIrParaLogin} />
+
+        {/* FN Serviços é a marca guarda-chuva das 3 áreas: contratando um serviço técnico, o
+            cliente também passa a ter acesso ao FN Clube e ao FN Home — por isso os 3 blocos
+            aparecem juntos aqui, antes até do formulário de solicitação. */}
+        <div style={{ textAlign: "center", margin: "6px 0 20px" }}>
+          <div style={{ fontSize: 20, fontWeight: 800, color: AZUL_MARINHO }}>FN Serviços</div>
+          <p style={{ fontSize: 13.5, color: "#65758b", margin: "4px 0 0" }}>
+            Contratando a FN, você não recebe apenas um serviço técnico — você passa a ter acesso a um ecossistema de benefícios para cuidar, reformar e equipar seu imóvel.
+          </p>
+        </div>
+
+        <div style={{ display: "grid", gap: 12, marginBottom: 26 }}>
+          <div style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 14, padding: 18 }}>
+            <div style={{ fontWeight: 800, color: AZUL_MARINHO, fontSize: 15, marginBottom: 4 }}>Serviços Técnicos FN</div>
+            <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 4px" }}>Proteção técnica desde o recebimento do seu imóvel.</p>
+            <p style={{ fontSize: 12.5, color: "#8593a8", margin: "0 0 12px" }}>Vistoria de Entrega de Chaves · Revistoria · Documentação ART/TRT</p>
+            <a href="#solicitar-servico" className="btn-solid" style={{ width: "auto", padding: "8px 16px", textDecoration: "none", display: "inline-flex" }}>Ver serviços</a>
+          </div>
+          <div style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 14, padding: 18 }}>
+            <div style={{ fontWeight: 800, color: AZUL_MARINHO, fontSize: 15, marginBottom: 4 }}>FN Clube</div>
+            <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 12px" }}>Profissionais e serviços selecionados com vantagens exclusivas para clientes FN.</p>
+            <a href="?pagina=fn-clube" className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, width: "auto", padding: "8px 16px", textDecoration: "none", display: "inline-flex" }}>Ver benefícios</a>
+          </div>
+          <div style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 14, padding: 18 }}>
+            <div style={{ fontWeight: 800, color: AZUL_MARINHO, fontSize: 15, marginBottom: 4 }}>FN Home</div>
+            <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 12px" }}>Produtos para seu novo lar, com condições exclusivas para clientes FN.</p>
+            <a href="?pagina=fn-home" className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, width: "auto", padding: "8px 16px", textDecoration: "none", display: "inline-flex" }}>Ver produtos</a>
+          </div>
+        </div>
+
+        <div id="solicitar-servico">
+          <AbaCliente notify={notify} onLogin={onLogin} onIrParaLogin={onIrParaLogin} />
+        </div>
       </main>
       <footer style={{ background: "#fff", borderTop: `1px solid ${CINZA_BORDA}`, padding: "22px 18px" }}>
         <div style={{ maxWidth: 720, margin: "0 auto", fontSize: 13 }}>
@@ -1635,6 +1667,12 @@ export default function App() {
   // então intercepta antes de qualquer outra checagem de sessão.
   const portfolioId = new URLSearchParams(window.location.search).get("portfolio");
   if (portfolioId) return <PaginaPortfolioParceiro parceiroId={portfolioId} />;
+
+  // Páginas próprias das duas áreas de benefícios da FN Serviços (?pagina=fn-clube /
+  // ?pagina=fn-home) — também públicas, mesmo padrão do link de portfólio acima.
+  const paginaFn = new URLSearchParams(window.location.search).get("pagina");
+  if (paginaFn === "fn-clube") return <PaginaBeneficiosFn tipo="servico" />;
+  if (paginaFn === "fn-home") return <PaginaBeneficiosFn tipo="produto" />;
 
   // Link de criação de senha do portal do cliente (?criar-senha=<token>), vindo do e-mail de
   // "primeiro acesso" — também funciona sem sessão, e tem prioridade sobre ela.
@@ -8381,6 +8419,14 @@ const PARCEIRO_TIPO_OPCOES = [
 ];
 const PARCEIRO_TIPO_LABEL = { servico: "Parceiro", produto: "Afiliado" };
 
+/* FN Serviços é a marca guarda-chuva; FN Clube (parceiros que prestam serviço) e FN Home
+   (afiliados que vendem produto) são as duas áreas de benefícios dentro dela — mesmo
+   cadastro de sempre (campo "tipo"), só a apresentação ao cliente muda por área. */
+const FN_AREA_INFO = {
+  servico: { titulo: "FN Clube", descricao: "Serviços selecionados para seu imóvel, com benefícios exclusivos para clientes FN." },
+  produto: { titulo: "FN Home", descricao: "Produtos e vantagens para transformar seu imóvel em lar, com condições exclusivas FN." },
+};
+
 const PARCEIRO_STATUS_OPCOES = ["em_analise", "aprovado", "suspenso", "encerrado"];
 const PARCEIRO_STATUS_LABEL = { em_analise: "Em análise", aprovado: "Aprovado", suspenso: "Suspenso", encerrado: "Encerrado" };
 const LEAD_STATUS_LABEL = {
@@ -8728,6 +8774,41 @@ function PaginaPortfolioParceiro({ parceiroId }) {
           </a>
         )}
       </main>
+    </div>
+  );
+}
+
+/* ---- Página pública: FN Clube (?pagina=fn-clube) e FN Home (?pagina=fn-home) ----
+   Mesma vitrine de sempre (SecaoParceirosVitrine, tipo "servico"/"produto"), só que como
+   página própria, dentro da marca FN Serviços — é o que o resto do site linka quando fala
+   em "VER BENEFÍCIOS" ou "VER PRODUTOS". Funciona sem login, igual ao portfólio do parceiro. */
+function PaginaBeneficiosFn({ tipo }) {
+  const info = FN_AREA_INFO[tipo] || FN_AREA_INFO.servico;
+  const [toast, setToast] = useState("");
+  const notify = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
+  return (
+    <div style={{ minHeight: "100vh", background: CINZA_CLARO, fontFamily: "'Inter', system-ui, sans-serif" }}>
+      <header style={{ background: AZUL_MARINHO, color: "#fff" }}>
+        <div style={{ maxWidth: 780, margin: "0 auto", padding: "16px 18px", display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: "clamp(36px, 9vw, 44px)", height: "clamp(36px, 9vw, 44px)", borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
+            <img src={LOGO_URL} alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+          </div>
+          <div style={{ lineHeight: 1.1, flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: 15 }}>FN Serviços</div>
+            <div style={{ fontSize: 11, opacity: 0.7 }}>{info.titulo}</div>
+          </div>
+          <a href={`${window.location.origin}${window.location.pathname}`} className="btn-ghost" style={{ textDecoration: "none" }}>← Início</a>
+        </div>
+      </header>
+      <main style={{ maxWidth: 780, margin: "0 auto", padding: "22px 18px 80px" }}>
+        <SecaoParceirosVitrine notify={notify} tipoInicial={tipo}
+          onIrParaLogin={() => { window.location.href = `${window.location.origin}${window.location.pathname}`; }} />
+      </main>
+      {toast && (
+        <div className="no-print" style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: AZUL_MARINHO, color: "#fff", padding: "10px 18px", borderRadius: 10, fontSize: 13.5, boxShadow: "0 6px 20px rgba(0,0,0,.2)" }}>
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
@@ -10268,10 +10349,10 @@ function SecaoMeusCupons({ notify }) {
   );
 }
 
-function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, somenteLogos = false }) {
+function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, somenteLogos = false, tipoInicial = "servico" }) {
   const [parceiros, setParceiros] = useState([]);
   const [carregando, setCarregando] = useState(false);
-  const [abaTipo, setAbaTipo] = useState("servico");
+  const [abaTipo, setAbaTipo] = useState(tipoInicial);
   const [selecionado, setSelecionado] = useState(null);
 
   useEffect(() => {
@@ -10286,24 +10367,26 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, so
   }, []);
 
   // Na página pública é só a vitrine de logos, sem separar por tipo — quem quer o detalhe
-  // (e resgatar) entra no portal do cliente, onde a categoria continua disponível.
+  // (e resgatar) entra no portal do cliente, onde a área continua disponível.
   const filtrados = somenteLogos ? parceiros : parceiros.filter((p) => p.tipo === abaTipo);
+  const info = FN_AREA_INFO[abaTipo] || FN_AREA_INFO.servico;
 
   return (
-    <Card icon={Building2} titulo="Parceiros FN">
+    <Card icon={Building2} titulo={somenteLogos ? "Benefícios Exclusivos FN" : info.titulo}>
       {!somenteLogos && (
         <>
-          <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-            Empresas parceiras da FN Edificações que oferecem benefícios exclusivos para nossos clientes.
-          </p>
+          <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>{info.descricao}</p>
           <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-            {PARCEIRO_TIPO_OPCOES.map((o) => (
-              <button key={o.valor} onClick={() => setAbaTipo(o.valor)}
-                className={abaTipo === o.valor ? "btn-solid" : "btn-ghost"}
-                style={abaTipo === o.valor ? {} : { color: AZUL_MARINHO, background: CINZA_CLARO }}>
-                {o.label}
-              </button>
-            ))}
+            <button onClick={() => setAbaTipo("servico")}
+              className={abaTipo === "servico" ? "btn-solid" : "btn-ghost"}
+              style={abaTipo === "servico" ? {} : { color: AZUL_MARINHO, background: CINZA_CLARO }}>
+              FN Clube
+            </button>
+            <button onClick={() => setAbaTipo("produto")}
+              className={abaTipo === "produto" ? "btn-solid" : "btn-ghost"}
+              style={abaTipo === "produto" ? {} : { color: AZUL_MARINHO, background: CINZA_CLARO }}>
+              FN Home
+            </button>
           </div>
         </>
       )}
