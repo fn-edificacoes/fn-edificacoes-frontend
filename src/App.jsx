@@ -1550,6 +1550,19 @@ function PortalCliente({ onIrParaLogin, onLogin }) {
         </button>
         <AbaCliente notify={notify} onLogin={onLogin} onIrParaLogin={onIrParaLogin} />
       </main>
+      <footer style={{ background: "#fff", borderTop: `1px solid ${CINZA_BORDA}`, padding: "22px 18px" }}>
+        <div style={{ maxWidth: 720, margin: "0 auto", fontSize: 13 }}>
+          <strong style={{ color: AZUL_MARINHO }}>Dúvidas? Fale conosco:</strong>
+          <div style={{ marginTop: 8, display: "flex", gap: 20, flexWrap: "wrap" }}>
+            <a href="https://wa.me/5581983061305" target="_blank" rel="noopener noreferrer" style={{ color: "#4a5a70", textDecoration: "none" }}>
+              📱 WhatsApp: (81) 9 8306-1305
+            </a>
+            <a href="https://www.instagram.com/fn.edificacoes/" target="_blank" rel="noopener noreferrer" style={{ color: "#4a5a70", textDecoration: "none" }}>
+              📸 Instagram: @fn.edificacoes
+            </a>
+          </div>
+        </div>
+      </footer>
       {toast && (
         <div className="no-print" style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: AZUL_MARINHO, color: "#fff", padding: "10px 18px", borderRadius: 10, fontSize: 13.5, boxShadow: "0 6px 20px rgba(0,0,0,.2)" }}>
           {toast}
@@ -8200,28 +8213,6 @@ function AbaCliente({ notify, onLogin, onIrParaLogin }) {
         <button className="btn-solid" style={{ marginTop: 12 }} onClick={enviar} disabled={enviando}>
           {enviando ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} Enviar cadastro
         </button>
-      </Card>
-
-      <Card icon={ClipboardCheck} titulo="Já é cliente?">
-        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
-          Entre com seu e-mail e senha para acompanhar seu atendimento, baixar a documentação
-          pronta e ver os benefícios exclusivos dos nossos parceiros.
-        </p>
-        <button className="btn-solid" style={{ width: "auto", padding: "9px 18px" }} onClick={onIrParaLogin}>
-          <Lock size={14} /> Entrar no portal do cliente
-        </button>
-
-        <div style={{ marginTop: 18, paddingTop: 14, borderTop: `1px solid ${CINZA_BORDA}`, fontSize: 13 }}>
-          <strong style={{ color: AZUL_MARINHO }}>Dúvidas? Fale conosco:</strong>
-          <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
-            <a href="https://wa.me/5581983061305" target="_blank" rel="noopener noreferrer" style={{ color: "#4a5a70", textDecoration: "none" }}>
-              📱 WhatsApp: (81) 9 8306-1305
-            </a>
-            <a href="https://www.instagram.com/fn.edificacoes/" target="_blank" rel="noopener noreferrer" style={{ color: "#4a5a70", textDecoration: "none" }}>
-              📸 Instagram: @fn.edificacoes
-            </a>
-          </div>
-        </div>
       </Card>
 
       <SecaoFeedbackVitrine notify={notify} />
