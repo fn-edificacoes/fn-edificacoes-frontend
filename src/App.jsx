@@ -8029,9 +8029,7 @@ function AbaCliente({ notify, onLogin, onIrParaLogin }) {
       </Card>
 
       <SecaoFeedbackVitrine notify={notify} />
-      <SecaoParceirosVitrine notify={notify} onIrParaLogin={onIrParaLogin} />
-      {/* Logo abaixo da vitrine: quem acabou de pegar um cupom volta por aqui. */}
-      <SecaoMeusCupons notify={notify} />
+      <SecaoParceirosVitrine notify={notify} onIrParaLogin={onIrParaLogin} somenteLogos />
     </div>
   );
 }
@@ -9524,7 +9522,7 @@ function SecaoMeusCupons({ notify }) {
   );
 }
 
-function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin }) {
+function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, somenteLogos = false }) {
   const [parceiros, setParceiros] = useState([]);
   const [carregando, setCarregando] = useState(false);
   const [abaTipo, setAbaTipo] = useState("servico");
@@ -9541,25 +9539,31 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin }) 
     })();
   }, []);
 
-  const filtrados = parceiros.filter((p) => p.tipo === abaTipo);
+  // Na página pública é só a vitrine de logos, sem separar por tipo — quem quer o detalhe
+  // (e resgatar) entra no portal do cliente, onde a categoria continua disponível.
+  const filtrados = somenteLogos ? parceiros : parceiros.filter((p) => p.tipo === abaTipo);
 
   return (
     <Card icon={Building2} titulo="Parceiros FN">
-      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-        Empresas parceiras da FN Edificações que oferecem benefícios exclusivos para nossos clientes.
-      </p>
-      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-        {PARCEIRO_TIPO_OPCOES.map((o) => (
-          <button key={o.valor} onClick={() => setAbaTipo(o.valor)}
-            className={abaTipo === o.valor ? "btn-solid" : "btn-ghost"}
-            style={abaTipo === o.valor ? {} : { color: AZUL_MARINHO, background: CINZA_CLARO }}>
-            {o.label}
-          </button>
-        ))}
-      </div>
+      {!somenteLogos && (
+        <>
+          <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+            Empresas parceiras da FN Edificações que oferecem benefícios exclusivos para nossos clientes.
+          </p>
+          <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+            {PARCEIRO_TIPO_OPCOES.map((o) => (
+              <button key={o.valor} onClick={() => setAbaTipo(o.valor)}
+                className={abaTipo === o.valor ? "btn-solid" : "btn-ghost"}
+                style={abaTipo === o.valor ? {} : { color: AZUL_MARINHO, background: CINZA_CLARO }}>
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
-      {!carregando && filtrados.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum parceiro disponível nesta categoria no momento.</p>}
+      {!carregando && filtrados.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum parceiro disponível no momento.</p>}
 
       {filtrados.length > 0 && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 12 }}>
