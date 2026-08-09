@@ -2441,7 +2441,8 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "laudos" && aba === "laudo" && <LaudoModelo laudo={montarLaudoModelo(dados, itens)} assinatura={assinatura} aprovado={perfil === "gerencia"} />}
         {abaTop === "laudos" && aba === "realizados" && (
           <AbaLaudosRealizados laudos={meusLaudos} carregando={meusLaudosCarregando}
-            recarregar={carregarMeusLaudos} assinatura={assinatura} ehGerencia={perfil === "gerencia"} />
+            recarregar={carregarMeusLaudos} assinatura={assinatura} ehGerencia={perfil === "gerencia"}
+            clientes={clientesAtivos} docs={docs} usuarios={usuarios} />
         )}
         {abaTop === "laudos" && aba === "agenda" && perfil === "vistoriador" && (
           <CalendarioVistoriador agenda={agendaVistoriador} carregando={agendaVistoriadorCarregando} clientes={clientesAtivos} preencherComCliente={preencherComCliente} />
@@ -5904,9 +5905,11 @@ function EstrelasNota({ nota }) {
   );
 }
 
-function AbaLaudosRealizados({ laudos = [], carregando, recarregar, assinatura, ehGerencia }) {
+function AbaLaudosRealizados({ laudos = [], carregando, recarregar, assinatura, ehGerencia, clientes = [], docs = [], usuarios = [] }) {
   const [abertoId, setAbertoId] = useState(null);
   const [filtro, setFiltro] = useState("");
+  const nomePorVistoriadorId = {};
+  usuarios.forEach((u) => { if (u.role === "vistoriador") nomePorVistoriadorId[u.id] = u.nome; });
 
   const entregues = laudos.filter((l) => l.status_cliente === "Laudo enviado por e-mail");
   const emAnalise = laudos.filter((l) => l.status_cliente === "Laudo em análise");
@@ -5914,6 +5917,39 @@ function AbaLaudosRealizados({ laudos = [], carregando, recarregar, assinatura, 
   const media = avaliados.length
     ? avaliados.reduce((soma, l) => soma + Number(l.avaliacao_nota), 0) / avaliados.length
     : 0;
+
+  /* Vistoria "sem laudo": já chegou a ser agendada ou iniciada, mas não existe nenhum "docs"
+     para o CPF dela — ou seja, o técnico nunca chegou a enviar o laudo pra Gerência. Não dá
+     pra usar cliente.status sozinho: uma vez que o docs nasce, o status do cliente congela
+     (quem manda a partir daí é docs.statusCliente), então "Em vistoria" continua aparecendo
+     mesmo depois do laudo enviado — só a ausência de um docs correspondente é confiável. */
+  const temDocEnviado = (c) => {
+    const cpfLimpo = (c.cpf || "").replace(/\D/g, "");
+    return cpfLimpo ? docs.some((d) => (d.cpf || "").replace(/\D/g, "") === cpfLimpo) : false;
+  };
+  const vistoriasSemLaudo = ehGerencia
+    ? clientes.filter((c) =>
+        c.servico === SERVICO_VISTORIA &&
+        ["Vistoria agendada", "Em vistoria"].includes(c.status) &&
+        !temDocEnviado(c))
+    : [];
+
+  /* Por vistoriador: quantos laudos já entregou (vem pronto em cada laudo, vistoriador_nome)
+     e quantas vistorias dele ainda não viraram laudo nenhum. */
+  const porVistoriador = {};
+  if (ehGerencia) {
+    laudos.forEach((l) => {
+      const nome = l.vistoriador_nome || "(sem técnico)";
+      if (!porVistoriador[nome]) porVistoriador[nome] = { nome, feitos: 0, faltando: 0 };
+      porVistoriador[nome].feitos += 1;
+    });
+    vistoriasSemLaudo.forEach((c) => {
+      const nome = c.vistoriadorId ? (nomePorVistoriadorId[c.vistoriadorId] || "(técnico não identificado)") : "(sem técnico atribuído)";
+      if (!porVistoriador[nome]) porVistoriador[nome] = { nome, feitos: 0, faltando: 0 };
+      porVistoriador[nome].faltando += 1;
+    });
+  }
+  const listaPorVistoriador = Object.values(porVistoriador).sort((a, b) => b.feitos - a.feitos);
 
   const lista = laudos.filter((l) =>
     filtro === "entregues" ? l.status_cliente === "Laudo enviado por e-mail"
@@ -5966,6 +6002,41 @@ function AbaLaudosRealizados({ laudos = [], carregando, recarregar, assinatura, 
           <span style={{ fontSize: 12.5, color: "#65758b" }}>
             média de {avaliados.length} avaliação(ões) {ehGerencia ? "da equipe" : "dos seus clientes"}
           </span>
+        </div>
+      )}
+
+      {ehGerencia && listaPorVistoriador.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 6 }}>
+            Por vistoriador
+            {vistoriasSemLaudo.length > 0 && (
+              <span style={{ marginLeft: 8, background: "#FCEAEA", color: "#C62828", borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 800 }}>
+                {vistoriasSemLaudo.length} vistoria(s) sem laudo enviado
+              </span>
+            )}
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: CINZA_CLARO }}>
+                  {["Vistoriador", "Laudos feitos", "Vistorias sem laudo"].map((h, i) => (
+                    <th key={h} style={{ textAlign: i >= 1 ? "right" : "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}`, whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {listaPorVistoriador.map((v) => (
+                  <tr key={v.nome} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                    <td style={{ padding: "8px 10px", fontWeight: 600 }}>{v.nome}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right" }}>{v.feitos}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right", color: v.faltando ? "#C62828" : "#8593a8", fontWeight: v.faltando ? 700 : 400 }}>
+                      {v.faltando || "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
