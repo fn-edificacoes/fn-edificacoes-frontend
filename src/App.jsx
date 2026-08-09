@@ -1995,6 +1995,29 @@ function AppInterno({ session, onLogout }) {
   };
   useEffect(() => { carregarVales(); }, []);
 
+  /* ---- Vendas e comissão (Gerência/Vendas/Atendimento acompanham) ----
+     Cada linha nasce sozinha quando um cliente aceita uma proposta de um parceiro
+     (POST /api/propostas/:id/responder, no backend). Aqui é acompanhamento + marcar pago. */
+  const [vendas, setVendas] = useState([]);
+  const [vendasCarregando, setVendasCarregando] = useState(false);
+  const carregarVendas = async () => {
+    if (!["gerencia", "vendas", "atendimento"].includes(perfil)) return;
+    setVendasCarregando(true);
+    try {
+      const r = await apiFetch("/api/vendas", { token });
+      setVendas(r.vendas || []);
+    } catch (e) { notify(`Não foi possível carregar vendas: ${e.message}`); }
+    setVendasCarregando(false);
+  };
+  useEffect(() => { carregarVendas(); }, []);
+  const atualizarVenda = async (id, corpo) => {
+    try {
+      await apiFetch(`/api/vendas/${id}`, { method: "PATCH", token, body: corpo });
+      await carregarVendas();
+      return true;
+    } catch (e) { notify(`Não foi possível atualizar a venda: ${e.message}`); return false; }
+  };
+
   /* ---- Preço de vistoria por empreendimento (alimenta o Financeiro) ---- */
   const [precos, setPrecos] = useState([]);
   const [precosCarregando, setPrecosCarregando] = useState(false);
@@ -2676,7 +2699,8 @@ function AppInterno({ session, onLogout }) {
         )}
         {abaTop === "vendas" && (
           <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
-            vales={vales} valesCarregando={valesCarregando} criarParceiroManual={criarParceiroManual}
+            vales={vales} valesCarregando={valesCarregando} vendas={vendas} vendasCarregando={vendasCarregando} atualizarVenda={atualizarVenda}
+            criarParceiroManual={criarParceiroManual}
             salvarItemCatalogo={salvarItemCatalogoAdmin} excluirItemCatalogo={excluirItemCatalogoAdmin} notify={notify}
             podeExcluir={perfil === "gerencia"} excluirParceiro={excluirParceiro} />
         )}
@@ -2688,6 +2712,7 @@ function AppInterno({ session, onLogout }) {
             excluirParceiro={excluirParceiro}
             salvarItemCatalogo={salvarItemCatalogoAdmin} excluirItemCatalogo={excluirItemCatalogoAdmin}
             vales={vales} valesCarregando={valesCarregando}
+            vendas={vendas} vendasCarregando={vendasCarregando} atualizarVenda={atualizarVenda}
             precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
             padronizarEmpreendimento={padronizarEmpreendimento} excluirCliente={delCliente}
             prospeccao={prospeccao} prospeccaoCarregando={prospeccaoCarregando} atualizarProspeccao={atualizarProspeccao}
@@ -6702,11 +6727,12 @@ function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendi
 }
 
 /* ---- Gerência · Parceiros e Afiliados ---- */
-function CardIndicadoresParceiros({ parceiros, vales, valesCarregando }) {
+function CardIndicadoresParceiros({ parceiros, vales, valesCarregando, vendas = [] }) {
   const ativos = parceiros.filter((p) => p.status === "aprovado").length;
   const leadsEnviados = vales.length;
   const valesUsados = vales.filter((v) => v.status === "usado").length;
   const taxaConversao = leadsEnviados > 0 ? (valesUsados / leadsEnviados) * 100 : 0;
+  const comissaoGerada = vendas.reduce((s, v) => s + (Number(v.comissao_valor) || 0), 0);
 
   return (
     <Card icon={TrendingUp} titulo="Indicadores de Parceiros e Afiliados">
@@ -6716,11 +6742,12 @@ function CardIndicadoresParceiros({ parceiros, vales, valesCarregando }) {
         <KpiCard label="Leads enviados" valor={leadsEnviados} cor="#2C75B5" Icon={TrendingUp} />
         <KpiCard label="Taxa de conversão" valor={`${taxaConversao.toFixed(0)}%`} cor="#2E7D32" Icon={Percent} />
         <KpiCard label="Vendas por indicação" valor={valesUsados} cor="#2E7D32" Icon={Check} />
-        <KpiCard label="Comissão gerada" valor="—" cor="#8593a8" Icon={DollarSign} />
+        <KpiCard label="Vendas do funil de orçamento" valor={vendas.length} cor="#2E7D32" Icon={Check} />
+        <KpiCard label="Comissão gerada" valor={fmtReal(comissaoGerada)} cor={AZUL_MARINHO} Icon={DollarSign} />
       </div>
       <p style={{ fontSize: 12, color: "#8593a8", marginTop: 12 }}>
-        "Leads enviados" e "taxa de conversão" são calculados a partir dos códigos de benefício (vales) gerados e ativados pelos clientes.
-        "Comissão gerada" ainda não tem dado real — os vales não registram o valor da venda, só o benefício concedido.
+        "Leads enviados" e "taxa de conversão" vêm dos códigos de benefício (vales) gerados e ativados pelos clientes.
+        "Vendas do funil de orçamento" e "Comissão gerada" vêm das propostas aceitas no funil de Leads + Propostas.
       </p>
     </Card>
   );
@@ -6900,11 +6927,11 @@ function CardBancoPatologias({ patologias = [], carregando, onCriar, onAtualizar
   );
 }
 
-function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, notify }) {
+function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas = [], vendasCarregando, atualizarVenda, notify }) {
   const [cadastrando, setCadastrando] = useState(false);
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <CardIndicadoresParceiros parceiros={parceiros} vales={vales} valesCarregando={valesCarregando} />
+      <CardIndicadoresParceiros parceiros={parceiros} vales={vales} valesCarregando={valesCarregando} vendas={vendas} />
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }} onClick={() => setCadastrando(true)}>
           <Plus size={15} /> Cadastrar parceiro
@@ -6913,10 +6940,81 @@ function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceir
       <CardParceiros parceiros={parceiros} carregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
         podeExcluir={podeExcluir} excluirParceiro={excluirParceiro}
         salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} notify={notify} />
+      <CardVendasComissoes vendas={vendas} carregando={vendasCarregando} atualizarVenda={atualizarVenda} notify={notify} />
       {cadastrando && (
         <ModalCriarParceiroManual onFechar={() => setCadastrando(false)} criarParceiroManual={criarParceiroManual} notify={notify} />
       )}
     </div>
+  );
+}
+
+/* Vendas fechadas pelo funil de Leads + Propostas, com a comissão calculada — Gerência/Vendas
+   acompanha e marca quando a comissão foi paga ao parceiro (ou ajusta o valor, quando o
+   cálculo automático não bateu por falta de categoria cadastrada na comissão do parceiro). */
+function CardVendasComissoes({ vendas, carregando, atualizarVenda, notify }) {
+  const [salvandoId, setSalvandoId] = useState(null);
+  const comissaoGerada = vendas.reduce((s, v) => s + (Number(v.comissao_valor) || 0), 0);
+  const comissaoPaga = vendas.filter((v) => v.status_comissao === "paga").reduce((s, v) => s + (Number(v.comissao_valor) || 0), 0);
+
+  const marcarPaga = async (id) => {
+    setSalvandoId(id);
+    const ok = await atualizarVenda(id, { statusComissao: "paga" });
+    setSalvandoId(null);
+    if (ok) notify("Comissão marcada como paga ✓");
+  };
+  const marcarPendente = async (id) => {
+    setSalvandoId(id);
+    const ok = await atualizarVenda(id, { statusComissao: "pendente" });
+    setSalvandoId(null);
+    if (ok) notify("Comissão marcada como pendente ✓");
+  };
+
+  return (
+    <Card icon={DollarSign} titulo={`Vendas e comissões (${vendas.length})`}>
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && vendas.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhuma venda fechada pelo funil de orçamento até o momento.</p>}
+      {vendas.length > 0 && (
+        <>
+          <div style={{ display: "flex", gap: 20, flexWrap: "wrap", fontSize: 13.5, marginBottom: 12 }}>
+            <div><strong style={{ color: AZUL_MARINHO }}>Comissão gerada: </strong>{fmtReal(comissaoGerada)}</div>
+            <div><strong style={{ color: "#2E7D32" }}>Comissão paga: </strong>{fmtReal(comissaoPaga)}</div>
+            <div><strong style={{ color: "#C62828" }}>Comissão a pagar: </strong>{fmtReal(comissaoGerada - comissaoPaga)}</div>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: CINZA_CLARO }}>
+                  {["Parceiro", "Cliente", "Serviço", "Valor da venda", "Comissão", "Status", ""].map((h) => (
+                    <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}` }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {vendas.map((v) => (
+                  <tr key={v.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                    <td style={{ padding: "8px 10px" }}>{v.parceiro_empresa || "—"}</td>
+                    <td style={{ padding: "8px 10px" }}>{v.cliente_nome || "—"}</td>
+                    <td style={{ padding: "8px 10px" }}>{v.servico_titulo || "—"}</td>
+                    <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{fmtReal(v.valor_venda)}</td>
+                    <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+                      {v.comissao_valor != null ? `${fmtReal(v.comissao_valor)} (${Number(v.comissao_percentual)}%)` : <span style={{ color: "#C62828" }}>sem comissão cadastrada</span>}
+                    </td>
+                    <td style={{ padding: "8px 10px" }}><Selo valor={STATUS_COMISSAO_LABEL[v.status_comissao] || v.status_comissao} /></td>
+                    <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+                      {salvandoId === v.id ? <Loader2 size={15} className="spin" /> : v.status_comissao === "paga" ? (
+                        <button className="btn-ghost" style={{ padding: "5px 10px", fontSize: 12 }} onClick={() => marcarPendente(v.id)}>Desfazer</button>
+                      ) : (
+                        <button className="btn-solid" style={{ width: "auto", padding: "5px 10px", fontSize: 12 }} onClick={() => marcarPaga(v.id)}>Marcar paga</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </Card>
   );
 }
 
@@ -7406,14 +7504,15 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", docs, addDoc, updDoc, delDoc, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
+function AbaGerencia({ sub = "visao-geral", docs, addDoc, updDoc, delDoc, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
   if (sub === "acompanhamento") {
     return <TabelaRegistrosVistoriaDoc docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc}
       carregando={carregando} notify={notify} clientes={clientes} />;
   }
   if (sub === "parceiros") {
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual}
-      salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} vales={vales} valesCarregando={valesCarregando} notify={notify}
+      salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} vales={vales} valesCarregando={valesCarregando}
+      vendas={vendas} vendasCarregando={vendasCarregando} atualizarVenda={atualizarVenda} notify={notify}
       podeExcluir excluirParceiro={excluirParceiro} />;
   }
   if (sub === "patologias") {
@@ -8800,6 +8899,10 @@ STATUS_COR["Usado"] = { cor: "#2E7D32", bg: "#E6F4EA" };
 STATUS_COR["Expirado"] = { cor: "#65758b", bg: "#EEF1F5" };
 STATUS_COR["Cancelado"] = { cor: "#C62828", bg: "#FCEAEA" };
 
+/* Comissão da venda gerada por uma proposta aceita — reaproveita os selos "Pago"/"Pendente"/
+   "Cancelada" já usados no financeiro, é o mesmo conceito. */
+const STATUS_COMISSAO_LABEL = { pendente: "Pendente", paga: "Pago", cancelada: "Cancelada" };
+
 /* Converte um vale vindo do banco (snake_case) para o formato usado no app (camelCase) */
 function mapValeDaApi(v) {
   return {
@@ -9054,6 +9157,49 @@ function CardValesParceiro({ vales }) {
             </tbody>
           </table>
         </div>
+      )}
+    </Card>
+  );
+}
+
+/* Vendas fechadas a partir de propostas aceitas, com a comissão que a FN calculou —
+   o parceiro só acompanha aqui, quem muda o status de pagamento é a Gerência/Vendas. */
+function CardVendasParceiro({ vendas, carregando }) {
+  const totalComissao = vendas.reduce((s, v) => s + (Number(v.comissao_valor) || 0), 0);
+  return (
+    <Card icon={DollarSign} titulo={`Vendas e comissão (${vendas.length})`}>
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && vendas.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhuma venda fechada até o momento.</p>}
+      {vendas.length > 0 && (
+        <>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: CINZA_CLARO }}>
+                  {["Cliente", "Serviço", "Valor da venda", "Comissão", "Status"].map((h) => (
+                    <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}` }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {vendas.map((v) => (
+                  <tr key={v.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                    <td style={{ padding: "8px 10px" }}>{v.cliente_nome || "—"}</td>
+                    <td style={{ padding: "8px 10px" }}>{v.servico_titulo || "—"}</td>
+                    <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{fmtReal(v.valor_venda)}</td>
+                    <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+                      {v.comissao_valor != null ? `${fmtReal(v.comissao_valor)} (${Number(v.comissao_percentual)}%)` : "—"}
+                    </td>
+                    <td style={{ padding: "8px 10px" }}><Selo valor={STATUS_COMISSAO_LABEL[v.status_comissao] || v.status_comissao} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ marginTop: 12, fontSize: 13.5 }}>
+            <strong style={{ color: AZUL_MARINHO }}>Comissão total gerada: </strong>{fmtReal(totalComissao)}
+          </div>
+        </>
       )}
     </Card>
   );
@@ -9451,6 +9597,20 @@ function PainelParceiro({ session, onLogout }) {
     } catch (e) { alert(`Não foi possível enviar a proposta: ${e.message}`); return false; }
   };
 
+  /* Vendas: nascem sozinhas quando o cliente aceita uma proposta (ver enviarProposta acima
+     e o fluxo do cliente) — aqui é só leitura, com a comissão já calculada pela FN. */
+  const [vendas, setVendas] = useState([]);
+  const [vendasCarregando, setVendasCarregando] = useState(true);
+  const carregarVendas = async () => {
+    setVendasCarregando(true);
+    try {
+      const r = await apiFetch("/api/parceiros/me/vendas", { token: session.token });
+      setVendas(r.vendas || []);
+    } catch { /* mostra vazio; o card de erro geral já cobre falha de sessão */ }
+    setVendasCarregando(false);
+  };
+  useEffect(() => { carregarVendas(); }, []);
+
   return (
     <div style={{ fontFamily: "'Inter', system-ui, sans-serif", color: "#1a2330", background: CINZA_CLARO, minHeight: "100vh" }}>
       <style>{estilos}</style>
@@ -9492,6 +9652,7 @@ function PainelParceiro({ session, onLogout }) {
             <CardStatusParceiro parceiro={parceiro} />
             <CardOportunidadesParceiro leads={leads} carregando={leadsCarregando}
               onVisualizar={visualizarLead} onEnviarProposta={enviarProposta} />
+            <CardVendasParceiro vendas={vendas} carregando={vendasCarregando} />
             <CardPerfilParceiro parceiro={parceiro} token={session.token} onSalvo={carregar} />
             <EditorCatalogoParceiro itens={itensCatalogo} carregando={itensCarregando}
               onSalvar={salvarItemCatalogo} onExcluir={excluirItemCatalogo}
