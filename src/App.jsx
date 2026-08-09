@@ -757,7 +757,7 @@ function CartaoIndicador({ titulo, valor, apoio, cor }) {
   );
 }
 
-function LaudoModelo({ laudo, assinatura, aprovado = true }) {
+function LaudoModelo({ laudo, assinatura, assinaturaVistoriador, aprovado = true }) {
   const ind = calcularIndicadoresLaudo(laudo);
   /* Se a foto com o cliente não decodificar, a página final inteira some — no laudo do
      cliente não pode sobrar o ícone de imagem quebrada nem um quadro vazio. Mesma regra
@@ -957,15 +957,22 @@ function LaudoModelo({ laudo, assinatura, aprovado = true }) {
           Recomenda-se o encaminhamento das não conformidades à construtora para correção e posterior revistoria.
         </p>
 
-        <div style={{ marginTop: 34, display: "flex", gap: 40, flexWrap: "wrap" }}>
-          <div style={{ flex: 1, minWidth: 200, textAlign: "center" }}>
-            {assinatura?.imagem && <img src={assinatura.imagem} alt="" style={{ height: 52, marginBottom: 4 }} />}
+        <div style={{ marginTop: 34, display: "flex", gap: 30, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 160, textAlign: "center" }}>
+            {assinaturaVistoriador?.imagem && <img src={assinaturaVistoriador.imagem} alt="" style={{ height: 46, marginBottom: 4 }} />}
             <div style={{ borderTop: `1px solid ${AZUL_MARINHO}`, paddingTop: 5, fontSize: 11.5 }}>
               <strong>{laudo.responsavel?.nome}</strong>
               <div style={{ color: "#65758b", fontSize: 10.5 }}>{laudo.responsavel?.registro}</div>
             </div>
           </div>
-          <div style={{ flex: 1, minWidth: 200, textAlign: "center", alignSelf: "flex-end" }}>
+          <div style={{ flex: 1, minWidth: 160, textAlign: "center" }}>
+            {assinatura?.imagem && <img src={assinatura.imagem} alt="" style={{ height: 46, marginBottom: 4 }} />}
+            <div style={{ borderTop: `1px solid ${AZUL_MARINHO}`, paddingTop: 5, fontSize: 11.5 }}>
+              <strong>{assinatura?.nome || "Gerência FN Edificações"}</strong>
+              <div style={{ color: "#65758b", fontSize: 10.5 }}>Gerência</div>
+            </div>
+          </div>
+          <div style={{ flex: 1, minWidth: 160, textAlign: "center", alignSelf: "flex-end" }}>
             <div style={{ borderTop: `1px solid ${AZUL_MARINHO}`, paddingTop: 5, fontSize: 11.5 }}>
               <strong>{laudo.proprietario}</strong>
               <div style={{ color: "#65758b", fontSize: 10.5 }}>Proprietário(a)</div>
@@ -2207,6 +2214,26 @@ function AppInterno({ session, onLogout }) {
     try { await apiFetch("/api/assinatura", { method: "DELETE", token }); } catch {}
   };
 
+  /* ---- Assinatura própria do vistoriador — aparece no laudo final ao lado da da Gerência ---- */
+  const [minhaAssinatura, setMinhaAssinatura] = useState(null); // { imagem }
+  const carregarMinhaAssinatura = async () => {
+    if (perfil !== "vistoriador" && perfil !== "gerencia") return;
+    try {
+      const r = await apiFetch("/api/usuarios/me/assinatura", { token });
+      setMinhaAssinatura(r.assinatura || null);
+    } catch { setMinhaAssinatura(null); }
+  };
+  useEffect(() => { carregarMinhaAssinatura(); }, []);
+  const salvarMinhaAssinatura = async (obj) => {
+    setMinhaAssinatura(obj);
+    try { await apiFetch("/api/usuarios/me/assinatura", { method: "POST", token, body: obj }); notify("Assinatura salva ✓"); }
+    catch (e) { notify(`Não foi possível salvar a assinatura: ${e.message}`); }
+  };
+  const removerMinhaAssinatura = async () => {
+    setMinhaAssinatura(null);
+    try { await apiFetch("/api/usuarios/me/assinatura", { method: "DELETE", token }); } catch {}
+  };
+
   /* ---- Gerenciar usuários da equipe (somente perfil Gerência) ---- */
   const [usuarios, setUsuarios] = useState([]);
   const [usuariosCarregando, setUsuariosCarregando] = useState(false);
@@ -2570,9 +2597,10 @@ function AppInterno({ session, onLogout }) {
             fotoCliente={dados.fotoCliente} setFotoCliente={setFotoCliente} notify={notify} setAba={setAba}
             bloqueado={laudoBloqueado} onPedirDesbloqueio={() => setConfirmandoDesbloqueio(true)}
             statusLaudo={laudoNoServidor?.laudoStatusLabel} devolvido={laudoDevolvido}
-            motivoDevolucao={laudoNoServidor?.motivo_devolucao} patologiasBanco={patologiasBanco} />
+            motivoDevolucao={laudoNoServidor?.motivo_devolucao} patologiasBanco={patologiasBanco}
+            minhaAssinatura={minhaAssinatura} salvarMinhaAssinatura={salvarMinhaAssinatura} removerMinhaAssinatura={removerMinhaAssinatura} />
         )}
-        {abaTop === "laudos" && aba === "laudo" && <LaudoModelo laudo={montarLaudoModelo(dados, itens)} assinatura={assinatura} aprovado={perfil === "gerencia"} />}
+        {abaTop === "laudos" && aba === "laudo" && <LaudoModelo laudo={montarLaudoModelo(dados, itens)} assinatura={assinatura} assinaturaVistoriador={minhaAssinatura} aprovado={perfil === "gerencia"} />}
         {abaTop === "laudos" && aba === "realizados" && (
           <AbaLaudosRealizados laudos={meusLaudos} carregando={meusLaudosCarregando}
             recarregar={carregarMeusLaudos} assinatura={assinatura} ehGerencia={perfil === "gerencia"}
@@ -4493,7 +4521,7 @@ function SeletorAmbientePatologias({ onFechar, onAdicionar, patologiasBanco = []
   );
 }
 
-function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, dados, setD, fotoCliente, setFotoCliente, notify, setAba, bloqueado, onPedirDesbloqueio, statusLaudo, devolvido, motivoDevolucao, patologiasBanco = [] }) {
+function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, dados, setD, fotoCliente, setFotoCliente, notify, setAba, bloqueado, onPedirDesbloqueio, statusLaudo, devolvido, motivoDevolucao, patologiasBanco = [], minhaAssinatura, salvarMinhaAssinatura, removerMinhaAssinatura }) {
   const fotoClienteRef = useRef();
   const [seletorAberto, setSeletorAberto] = useState(false);
   const handleFotoCliente = (file) => {
@@ -4569,6 +4597,35 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
             <Field label="Registro profissional" value={dados?.rt?.registro || ""} onChange={(v) => setD("rt", "registro", v)}
               placeholder="Ex.: CFT-03 nº 00000000000" full />
           </Grid>
+
+          {salvarMinhaAssinatura && (
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${CINZA_BORDA}` }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Minha assinatura</div>
+              <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+                <label className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO, cursor: "pointer" }}>
+                  <Camera size={15} /> {minhaAssinatura ? "Trocar assinatura" : "Enviar assinatura"}
+                  <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    if (!file.type.startsWith("image/")) { notify("Envie uma imagem (PNG ou JPG) da assinatura"); return; }
+                    const reader = new FileReader();
+                    reader.onload = () => salvarMinhaAssinatura({ imagem: reader.result });
+                    reader.readAsDataURL(file);
+                    e.target.value = "";
+                  }} />
+                </label>
+                {minhaAssinatura && (
+                  <>
+                    <img src={minhaAssinatura.imagem} alt="Sua assinatura" style={{ height: 44, background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 6, padding: 4 }} />
+                    <button className="btn-ghost" style={{ color: "#c62828" }} onClick={removerMinhaAssinatura}><Trash2 size={15} /> Remover</button>
+                  </>
+                )}
+              </div>
+              <p style={{ fontSize: 12, color: "#8593a8", margin: "8px 0 0" }}>
+                Aparece no laudo final ao lado da assinatura da Gerência. Envie uma única vez — fica salva para todos os seus próximos laudos.
+              </p>
+            </div>
+          )}
         </Card>
       </div>
 
@@ -5736,7 +5793,8 @@ function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, d
             ) : (
               <>
                 {/* Mesma peça que o cliente recebe — a gerência aprova vendo o resultado final. */}
-                <LaudoModelo laudo={montarLaudoModelo(laudoPreview.dados, laudoPreview.itens || [])} assinatura={assinatura} />
+                <LaudoModelo laudo={montarLaudoModelo(laudoPreview.dados, laudoPreview.itens || [])} assinatura={assinatura}
+                  assinaturaVistoriador={laudoPreview.vistoriador_assinatura ? { imagem: laudoPreview.vistoriador_assinatura } : null} />
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
                   <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setPreviewId(null)}>Fechar</button>
                   <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: "#EAF2FB" }} onClick={() => setEditando(true)}>
@@ -6315,7 +6373,9 @@ function AbaLaudosRealizados({ laudos = [], carregando, recarregar, assinatura, 
                       foi entregue — o que está em análise continua saindo como preliminar. */}
                   <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, overflow: "hidden" }}>
                     <LaudoModelo laudo={montarLaudoModelo(l.dados || {}, l.itens || [])}
-                      assinatura={assinatura} aprovado={entregue} />
+                      assinatura={assinatura}
+                      assinaturaVistoriador={l.vistoriador_assinatura ? { imagem: l.vistoriador_assinatura } : null}
+                      aprovado={entregue} />
                   </div>
                 </div>
               )}
