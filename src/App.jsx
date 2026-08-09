@@ -1361,10 +1361,6 @@ function TelaLogin({ onLogin, onVoltar, onCadastroParceiro }) {
   const [senha, setSenha] = useState("");
   const [erro, setErro] = useState("");
   const [carregando, setCarregando] = useState(false);
-  const [primeiroAcesso, setPrimeiroAcesso] = useState(false);
-  const [emailPrimeiroAcesso, setEmailPrimeiroAcesso] = useState("");
-  const [erroPrimeiroAcesso, setErroPrimeiroAcesso] = useState("");
-  const [liberandoAcesso, setLiberandoAcesso] = useState(false);
 
   const entrar = async () => {
     if (!email || !senha) { setErro("Informe e-mail e senha."); return; }
@@ -1377,57 +1373,6 @@ function TelaLogin({ onLogin, onVoltar, onCadastroParceiro }) {
     }
     setCarregando(false);
   };
-
-  /* Só para quem é cliente e nunca criou senha (cadastro antigo, ou feito por telefone pelo
-     Atendimento). Basta o e-mail cadastrado no perfil dele (o mesmo do "Sou cliente") — o
-     acesso libera com a senha padrão "123456", provisória: o portal já entra pedindo pra
-     trocar. Quem já tem senha e esqueceu fala com o suporte — não é este fluxo. */
-  const liberarPrimeiroAcesso = async () => {
-    setErroPrimeiroAcesso("");
-    if (!emailPrimeiroAcesso.trim()) {
-      setErroPrimeiroAcesso("Informe o e-mail cadastrado."); return;
-    }
-    setLiberandoAcesso(true);
-    try {
-      const r = await apiFetch("/api/clientes/criar-senha-existente", {
-        method: "POST", body: { email: emailPrimeiroAcesso.trim() },
-      });
-      onLogin({ token: r.token, usuario: r.usuario });
-    } catch (e) { setErroPrimeiroAcesso(e.message); }
-    setLiberandoAcesso(false);
-  };
-
-  if (primeiroAcesso) {
-    return (
-      <div style={{ minHeight: "100vh", background: CINZA_CLARO, display: "grid", placeItems: "center", padding: 18, fontFamily: "'Inter', system-ui, sans-serif" }}>
-        <div style={{ background: "#fff", borderRadius: 16, padding: "32px 30px", width: "100%", maxWidth: 380, boxShadow: "0 10px 30px rgba(18,51,91,.12)" }}>
-          <h2 style={{ textAlign: "center", color: AZUL_MARINHO, fontSize: 18, margin: "0 0 4px" }}>Primeiro acesso</h2>
-          <p style={{ textAlign: "center", color: "#65758b", fontSize: 13, margin: "0 0 20px" }}>
-            Digite o e-mail cadastrado no seu perfil. Seu acesso é liberado na hora, com uma senha temporária — você troca assim que entrar.
-          </p>
-          <div style={cell(true)}>
-            <label style={lab}>E-mail cadastrado</label>
-            <input style={inp} type="email" value={emailPrimeiroAcesso} onChange={(e) => setEmailPrimeiroAcesso(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && liberarPrimeiroAcesso()} autoFocus />
-          </div>
-
-          {erroPrimeiroAcesso && (
-            <div style={{ marginTop: 12, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>{erroPrimeiroAcesso}</div>
-          )}
-
-          <button type="button" className="btn-solid" style={{ width: "100%", justifyContent: "center", marginTop: 18, padding: "11px" }}
-            disabled={liberandoAcesso} onClick={liberarPrimeiroAcesso}>
-            {liberandoAcesso ? <><Loader2 size={15} className="spin" /> Liberando…</> : "Liberar meu acesso"}
-          </button>
-          <button type="button" onClick={() => {
-            setPrimeiroAcesso(false); setErroPrimeiroAcesso(""); setEmailPrimeiroAcesso("");
-          }} style={{ width: "100%", marginTop: 14, background: "none", border: "none", color: AZUL_MEDIO, fontSize: 13, cursor: "pointer" }}>
-            ← Voltar para o login
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div style={{ minHeight: "100vh", background: CINZA_CLARO, display: "grid", placeItems: "center", padding: 18, fontFamily: "'Inter', system-ui, sans-serif" }}>
@@ -1460,10 +1405,13 @@ function TelaLogin({ onLogin, onVoltar, onCadastroParceiro }) {
           {carregando ? <><Loader2 size={15} className="spin" /> Entrando…</> : "Entrar"}
         </button>
 
-        <div style={{ display: "flex", justifyContent: "center", gap: 14, marginTop: 14, fontSize: 12.5, flexWrap: "wrap" }}>
-          <button type="button" onClick={() => setPrimeiroAcesso(true)} style={{ background: "none", border: "none", color: AZUL_MEDIO, cursor: "pointer", padding: 0 }}>
-            Sou cliente e é meu primeiro acesso
-          </button>
+        {/* Todo cliente já cadastrado (mesmo de antes de existir senha própria) já tem acesso
+           liberado com a senha padrão — só falta ele saber disso, já que não existe mais uma
+           tela separada de "primeiro acesso" pedindo pra criar a dele. */}
+        <p style={{ textAlign: "center", color: "#8593a8", fontSize: 12, margin: "14px 0 0" }}>
+          Primeiro acesso? Use o e-mail cadastrado e a senha <strong>12345678</strong> — você troca assim que entrar.
+        </p>
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 6, fontSize: 12.5 }}>
           <a href="https://wa.me/5581983061305" target="_blank" rel="noopener noreferrer" style={{ color: "#8593a8", textDecoration: "none" }}>
             Esqueci minha senha
           </a>
