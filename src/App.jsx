@@ -8284,6 +8284,15 @@ const PARCEIRO_TIPO_LABEL = { servico: "Parceiro", produto: "Afiliado" };
 
 const PARCEIRO_STATUS_OPCOES = ["em_analise", "aprovado", "suspenso", "encerrado"];
 const PARCEIRO_STATUS_LABEL = { em_analise: "Em análise", aprovado: "Aprovado", suspenso: "Suspenso", encerrado: "Encerrado" };
+const LEAD_STATUS_LABEL = {
+  novo: "Aguardando o parceiro", visualizado: "Parceiro visualizou", orcamento_enviado: "Proposta recebida",
+  proposta_aceita: "Proposta aceita", perdido: "Encerrado",
+};
+STATUS_COR["Aguardando o parceiro"] = { cor: "#B26A00", bg: "#FFF4E0" };
+STATUS_COR["Parceiro visualizou"] = { cor: "#2C75B5", bg: "#EAF2FB" };
+STATUS_COR["Proposta recebida"] = { cor: "#2C75B5", bg: "#EAF2FB" };
+STATUS_COR["Proposta aceita"] = { cor: "#2E7D32", bg: "#E6F4EA" };
+// "Encerrado" já tem cor definida mais abaixo, junto de PARCEIRO_STATUS_LABEL.
 STATUS_COR["Em análise"] = { cor: "#2C75B5", bg: "#EAF2FB" };
 STATUS_COR["Aprovado"] = { cor: "#2E7D32", bg: "#E6F4EA" };
 STATUS_COR["Suspenso"] = { cor: "#B26A00", bg: "#FFF4E0" };
@@ -8902,6 +8911,122 @@ function CardPerfilParceiro({ parceiro, token, onSalvo }) {
   );
 }
 
+/* Pedidos de orçamento dirigidos a este parceiro. O contato do cliente (telefone/e-mail) só
+   vem preenchido depois que uma proposta é aceita — antes disso o backend nem manda esse
+   dado (ver mapLeadParaParceiro em parceiros.js), então aqui é só exibir o que chegou. */
+function CardOportunidadesParceiro({ leads, carregando, onVisualizar, onEnviarProposta }) {
+  const [abertoId, setAbertoId] = useState(null);
+  const [propondoLead, setPropondoLead] = useState(null);
+
+  const abrir = (l) => {
+    setAbertoId(abertoId === l.id ? null : l.id);
+    if (l.status === "novo") onVisualizar(l.id);
+  };
+
+  const pendentes = leads.filter((l) => !["proposta_aceita", "perdido"].includes(l.status));
+
+  return (
+    <Card icon={ClipboardList} titulo={`Oportunidades (${pendentes.length})`}>
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && leads.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum pedido de orçamento ainda.</p>}
+      {!carregando && leads.length > 0 && (
+        <div style={{ display: "grid", gap: 8 }}>
+          {leads.map((l) => {
+            const propostaPendente = l.propostas.find((p) => p.status === "enviada");
+            const propostaAceita = l.propostas.find((p) => p.status === "aceita");
+            const aberto = abertoId === l.id;
+            return (
+              <div key={l.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, overflow: "hidden" }}>
+                <button onClick={() => abrir(l)}
+                  style={{ width: "100%", background: "#fff", border: "none", cursor: "pointer", padding: 12, display: "flex", alignItems: "center", gap: 10, textAlign: "left", flexWrap: "wrap" }}>
+                  <strong style={{ fontSize: 14 }}>{l.clienteNome || "Cliente FN"}</strong>
+                  {l.servicoTitulo && <span style={{ fontSize: 12.5, color: "#65758b" }}>· {l.servicoTitulo}</span>}
+                  <span style={{ marginLeft: "auto" }}><Selo valor={LEAD_STATUS_LABEL[l.status] || l.status} /></span>
+                </button>
+                {aberto && (
+                  <div style={{ padding: "0 12px 12px" }}>
+                    {l.mensagem && <p style={{ fontSize: 13, color: "#4a5a70", margin: "0 0 10px" }}>&ldquo;{l.mensagem}&rdquo;</p>}
+                    {(l.clienteTelefone || l.clienteEmail) && (
+                      <div style={{ fontSize: 12.5, color: "#65758b", marginBottom: 10 }}>
+                        {l.clienteTelefone && <div>📱 {l.clienteTelefone}</div>}
+                        {l.clienteEmail && <div>✉️ {l.clienteEmail}</div>}
+                      </div>
+                    )}
+                    {!l.clienteTelefone && !l.clienteEmail && !propostaAceita && (
+                      <p style={{ fontSize: 12, color: "#8593a8", margin: "0 0 10px" }}>
+                        O contato do cliente libera depois que ele aceitar uma proposta.
+                      </p>
+                    )}
+                    {propostaAceita && (
+                      <div style={{ fontSize: 13.5, background: "#E6F4EA", color: "#2E7D32", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
+                        Proposta aceita: {fmtReal(propostaAceita.valor_final)}
+                      </div>
+                    )}
+                    {propostaPendente && (
+                      <div style={{ fontSize: 13, color: "#65758b", marginBottom: 8 }}>
+                        Proposta enviada: {fmtReal(propostaPendente.valor_final)} — aguardando resposta do cliente.
+                      </div>
+                    )}
+                    {l.status !== "proposta_aceita" && l.status !== "perdido" && !propostaPendente && (
+                      <button className="btn-solid" style={{ padding: "7px 16px" }} onClick={() => setPropondoLead(l)}>
+                        Enviar proposta
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {propondoLead && (
+        <ModalEnviarProposta lead={propondoLead} onFechar={() => setPropondoLead(null)}
+          onEnviar={async (dados) => { const ok = await onEnviarProposta({ leadId: propondoLead.id, ...dados }); if (ok) setPropondoLead(null); }} />
+      )}
+    </Card>
+  );
+}
+
+function ModalEnviarProposta({ lead, onFechar, onEnviar }) {
+  const [valorNormal, setValorNormal] = useState("");
+  const [descontoPercentual, setDescontoPercentual] = useState("");
+  const [valorFinal, setValorFinal] = useState("");
+  const [prazo, setPrazo] = useState("");
+  const [formaPagamento, setFormaPagamento] = useState("");
+  const [observacoes, setObservacoes] = useState("");
+  const [enviando, setEnviando] = useState(false);
+
+  const enviar = async () => {
+    if (!valorFinal || Number(valorFinal) <= 0) { alert("Informe o valor final da proposta."); return; }
+    setEnviando(true);
+    await onEnviar({ valorNormal, descontoPercentual, valorFinal, prazo, formaPagamento, observacoes });
+    setEnviando(false);
+  };
+
+  return (
+    <div className="no-print" style={overlay} onClick={onFechar}>
+      <div style={{ ...modal, maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <strong>Proposta para {lead.clienteNome || "cliente"}</strong>
+          <button className="icon-btn" onClick={onFechar}><X size={16} /></button>
+        </div>
+        <Grid>
+          <Field label="Valor normal (R$)" type="number" value={valorNormal} onChange={setValorNormal} />
+          <Field label="Desconto (%)" type="number" value={descontoPercentual} onChange={setDescontoPercentual} />
+          <Field label="Valor final (R$)" type="number" value={valorFinal} onChange={setValorFinal} full />
+          <Field label="Prazo" value={prazo} onChange={setPrazo} placeholder="Ex.: 10 dias úteis" />
+          <Field label="Forma de pagamento" value={formaPagamento} onChange={setFormaPagamento} placeholder="Ex.: 50% entrada + 50% na entrega" />
+        </Grid>
+        <Area label="Observações (opcional)" value={observacoes} onChange={setObservacoes} rows={2} />
+        <button className="btn-solid" style={{ width: "100%", justifyContent: "center", marginTop: 14 }} onClick={enviar} disabled={enviando}>
+          {enviando ? <><Loader2 size={15} className="spin" /> Enviando…</> : "Enviar proposta"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function CardValesParceiro({ vales }) {
   return (
     <Card icon={ClipboardList} titulo={`Vales gerados (${vales.length})`}>
@@ -9067,6 +9192,34 @@ function PainelCliente({ session, onLogout }) {
   };
   useEffect(() => { carregar(); }, []);
 
+  /* Pedidos de orçamento e as propostas recebidas — funil comercial de parceiros, separado
+     do cupom/desconto instantâneo (que continua na vitrine). */
+  const [leads, setLeads] = useState([]);
+  const [leadsCarregando, setLeadsCarregando] = useState(true);
+  const carregarLeads = async () => {
+    setLeadsCarregando(true);
+    try {
+      const r = await apiFetch("/api/leads/meus", { token: session.token });
+      setLeads(r.leads || []);
+    } catch { /* mostra vazio; o card de erro geral já cobre falha de sessão */ }
+    setLeadsCarregando(false);
+  };
+  useEffect(() => { carregarLeads(); }, []);
+  const responderProposta = async (propostaId, decisao) => {
+    try {
+      await apiFetch(`/api/propostas/${propostaId}/responder`, { method: "POST", token: session.token, body: { decisao } });
+      notify(decisao === "aceita" ? "Proposta aceita ✓" : "Resposta registrada ✓");
+      await carregarLeads();
+    } catch (e) { notify(`Não foi possível responder: ${e.message}`); }
+  };
+  const desistirLead = async (leadId) => {
+    try {
+      await apiFetch(`/api/leads/${leadId}/desistir`, { method: "PATCH", token: session.token });
+      notify("Pedido encerrado");
+      await carregarLeads();
+    } catch (e) { notify(`Não foi possível encerrar: ${e.message}`); }
+  };
+
   /* Cross-sell: quem já é cliente (fez vistoria, por ex.) pede Documentação ART/TRT sem
      preencher o cadastro de novo — os dados vêm do cadastro já existente. */
   const [solicitandoDoc, setSolicitandoDoc] = useState(false);
@@ -9152,6 +9305,62 @@ function PainelCliente({ session, onLogout }) {
           )}
         </Card>
 
+        {!leadsCarregando && leads.length > 0 && (
+          <Card icon={FileText} titulo="Meus orçamentos">
+            <div style={{ display: "grid", gap: 10 }}>
+              {leads.map((l) => {
+                const propostaPendente = l.propostas.find((p) => p.status === "enviada");
+                const propostaAceita = l.propostas.find((p) => p.status === "aceita");
+                return (
+                  <div key={l.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                      <strong style={{ fontSize: 14 }}>{l.parceiro.empresa}</strong>
+                      <Selo valor={LEAD_STATUS_LABEL[l.status] || l.status} />
+                    </div>
+                    {l.servicoTitulo && <div style={{ fontSize: 12.5, color: "#65758b", marginBottom: 6 }}>{l.servicoTitulo}</div>}
+
+                    {propostaAceita && (
+                      <div style={{ fontSize: 13.5, background: "#E6F4EA", color: "#2E7D32", borderRadius: 8, padding: "8px 10px", marginTop: 6 }}>
+                        Proposta aceita: {fmtReal(propostaAceita.valor_final)}
+                        {propostaAceita.prazo ? ` · prazo: ${propostaAceita.prazo}` : ""}
+                      </div>
+                    )}
+
+                    {propostaPendente && (
+                      <div style={{ background: CINZA_CLARO, borderRadius: 8, padding: 10, marginTop: 6 }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 700, color: AZUL_MARINHO }}>{fmtReal(propostaPendente.valor_final)}</div>
+                        {propostaPendente.prazo && <div style={{ fontSize: 12, color: "#65758b" }}>Prazo: {propostaPendente.prazo}</div>}
+                        {propostaPendente.forma_pagamento && <div style={{ fontSize: 12, color: "#65758b" }}>Pagamento: {propostaPendente.forma_pagamento}</div>}
+                        {propostaPendente.observacoes && <p style={{ fontSize: 12.5, color: "#4a5a70", margin: "6px 0 0" }}>{propostaPendente.observacoes}</p>}
+                        <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                          <button className="btn-solid" style={{ padding: "6px 14px" }} onClick={() => responderProposta(propostaPendente.id, "aceita")}>
+                            <Check size={14} /> Aceitar
+                          </button>
+                          <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: "#fff", padding: "6px 14px" }}
+                            onClick={() => responderProposta(propostaPendente.id, "ajuste_solicitado")}>
+                            Pedir ajuste
+                          </button>
+                          <button className="btn-ghost" style={{ color: "#c62828", padding: "6px 14px" }}
+                            onClick={() => responderProposta(propostaPendente.id, "recusada")}>
+                            Recusar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {l.status === "novo" && (
+                      <button className="btn-ghost" style={{ color: "#c62828", marginTop: 8, padding: "4px 10px", fontSize: 12.5 }}
+                        onClick={() => desistirLead(l.id)}>
+                        Não tenho mais interesse
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        )}
+
         {!carregando && resultados.length > 0 && !jaTemDocumentacao && (
           <Card icon={FileText} titulo="Precisa de mais um serviço?">
             <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
@@ -9219,6 +9428,29 @@ function PainelParceiro({ session, onLogout }) {
     catch (e) { alert(`Não foi possível excluir: ${e.message}`); }
   };
 
+  /* Oportunidades (leads): pedidos de orçamento dirigidos a este parceiro. */
+  const [leads, setLeads] = useState([]);
+  const [leadsCarregando, setLeadsCarregando] = useState(true);
+  const carregarLeads = async () => {
+    setLeadsCarregando(true);
+    try {
+      const r = await apiFetch("/api/parceiros/me/leads", { token: session.token });
+      setLeads(r.leads || []);
+    } catch { /* mostra vazio; o card de erro geral já cobre falha de sessão */ }
+    setLeadsCarregando(false);
+  };
+  useEffect(() => { carregarLeads(); }, []);
+  const visualizarLead = async (id) => {
+    try { await apiFetch(`/api/leads/${id}/visualizar`, { method: "PATCH", token: session.token }); carregarLeads(); } catch {}
+  };
+  const enviarProposta = async (proposta) => {
+    try {
+      await apiFetch("/api/propostas", { method: "POST", token: session.token, body: proposta });
+      await carregarLeads();
+      return true;
+    } catch (e) { alert(`Não foi possível enviar a proposta: ${e.message}`); return false; }
+  };
+
   return (
     <div style={{ fontFamily: "'Inter', system-ui, sans-serif", color: "#1a2330", background: CINZA_CLARO, minHeight: "100vh" }}>
       <style>{estilos}</style>
@@ -9258,6 +9490,8 @@ function PainelParceiro({ session, onLogout }) {
         {!carregando && !erro && parceiro && (
           <>
             <CardStatusParceiro parceiro={parceiro} />
+            <CardOportunidadesParceiro leads={leads} carregando={leadsCarregando}
+              onVisualizar={visualizarLead} onEnviarProposta={enviarProposta} />
             <CardPerfilParceiro parceiro={parceiro} token={session.token} onSalvo={carregar} />
             <EditorCatalogoParceiro itens={itensCatalogo} carregando={itensCarregando}
               onSalvar={salvarItemCatalogo} onExcluir={excluirItemCatalogo}
@@ -9535,11 +9769,22 @@ function ModalBeneficioParceiro({ parceiro, onClose, notify, clienteLogado, toke
   const [gerando, setGerando] = useState(false);
   const [vale, setVale] = useState(null); // { codigo, beneficio, expiraEm }
   const [erro, setErro] = useState("");
+  const [servicos, setServicos] = useState([]);
+  const [pedindoOrcamentoDe, setPedindoOrcamentoDe] = useState(null); // serviço selecionado, ou null
 
   /* Link da página do parceiro: é onde o cliente vê os serviços e resgata. Vai junto na
      criação para o e-mail poder levá-lo — antes o código aparecia só nesta tela, e quem
      fechava a aba ficava sem benefício e sem para onde ir. */
   const linkParceiro = `${window.location.origin}${window.location.pathname}?portfolio=${parceiro.id}`;
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await apiFetch(`/api/parceiros/${parceiro.id}/servicos`);
+        setServicos(r.servicos || []);
+      } catch { /* sem catálogo, o benefício genérico continua disponível */ }
+    })();
+  }, [parceiro.id]);
 
   const gerar = async () => {
     setErro("");
@@ -9591,6 +9836,28 @@ function ModalBeneficioParceiro({ parceiro, onClose, notify, clienteLogado, toke
                 <button className="btn-solid" style={{ width: "100%", justifyContent: "center" }} onClick={gerar} disabled={gerando}>
                   {gerando ? <><Loader2 size={15} className="spin" /> Gerando…</> : "Quero esse benefício"}
                 </button>
+
+                {servicos.length > 0 && (
+                  <div style={{ marginTop: 18, paddingTop: 14, borderTop: `1px solid ${CINZA_BORDA}` }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 10 }}>
+                      Ou peça um orçamento sob medida:
+                    </div>
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {servicos.map((s) => (
+                        <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, padding: "8px 10px" }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600 }}>{s.titulo || "Serviço"}</div>
+                            {s.preco && <div style={{ fontSize: 11.5, color: "#8593a8" }}>a partir de {s.preco}</div>}
+                          </div>
+                          <button className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO, whiteSpace: "nowrap" }}
+                            onClick={() => setPedindoOrcamentoDe(s)}>
+                            Solicitar orçamento
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </>
@@ -9620,6 +9887,60 @@ function ModalBeneficioParceiro({ parceiro, onClose, notify, clienteLogado, toke
             </a>
             <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, marginTop: 8, width: "100%", justifyContent: "center" }} onClick={onClose}>Fechar</button>
           </div>
+        )}
+      </div>
+
+      {pedindoOrcamentoDe && (
+        <ModalPedirOrcamento parceiro={parceiro} servico={pedindoOrcamentoDe} token={token} notify={notify}
+          onFechar={() => setPedindoOrcamentoDe(null)} />
+      )}
+    </div>
+  );
+}
+
+/* Pedido de orçamento sob medida — diferente do cupom (desconto instantâneo): aqui o parceiro
+   ainda vai mandar uma proposta com valor e prazo, que o cliente acompanha em "Meus orçamentos". */
+function ModalPedirOrcamento({ parceiro, servico, token, notify, onFechar }) {
+  const [mensagem, setMensagem] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [enviado, setEnviado] = useState(false);
+
+  const enviar = async () => {
+    setEnviando(true);
+    try {
+      await apiFetch("/api/leads", { method: "POST", token, body: { parceiroId: parceiro.id, servicoId: servico.id, mensagem } });
+      setEnviado(true);
+    } catch (e) { notify(`Não foi possível enviar: ${e.message}`); }
+    setEnviando(false);
+  };
+
+  return (
+    <div className="no-print" style={{ ...overlay, zIndex: 90 }} onClick={onFechar}>
+      <div style={{ ...modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <strong>Pedir orçamento</strong>
+          <button className="icon-btn" onClick={onFechar}><X size={16} /></button>
+        </div>
+        {enviado ? (
+          <div style={{ textAlign: "center" }}>
+            <div style={{ width: 48, height: 48, borderRadius: "50%", background: "#E6F4EA", display: "grid", placeItems: "center", margin: "0 auto 12px" }}>
+              <Check size={22} color="#2E7D32" />
+            </div>
+            <p style={{ fontSize: 13.5, color: "#4a5a70", margin: "0 0 4px" }}>Pedido enviado para {parceiro.empresa}!</p>
+            <p style={{ fontSize: 12.5, color: "#8593a8", margin: 0 }}>Acompanhe a resposta em "Meus orçamentos", no seu portal.</p>
+            <button className="btn-solid" style={{ marginTop: 16, width: "100%", justifyContent: "center" }} onClick={onFechar}>Fechar</button>
+          </div>
+        ) : (
+          <>
+            <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 12px" }}>
+              <strong>{servico.titulo}</strong> · {parceiro.empresa} vai enviar uma proposta com valor e prazo.
+            </p>
+            <Area label="Conte mais detalhes (opcional)" value={mensagem} onChange={setMensagem} rows={3}
+              placeholder="Ex.: apartamento de 48m², preciso pintar até o fim do mês…" />
+            <button className="btn-solid" style={{ width: "100%", justifyContent: "center", marginTop: 14 }} onClick={enviar} disabled={enviando}>
+              {enviando ? <><Loader2 size={15} className="spin" /> Enviando…</> : "Enviar pedido"}
+            </button>
+          </>
         )}
       </div>
     </div>
