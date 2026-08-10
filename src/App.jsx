@@ -4868,15 +4868,32 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
       <div style={{ marginBottom: 16 }}>
         <Card icon={User} titulo="Responsável técnico">
           <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
-            Aparece na última página do laudo, como quem assina a vistoria — confirme se é você mesmo.
+            Aparece na última página do laudo, como quem assina a vistoria.
           </p>
-          <Grid>
-            <Field label="Nome" value={dados?.rt?.nome || ""} onChange={(v) => setD("rt", "nome", v)} />
-            <Field label="Qualificação" value={dados?.rt?.qualificacao || ""} onChange={(v) => setD("rt", "qualificacao", v)}
-              placeholder="Ex.: Técnico em Edificações" />
-            <Field label="Registro profissional" value={dados?.rt?.registro || ""} onChange={(v) => setD("rt", "registro", v)}
-              placeholder="Ex.: CFT-03 nº 00000000000" full />
-          </Grid>
+          {/* Fixo, não editável: nome vem do próprio login, qualificação e registro vêm do
+              cadastro que a Gerência já preencheu (ver ModalPerfilTecnicoVistoriador). Antes
+              dava pra digitar aqui de novo em cada laudo — sem necessidade, já que cada
+              vistoriador só assina com o que está no próprio cadastro. Se algo estiver errado
+              (nome, qualificação, registro), é a Gerência quem corrige, não o campo aqui. */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 11.5, color: "#8593a8", marginBottom: 2 }}>Nome</div>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>{dados?.rt?.nome || "—"}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11.5, color: "#8593a8", marginBottom: 2 }}>Qualificação</div>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>{dados?.rt?.qualificacao || "—"}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11.5, color: "#8593a8", marginBottom: 2 }}>Registro profissional</div>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>{dados?.rt?.registro || "—"}</div>
+            </div>
+          </div>
+          {(!dados?.rt?.qualificacao || !dados?.rt?.registro) && (
+            <p style={{ fontSize: 12, color: "#B26A00", background: "#FFF4E0", borderRadius: 8, padding: "9px 12px", margin: "10px 0 0" }}>
+              Qualificação ou registro ainda não cadastrados pela Gerência. Avise a Gerência pra completar seu cadastro.
+            </p>
+          )}
 
           {salvarMinhaAssinatura && (
             <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${CINZA_BORDA}` }}>
