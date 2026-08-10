@@ -9862,12 +9862,12 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
   const [toast, setToast] = useState("");
   const notify = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
 
-  /* Quem entrou pelo "Primeiro acesso" ganhou a senha padrão "123456", provisória — o portal
-     trava numa troca obrigatória antes de mostrar qualquer coisa. A senha atual já é sabida
-     (é a padrão), então só pede a nova, sem repetir a "123456" pro cliente digitar. */
+  /* Cliente já cadastrado ganhou a senha padrão "12345678", provisória — o portal trava numa
+     troca obrigatória antes de mostrar qualquer coisa. A senha atual já é sabida (é a
+     padrão), então só pede a nova, sem repetir a "12345678" pro cliente digitar. */
   const trocarSenhaObrigatoria = async (senhaNova) => {
     try {
-      await apiFetch("/api/auth/trocar-senha", { method: "POST", token: session.token, body: { senhaAtual: "123456", senhaNova } });
+      await apiFetch("/api/auth/trocar-senha", { method: "POST", token: session.token, body: { senhaAtual: "12345678", senhaNova } });
       onSessaoAtualizada({ ...session, usuario: { ...session.usuario, senhaProvisoria: false } });
       return true;
     } catch (e) { notify(e.message); return false; }
