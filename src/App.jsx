@@ -79,6 +79,7 @@ function mapDocDaApi(d) {
 function mapClienteDaApi(c) {
   return {
     id: c.id, nome: c.nome || "", cpf: c.cpf || "", telefone: c.telefone || "", email: c.email || "",
+    instagram: c.instagram || "",
     construtora: c.construtora || "", empreendimento: c.empreendimento || "", blocoTorre: c.bloco_torre || "", endereco: c.endereco || "",
     servico: c.servico || "", dataDesejada: c.data_desejada || "", horarioDesejado: c.horario_desejado || "",
     observacoes: c.observacoes || "", atendido: !!c.atendido,
@@ -472,6 +473,15 @@ const HORARIOS_COMERCIAIS = (() => {
 /* Nome: só letras (com acento) e espaço, sempre em maiúsculas. */
 const somenteLetras = (v) => (v || "").replace(/[^A-Za-zÀ-ÿ\s]/g, "").toUpperCase();
 
+/* Instagram do cliente (opcional): muita gente cola o link inteiro do perfil em vez do @.
+   Guardamos sempre só o usuário, com um @ na frente — é assim que a equipe procura. */
+const normalizarInstagram = (v) => {
+  const bruto = (v || "").trim().replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/^instagram\.com\//i, "");
+  const usuario = bruto.split(/[/?#]/)[0].replace(/[^A-Za-z0-9._]/g, "").slice(0, 30);
+  return usuario ? `@${usuario}` : "";
+};
+const linkInstagram = (v) => `https://instagram.com/${(v || "").replace(/^@/, "")}`;
+
 /* Sugestões de e-mail: completa o domínio a partir do que a pessoa já digitou. */
 const DOMINIOS_EMAIL = ["gmail.com", "hotmail.com", "outlook.com", "yahoo.com.br", "icloud.com", "bol.com.br", "uol.com.br", "live.com"];
 function sugestoesEmail(valor) {
@@ -510,7 +520,7 @@ function etapaClienteCompleta(cliente, docs = []) {
 
 const novoCadastroCliente = () => ({
   id: `cli_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-  nome: "", cpf: "", telefone: "", email: "", senha: "",
+  nome: "", cpf: "", telefone: "", email: "", senha: "", instagram: "",
   construtora: "", empreendimento: "", blocoTorre: "", endereco: "", cep: "",
   servico: SERVICO_OPCOES[0], dataDesejada: "", horarioDesejado: "", areaPrivativa: "", observacoes: "",
   atendido: false,
@@ -3485,6 +3495,16 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
               <Field label="CPF" value={editando.cpf} onChange={(v) => setEditando({ ...editando, cpf: v })} />
               <Field label="Telefone" value={editando.telefone} onChange={(v) => setEditando({ ...editando, telefone: v })} />
               <Field label="E-mail" value={editando.email} onChange={(v) => setEditando({ ...editando, email: v })} />
+              <div style={cell(false)}>
+                <label style={lab}>Instagram (opcional)</label>
+                <input style={inp} placeholder="@perfildocliente" value={editando.instagram || ""}
+                  onChange={(e) => setEditando({ ...editando, instagram: e.target.value })}
+                  onBlur={(e) => setEditando({ ...editando, instagram: normalizarInstagram(e.target.value) })} />
+                {editando.instagram && (
+                  <a href={linkInstagram(editando.instagram)} target="_blank" rel="noopener noreferrer"
+                    style={{ fontSize: 11.5, color: AZUL_MEDIO, fontWeight: 600 }}>Abrir perfil</a>
+                )}
+              </div>
               <div style={cell(true)}>
                 <label style={lab}>Serviço desejado</label>
                 <select style={inp} value={editando.servico} onChange={(e) => setEditando({ ...editando, servico: e.target.value })}>
@@ -8441,7 +8461,7 @@ function AbaCliente({ notify, onLogin, onIrParaLogin }) {
     try {
       const r = await apiFetch("/api/clientes", {
         method: "POST",
-        body: { ...form, construtora: construtoraFinal.toUpperCase(), empreendimento: empreendimentoFinal.toUpperCase(), precisaCadastroEmpreendimento },
+        body: { ...form, instagram: normalizarInstagram(form.instagram), construtora: construtoraFinal.toUpperCase(), empreendimento: empreendimentoFinal.toUpperCase(), precisaCadastroEmpreendimento },
       });
       setCadastroRealizado(form.servico);
       setForm(novoCadastroCliente());
@@ -8497,6 +8517,15 @@ function AbaCliente({ notify, onLogin, onIrParaLogin }) {
             )}
           </div>
           <Field label="Telefone / WhatsApp" value={form.telefone} onChange={(v) => setF("telefone", v.replace(/\D/g, "").slice(0, 11))} />
+          {/* Instagram é opcional: serve para o time comercial e para marcar o cliente nas
+              publicações quando ele autoriza. Só normaliza ao sair do campo, senão o @ que
+              a gente coloca na frente atrapalha quem está digitando. */}
+          <div style={cell(false)}>
+            <label style={lab}>Instagram (opcional)</label>
+            <input style={inp} placeholder="@seuperfil" value={form.instagram}
+              onChange={(e) => setF("instagram", e.target.value)}
+              onBlur={(e) => setF("instagram", normalizarInstagram(e.target.value))} />
+          </div>
           {/* Sugere o domínio conforme digita (@gmail.com, @hotmail.com…), mas continua
               aceitando qualquer e-mail escrito à mão. */}
           <div style={cell(true)}>
