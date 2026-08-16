@@ -419,6 +419,17 @@ const MODULOS_POR_PERFIL = {
 };
 const PERFIL_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", qualidade: "Agendamento", vendas: "Vendas", gerencia: "Gerência" };
 
+/* Quem pode ser escalado para uma vistoria. A Gerência também vistoria — o gerente atende
+   em campo como qualquer técnico — e o Atendimento precisa poder marcá-lo no agendamento.
+   O backend nunca exigiu papel "vistoriador" no vistoriador_id; quem restringia era esta
+   lista, que só olhava para o papel "vistoriador". A diferença é o que acontece no fim:
+   laudo de técnico vai para a fila de aprovação; laudo da Gerência já sai aprovado, porque
+   quem aprovaria é quem fez (ver enviarParaGerencia). */
+const fazVistoria = (u) => u?.role === "vistoriador" || u?.role === "gerencia";
+/* Na lista de quem vai atender, o gerente vem marcado — quem agenda precisa ver que está
+   escalando a Gerência, e não confundir com um técnico de mesmo nome. */
+const rotuloTecnico = (u) => (u?.role === "gerencia" ? `${u.nome} (Gerência)` : u?.nome || "");
+
 /* ---------- Cor fixa por técnico (vistoriador) no calendário do Agendamento ----------
    Não existe campo "cor"/"sigla" cadastrado no técnico (nem no front, nem no backend).
    Pra não inventar campo novo no banco, a cor é calculada de forma determinística a
@@ -1176,8 +1187,11 @@ function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], ava
     }
   }
 
-  // --- Vistoriador: a agenda dele ---
-  if (perfil === "vistoriador") {
+  /* --- A agenda de quem vistoria (técnico ou gerente) ---
+     A Gerência entra aqui só pelas vistorias atribuídas a ela; o resto do bloco (laudo
+     devolvido, aprovado, foto que falhou) continua sendo assunto do técnico, porque para a
+     Gerência esses avisos já existem nos cards do módulo dela. */
+  if (fazVistoria({ role: perfil })) {
     const deHoje = agendaVistoriador.filter((a) => a.data_desejada === hojeISO && !a.laudo_enviado);
     if (deHoje.length) {
       itens.push({
@@ -1202,7 +1216,10 @@ function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], ava
         onde: { aba: "laudos", sub: "agenda" },
       });
     }
+  }
 
+  // --- Só do técnico: o que está parado esperando ele ---
+  if (perfil === "vistoriador") {
     /* Devolvido é a única coisa desta tela que está parada esperando o técnico. Antes ele
        não tinha como saber: no status voltado ao cliente, laudo devolvido e laudo intocado
        apareciam os dois como "Laudo em análise". */
@@ -2404,8 +2421,10 @@ function AppInterno({ session, onLogout }) {
   const [agendaVistoriador, setAgendaVistoriador] = useState([]);
   const [agendaVistoriadorCarregando, setAgendaVistoriadorCarregando] = useState(false);
   const carregarAgendaVistoriador = async ({ silencioso = false } = {}) => {
-    // Só o vistoriador tem vistorias atribuídas a ele; a Gerência acompanha pelo Agendamento.
-    if (perfil !== "vistoriador") return;
+    /* Vistoriador e Gerência: os dois podem ter vistoria atribuída (a rota minha-agenda
+       filtra pelo próprio id, então cada um vê só as suas). Os demais perfis acompanham
+       pelo Agendamento. */
+    if (!fazVistoria({ role: perfil })) return;
     if (!silencioso) setAgendaVistoriadorCarregando(true);
     try {
       const r = await apiFetch("/api/clientes/minha-agenda", { token });
@@ -2570,15 +2589,29 @@ function AppInterno({ session, onLogout }) {
         fotos: await Promise.all(item.fotos.map((f) => redimensionar(f))),
       })));
       const dadosComprimidos = { ...dados, fotoCliente: dados.fotoCliente ? await redimensionar(dados.fotoCliente) : null };
-      await apiFetch("/api/vistoria/finalizar", {
+      const r = await apiFetch("/api/vistoria/finalizar", {
         method: "POST", token,
         body: { clienteId: clienteAtualId, dados: dadosComprimidos, itens: itensComprimidos },
       });
-      notify("Laudo enviado para a gerência ✓");
+      /* Laudo da própria Gerência não espera aprovação: quem aprovaria é quem acabou de
+         fazer a vistoria, e o laudo ficava parado na fila esperando o próprio autor. Aqui
+         ele já segue o caminho completo — PDF, e-mail ao cliente e arquivo no Drive.
+         Se a aprovação falhar (cliente sem e-mail cadastrado, por exemplo), o laudo fica
+         salvo na fila de pendentes, que é o comportamento de sempre, e o aviso diz isso. */
+      if (perfil === "gerencia" && r.docId) {
+        const aprovado = await aprovarLaudo(r.docId);
+        if (!aprovado) notify("Laudo salvo, mas a aprovação não passou — ele está em \"Laudos pendentes\".");
+      } else {
+        notify("Laudo enviado para a gerência ✓");
+      }
       /* A trava agora vem do servidor: recarregar a lista é o que a aplica na tela. */
       await carregarMeusLaudos();
       carregarDocs();
-    } catch (e) { notify(`Não foi possível enviar para a gerência: ${e.message}`); }
+    } catch (e) {
+      notify(perfil === "gerencia"
+        ? `Não foi possível finalizar o laudo: ${e.message}`
+        : `Não foi possível enviar para a gerência: ${e.message}`);
+    }
     setEnviandoParaGerencia(false);
   };
   /* O técnico não destrava mais o próprio laudo — quem reabre a edição é a gerência, ao
@@ -2772,10 +2805,12 @@ function AppInterno({ session, onLogout }) {
               {perfil === "gerencia" && (
                 <button className="btn-solid" onClick={() => { setAba("laudo"); setTimeout(imprimir, 300); }}><Printer size={15} /> Gerar PDF</button>
               )}
-              {/* Só o vistoriador envia: a Gerência é quem aprova, não teria a quem enviar. */}
-              {perfil === "vistoriador" && (
+              {/* O vistoriador envia para aprovação; a Gerência, que também vistoria, não
+                  teria a quem enviar — o mesmo botão finaliza e aprova de uma vez. */}
+              {fazVistoria({ role: perfil }) && (
                 <button className="btn-solid" style={{ background: AZUL_MARINHO }} onClick={enviarParaGerencia} disabled={enviandoParaGerencia || laudoBloqueado} title={laudoBloqueado ? "Este laudo já foi enviado — desbloqueie para corrigir e reenviar" : ""}>
-                  {enviandoParaGerencia ? <Loader2 size={15} className="spin" /> : laudoBloqueado ? <Lock size={15} /> : <Send size={15} />} {laudoBloqueado ? "Laudo enviado" : "Enviar para gerência"}
+                  {enviandoParaGerencia ? <Loader2 size={15} className="spin" /> : laudoBloqueado ? <Lock size={15} /> : <Send size={15} />}{" "}
+                  {laudoBloqueado ? "Laudo enviado" : perfil === "gerencia" ? "Finalizar e aprovar" : "Enviar para gerência"}
                 </button>
               )}
             </>
@@ -2802,7 +2837,7 @@ function AppInterno({ session, onLogout }) {
         {/* Sub-navegação (somente dentro do módulo Laudos) */}
         {abaTop === "laudos" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
-            {[...(perfil === "vistoriador" ? [["agenda", "Minha agenda", CalendarDays]] : []),
+            {[...(fazVistoria({ role: perfil }) ? [["agenda", "Minha agenda", CalendarDays]] : []),
               ["itens", `Vistoria (${totalItens})`, Camera], ["laudo", "Laudo final", FileText],
               ...(perfil === "vistoriador" || perfil === "gerencia" ? [["realizados", "Laudos realizados", ClipboardCheck]] : [])]
               .map(([k, label, Icon]) => (
@@ -2855,7 +2890,7 @@ function AppInterno({ session, onLogout }) {
             recarregar={carregarMeusLaudos} assinatura={assinatura} ehGerencia={perfil === "gerencia"}
             clientes={clientesAtivos} docs={docs} usuarios={usuarios} />
         )}
-        {abaTop === "laudos" && aba === "agenda" && perfil === "vistoriador" && (
+        {abaTop === "laudos" && aba === "agenda" && fazVistoria({ role: perfil }) && (
           <CalendarioVistoriador agenda={agendaVistoriador} carregando={agendaVistoriadorCarregando} clientes={clientesAtivos} preencherComCliente={preencherComCliente} />
         )}
 
@@ -4242,7 +4277,7 @@ function PainelDiaAgendamento({ diaISO, clientes = [], todosClientes = [], visto
                           value={c.vistoriadorId || ""} disabled={trocandoId === c.id}
                           onChange={(e) => trocarTecnico(c, e.target.value)}>
                           <option value="">ainda não atribuído</option>
-                          {vistoriadores.map((v) => <option key={v.id} value={v.id}>{v.nome}</option>)}
+                          {vistoriadores.map((v) => <option key={v.id} value={v.id}>{rotuloTecnico(v)}</option>)}
                         </select>
                         {trocandoId === c.id && <Loader2 size={13} className="spin" />}
                       </div>
@@ -4346,7 +4381,7 @@ function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesAprovados
             <label style={lab}>Técnico</label>
             <select style={inp} value={vistoriadorId} onChange={(e) => setVistoriadorId(e.target.value)}>
               <option value="">selecionar…</option>
-              {vistoriadores.map((v) => <option key={v.id} value={v.id}>{siglaDoNome(v.nome)} · {v.nome}</option>)}
+              {vistoriadores.map((v) => <option key={v.id} value={v.id}>{siglaDoNome(v.nome)} · {rotuloTecnico(v)}</option>)}
             </select>
           </div>
           <Grid>
@@ -4384,7 +4419,7 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
   const [clienteAprovado, setClienteAprovado] = useState(null);
   const [agendando, setAgendando] = useState(null); // { dataDesejada } quando o form "Agendar vistoria" está aberto
 
-  const vistoriadores = usuarios.filter((u) => u.role === "vistoriador" && u.ativo);
+  const vistoriadores = usuarios.filter((u) => fazVistoria(u) && u.ativo);
   const aprovadosSemVistoria = clientes.filter((c) => c.status === "Agendamento aprovado" && !ehServicoDocumentacao(c));
   // O painel do dia respeita o mesmo filtro de etapa aplicado ao calendário.
   const doDiaSelecionado = diaSelecionado
@@ -4493,7 +4528,7 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
   const [confirmandoCancelamento, setConfirmandoCancelamento] = useState(null);
   const [abertoId, setAbertoId] = useState(null);
   const [form, setForm] = useState({});
-  const vistoriadores = usuarios.filter((u) => u.role === "vistoriador" && u.ativo);
+  const vistoriadores = usuarios.filter((u) => fazVistoria(u) && u.ativo);
 
   // Veio do atalho "Agendar agora" (aprovação em Análise) — abre o card já direto.
   useEffect(() => {
@@ -4608,7 +4643,7 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
                           <label style={lab}>Vistoriador</label>
                           <select style={inp} value={valorCampo(c, "vistoriadorId", "")} onChange={(e) => setCampo(c.id, "vistoriadorId", e.target.value)} disabled={!podeAgir}>
                             <option value="">selecionar…</option>
-                            {vistoriadores.map((v) => <option key={v.id} value={v.id}>{v.nome}</option>)}
+                            {vistoriadores.map((v) => <option key={v.id} value={v.id}>{rotuloTecnico(v)}</option>)}
                           </select>
                         </div>
                         <div style={cell(false)}>
@@ -4639,7 +4674,7 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
                             value={c.vistoriadorId || ""} disabled={trocandoId === c.id}
                             onChange={(e) => trocarTecnico(c, e.target.value)}>
                             <option value="">selecionar…</option>
-                            {vistoriadores.map((v) => <option key={v.id} value={v.id}>{v.nome}</option>)}
+                            {vistoriadores.map((v) => <option key={v.id} value={v.id}>{rotuloTecnico(v)}</option>)}
                           </select>
                           {trocandoId === c.id && <Loader2 size={14} className="spin" />}
                           <span style={{ fontSize: 11.5, color: "#8593a8" }}>trocar não desmarca a vistoria</span>
@@ -5820,7 +5855,7 @@ function CardPainelLaudos({ painel, carregando, recarregar, usuarios = [], notif
               <label style={rotulo}>Vistoriador</label>
               <select style={campo} value={filtros.vistoriador} onChange={(e) => set("vistoriador", e.target.value)}>
                 <option value="">todos</option>
-                {usuarios.filter((u) => u.role === "vistoriador").map((u) => <option key={u.id} value={u.id}>{u.nome}</option>)}
+                {usuarios.filter(fazVistoria).map((u) => <option key={u.id} value={u.id}>{u.nome}</option>)}
               </select>
             </div>
             <div>
@@ -6520,7 +6555,7 @@ function AbaLaudosRealizados({ laudos = [], carregando, recarregar, assinatura, 
   const [abertoId, setAbertoId] = useState(null);
   const [filtro, setFiltro] = useState("");
   const nomePorVistoriadorId = {};
-  usuarios.forEach((u) => { if (u.role === "vistoriador") nomePorVistoriadorId[u.id] = u.nome; });
+  usuarios.forEach((u) => { if (fazVistoria(u)) nomePorVistoriadorId[u.id] = u.nome; });
 
   const entregues = laudos.filter((l) => l.status_cliente === "Laudo enviado por e-mail");
   const emAnalise = laudos.filter((l) => l.status_cliente === "Laudo em análise");
@@ -7475,7 +7510,7 @@ const CUSTO_UNITARIO_DOCUMENTACAO = 69;
 
 function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
   const nomeVistoriadorPorId = {};
-  usuarios.forEach((u) => { if (u.role === "vistoriador") nomeVistoriadorPorId[u.id] = u.nome; });
+  usuarios.forEach((u) => { if (fazVistoria(u)) nomeVistoriadorPorId[u.id] = u.nome; });
 
   const precoPorChave = {};
   const nomeCanonicoPorChave = {};
@@ -7928,7 +7963,9 @@ function CardUsuarios({ usuarios, carregando, criarUsuario, atualizarUsuario, ex
                     <button className="icon-btn" onClick={() => { setResetandoId(u.id); setNovaSenha(""); }} title="Redefinir senha">
                       <Edit3 size={15} color={AZUL_MEDIO} />
                     </button>
-                    {u.role === "vistoriador" && salvarPerfilTecnico && (
+                    {/* Vale também para a Gerência: quem assina laudo precisa de qualificação,
+                        registro e assinatura cadastrados, não importa o papel. */}
+                    {fazVistoria(u) && salvarPerfilTecnico && (
                       <button className="icon-btn" onClick={() => setPerfilTecnicoDe(u)} title="Qualificação, registro e assinatura para o laudo">
                         <FileText size={15} color={AZUL_MEDIO} />
                       </button>
