@@ -66,7 +66,7 @@ function registrarAcesso(area) {
 function mapDocDaApi(d) {
   return {
     id: d.id, cliente: d.cliente || "", cpf: d.cpf || "", empreendimento: d.empreendimento || "",
-    blocoTorre: d.bloco_torre || "", data: d.data || "", hora: d.hora || "",
+    blocoTorre: d.bloco_torre || "", apartamento: d.apartamento || "", data: d.data || "", hora: d.hora || "",
     pagamento: d.pagamento || "Pendente", valorVistoria: d.valor_vistoria ?? 0, valorTrt: d.valor_trt ?? 0,
     vistoria: d.vistoria || "Agendada", art: d.art || "Não solicitada", tipoArt: d.tipo_art || "Individual",
     relatorio: d.relatorio || "Pendente", observacoes: d.observacoes || "",
@@ -80,7 +80,8 @@ function mapClienteDaApi(c) {
   return {
     id: c.id, nome: c.nome || "", cpf: c.cpf || "", telefone: c.telefone || "", email: c.email || "",
     instagram: c.instagram || "",
-    construtora: c.construtora || "", empreendimento: c.empreendimento || "", blocoTorre: c.bloco_torre || "", endereco: c.endereco || "",
+    construtora: c.construtora || "", empreendimento: c.empreendimento || "", blocoTorre: c.bloco_torre || "",
+    apartamento: c.apartamento || "", endereco: c.endereco || "",
     servico: c.servico || "", dataDesejada: c.data_desejada || "", horarioDesejado: c.horario_desejado || "",
     observacoes: c.observacoes || "", atendido: !!c.atendido,
     status: c.status || "Em análise", cep: c.cep || "", vistoriadorId: c.vistoriador_id || "",
@@ -457,7 +458,7 @@ function siglaDoNome(nome) {
 
 const novoRegistroDoc = () => ({
   id: `doc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-  cliente: "", cpf: "", empreendimento: "", blocoTorre: "", data: "", hora: "",
+  cliente: "", cpf: "", empreendimento: "", blocoTorre: "", apartamento: "", data: "", hora: "",
   pagamento: "Pendente", valorVistoria: "", valorTrt: "",
   vistoria: "Agendada", art: "Não solicitada", tipoArt: "Individual",
   relatorio: "Pendente", observacoes: "",
@@ -483,6 +484,13 @@ const HORARIOS_COMERCIAIS = (() => {
 
 /* Nome: só letras (com acento) e espaço, sempre em maiúsculas. */
 const somenteLetras = (v) => (v || "").replace(/[^A-Za-zÀ-ÿ\s]/g, "").toUpperCase();
+
+/* Bloco/torre e número do apartamento são campos separados: num campo só, cada cliente
+   escrevia de um jeito ("A302", "BL A AP 302", "torre 1 apto 302") e a Documentação tinha
+   que adivinhar o que era bloco e o que era unidade. As colunas já existiam separadas no
+   banco (bloco_torre e apartamento) — era a tela que juntava as duas coisas.
+   Nas listas os dois voltam juntos, no mesmo formato que "Laudos realizados" já usava. */
+const unidadeDoCliente = (c) => [c?.blocoTorre, c?.apartamento].filter(Boolean).join(" · ");
 
 /* Instagram do cliente (opcional): muita gente cola o link inteiro do perfil em vez do @.
    Guardamos sempre só o usuário, com um @ na frente — é assim que a equipe procura. */
@@ -532,7 +540,7 @@ function etapaClienteCompleta(cliente, docs = []) {
 const novoCadastroCliente = () => ({
   id: `cli_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
   nome: "", cpf: "", telefone: "", email: "", senha: "", instagram: "",
-  construtora: "", empreendimento: "", blocoTorre: "", endereco: "", cep: "",
+  construtora: "", empreendimento: "", blocoTorre: "", apartamento: "", endereco: "", cep: "",
   servico: SERVICO_OPCOES[0], dataDesejada: "", horarioDesejado: "", areaPrivativa: "", observacoes: "",
   atendido: false,
   criadoEm: new Date().toISOString(),
@@ -2552,7 +2560,7 @@ function AppInterno({ session, onLogout }) {
     setDados((d) => ({
       ...d,
       contratante: { ...d.contratante, nome: cli.nome || d.contratante.nome, cpf: cli.cpf || d.contratante.cpf },
-      imovel: { ...d.imovel, construtora: cli.construtora || d.imovel.construtora, empreendimento: cli.empreendimento || d.imovel.empreendimento, unidade: cli.blocoTorre || d.imovel.unidade, endereco: cli.endereco || d.imovel.endereco, areaPrivativa: cli.areaPrivativa || d.imovel.areaPrivativa },
+      imovel: { ...d.imovel, construtora: cli.construtora || d.imovel.construtora, empreendimento: cli.empreendimento || d.imovel.empreendimento, unidade: unidadeDoCliente(cli) || d.imovel.unidade, endereco: cli.endereco || d.imovel.endereco, areaPrivativa: cli.areaPrivativa || d.imovel.areaPrivativa },
       vistoria: {
         ...d.vistoria,
         data: cli.dataDesejada || d.vistoria.data,
@@ -3017,7 +3025,7 @@ function NotificacoesClientes({ clientes, preencherComCliente, style }) {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 700, fontSize: 14 }}>{c.nome}</div>
                 <div style={{ fontSize: 12.5, color: "#65758b" }}>
-                  {c.servico} {c.empreendimento ? `· ${c.empreendimento}` : ""}{c.blocoTorre ? ` (${c.blocoTorre})` : ""}
+                  {c.servico} {c.empreendimento ? `· ${c.empreendimento}` : ""}{unidadeDoCliente(c) ? ` (${unidadeDoCliente(c)})` : ""}
                 </div>
               </div>
               <div style={{ fontSize: 12.5, color: AZUL_MARINHO, fontWeight: 700, whiteSpace: "nowrap" }}>
@@ -3249,7 +3257,7 @@ function KanbanClientes({ clientes, docs, onAbrir }) {
                 style={{ textAlign: "left", background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 10, cursor: "pointer" }}>
                 <div style={{ fontWeight: 700, fontSize: 13.5 }}>{c.nome}</div>
                 <div style={{ fontSize: 12, color: "#65758b", marginTop: 2 }}>
-                  {c.empreendimento || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}
+                  {c.empreendimento || "—"}{unidadeDoCliente(c) ? ` · ${unidadeDoCliente(c)}` : ""}
                 </div>
                 <div style={{ fontSize: 11.5, color: "#8593a8", marginTop: 4 }}>
                   {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""}
@@ -3311,7 +3319,7 @@ function CardEncaminharDocumentacao({ clientes = [], atualizarCliente, notify })
             <div style={{ flex: 1, minWidth: 190 }}>
               <div style={{ fontWeight: 700, fontSize: 14 }}>{c.nome}</div>
               <div style={{ fontSize: 12.5, color: "#65758b" }}>
-                {c.empreendimento || c.endereco || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}
+                {c.empreendimento || c.endereco || "—"}{unidadeDoCliente(c) ? ` · ${unidadeDoCliente(c)}` : ""}
                 {c.telefone ? ` · ${c.telefone}` : ""}
               </div>
             </div>
@@ -3501,7 +3509,7 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
                         )
                       ) : "—"}
                     </td>
-                    <td style={{ padding: "8px 10px" }}>{c.empreendimento || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}</td>
+                    <td style={{ padding: "8px 10px" }}>{c.empreendimento || "—"}{unidadeDoCliente(c) ? ` · ${unidadeDoCliente(c)}` : ""}</td>
                     <td style={{ padding: "8px 10px" }}>{c.servico || "—"}</td>
                     <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
                       {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""}
@@ -3550,7 +3558,8 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
               <Field label="Empreendimento" value={editando.empreendimento} onChange={(v) => setEditando({ ...editando, empreendimento: v })} />
               <Field label="Endereço completo" value={editando.endereco} onChange={(v) => setEditando({ ...editando, endereco: v })} full />
               <Field label="CEP" value={editando.cep} onChange={(v) => setEditando({ ...editando, cep: v })} />
-              <Field label="Bloco / Apto" value={editando.blocoTorre} onChange={(v) => setEditando({ ...editando, blocoTorre: v })} />
+              <Field label="Bloco / Torre" value={editando.blocoTorre} onChange={(v) => setEditando({ ...editando, blocoTorre: v })} />
+              <Field label="Número do apartamento" value={editando.apartamento || ""} onChange={(v) => setEditando({ ...editando, apartamento: v })} />
               <Field label="Data desejada" type="date" value={editando.dataDesejada} onChange={(v) => setEditando({ ...editando, dataDesejada: v })} />
               <div style={cell(false)}>
                 <label style={lab}>Horário desejado</label>
@@ -3840,7 +3849,7 @@ function AbaQualidadeAcompanhamento({ clientes = [], clientesCarregando, docs = 
                         <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
                             <strong style={{ fontSize: 14 }}>{c.nome || "—"}</strong>
-                            <span style={{ fontSize: 12, color: "#65758b" }}>{c.empreendimento}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}</span>
+                            <span style={{ fontSize: 12, color: "#65758b" }}>{c.empreendimento}{unidadeDoCliente(c) ? ` · ${unidadeDoCliente(c)}` : ""}</span>
                           </div>
                           <LinhaDoTempo etapaAtual={etapa} />
                           {avaliacao && (
@@ -4508,7 +4517,7 @@ function CardVistoriaResumo({ c, aberto, onToggle, children }) {
       <button onClick={onToggle} style={{ width: "100%", background: "#fff", border: "none", cursor: "pointer", padding: 12, display: "flex", alignItems: "center", gap: 12, textAlign: "left" }}>
         <div style={{ flex: 1, minWidth: 160 }}>
           <div style={{ fontWeight: 700, fontSize: 14 }}>{c.nome}</div>
-          <div style={{ fontSize: 12, color: "#65758b" }}>{c.empreendimento || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}</div>
+          <div style={{ fontSize: 12, color: "#65758b" }}>{c.empreendimento || "—"}{unidadeDoCliente(c) ? ` · ${unidadeDoCliente(c)}` : ""}</div>
         </div>
         <div style={{ fontSize: 12.5, color: AZUL_MARINHO, fontWeight: 700, whiteSpace: "nowrap" }}>
           {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""}
@@ -5308,7 +5317,8 @@ function DadosParaDocumentacao({ cliente, notify }) {
     ["Telefone", cliente.telefone],
     ["Construtora", cliente.construtora],
     ["Empreendimento", cliente.empreendimento],
-    ["Bloco / Torre / Apto", cliente.blocoTorre],
+    ["Bloco / Torre", cliente.blocoTorre],
+    ["Apartamento", cliente.apartamento],
     ["Endereço", cliente.endereco],
     ["CEP", cliente.cep],
     ["Área privativa", cliente.areaPrivativa],
@@ -5401,7 +5411,7 @@ function CardDocumentosArt({ cliente, documentos = [], precoDocumentacao = 0, en
             </div>
           ) : (
             <div style={{ fontSize: 12.5, color: "#65758b", display: "flex", alignItems: "center", gap: 4 }}>
-              {cliente.empreendimento || cliente.endereco || "sem empreendimento"}{cliente.blocoTorre ? ` · ${cliente.blocoTorre}` : ""}
+              {cliente.empreendimento || cliente.endereco || "sem empreendimento"}{unidadeDoCliente(cliente) ? ` · ${unidadeDoCliente(cliente)}` : ""}
               {cliente.telefone ? ` · ${cliente.telefone}` : ""}
               {/* Sem empreendimento cadastrado, o preço não casa com nada em "Preços por
                   empreendimento" e fica "sem preço fixado" mesmo que o valor já esteja lá —
@@ -5596,7 +5606,7 @@ function TabelaRegistrosVistoriaDoc({ docs, addDoc, updDoc, delDoc, carregando, 
                 {filtrados.map((d) => (
                   <tr key={d.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
                     <td style={{ padding: "8px 10px", fontWeight: 600 }}>{d.cliente || "—"}</td>
-                    <td style={{ padding: "8px 10px" }}>{d.empreendimento || "—"}{d.blocoTorre ? ` · ${d.blocoTorre}` : ""}</td>
+                    <td style={{ padding: "8px 10px" }}>{d.empreendimento || "—"}{unidadeDoCliente(d) ? ` · ${unidadeDoCliente(d)}` : ""}</td>
                     <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{d.data ? d.data.split("-").reverse().join("/") : "—"}</td>
                     <td style={{ padding: "8px 10px" }}><Selo valor={d.pagamento} /></td>
                     <td style={{ padding: "8px 10px", whiteSpace: "nowrap", fontSize: 12, color: "#4a5a70" }}>
@@ -5631,7 +5641,8 @@ function TabelaRegistrosVistoriaDoc({ docs, addDoc, updDoc, delDoc, carregando, 
               <Field label="Cliente" value={editando.cliente} onChange={(v) => setEditando({ ...editando, cliente: v })} full />
               <Field label="CPF" value={editando.cpf} onChange={(v) => setEditando({ ...editando, cpf: v })} />
               <Field label="Empreendimento" value={editando.empreendimento} onChange={(v) => setEditando({ ...editando, empreendimento: v })} />
-              <Field label="Bloco / Apto / Complemento" value={editando.blocoTorre} onChange={(v) => setEditando({ ...editando, blocoTorre: v })} />
+              <Field label="Bloco / Torre" value={editando.blocoTorre} onChange={(v) => setEditando({ ...editando, blocoTorre: v })} />
+              <Field label="Número do apartamento" value={editando.apartamento || ""} onChange={(v) => setEditando({ ...editando, apartamento: v })} />
               <Field label="Data" type="date" value={editando.data} onChange={(v) => setEditando({ ...editando, data: v })} />
               <Field label="Hora" type="time" value={editando.hora} onChange={(v) => setEditando({ ...editando, hora: v })} />
               <div style={cell()}>
@@ -8665,7 +8676,8 @@ function AbaCliente({ notify, onLogin, onIrParaLogin }) {
               {buscandoCep ? "Buscando endereço…" : "Preenche o endereço automaticamente."}
             </span>
           </div>
-          <Field label="Bloco / Apto" value={form.blocoTorre} onChange={(v) => setFMaiusc("blocoTorre", v)} />
+          <Field label="Bloco / Torre" value={form.blocoTorre} onChange={(v) => setFMaiusc("blocoTorre", v)} placeholder="EX.: BLOCO A" />
+          <Field label="Número do apartamento" value={form.apartamento} onChange={(v) => setFMaiusc("apartamento", v)} placeholder="EX.: 302" />
           {form.servico === SERVICO_OPCOES[0] && (
             <>
               <Field label="Data desejada" type="date" value={form.dataDesejada} onChange={(v) => setF("dataDesejada", v)} />
@@ -10065,9 +10077,9 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
                       <strong style={{ fontSize: 14 }}>{d.servico || "Atendimento"}</strong>
                       {d.status && <Selo valor={d.status} />}
                     </div>
-                    {(d.empreendimento || d.blocoTorre) && (
+                    {(d.empreendimento || unidadeDoCliente(d)) && (
                       <div style={{ fontSize: 12.5, color: "#65758b", marginBottom: 8 }}>
-                        {d.empreendimento}{d.blocoTorre ? ` · ${d.blocoTorre}` : ""}
+                        {d.empreendimento}{unidadeDoCliente(d) ? ` · ${unidadeDoCliente(d)}` : ""}
                       </div>
                     )}
                     {statusInfo && (
