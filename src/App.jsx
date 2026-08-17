@@ -312,7 +312,7 @@ const TEXTOS_PADRAO = {
 };
 
 const DADOS_INICIAIS = {
-  contratante: { nome: "", cpf: "" },
+  contratante: { nome: "", cpf: "", instagram: "" },
   imovel: { construtora: "", empreendimento: "", endereco: "", unidade: "", descricao: "", tipologia: "", areaPrivativa: "" },
   /* Vazio de propósito: antes vinha fixo com o nome e o registro profissional (CFT) de uma
      pessoa específica, atribuídos a toda vistoria — mesmo as feitas por outro técnico. Quem
@@ -635,6 +635,7 @@ function montarLaudoModelo(dados = {}, itens = []) {
     local: vistoria.cidade || "",
     proprietario: contratante.nome || "",
     cpf: contratante.cpf || "",
+    instagram: contratante.instagram || "",
     construtora: imovel.construtora || "",
     empreendimento: imovel.empreendimento || "",
     endereco: imovel.endereco || "",
@@ -1028,6 +1029,9 @@ function LaudoModelo({ laudo, assinatura, assinaturaVistoriador, aprovado = true
           <div style={{ marginTop: 26, background: CINZA_CLARO, borderRadius: 9, padding: "14px 18px" }}>
             {[
               ["Cliente", laudo.proprietario],
+              /* Só aparece se o cliente informou no cadastro (o campo é opcional): o filtro
+                 abaixo derruba a linha vazia, como já acontece com bloco/unidade. */
+              ["Instagram", laudo.instagram],
               ["Vistoriador", laudo.responsavel?.nome],
               ["Data da vistoria", laudo.dataVistoria],
               ["Condomínio", laudo.empreendimento],
@@ -2551,7 +2555,9 @@ function AppInterno({ session, onLogout }) {
     }
     setDados((d) => ({
       ...d,
-      contratante: { ...d.contratante, nome: cli.nome || d.contratante.nome, cpf: cli.cpf || d.contratante.cpf },
+      /* O Instagram vem junto do cadastro para sair na página final do laudo, ao lado da
+         foto com o cliente — é o perfil que a equipe marca ao publicar essa foto. */
+      contratante: { ...d.contratante, nome: cli.nome || d.contratante.nome, cpf: cli.cpf || d.contratante.cpf, instagram: cli.instagram || d.contratante.instagram || "" },
       imovel: { ...d.imovel, construtora: cli.construtora || d.imovel.construtora, empreendimento: cli.empreendimento || d.imovel.empreendimento, unidade: cli.blocoTorre || d.imovel.unidade, endereco: cli.endereco || d.imovel.endereco, areaPrivativa: cli.areaPrivativa || d.imovel.areaPrivativa },
       vistoria: {
         ...d.vistoria,
