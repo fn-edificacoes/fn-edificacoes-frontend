@@ -7,7 +7,7 @@ import {
   AlertTriangle, CircleAlert, Info, Copy, Sparkles, Loader2,
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
-  ExternalLink, Undo2, Handshake, ShoppingCart, Minus
+  ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images
 } from "lucide-react";
 
 /* ============================================================
@@ -4857,7 +4857,8 @@ function SeletorAmbientePatologias({ onFechar, onAdicionar, patologiasBanco = []
 }
 
 function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, dados, setD, fotoCliente, setFotoCliente, notify, setAba, bloqueado, onPedirDesbloqueio, statusLaudo, devolvido, motivoDevolucao, patologiasBanco = [], minhaAssinatura, salvarMinhaAssinatura, removerMinhaAssinatura }) {
-  const fotoClienteRef = useRef();
+  const fotoClienteRef = useRef();        // câmera (capture="environment")
+  const fotoClienteGaleriaRef = useRef(); // galeria do aparelho
   const [seletorAberto, setSeletorAberto] = useState(false);
   const handleFotoCliente = (file) => {
     if (!file) return;
@@ -4993,13 +4994,24 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
                 <button className="foto-x" onClick={() => setFotoCliente(null)}><X size={12} /></button>
               </div>
             ) : (
-              <button onClick={() => fotoClienteRef.current?.click()}
-                style={{ width: 160, height: 160, borderRadius: 10, border: `1.5px dashed ${AZUL_MEDIO}`, background: "#f6f9fd", color: AZUL_MEDIO, display: "flex", flexDirection: "column", gap: 6, alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-                <Camera size={28} />
-                <span style={{ fontSize: 12.5, fontWeight: 600 }}>Tirar foto</span>
-              </button>
+              <>
+                <button onClick={() => fotoClienteRef.current?.click()}
+                  style={{ width: 160, height: 160, borderRadius: 10, border: `1.5px dashed ${AZUL_MEDIO}`, background: "#f6f9fd", color: AZUL_MEDIO, display: "flex", flexDirection: "column", gap: 6, alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                  <Camera size={28} />
+                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>Tirar foto</span>
+                </button>
+                {/* Mesma dupla dos itens: a câmera abre direto pelo capture, e este atalho é
+                    para a foto que já está na galeria do aparelho. */}
+                <button onClick={() => fotoClienteGaleriaRef.current?.click()}
+                  style={{ width: 160, height: 160, borderRadius: 10, border: `1.5px dashed ${AZUL_MEDIO}`, background: "#f6f9fd", color: AZUL_MEDIO, display: "flex", flexDirection: "column", gap: 6, alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                  <Images size={28} />
+                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>Escolher da galeria</span>
+                </button>
+              </>
             )}
             <input ref={fotoClienteRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }}
+              onChange={(e) => { handleFotoCliente(e.target.files[0]); e.target.value = ""; }} />
+            <input ref={fotoClienteGaleriaRef} type="file" accept="image/*" style={{ display: "none" }}
               onChange={(e) => { handleFotoCliente(e.target.files[0]); e.target.value = ""; }} />
           </div>
         </Card>
@@ -5063,7 +5075,8 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
 }
 
 function ItemCard({ item, num, onChange, onPatologia, onFotos, onRemoveFoto, onDelete, patologiasBanco = [] }) {
-  const fileRef = useRef();
+  const fileRef = useRef();     // câmera (capture="environment")
+  const galeriaRef = useRef();  // galeria do aparelho
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
   const m = sevMeta[item.severidade] || sevMeta.Média;
 
@@ -5113,11 +5126,20 @@ function ItemCard({ item, num, onChange, onPatologia, onFotos, onRemoveFoto, onD
           </div>
         ))}
         {item.fotos.length < 4 && (
-          <button onClick={() => fileRef.current?.click()} style={{ width: 92, height: 92, borderRadius: 9, border: `1.5px dashed ${AZUL_MEDIO}`, background: "#f6f9fd", color: AZUL_MEDIO, display: "grid", placeItems: "center", cursor: "pointer" }}>
-            <Camera size={22} />
-          </button>
+          <>
+            <button onClick={() => fileRef.current?.click()} title="Tirar foto agora" style={{ width: 92, height: 92, borderRadius: 9, border: `1.5px dashed ${AZUL_MEDIO}`, background: "#f6f9fd", color: AZUL_MEDIO, display: "grid", placeItems: "center", cursor: "pointer" }}>
+              <Camera size={22} />
+            </button>
+            {/* Segundo botão porque o primeiro tem capture="environment": no celular isso abre
+                a câmera direto, sem oferecer a galeria. Quem já fotografou antes de abrir o
+                sistema (ou refotografou depois) precisava tirar tudo de novo. */}
+            <button onClick={() => galeriaRef.current?.click()} title="Escolher da galeria" style={{ width: 92, height: 92, borderRadius: 9, border: `1.5px dashed ${AZUL_MEDIO}`, background: "#f6f9fd", color: AZUL_MEDIO, display: "grid", placeItems: "center", cursor: "pointer" }}>
+              <Images size={22} />
+            </button>
+          </>
         )}
         <input ref={fileRef} type="file" accept="image/*" capture="environment" multiple style={{ display: "none" }} onChange={(e) => { onFotos(e.target.files); e.target.value = ""; }} />
+        <input ref={galeriaRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={(e) => { onFotos(e.target.files); e.target.value = ""; }} />
       </div>
 
       {/* Bloco IA */}
