@@ -2118,6 +2118,8 @@ function AppInterno({ session, onLogout }) {
   const salvarItemCatalogoAdmin = async (parceiroId, item) => {
     try {
       const body = { parceiroId, titulo: item.titulo || "", categoria: item.categoria || "", preco: item.preco || "", preco_de: item.preco_de || "", descricao: item.descricao || "", foto: item.foto || "" };
+      // Link do marketplace de afiliado: vazio apaga de propósito, então vai sempre.
+      body.link_externo = item.link_externo || "";
       // Só vai no corpo se o editor tinha o campo: mandar vazio apagaria a comissão combinada
       // (ou tiraria o item do carrinho, no caso do preço de venda).
       if (item.comissao_percentual !== undefined) body.comissao_percentual = item.comissao_percentual;
@@ -9131,12 +9133,21 @@ function PaginaPortfolioParceiro({ parceiroId }) {
                         {s.preco && <div style={{ fontSize: 13, fontWeight: 700, color: "#2E7D32" }}>{s.preco}</div>}
                       </>
                     )}
-                    {s.preco_venda > 0 && (
+                    {/* Dois jeitos de comprar, nunca os dois no mesmo item: preço de venda
+                        cadastrado põe no carrinho da FN (Mercado Pago); link externo manda
+                        pro marketplace do afiliado, onde a FN ganha comissão da plataforma.
+                        O carrinho tem prioridade — venda própria vale mais que indicação. */}
+                    {s.preco_venda > 0 ? (
                       <button className="btn-solid" style={{ width: "100%", justifyContent: "center", marginTop: 10, padding: "8px" }}
                         onClick={() => { carrinho.adicionar({ servicoId: s.id, titulo: s.titulo || "Serviço", precoUnitario: Number(s.preco_venda), precoDe: precoParaNumero(s.preco_de), parceiroEmpresa: parceiro.empresa, foto: s.foto }); notify("Adicionado ao carrinho ✓"); }}>
                         <ShoppingCart size={14} /> Comprar
                       </button>
-                    )}
+                    ) : s.link_externo ? (
+                      <a className="btn-solid" href={s.link_externo} target="_blank" rel="noopener noreferrer sponsored"
+                        style={{ width: "100%", justifyContent: "center", marginTop: 10, padding: "8px", textDecoration: "none", display: "flex" }}>
+                        <ExternalLink size={14} /> Ver oferta
+                      </a>
+                    ) : null}
                   </div>
                 </div>
               );
@@ -9903,6 +9914,21 @@ function EditorCatalogoParceiro({ itens = [], carregando, onSalvar, onExcluir, l
               </p>
             </div>
 
+            {/* Marketplace de afiliado: o item não é vendido aqui dentro, é indicado. O
+                cliente sai no link e a FN ganha a comissão da plataforma (Mercado Livre e
+                afins). Só vale quando não há preço de venda — na vitrine o carrinho tem
+                prioridade, então preencher os dois esconderia este link. */}
+            <div style={{ ...cell(true), marginTop: 10 }}>
+              <label style={lab}>Link de compra fora do sistema (opcional)</label>
+              <input style={inp} type="url" placeholder="https://..."
+                value={editando.link_externo ?? ""}
+                onChange={(e) => setEditando((ed) => ({ ...ed, link_externo: e.target.value }))} />
+              <p style={{ fontSize: 12, color: "#8593a8", margin: "6px 0 0" }}>
+                Cole aqui o link de afiliado do produto. O cliente vê o botão "Ver oferta" e compra na loja
+                de origem. {editando.preco_venda ? "Atenção: com preço de venda preenchido, o carrinho aparece no lugar deste link." : ""}
+              </p>
+            </div>
+
             {/* Comissão do item, e não da parceria: o percentual do cadastro vale por
                 categoria, mas a negociação costuma acontecer serviço a serviço. Fica só
                 entre o parceiro e a FN — a rota pública não devolve este campo. */}
@@ -10310,6 +10336,7 @@ function PainelParceiro({ session, onLogout }) {
   const salvarItemCatalogo = async (item) => {
     try {
       const body = { titulo: item.titulo || "", categoria: item.categoria || "", preco: item.preco || "", preco_de: item.preco_de || "", descricao: item.descricao || "", foto: item.foto || "" };
+      body.link_externo = item.link_externo || "";
       if (item.comissao_percentual !== undefined) body.comissao_percentual = item.comissao_percentual;
       if (item.preco_venda !== undefined) body.preco_venda = item.preco_venda;
       if (item.id) await apiFetch(`/api/parceiros/servicos/${item.id}`, { method: "PATCH", token: session.token, body });
@@ -10794,12 +10821,19 @@ function ModalBeneficioParceiro({ parceiro, onClose, notify, clienteLogado, toke
                         ) : s.preco && <div style={{ fontSize: 11.5, color: "#8593a8" }}>a partir de {s.preco}</div>}
                       </div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        {s.preco_venda > 0 && (
+                        {/* Mesma regra da página do portfólio: carrinho quando a venda é da
+                            FN, link externo quando é indicação de afiliado. */}
+                        {s.preco_venda > 0 ? (
                           <button className="btn-solid" style={{ width: "auto", padding: "7px 12px", fontSize: 12.5, whiteSpace: "nowrap" }}
                             onClick={() => { adicionarAoCarrinho({ servicoId: s.id, titulo: s.titulo || "Serviço", precoUnitario: Number(s.preco_venda), precoDe: precoParaNumero(s.preco_de), parceiroEmpresa: parceiro.empresa, foto: s.foto }); notify("Adicionado ao carrinho ✓"); }}>
                             <ShoppingCart size={13} /> Comprar
                           </button>
-                        )}
+                        ) : s.link_externo ? (
+                          <a className="btn-solid" href={s.link_externo} target="_blank" rel="noopener noreferrer sponsored"
+                            style={{ width: "auto", padding: "7px 12px", fontSize: 12.5, whiteSpace: "nowrap", textDecoration: "none", display: "flex" }}>
+                            <ExternalLink size={13} /> Ver oferta
+                          </a>
+                        ) : null}
                         {clienteLogado && (
                           <button className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO, whiteSpace: "nowrap", padding: "7px 12px", fontSize: 12.5 }}
                             onClick={() => setPedindoOrcamentoDe(s)}>
