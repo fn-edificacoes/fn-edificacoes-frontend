@@ -39,6 +39,37 @@ Pages, com o domínio vindo de `public/CNAME`. O workflow copia `dist/index.html
 ⚠️ O `README.md` ainda descreve um deploy pelo Netlify. Está **desatualizado** — a
 publicação é pelo GitHub Pages, como descrito acima.
 
+## Se a API cair ("o sistema travou")
+
+O front e a API são hospedados em lugares diferentes e caem separado. Antes de procurar
+defeito no código, descubra **qual dos dois** parou:
+
+```bash
+curl -s -o /dev/null -w "front %{http_code}
+" https://sistema.fnedificacoes.com.br/
+curl -s -i https://fn-edificacoes-api.onrender.com/ | head -5
+```
+
+Front 200 e API 5xx significa que **não há nada a corrigir neste repositório** — o serviço
+no Render é que está fora. Olhe o cabeçalho `x-render-routing` da resposta:
+
+| Resposta | O que é | O que fazer |
+|---|---|---|
+| `suspend-by-user` + "suspended by its owner" | serviço **suspenso** — quase sempre cobrança pendente ou cartão recusado | resolver o pagamento no Render e clicar em *Resume* |
+| demora de ~50s e depois responde | serviço **hibernado** (plano free) | normal, só a primeira chamada |
+| `502` / `504` | serviço caindo ao subir | ver os logs de deploy no Render |
+
+Já aconteceu (agosto/2026): o serviço ficou suspenso e o sistema inteiro parou. A página de
+erro da hospedagem não manda cabeçalho de CORS, então o navegador engole o 503 e o app só
+via um `Failed to fetch` — a tela dizia "verifique sua internet" e a busca foi para o lado
+errado. Hoje `apiFetch` traduz isso para uma mensagem que diz que o servidor está fora.
+
+**O endereço da API ainda é o do Render, não nosso.** Enquanto for assim, trocar de
+hospedagem exige mexer no `API_URL`, buildar e publicar o front. Apontar
+`api.fnedificacoes.com.br` (CNAME) para o serviço e cadastrar esse domínio no Render
+reduz a troca a uma mudança de DNS — o app não precisa saber. Feito isso, o novo endereço
+entra em `API_URL`, no topo do `src/App.jsx`.
+
 ## Estrutura
 
 Praticamente tudo vive em `src/App.jsx` (mais de 10 mil linhas). É proposital: o app

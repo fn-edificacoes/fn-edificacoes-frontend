@@ -21,26 +21,57 @@ const CINZA_CLARO = "#F1F4F8";
 const CINZA_BORDA = "#D8DEE7";
 
 /* ---------- Backend (API real, com login) ---------- */
-// Troque pela URL do seu serviço no Render, se for diferente:
-const API_URL = "https://fn-edificacoes-api.onrender.com";
+/* Endereço da API. VITE_API_URL sobrescreve quando é preciso apontar para outro lugar
+   (backend local, homologação) sem editar este arquivo; sem ela, vale o endereço abaixo.
+
+   ⚠️ Este endereço é do Render, não nosso. Trocar de hospedagem aqui obriga a mexer no
+   código, buildar e publicar o front de novo — foi o que doeu quando o serviço ficou
+   suspenso e o sistema inteiro caiu junto. O caminho definitivo é apontar
+   api.fnedificacoes.com.br para o serviço e usar esse endereço: aí trocar de servidor
+   vira uma mudança de DNS, sem tocar no app. Ver "Se a API cair" no CLAUDE.md. */
+const API_URL = import.meta.env.VITE_API_URL || "https://fn-edificacoes-api.onrender.com";
 
 /* Caminho da logo montado a partir da base do site: na raiz (Netlify/Vercel) vira
    "/logo-...png" e no GitHub Pages, "/fn-edificacoes-frontend/logo-...png". Caminho
    absoluto fixo quebrava no Pages, que serve o site dentro de uma subpasta. */
 const LOGO_URL = `${import.meta.env.BASE_URL}logo-fn-transparente.png`;
 
+/* Quanto esperar pela API antes de desistir. O plano free do Render hiberna o serviço e a
+   primeira chamada do dia pode levar quase um minuto para acordar — daí o valor alto. Sem
+   limite nenhum a tela ficava girando para sempre, que é o que as pessoas chamam de
+   "sistema travado". */
+const TIMEOUT_API_MS = 60000;
+
+/* Servidor fora do ar (suspenso, caído, reiniciando, hospedagem trocando de lugar).
+   A pessoa não tem o que fazer a respeito, então a mensagem não manda conferir a internet:
+   quando o serviço estava suspenso no Render, a tela dizia "verifique sua internet" e todo
+   mundo foi procurar defeito no lugar errado — inclusive porque a página de erro do Render
+   não manda cabeçalho de CORS e o navegador transforma o 503 num "Failed to fetch" seco. */
+const MSG_API_FORA = "O sistema está fora do ar no momento. Não é problema no seu acesso nem na sua senha — tente de novo em alguns minutos.";
+
 async function apiFetch(caminho, { method = "GET", body, token } = {}) {
-  const resp = await fetch(`${API_URL}${caminho}`, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  let resp;
+  try {
+    resp = await fetch(`${API_URL}${caminho}`, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      // AbortSignal.timeout não existe em navegador antigo; sem ele, fica só sem o limite.
+      signal: AbortSignal.timeout?.(TIMEOUT_API_MS),
+    });
+  } catch {
+    /* Estouro do tempo, rede fora ou o navegador barrando a resposta do servidor: nada
+       disso é acionável pela pessoa, e nenhum "Failed to fetch" deve chegar à tela. */
+    throw new Error(MSG_API_FORA);
+  }
   let dados = null;
-  try { dados = await resp.json(); } catch { /* resposta vazia */ }
-  if (!resp.ok) throw new Error(dados?.erro || `Erro ${resp.status}`);
+  try { dados = await resp.json(); } catch { /* resposta vazia, ou HTML de erro da hospedagem */ }
+  /* 5xx é defeito do servidor, não da pessoa. Os 4xx seguem passando a mensagem do backend
+     ("senha inválida", "cadastro em análise"), que é justamente o que ela precisa ler. */
+  if (!resp.ok) throw new Error(dados?.erro || (resp.status >= 500 ? MSG_API_FORA : `Erro ${resp.status}`));
   return dados;
 }
 
@@ -1400,7 +1431,7 @@ function TelaLogin({ onLogin, onVoltar, onCadastroParceiro }) {
       const r = await apiFetch("/api/auth/login", { method: "POST", body: { email, senha } });
       onLogin({ token: r.token, usuario: r.usuario });
     } catch (e2) {
-      setErro(e2.message === "Failed to fetch" ? "Não foi possível conectar à API. Verifique sua internet ou tente novamente em instantes (o servidor pode estar acordando)." : e2.message);
+      setErro(e2.message); // apiFetch já traduz servidor fora do ar e falha de rede
     }
     setCarregando(false);
   };
@@ -9261,7 +9292,7 @@ function TelaCadastroParceiro({ onVoltar, onIrParaLogin }) {
       const r = await apiFetch("/api/parceiros/signup", { method: "POST", body: dadosDoCadastro });
       setResultado({ id: r.id, status: r.status || "em_analise" });
     } catch (e) {
-      setErro(e.message === "Failed to fetch" ? "Não foi possível conectar à API. Verifique sua internet e tente novamente." : e.message);
+      setErro(e.message); // apiFetch já traduz servidor fora do ar e falha de rede
     }
     setEnviando(false);
   };
