@@ -3120,18 +3120,31 @@ function CalendarioMensal({ porData, mesRef, setMesRef, diaSelecionado, setDiaSe
           const hoje = chave === hojeISO;
           return (
             <button key={chave} onClick={() => setDiaSelecionado(selecionado ? null : chave)}
+              title={qtd > 0 ? `${qtd} vistoria(s) marcada(s)` : ""}
               style={{
-                aspectRatio: "1", border: `1px solid ${selecionado ? AZUL_MEDIO : CINZA_BORDA}`, borderRadius: 8,
-                background: selecionado ? AZUL_MEDIO : hoje ? CINZA_CLARO : "#fff", color: selecionado ? "#fff" : "#1a2330",
-                cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, padding: 2,
+                aspectRatio: "1",
+                border: `1.5px solid ${selecionado ? AZUL_MEDIO : qtd > 0 ? AZUL_MEDIO : CINZA_BORDA}`,
+                borderRadius: 8,
+                background: selecionado ? AZUL_MEDIO : qtd > 0 ? "#E4EEFC" : hoje ? CINZA_CLARO : "#fff",
+                color: selecionado ? "#fff" : "#1a2330",
+                boxShadow: hoje && !selecionado ? `0 0 0 2px ${AZUL_MARINHO}` : "none",
+                cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3, padding: 2,
               }}>
-              <span style={{ fontSize: 12.5, fontWeight: hoje ? 800 : 500 }}>{dia}</span>
+              <span style={{ fontSize: 12.5, fontWeight: hoje || qtd > 0 ? 800 : 500 }}>{dia}</span>
               {qtd > 0 && (
-                <span style={{ fontSize: 9.5, fontWeight: 700, color: selecionado ? "#fff" : AZUL_MEDIO }}>{qtd}</span>
+                <span style={{
+                  fontSize: 10, fontWeight: 800, lineHeight: 1, minWidth: 16, height: 16, padding: "0 4px",
+                  borderRadius: 20, display: "grid", placeItems: "center",
+                  color: selecionado ? AZUL_MEDIO : "#fff", background: selecionado ? "#fff" : AZUL_MEDIO,
+                }}>{qtd}</span>
               )}
             </button>
           );
         })}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 11.5, color: "#65758b" }}>
+        <span style={{ width: 12, height: 12, borderRadius: 4, background: "#E4EEFC", border: `1.5px solid ${AZUL_MEDIO}`, display: "inline-block" }} />
+        Dias com vistoria marcada
       </div>
     </div>
   );
