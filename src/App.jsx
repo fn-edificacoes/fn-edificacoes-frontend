@@ -7720,7 +7720,7 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: CINZA_CLARO }}>
-                  {["Empreendimento", "Serviço", "Qtd", "Valor unitário", "Total", "Custo", "Lucro", "Recebido"].map((h, i) => (
+                  {["Empreendimento", "Serviço", "Qtd", "Valor unitário", "Total", "Custo", "Recebido", "Lucro"].map((h, i) => (
                     <th key={h} style={{ textAlign: i >= 2 ? "right" : "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}`, whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
@@ -7738,10 +7738,10 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
                     <td style={{ padding: "8px 10px", ...num, color: l.custo ? "#C62828" : "#8593a8" }}>
                       {l.custo ? fmtReal(l.custo) : "—"}
                     </td>
-                    <td style={{ padding: "8px 10px", ...num, fontWeight: 700, color: "#2E7D32" }}>{fmtReal(l.lucro)}</td>
                     <td style={{ padding: "8px 10px", ...num, color: l.recebido >= l.total && l.total > 0 ? "#2E7D32" : "#65758b" }}>
                       {fmtReal(l.recebido)}
                     </td>
+                    <td style={{ padding: "8px 10px", ...num, fontWeight: 700, color: "#2E7D32" }}>{fmtReal(l.lucro)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -7752,8 +7752,8 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
                   <td />
                   <td style={{ padding: "9px 10px", ...num, fontWeight: 800, color: AZUL_MARINHO }}>{fmtReal(totalGeral)}</td>
                   <td style={{ padding: "9px 10px", ...num, fontWeight: 800, color: "#C62828" }}>{fmtReal(totalCusto)}</td>
-                  <td style={{ padding: "9px 10px", ...num, fontWeight: 800, color: "#2E7D32" }}>{fmtReal(totalLucro)}</td>
                   <td style={{ padding: "9px 10px", ...num, fontWeight: 800, color: "#2E7D32" }}>{fmtReal(totalRecebido)}</td>
+                  <td style={{ padding: "9px 10px", ...num, fontWeight: 800, color: "#2E7D32" }}>{fmtReal(totalLucro)}</td>
                 </tr>
               </tfoot>
             </table>
