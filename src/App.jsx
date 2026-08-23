@@ -7597,6 +7597,10 @@ const CUSTO_UNITARIO_DOCUMENTACAO = 69;
 // "Preços por empreendimento" (custoVistoria). Sem valor cadastrado ali, entra como zero.
 
 function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
+  const [busca, setBusca] = useState("");
+  const [ordem, setOrdem] = useState({ chave: "total", dir: "desc" });
+  const [metricaGrafico, setMetricaGrafico] = useState("total");
+
   const nomeVistoriadorPorId = {};
   usuarios.forEach((u) => { if (fazVistoria(u)) nomeVistoriadorPorId[u.id] = u.nome; });
 
@@ -7692,14 +7696,63 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
     })
     .sort((a, b) => b.total - a.total || a.empreendimento.localeCompare(b.empreendimento, "pt-BR"));
 
-  const totalGeral = linhas.reduce((s, l) => s + l.total, 0);
-  const totalRecebido = linhas.reduce((s, l) => s + l.recebido, 0);
-  const totalServicos = linhas.reduce((s, l) => s + l.qtd, 0);
-  const totalCusto = linhas.reduce((s, l) => s + l.custo, 0);
+  const termoBusca = busca.trim().toLowerCase();
+  const linhasFiltradas = termoBusca
+    ? linhas.filter((l) => `${l.empreendimento} ${l.rotulo}`.toLowerCase().includes(termoBusca))
+    : linhas;
+
+  const totalGeral = linhasFiltradas.reduce((s, l) => s + l.total, 0);
+  const totalRecebido = linhasFiltradas.reduce((s, l) => s + l.recebido, 0);
+  const totalServicos = linhasFiltradas.reduce((s, l) => s + l.qtd, 0);
+  const totalCusto = linhasFiltradas.reduce((s, l) => s + l.custo, 0);
   const totalLucro = totalGeral - totalCusto;
-  const semPreco = linhas.filter((l) => l.unitario === 0);
+  const semPreco = linhasFiltradas.filter((l) => l.unitario === 0);
 
   const num = { textAlign: "right", whiteSpace: "nowrap" };
+
+  /* Ordenação clicável da tabela: clicar de novo no mesmo cabeçalho inverte a direção;
+     trocar de coluna começa decrescente pra número (maior primeiro) e crescente pra texto. */
+  const COLUNAS_TABELA = [
+    { chave: "empreendimento", rotulo: "Empreendimento", tipo: "texto" },
+    { chave: "rotulo", rotulo: "Serviço", tipo: "texto" },
+    { chave: "qtd", rotulo: "Qtd", tipo: "numero" },
+    { chave: "unitario", rotulo: "Valor unitário", tipo: "numero" },
+    { chave: "total", rotulo: "Total", tipo: "numero" },
+    { chave: "custo", rotulo: "Custo", tipo: "numero" },
+    { chave: "recebido", rotulo: "Recebido", tipo: "numero" },
+    { chave: "lucro", rotulo: "Lucro", tipo: "numero" },
+  ];
+  const alternarOrdem = (chave) => setOrdem((o) => {
+    if (o.chave === chave) return { chave, dir: o.dir === "desc" ? "asc" : "desc" };
+    return { chave, dir: COLUNAS_TABELA.find((c) => c.chave === chave).tipo === "texto" ? "asc" : "desc" };
+  });
+  const linhasVisiveis = [...linhasFiltradas].sort((a, b) => {
+    const tipo = COLUNAS_TABELA.find((c) => c.chave === ordem.chave).tipo;
+    const dir = ordem.dir === "asc" ? 1 : -1;
+    return tipo === "texto"
+      ? dir * String(a[ordem.chave]).localeCompare(String(b[ordem.chave]), "pt-BR")
+      : dir * ((Number(a[ordem.chave]) || 0) - (Number(b[ordem.chave]) || 0));
+  });
+
+  // Painel "por empreendimento": soma os serviços de cada um pra dar uma leitura visual rápida.
+  const METRICAS_GRAFICO = {
+    total: { rotulo: "Total", cor: AZUL_MARINHO },
+    custo: { rotulo: "Custo", cor: "#C62828" },
+    recebido: { rotulo: "Recebido", cor: "#2E7D32" },
+    lucro: { rotulo: "Lucro", cor: "#6A4C93" },
+  };
+  const porEmpreendimento = {};
+  linhasFiltradas.forEach((l) => {
+    if (!porEmpreendimento[l.empreendimento]) {
+      porEmpreendimento[l.empreendimento] = { empreendimento: l.empreendimento, total: 0, custo: 0, recebido: 0, lucro: 0 };
+    }
+    const acc = porEmpreendimento[l.empreendimento];
+    acc.total += l.total; acc.custo += l.custo; acc.recebido += l.recebido; acc.lucro += l.lucro;
+  });
+  const barras = Object.values(porEmpreendimento)
+    .sort((a, b) => b[metricaGrafico] - a[metricaGrafico])
+    .slice(0, 8);
+  const maxBarra = Math.max(...barras.map((b) => b[metricaGrafico]), 1);
 
   return (
     <>
@@ -7716,17 +7769,69 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
 
       {linhas.length > 0 && (
         <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 16 }}>
+            <KpiCard label="Receita total" valor={fmtReal(totalGeral)} cor={AZUL_MARINHO} />
+            <KpiCard label="Custo" valor={fmtReal(totalCusto)} cor="#C62828" />
+            <KpiCard label="Recebido" valor={fmtReal(totalRecebido)} cor="#2E7D32" />
+            <KpiCard label="Lucro" valor={fmtReal(totalLucro)} cor="#6A4C93" />
+            <KpiCard label="A receber" valor={fmtReal(totalGeral - totalRecebido)} cor="#B26A00" />
+          </div>
+
+          {barras.length > 0 && (
+            <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: "14px 16px", marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+                <strong style={{ fontSize: 13, color: AZUL_MARINHO }}>Por empreendimento</strong>
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                  {Object.entries(METRICAS_GRAFICO).map(([k, m]) => (
+                    <button key={k} type="button" onClick={() => setMetricaGrafico(k)}
+                      style={{ padding: "4px 10px", borderRadius: 20, fontSize: 11.5, fontWeight: 600, cursor: "pointer",
+                        border: `1.5px solid ${metricaGrafico === k ? m.cor : CINZA_BORDA}`,
+                        background: metricaGrafico === k ? m.cor : "#fff", color: metricaGrafico === k ? "#fff" : "#4a5a70" }}>
+                      {m.rotulo}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                {barras.map((b) => (
+                  <div key={b.empreendimento} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 140, fontSize: 12, color: "#4a5a70", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 0 }} title={b.empreendimento}>
+                      {b.empreendimento}
+                    </div>
+                    <div style={{ flex: 1, height: 16, borderRadius: 8, background: CINZA_CLARO, overflow: "hidden" }}>
+                      <div style={{ width: `${b[metricaGrafico] > 0 ? Math.max((b[metricaGrafico] / maxBarra) * 100, 2) : 0}%`, height: "100%", background: METRICAS_GRAFICO[metricaGrafico].cor, borderRadius: 8, transition: "width .3s" }} />
+                    </div>
+                    <div style={{ width: 96, textAlign: "right", fontSize: 12, fontWeight: 700, color: METRICAS_GRAFICO[metricaGrafico].cor, flexShrink: 0 }}>
+                      {fmtReal(b[metricaGrafico])}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <input style={{ ...inp, marginBottom: 14, width: "100%" }} placeholder="Buscar por empreendimento ou serviço…"
+            value={busca} onChange={(e) => setBusca(e.target.value)} />
+
+          {linhasFiltradas.length === 0 && (
+            <p style={{ color: "#8593a8", fontSize: 14 }}>Nada encontrado para "{busca}".</p>
+          )}
+
+          {linhasFiltradas.length > 0 && (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: CINZA_CLARO }}>
-                  {["Empreendimento", "Serviço", "Qtd", "Valor unitário", "Total", "Custo", "Recebido", "Lucro"].map((h, i) => (
-                    <th key={h} style={{ textAlign: i >= 2 ? "right" : "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}`, whiteSpace: "nowrap" }}>{h}</th>
+                  {COLUNAS_TABELA.map((c, i) => (
+                    <th key={c.chave} onClick={() => alternarOrdem(c.chave)} title="Clique para ordenar"
+                      style={{ textAlign: i >= 2 ? "right" : "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}`, whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }}>
+                      {c.rotulo}{ordem.chave === c.chave && (ordem.dir === "asc" ? " ▲" : " ▼")}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {linhas.map((l) => (
+                {linhasVisiveis.map((l) => (
                   <tr key={`${l.empreendimento}||${l.servico}`} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
                     <td style={{ padding: "8px 10px", fontWeight: 600 }}>{l.empreendimento}</td>
                     <td style={{ padding: "8px 10px", color: "#4a5a70" }}>{l.rotulo}</td>
@@ -7758,6 +7863,7 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
               </tfoot>
             </table>
           </div>
+          )}
 
           <div style={{ marginTop: 12, fontSize: 12.5, color: "#65758b" }}>
             A receber: <strong style={{ color: "#B26A00" }}>{fmtReal(totalGeral - totalRecebido)}</strong>
@@ -7858,6 +7964,8 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
+      <CardReceitaEstimada precos={precos} clientes={clientes} docs={docs} usuarios={usuarios} />
+
       <Card icon={DollarSign} titulo="Financeiro (acesso restrito · Gerência)">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 20 }}>
           <div>
@@ -7897,8 +8005,6 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
 
       <CardPrecoEmpreendimento precos={precos} carregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef} clientes={clientes}
         adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento} notify={notify} />
-
-      <CardReceitaEstimada precos={precos} clientes={clientes} docs={docs} usuarios={usuarios} />
     </div>
   );
 }
