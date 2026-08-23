@@ -7,7 +7,7 @@ import {
   AlertTriangle, CircleAlert, Info, Copy, Sparkles, Loader2,
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
-  ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images
+  ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog
 } from "lucide-react";
 
 /* ============================================================
@@ -446,7 +446,7 @@ const MODULOS_POR_PERFIL = {
   atendimento: ["clientes", "qualidade", "vendas"],
   qualidade: ["qualidade"],
   vendas: ["vendas"],
-  gerencia: ["laudos", "documentacao", "gerencia", "clientes", "qualidade"],
+  gerencia: ["laudos", "documentacao", "gerencia", "usuarios", "clientes", "qualidade"],
 };
 const PERFIL_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", qualidade: "Agendamento", vendas: "Vendas", gerencia: "Gerência" };
 
@@ -2864,7 +2864,7 @@ function AppInterno({ session, onLogout }) {
 
         {/* Navegação de módulos (filtrada pelo perfil de acesso) */}
         <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, borderTop: "1px solid rgba(255,255,255,.12)", overflowX: "auto" }}>
-          {[["laudos", "Laudos", FileText], ["documentacao", "Documentação", ClipboardCheck], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["vendas", "Vendas", Handshake], ["gerencia", "Gerência", BarChart3]]
+          {[["laudos", "Laudos", FileText], ["documentacao", "Documentação", ClipboardCheck], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["vendas", "Vendas", Handshake], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog]]
             .filter(([k]) => modulosPermitidos.includes(k))
             .map(([k, label, Icon]) => (
               <button key={k} onClick={() => setAbaTop(k)} className="tab" style={{ borderBottomColor: abaTop === k ? "#fff" : "transparent", color: abaTop === k ? "#fff" : "rgba(255,255,255,.55)", whiteSpace: "nowrap", flexShrink: 0 }}>
@@ -2979,6 +2979,10 @@ function AppInterno({ session, onLogout }) {
             patologiasBanco={patologiasBanco} patologiasBancoCarregando={patologiasBancoCarregando}
             criarPatologia={criarPatologia} atualizarPatologia={atualizarPatologia} excluirPatologia={excluirPatologia}
             importarPatologiasEstaticas={importarPatologiasEstaticas} />
+        )}
+        {abaTop === "usuarios" && (
+          <CardUsuarios usuarios={usuarios} carregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario}
+            excluirUsuario={excluirUsuario} salvarPerfilTecnico={salvarPerfilTecnico} notify={notify} usuarioAtualId={session.usuario.id} />
         )}
       </main>
 
@@ -7061,8 +7065,6 @@ function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendi
           </table>
         </Card>
       )}
-
-      <CardUsuarios usuarios={usuarios} carregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} salvarPerfilTecnico={salvarPerfilTecnico} notify={notify} usuarioAtualId={usuarioAtualId} />
 
       <CardAssinaturaGerencia assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify} />
     </div>
