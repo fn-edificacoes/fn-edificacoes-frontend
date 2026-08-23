@@ -2719,7 +2719,19 @@ function AppInterno({ session, onLogout }) {
       setDados(r.dados);
       setItens((r.itens || []).map((i) => ({ ...i, id: idCounter++, fotos: i.fotos || [] })));
       setShowLoad(false);
-      notify(r.comFotos ? "Rascunho carregado com as fotos ✓" : "Rascunho antigo carregado — refaça o envio das fotos");
+      /* O rascunho traz dados/itens de volta, mas não o vínculo com o cadastro do cliente —
+         sem reconectar isso, "Enviar para gerência" ou barra pedindo pra selecionar um
+         cliente, ou (se já tivesse outro cliente aberto antes de abrir o rascunho) prendia
+         esse laudo recuperado no cadastro errado. Reconecta pelo CPF; sem CPF batendo,
+         zera o cliente selecionado em vez de manter o de antes — pra nunca enviar errado. */
+      const cpfDoRascunho = (r.dados?.contratante?.cpf || "").replace(/\D/g, "");
+      const cliCorrespondente = cpfDoRascunho
+        ? clientesAtivos.find((c) => (c.cpf || "").replace(/\D/g, "") === cpfDoRascunho)
+        : null;
+      setClienteAtualId(cliCorrespondente ? cliCorrespondente.id : null);
+      notify(cliCorrespondente
+        ? (r.comFotos ? "Rascunho carregado com as fotos ✓" : "Rascunho antigo carregado — refaça o envio das fotos")
+        : "Rascunho carregado, mas não achei o cadastro pelo CPF — selecione o cliente certo em \"Dados do laudo\" antes de enviar para a gerência.");
     } catch { notify("Falha ao carregar o rascunho."); }
   };
 
