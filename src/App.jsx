@@ -8628,7 +8628,7 @@ function AbaCliente({ notify, onLogin, onIrParaLogin }) {
               aceitando qualquer e-mail escrito à mão. */}
           <div style={cell(true)}>
             <label style={lab}>E-mail</label>
-            <input list="sugestoes-email" style={inp} type="email" placeholder="seunome@gmail.com"
+            <input list="sugestoes-email" style={inp} type="email" placeholder="seunome@gmail.com" autoComplete="off"
               value={form.email}
               onChange={(e) => { setF("email", e.target.value); setAvisoEmail(null); }}
               onBlur={async (e) => {
