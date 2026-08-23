@@ -5760,12 +5760,17 @@ function TabelaRegistrosVistoriaDoc({ docs, addDoc, updDoc, delDoc, carregando, 
 }
 
 /* ================= Aba: Gerência (indicadores) ================= */
-function KpiCard({ label, valor, cor = AZUL_MARINHO, Icon }) {
+function KpiCard({ label, valor, cor = AZUL_MARINHO, Icon, percentual }) {
   return (
     <div style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
       {Icon && <div style={{ width: 34, height: 34, borderRadius: 9, background: CINZA_CLARO, display: "grid", placeItems: "center", flexShrink: 0 }}><Icon size={16} color={cor} /></div>}
       <div>
-        <div style={{ fontSize: 20, fontWeight: 800, color: cor, lineHeight: 1.1 }}>{valor}</div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 20, fontWeight: 800, color: cor, lineHeight: 1.1 }}>{valor}</div>
+          {percentual != null && (
+            <span style={{ fontSize: 11, fontWeight: 700, color: cor, background: CINZA_CLARO, borderRadius: 20, padding: "1px 7px" }}>{percentual}</span>
+          )}
+        </div>
         <div style={{ fontSize: 12, color: "#65758b", marginTop: 2 }}>{label}</div>
       </div>
     </div>
@@ -5793,6 +5798,7 @@ function BarraStatus({ titulo, contagens }) {
   );
 }
 const fmtReal = (v) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const fmtPct = (v, base) => (base > 0 ? `${((Number(v) || 0) / base * 100).toFixed(1).replace(".", ",")}%` : "—");
 const SERVICO_VISTORIA = "Vistoria de entrega de chaves";
 
 /* Indicadores de "Vistorias" agora vêm de clientes (cadastros reais do portal público),
@@ -7749,7 +7755,9 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
     const acc = porEmpreendimento[l.empreendimento];
     acc.total += l.total; acc.custo += l.custo; acc.recebido += l.recebido; acc.lucro += l.lucro;
   });
-  const barras = Object.values(porEmpreendimento)
+  const todosEmpreendimentos = Object.values(porEmpreendimento);
+  const somaMetricaTotal = todosEmpreendimentos.reduce((s, b) => s + b[metricaGrafico], 0);
+  const barras = todosEmpreendimentos
     .sort((a, b) => b[metricaGrafico] - a[metricaGrafico])
     .slice(0, 8);
   const maxBarra = Math.max(...barras.map((b) => b[metricaGrafico]), 1);
@@ -7770,11 +7778,11 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
       {linhas.length > 0 && (
         <>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 16 }}>
-            <KpiCard label="Receita total" valor={fmtReal(totalGeral)} cor={AZUL_MARINHO} />
-            <KpiCard label="Custo" valor={fmtReal(totalCusto)} cor="#C62828" />
-            <KpiCard label="Recebido" valor={fmtReal(totalRecebido)} cor="#2E7D32" />
-            <KpiCard label="Lucro" valor={fmtReal(totalLucro)} cor="#6A4C93" />
-            <KpiCard label="A receber" valor={fmtReal(totalGeral - totalRecebido)} cor="#B26A00" />
+            <KpiCard label="Receita total" valor={fmtReal(totalGeral)} cor={AZUL_MARINHO} percentual={fmtPct(totalGeral, totalGeral)} />
+            <KpiCard label="Custo" valor={fmtReal(totalCusto)} cor="#C62828" percentual={fmtPct(totalCusto, totalGeral)} />
+            <KpiCard label="Recebido" valor={fmtReal(totalRecebido)} cor="#2E7D32" percentual={fmtPct(totalRecebido, totalGeral)} />
+            <KpiCard label="Lucro" valor={fmtReal(totalLucro)} cor="#6A4C93" percentual={fmtPct(totalLucro, totalGeral)} />
+            <KpiCard label="A receber" valor={fmtReal(totalGeral - totalRecebido)} cor="#B26A00" percentual={fmtPct(totalGeral - totalRecebido, totalGeral)} />
           </div>
 
           {barras.length > 0 && (
@@ -7801,8 +7809,8 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
                     <div style={{ flex: 1, height: 16, borderRadius: 8, background: CINZA_CLARO, overflow: "hidden" }}>
                       <div style={{ width: `${b[metricaGrafico] > 0 ? Math.max((b[metricaGrafico] / maxBarra) * 100, 2) : 0}%`, height: "100%", background: METRICAS_GRAFICO[metricaGrafico].cor, borderRadius: 8, transition: "width .3s" }} />
                     </div>
-                    <div style={{ width: 96, textAlign: "right", fontSize: 12, fontWeight: 700, color: METRICAS_GRAFICO[metricaGrafico].cor, flexShrink: 0 }}>
-                      {fmtReal(b[metricaGrafico])}
+                    <div style={{ width: 128, textAlign: "right", fontSize: 12, fontWeight: 700, color: METRICAS_GRAFICO[metricaGrafico].cor, flexShrink: 0 }}>
+                      {fmtReal(b[metricaGrafico])} <span style={{ fontWeight: 600, opacity: 0.75 }}>({fmtPct(b[metricaGrafico], somaMetricaTotal)})</span>
                     </div>
                   </div>
                 ))}
