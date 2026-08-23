@@ -2878,7 +2878,8 @@ function AppInterno({ session, onLogout }) {
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
             {[...(fazVistoria({ role: perfil }) ? [["agenda", "Minha agenda", CalendarDays]] : []),
               ["itens", `Vistoria (${totalItens})`, Camera], ["laudo", "Laudo final", FileText],
-              ...(perfil === "vistoriador" || perfil === "gerencia" ? [["realizados", "Laudos realizados", ClipboardCheck]] : [])]
+              ...(perfil === "vistoriador" || perfil === "gerencia" ? [["realizados", "Laudos realizados", ClipboardCheck]] : []),
+              ...(perfil === "vistoriador" ? [["banco-patologias", "Banco de patologias", AlertTriangle]] : [])]
               .map(([k, label, Icon]) => (
                 <button key={k} onClick={() => setAba(k)} className="tab" style={{ borderBottomColor: aba === k ? AZUL_MEDIO : "transparent", color: aba === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
                   <Icon size={15} /> {label}
@@ -2931,6 +2932,9 @@ function AppInterno({ session, onLogout }) {
         )}
         {abaTop === "laudos" && aba === "agenda" && fazVistoria({ role: perfil }) && (
           <CalendarioVistoriador agenda={agendaVistoriador} carregando={agendaVistoriadorCarregando} clientes={clientesAtivos} preencherComCliente={preencherComCliente} />
+        )}
+        {abaTop === "laudos" && aba === "banco-patologias" && perfil === "vistoriador" && (
+          <CardBancoPatologias patologias={patologiasBanco} carregando={patologiasBancoCarregando} notify={notify} somenteLeitura />
         )}
 
         {abaTop === "documentacao" && (
@@ -7096,7 +7100,7 @@ function CardIndicadoresParceiros({ parceiros, vales, valesCarregando, vendas = 
    patologias que já existiam no arquivo estático (gerado de planilha). Dali em diante, o
    cadastro é feito por aqui — o mesmo banco alimenta o dropdown do item de vistoria, o
    "Conferir por ambiente" e a correção de laudo da gerência. */
-function CardBancoPatologias({ patologias = [], carregando, onCriar, onAtualizar, onExcluir, onImportar, notify }) {
+function CardBancoPatologias({ patologias = [], carregando, onCriar, onAtualizar, onExcluir, onImportar, notify, somenteLeitura = false }) {
   const ambientes = useMemo(() => listarAmbientes(), []);
   const [busca, setBusca] = useState("");
   const [editando, setEditando] = useState(null); // objeto da patologia, ou {} pra nova
@@ -7144,10 +7148,12 @@ function CardBancoPatologias({ patologias = [], carregando, onCriar, onAtualizar
   return (
     <Card icon={AlertTriangle} titulo={`Banco de patologias (${patologias.length})`}>
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-        Catálogo que alimenta o item de vistoria, o "Conferir por ambiente" e a correção de laudo — ajuste, adicione ou remova entradas aqui.
+        {somenteLeitura
+          ? "Catálogo que alimenta o item de vistoria e o \"Conferir por ambiente\". Quem ajusta, adiciona ou remove é a Gerência."
+          : "Catálogo que alimenta o item de vistoria, o \"Conferir por ambiente\" e a correção de laudo — ajuste, adicione ou remova entradas aqui."}
       </p>
 
-      {!carregando && patologias.length === 0 && (
+      {!somenteLeitura && !carregando && patologias.length === 0 && (
         <div style={{ background: "#FFF4E0", border: "1px solid #f0c987", borderRadius: 10, padding: 14, marginBottom: 16, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <AlertTriangle size={16} color="#B26A00" style={{ flexShrink: 0 }} />
           <span style={{ fontSize: 13, color: "#7a4e00", flex: 1, minWidth: 200 }}>
@@ -7162,9 +7168,11 @@ function CardBancoPatologias({ patologias = [], carregando, onCriar, onAtualizar
       <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
         <input style={{ ...inp, flex: 1, minWidth: 200 }} value={busca} onChange={(e) => setBusca(e.target.value)}
           placeholder={`Buscar em ${patologias.length} patologia(s)…`} />
-        <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }} onClick={iniciarNova}>
-          <Plus size={15} /> Nova patologia
-        </button>
+        {!somenteLeitura && (
+          <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }} onClick={iniciarNova}>
+            <Plus size={15} /> Nova patologia
+          </button>
+        )}
       </div>
 
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
@@ -7187,15 +7195,19 @@ function CardBancoPatologias({ patologias = [], carregando, onCriar, onAtualizar
             <span style={{ fontSize: 11, fontWeight: 700, color: sevMeta[p.severidade]?.cor, background: sevMeta[p.severidade]?.bg, borderRadius: 20, padding: "2px 10px" }}>
               {p.severidade}
             </span>
-            <button className="icon-btn" onClick={() => setEditando({ ...p })} title="Editar"><Edit3 size={15} color={AZUL_MEDIO} /></button>
-            <button className="icon-btn" onClick={() => excluir(p.id)} title="Excluir" disabled={excluindoId === p.id}>
-              {excluindoId === p.id ? <Loader2 size={15} className="spin" /> : <Trash2 size={15} color="#c62828" />}
-            </button>
+            {!somenteLeitura && (
+              <>
+                <button className="icon-btn" onClick={() => setEditando({ ...p })} title="Editar"><Edit3 size={15} color={AZUL_MEDIO} /></button>
+                <button className="icon-btn" onClick={() => excluir(p.id)} title="Excluir" disabled={excluindoId === p.id}>
+                  {excluindoId === p.id ? <Loader2 size={15} className="spin" /> : <Trash2 size={15} color="#c62828" />}
+                </button>
+              </>
+            )}
           </div>
         ))}
       </div>
 
-      {editando && (
+      {!somenteLeitura && editando && (
         <div className="no-print" style={overlay} onClick={() => setEditando(null)}>
           <div style={{ ...modal, maxWidth: 640, maxHeight: "88vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
