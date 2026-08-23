@@ -5585,7 +5585,7 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, cli
           vistoria fica na aba própria da Gerência (AbaGerenciaAcompanhamento), que reaproveita
           este mesmo componente sem esse filtro. */}
       <TabelaRegistrosVistoriaDoc docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={carregando}
-        notify={notify} clientes={clientes} somenteDocumentacao />
+        notify={notify} clientes={clientes} somenteDocumentacao precos={precos} />
 
       <ConfirmModal aberto={!!removendoCliente} titulo="Apagar cadastro do pedido"
         mensagem={removendoCliente ? `Tem certeza que deseja apagar o cadastro de "${removendoCliente.nome || "cliente sem nome"}"? Os documentos já anexados também somem. Essa ação não pode ser desfeita.` : ""}
@@ -5598,7 +5598,7 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, cli
    - AbaDocumentacao: só documentação (somenteDocumentacao=true), inclusive para Gerência.
    - AbaGerenciaAcompanhamento: os dois juntos (somenteDocumentacao=false) — visão cruzada
      que só a Gerência tem, pensada pra acompanhar vistoria e documentação lado a lado. */
-function TabelaRegistrosVistoriaDoc({ docs, addDoc, updDoc, delDoc, carregando, notify, clientes = [], somenteDocumentacao = false }) {
+function TabelaRegistrosVistoriaDoc({ docs, addDoc, updDoc, delDoc, carregando, notify, clientes = [], somenteDocumentacao = false, precos = [] }) {
   const [editando, setEditando] = useState(null); // registro (cópia) em edição, ou null
   const [filtroVistoria, setFiltroVistoria] = useState("");
   const [busca, setBusca] = useState("");
@@ -5699,7 +5699,20 @@ function TabelaRegistrosVistoriaDoc({ docs, addDoc, updDoc, delDoc, carregando, 
             <Grid>
               <Field label="Cliente" value={editando.cliente} onChange={(v) => setEditando({ ...editando, cliente: v })} full />
               <Field label="CPF" value={editando.cpf} onChange={(v) => setEditando({ ...editando, cpf: v })} />
-              <Field label="Empreendimento" value={editando.empreendimento} onChange={(v) => setEditando({ ...editando, empreendimento: v })} />
+              <Field label="Empreendimento" value={editando.empreendimento}
+                onChange={(v) => {
+                  /* O valor da vistoria/TRT some da tabela de preços por empreendimento assim que
+                     o nome bate certinho com um cadastro lá — poupa o gerente de digitar de novo
+                     o que já está definido. Se o empreendimento não tiver preço definido, ou o
+                     nome não bater, o campo de valor não muda: continua editável na mão. */
+                  const preco = precos.find((p) => p.empreendimento === v.trim());
+                  setEditando((ed) => ({
+                    ...ed,
+                    empreendimento: v,
+                    ...(preco?.precoVistoria ? { valorVistoria: preco.precoVistoria } : {}),
+                    ...(preco?.precoDocumentacao ? { valorTrt: preco.precoDocumentacao } : {}),
+                  }));
+                }} />
               <Field label="Bloco / Apto / Complemento" value={editando.blocoTorre} onChange={(v) => setEditando({ ...editando, blocoTorre: v })} />
               <Field label="Data" type="date" value={editando.data} onChange={(v) => setEditando({ ...editando, data: v })} />
               <Field label="Hora" type="time" value={editando.hora} onChange={(v) => setEditando({ ...editando, hora: v })} />
@@ -7893,7 +7906,7 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
 function AbaGerencia({ sub = "visao-geral", token, perfil, decidirComissaoItem, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
   if (sub === "acompanhamento") {
     return <TabelaRegistrosVistoriaDoc docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc}
-      carregando={carregando} notify={notify} clientes={clientes} />;
+      carregando={carregando} notify={notify} clientes={clientes} precos={precos} />;
   }
   if (sub === "parceiros") {
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual}
