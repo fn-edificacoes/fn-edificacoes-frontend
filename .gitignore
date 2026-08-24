@@ -1,2 +1,6 @@
 .vercel
 modelo-laudo
+# Dependências e build local: o Pages gera o dist/ sozinho no workflow (npm ci +
+# npm run build), então nenhum dos dois tem por que entrar no repositório.
+node_modules/
+dist/
