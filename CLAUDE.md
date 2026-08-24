@@ -99,6 +99,29 @@ O papel vem do backend no login, nunca é escolhido na tela. `App()` despacha po
   `vistoriador` (laudos), `documentacao`, `atendimento` (clientes, agendamento, parceiros),
   `qualidade` (agendamento, só leitura), `vendas` (parceiros), `gerencia` (tudo).
 
+## Revistoria
+
+O retorno do técnico ao imóvel depois que a construtora corrigiu o que o laudo apontou.
+Quem pede é o próprio cliente, na aba **Revistoria** do portal dele (`AbaRevistoriaCliente`,
+dentro do `PainelCliente`) — antes isso chegava por WhatsApp e o Atendimento recadastrava
+tudo à mão.
+
+Não existe fluxo paralelo, e é de propósito: o pedido (`POST /api/clientes/me/revistoria`)
+cria um **cadastro novo em `clientes`**, com `servico = "Revistoria"`, `status = "Em análise"`
+e `revistoria_de` apontando para o atendimento que gerou o laudo original. Daí em diante ele
+percorre a fila de sempre — Atendimento aprova, escala o técnico no calendário, o técnico
+vistoria, a Gerência aprova o laudo, o cliente baixa. O que muda no caminho:
+
+- o selo `SeloRevistoria` nas telas da equipe (fila de aprovação, agenda do dia, Kanban,
+  lista de clientes, agenda do técnico, fila de laudos da Gerência);
+- `preencherComCliente` carrega os itens do laudo original (sem as fotos) para o técnico
+  marcar o que foi corrigido, em vez de começar em branco;
+- o PDF aprovado é arquivado em `REVISTORIAS/…` no Drive, e não em `VISTORIAS/…`.
+
+Cliente e cadastro casam por `clienteId` (`docDoCliente`), nunca por CPF: com revistoria a
+mesma pessoa passa a ter dois cadastros de vistoria no mesmo imóvel, e o CPF deixou de
+identificar um só.
+
 A tela de login é uma só para os três públicos — equipe, cliente e parceiro/filiado.
 Cliente sem senha usa "primeiro acesso"; parceiro se cadastra pelo botão do rodapé, que
 abre a `TelaCadastroParceiro`. O login do parceiro nasce desativado e só abre quando a
