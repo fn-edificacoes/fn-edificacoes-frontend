@@ -4214,12 +4214,40 @@ function conflitosDeHorario(cliente, todos) {
   });
 }
 
+/* Já existe vistoria desse técnico no mesmo dia e horário? Devolve o cadastro que ocupa o
+   lugar, ou null. A mesma pergunta era feita em quatro telas com quatro cópias do filtro —
+   e elas já tinham divergido: umas olhavam só "Vistoria agendada", outras também "Em
+   vistoria", que é o mesmo compromisso já começado. */
+function vistoriaNoMesmoHorario(clientes = [], { clienteId, vistoriadorId, data, horario }) {
+  if (!vistoriadorId || !data || !horario) return null;
+  return clientes.find((o) =>
+    o.id !== clienteId &&
+    (o.status === "Vistoria agendada" || o.status === "Em vistoria") &&
+    String(o.vistoriadorId) === String(vistoriadorId) &&
+    o.dataDesejada === data && o.horarioDesejado === horario
+  ) || null;
+}
+
 /* ================= Bloco de aprovação de clientes (item 2 do Agendamento) =================
    Fica acima do calendário. Só cliente "aprovado" pode ser agendado (status "Agendamento
    aprovado"); "Recusar" reaproveita o status "Cancelado" já existente no fluxo — não existe
    (nem no backend) um status "Recusado" à parte. */
-function CardClientePendente({ c, todos, podeAgir, onAprovar, onRecusar }) {
+function CardClientePendente({ c, todos, podeAgir, onAprovar, onRecusar, vistoriadores = [] }) {
   const conflitos = conflitosDeHorario(c, todos);
+  /* Aprovar e escalar o técnico no mesmo passo. Antes eram dois momentos: o cadastro virava
+     "Agendamento aprovado" aqui e alguém precisava abrir a sub-aba Vistoria depois para dizer
+     quem atende — nesse meio a vistoria aparecia no calendário do dia mas não estava na agenda
+     de técnico nenhum, e o formulário de agendar nem listava quem ainda não tinha passado por
+     aqui. Na revistoria o técnico da visita anterior já vem escolhido. */
+  const [vistoriadorId, setVistoriadorId] = useState(c.vistoriadorId || "");
+  const [aprovando, setAprovando] = useState(false);
+  const semDataOuHora = !c.dataDesejada || !c.horarioDesejado;
+
+  const aprovar = async (comTecnico) => {
+    setAprovando(true);
+    await onAprovar(c, comTecnico ? vistoriadorId : "");
+    setAprovando(false);
+  };
   return (
     <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, minWidth: 250, maxWidth: 270, flexShrink: 0, display: "flex", flexDirection: "column", gap: 5 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -4249,14 +4277,39 @@ function CardClientePendente({ c, todos, podeAgir, onAprovar, onRecusar }) {
         </div>
       )}
       {podeAgir ? (
-        <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-          <button className="btn-solid" style={{ flex: 1, padding: "7px 10px", fontSize: 12.5 }} onClick={() => onAprovar(c)}>
-            <Check size={13} /> Aprovar
+        <>
+          <div style={cell(true)}>
+            <label style={lab}>Técnico que vai atender</label>
+            <select style={{ ...inp, padding: "7px 9px", fontSize: 12.5 }} value={vistoriadorId}
+              onChange={(e) => setVistoriadorId(e.target.value)}>
+              <option value="">selecionar…</option>
+              {vistoriadores.map((v) => <option key={v.id} value={v.id}>{rotuloTecnico(v)}</option>)}
+            </select>
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+            <button className="btn-solid" style={{ flex: 1, padding: "7px 10px", fontSize: 12.5 }}
+              disabled={aprovando || !vistoriadorId || semDataOuHora}
+              title={semDataOuHora ? "Este cadastro não tem data/horário definidos" : (!vistoriadorId ? "Escolha quem vai atender" : "")}
+              onClick={() => aprovar(true)}>
+              {aprovando ? <Loader2 size={13} className="spin" /> : <Check size={13} />} Aprovar e agendar
+            </button>
+            <button className="btn-ghost" style={{ flex: 1, color: "#C62828", background: "#FCEAEA", padding: "7px 10px", fontSize: 12.5 }}
+              disabled={aprovando} onClick={() => onRecusar(c)}>
+              <X size={13} /> Recusar
+            </button>
+          </div>
+          {/* Saída para quando ainda não se sabe quem atende: aprova e a vistoria fica na fila
+              de "aguardando técnico", como era antes. */}
+          <button className="btn-ghost" style={{ color: "#65758b", padding: "2px 4px", fontSize: 11.5, justifyContent: "flex-start" }}
+            disabled={aprovando} onClick={() => aprovar(false)}>
+            Aprovar sem definir o técnico agora
           </button>
-          <button className="btn-ghost" style={{ flex: 1, color: "#C62828", background: "#FCEAEA", padding: "7px 10px", fontSize: 12.5 }} onClick={() => onRecusar(c)}>
-            <X size={13} /> Recusar
-          </button>
-        </div>
+          {semDataOuHora && (
+            <span style={{ fontSize: 11.5, color: "#B26A00" }}>
+              Sem data ou horário no cadastro — defina em Clientes antes de agendar.
+            </span>
+          )}
+        </>
       ) : (
         <span style={{ fontSize: 11.5, color: "#8593a8", marginTop: 4 }}>Somente leitura — o Atendimento decide isso.</span>
       )}
@@ -4264,7 +4317,7 @@ function CardClientePendente({ c, todos, podeAgir, onAprovar, onRecusar }) {
   );
 }
 
-function BlocoAprovacaoClientes({ clientes = [], carregando, podeAgir, onAprovar, onRecusar, clienteAprovado, onAgendarAgora, onFecharAviso }) {
+function BlocoAprovacaoClientes({ clientes = [], carregando, podeAgir, onAprovar, onRecusar, clienteAprovado, onAgendarAgora, onFecharAviso, vistoriadores = [] }) {
   const pendentes = clientes.filter((c) => c.status === "Em análise" && !ehServicoDocumentacao(c));
 
   if (!carregando && pendentes.length === 0 && !clienteAprovado) {
@@ -4291,7 +4344,7 @@ function BlocoAprovacaoClientes({ clientes = [], carregando, podeAgir, onAprovar
       {pendentes.length > 0 && (
         <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
           {pendentes.map((c) => (
-            <CardClientePendente key={c.id} c={c} todos={clientes} podeAgir={podeAgir} onAprovar={onAprovar} onRecusar={onRecusar} />
+            <CardClientePendente key={c.id} c={c} todos={clientes} podeAgir={podeAgir} onAprovar={onAprovar} onRecusar={onRecusar} vistoriadores={vistoriadores} />
           ))}
         </div>
       )}
@@ -4457,11 +4510,9 @@ function PainelDiaAgendamento({ diaISO, clientes = [], todosClientes = [], visto
   const trocarTecnico = async (c, novoId) => {
     if (!novoId || String(novoId) === String(c.vistoriadorId)) return;
     const universo = todosClientes.length ? todosClientes : clientes;
-    const conflito = universo.find((o) =>
-      o.id !== c.id && (o.status === "Vistoria agendada" || o.status === "Em vistoria") &&
-      String(o.vistoriadorId) === String(novoId) &&
-      o.dataDesejada === c.dataDesejada && o.horarioDesejado === c.horarioDesejado
-    );
+    const conflito = vistoriaNoMesmoHorario(universo, {
+      clienteId: c.id, vistoriadorId: novoId, data: c.dataDesejada, horario: c.horarioDesejado,
+    });
     const nomeNovo = vistoriadores.find((v) => String(v.id) === String(novoId))?.nome || "O técnico";
     if (conflito) {
       notify(`${nomeNovo} já tem vistoria às ${c.horarioDesejado} nesse dia (${conflito.nome}). Escolha outro.`);
@@ -4566,8 +4617,11 @@ function PainelDiaAgendamento({ diaISO, clientes = [], todosClientes = [], visto
 
 /* Formulário "Agendar vistoria": escolhe um cliente já aprovado + técnico + data/hora.
    Bloqueia o envio se o técnico já tiver outra vistoria confirmada no mesmo horário. */
-function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesAprovados = [], todosClientes = [], onFechar, onConfirmar }) {
-  const listaClientes = diaInicial ? clientesAprovados.filter((c) => c.dataDesejada === diaInicial) : clientesAprovados;
+function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesParaAgendar = [], todosClientes = [], onFechar, onConfirmar }) {
+  /* Entram os aprovados E os que ainda estão em análise: confirmar aqui já aprova. Antes a
+     lista só tinha os aprovados, e quem abria o dia via o cadastro no calendário e o
+     formulário dizendo "nenhum cliente aprovado neste dia" — sem pista do que fazer. */
+  const listaClientes = diaInicial ? clientesParaAgendar.filter((c) => c.dataDesejada === diaInicial) : clientesParaAgendar;
   const [clienteId, setClienteId] = useState("");
   const [vistoriadorId, setVistoriadorId] = useState("");
   const [erro, setErro] = useState("");
@@ -4585,13 +4639,10 @@ function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesAprovados
 
   const confirmar = async () => {
     setErro("");
-    if (!clienteId) { setErro("Escolha o cliente aprovado."); return; }
+    if (!clienteId) { setErro("Escolha o cliente."); return; }
     if (!vistoriadorId) { setErro("Escolha o técnico responsável."); return; }
     if (!data || !hora) { setErro("Este cliente não definiu data/horário no cadastro."); return; }
-    const conflito = todosClientes.find((c) =>
-      c.id !== clienteId && c.status === "Vistoria agendada" &&
-      c.vistoriadorId === vistoriadorId && c.dataDesejada === data && c.horarioDesejado === hora
-    );
+    const conflito = vistoriaNoMesmoHorario(todosClientes, { clienteId, vistoriadorId, data, horario: hora });
     if (conflito) {
       const nomeTecnico = vistoriadores.find((v) => String(v.id) === String(vistoriadorId))?.nome || "O técnico";
       setErro(`${nomeTecnico} já tem vistoria às ${hora}. Escolha outro técnico.`);
@@ -4612,20 +4663,25 @@ function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesAprovados
 
         <div style={{ display: "grid", gap: 12 }}>
           <div style={cell(true)}>
-            <label style={lab}>Cliente aprovado</label>
+            <label style={lab}>Cliente</label>
             <select style={inp} value={clienteId} onChange={(e) => setClienteId(e.target.value)}>
               <option value="">selecionar…</option>
               {listaClientes.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.nome}{c.empreendimento ? ` · ${c.empreendimento}` : ""}{ehRevistoria(c) ? ` · ${rotuloRevistoria(c.revistoriaSeq).toUpperCase()}` : ""}
+                  {c.nome}{c.empreendimento ? ` · ${c.empreendimento}` : ""}{ehRevistoria(c) ? ` · ${rotuloRevistoria(c.revistoriaSeq).toUpperCase()}` : ""}{c.status === "Em análise" ? " · ainda não aprovado" : ""}
                 </option>
               ))}
             </select>
-            {listaClientes.length === 0 && <span style={{ fontSize: 12, color: "#8593a8" }}>Nenhum cliente aprovado aguardando agendamento{diaInicial ? " neste dia" : ""}.</span>}
+            {listaClientes.length === 0 && <span style={{ fontSize: 12, color: "#8593a8" }}>Nenhum cliente aguardando agendamento{diaInicial ? " neste dia" : ""}.</span>}
           </div>
           {clienteEscolhido && (
             <div style={{ fontSize: 12.5, color: "#65758b" }}>
               {clienteEscolhido.servico} · {clienteEscolhido.endereco || clienteEscolhido.empreendimento || "sem endereço"}
+            </div>
+          )}
+          {clienteEscolhido?.status === "Em análise" && (
+            <div style={{ background: "#EAF2FB", color: AZUL_MARINHO, borderRadius: 8, padding: "8px 10px", fontSize: 12.5 }}>
+              Este cadastro ainda está aguardando aprovação — confirmar o agendamento também aprova.
             </div>
           )}
           {clienteEscolhido && ehRevistoria(clienteEscolhido) && clienteEscolhido.observacoes && (
@@ -4677,7 +4733,12 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
   const [agendando, setAgendando] = useState(null); // { dataDesejada } quando o form "Agendar vistoria" está aberto
 
   const vistoriadores = usuarios.filter((u) => fazVistoria(u) && u.ativo);
-  const aprovadosSemVistoria = clientes.filter((c) => c.status === "Agendamento aprovado" && !ehServicoDocumentacao(c));
+  /* Quem ainda não está na agenda de ninguém — aprovado esperando técnico, ou recém-chegado
+     ainda em análise. Os dois podem ser agendados pelo formulário: confirmar já aprova, que é
+     o que se espera de quem está olhando o dia e decidindo quem atende. Antes só os aprovados
+     entravam na lista, e o formulário abria vazio bem no dia em que havia cadastro esperando. */
+  const aguardandoAgenda = clientes.filter((c) =>
+    ["Em análise", "Agendamento aprovado"].includes(c.status) && !ehServicoDocumentacao(c));
   // O painel do dia respeita o mesmo filtro de etapa aplicado ao calendário.
   const doDiaSelecionado = diaSelecionado
     ? clientes.filter((c) => c.dataDesejada === diaSelecionado && (!filtroEtapa || etapaVistoriaCliente(c, docs) === filtroEtapa))
@@ -4694,11 +4755,30 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
     }
   }, [diaParaAbrir]);
 
-  const aprovar = async (c) => {
+  /* Aprovar já escalando o técnico: o cadastro vai direto de "Em análise" para "Vistoria
+     agendada" e entra na agenda dele na hora. Sem técnico (quando ainda não se sabe quem vai),
+     segue o caminho antigo — "Agendamento aprovado", esperando alguém escalar. */
+  const aprovar = async (c, vistoriadorId = "") => {
     try {
-      await updCliente(c.id, { status: "Agendamento aprovado" });
-      setClienteAprovado(c);
-      notify("Agendamento aprovado ✓");
+      if (!vistoriadorId) {
+        const ok = await updCliente(c.id, { status: "Agendamento aprovado" });
+        if (!ok) return;
+        setClienteAprovado(c);
+        notify("Agendamento aprovado ✓ — falta escalar o técnico");
+        return;
+      }
+      const conflito = vistoriaNoMesmoHorario(clientes, {
+        clienteId: c.id, vistoriadorId, data: c.dataDesejada, horario: c.horarioDesejado,
+      });
+      const nomeTecnico = vistoriadores.find((v) => String(v.id) === String(vistoriadorId))?.nome || "O técnico";
+      if (conflito) {
+        notify(`${nomeTecnico} já tem vistoria às ${c.horarioDesejado} nesse dia (${conflito.nome}). Escolha outro.`);
+        return;
+      }
+      const ok = await updCliente(c.id, { status: "Vistoria agendada", vistoriadorId });
+      if (!ok) return;
+      setClienteAprovado(null);
+      notify(`${ehRevistoria(c) ? "Revistoria" : "Vistoria"} agendada com ${nomeTecnico} ✓ — já está na agenda dele`);
     } catch (e) { notify(`Erro: ${e.message}`); }
   };
   const recusar = async (c) => {
@@ -4718,8 +4798,10 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
   };
   const confirmarAgendamento = async (dados) => {
     try {
-      await updCliente(dados.clienteId, { vistoriadorId: dados.vistoriadorId, dataDesejada: dados.dataDesejada, horarioDesejado: dados.horarioDesejado, status: "Vistoria agendada" });
-      notify("Vistoria agendada ✓");
+      const alvo = clientes.find((c) => c.id === dados.clienteId);
+      const ok = await updCliente(dados.clienteId, { vistoriadorId: dados.vistoriadorId, dataDesejada: dados.dataDesejada, horarioDesejado: dados.horarioDesejado, status: "Vistoria agendada" });
+      if (!ok) return;
+      notify(`${ehRevistoria(alvo) ? "Revistoria" : "Vistoria"} agendada ✓ — já está na agenda do técnico`);
       setAgendando(null);
     } catch (e) { notify(`Erro: ${e.message}`); }
   };
@@ -4727,7 +4809,7 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <BlocoAprovacaoClientes clientes={clientes} carregando={carregando} podeAgir={podeAgir}
-        onAprovar={aprovar} onRecusar={recusar}
+        onAprovar={aprovar} onRecusar={recusar} vistoriadores={vistoriadores}
         clienteAprovado={clienteAprovado} onAgendarAgora={aoClicarAgendarAgora} onFecharAviso={() => setClienteAprovado(null)} />
 
       <Card icon={CalendarDays} titulo="Calendário de vistorias">
@@ -4749,7 +4831,7 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
 
       {agendando && (
         <FormAgendarVistoria diaInicial={agendando.dataDesejada} vistoriadores={vistoriadores}
-          clientesAprovados={aprovadosSemVistoria} todosClientes={clientes}
+          clientesParaAgendar={aguardandoAgenda} todosClientes={clientes}
           onFechar={() => setAgendando(null)} onConfirmar={confirmarAgendamento} />
       )}
     </div>
@@ -4833,11 +4915,9 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
      A checagem de choque de horário é a mesma do agendamento inicial. */
   const trocarTecnico = async (c, novoId) => {
     if (!novoId || String(novoId) === String(c.vistoriadorId)) return;
-    const conflito = clientes.find((o) =>
-      o.id !== c.id && (o.status === "Vistoria agendada" || o.status === "Em vistoria") &&
-      String(o.vistoriadorId) === String(novoId) &&
-      o.dataDesejada === c.dataDesejada && o.horarioDesejado === c.horarioDesejado
-    );
+    const conflito = vistoriaNoMesmoHorario(clientes, {
+      clienteId: c.id, vistoriadorId: novoId, data: c.dataDesejada, horario: c.horarioDesejado,
+    });
     const nomeNovo = vistoriadores.find((v) => String(v.id) === String(novoId))?.nome || "O técnico";
     if (conflito) {
       notify(`${nomeNovo} já tem vistoria às ${c.horarioDesejado} nesse dia. Escolha outro.`);
@@ -4857,10 +4937,9 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
     const vistoriadorId = valorCampo(c, "vistoriadorId", c.vistoriadorId || "");
     if (!vistoriadorId) { notify("Escolha o vistoriador responsável"); return; }
     if (!c.dataDesejada || !c.horarioDesejado) { notify("Este cliente não definiu data/horário no cadastro."); return; }
-    const conflito = clientes.find((o) =>
-      o.id !== c.id && o.status === "Vistoria agendada" &&
-      o.vistoriadorId === vistoriadorId && o.dataDesejada === c.dataDesejada && o.horarioDesejado === c.horarioDesejado
-    );
+    const conflito = vistoriaNoMesmoHorario(clientes, {
+      clienteId: c.id, vistoriadorId, data: c.dataDesejada, horario: c.horarioDesejado,
+    });
     if (conflito) {
       const nomeTecnico = vistoriadores.find((v) => String(v.id) === String(vistoriadorId))?.nome || "O técnico";
       notify(`${nomeTecnico} já tem vistoria às ${c.horarioDesejado}. Escolha outro técnico.`);
