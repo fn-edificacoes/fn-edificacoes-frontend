@@ -7,7 +7,7 @@ import {
   AlertTriangle, CircleAlert, Info, Copy, Sparkles, Loader2,
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
-  ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog
+  ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History
 } from "lucide-react";
 
 /* ============================================================
@@ -96,7 +96,14 @@ function registrarAcesso(area) {
 /* Converte um registro de Documentação vindo do banco (snake_case) para o formato usado no app (camelCase) */
 function mapDocDaApi(d) {
   return {
-    id: d.id, cliente: d.cliente || "", cpf: d.cpf || "", empreendimento: d.empreendimento || "",
+    id: d.id,
+    /* Cadastro a que este laudo pertence. É por ele que as telas encontram "o laudo deste
+       cliente" — nunca pelo CPF, que repete entre a vistoria e a revistoria do mesmo imóvel
+       (ver docDoCliente). Pode vir vazio em registros antigos. */
+    clienteId: d.cliente_id || null,
+    /* 0 = vistoria original; 1, 2… = revistorias daquele imóvel. */
+    revistoriaSeq: Number(d.revistoria_seq) || 0,
+    cliente: d.cliente || "", cpf: d.cpf || "", empreendimento: d.empreendimento || "",
     blocoTorre: d.bloco_torre || "", data: d.data || "", hora: d.hora || "",
     pagamento: d.pagamento || "Pendente", valorVistoria: d.valor_vistoria ?? 0, valorTrt: d.valor_trt ?? 0,
     vistoria: d.vistoria || "Agendada", art: d.art || "Não solicitada", tipoArt: d.tipo_art || "Individual",
@@ -118,15 +125,42 @@ function mapClienteDaApi(c) {
     precisaCadastroEmpreendimento: !!c.precisa_cadastro_empreendimento,
     pagamento: c.pagamento || "Pendente", areaPrivativa: c.area_privativa || "",
     encaminhadoDocumentacao: !!c.encaminhado_documentacao,
+    /* Revistoria: cadastro de retorno ao mesmo imóvel. revistoriaDe aponta para o
+       atendimento de origem; revistoriaSeq é a ordem (1ª, 2ª…). */
+    revistoriaDe: c.revistoria_de || null,
+    revistoriaSeq: Number(c.revistoria_seq) || 0,
   };
+}
+/* O laudo (registro em "docs") de um cadastro. O vínculo é o cliente_id: casar por CPF
+   misturava dois imóveis do mesmo comprador e, agora, a revistoria com a vistoria original —
+   as duas têm o mesmo CPF, e o `find` devolvia sempre a primeira, deixando a revistoria
+   nascer com cara de "já vistoriada".
+   Registros antigos, gravados antes de existir o cliente_id, continuam casando pelo CPF;
+   revistoria nunca usa esse atalho, senão adotaria o laudo da vistoria anterior. */
+function docDoCliente(cliente, docs = []) {
+  if (!cliente) return null;
+  const porCadastro = docs.find((d) => d.clienteId && d.clienteId === cliente.id);
+  if (porCadastro) return porCadastro;
+  if (cliente.revistoriaDe) return null;
+  const cpfLimpo = (cliente.cpf || "").replace(/\D/g, "");
+  if (!cpfLimpo) return null;
+  return docs.find((d) => !d.clienteId && (d.cpf || "").replace(/\D/g, "") === cpfLimpo) || null;
+}
+/* O caminho inverso: de qual cadastro veio este registro de vistoria. */
+function clienteDoDoc(doc, clientes = []) {
+  if (!doc) return null;
+  const porCadastro = doc.clienteId ? clientes.find((c) => c.id === doc.clienteId) : null;
+  if (porCadastro) return porCadastro;
+  const cpfLimpo = (doc.cpf || "").replace(/\D/g, "");
+  if (!cpfLimpo) return null;
+  return clientes.find((c) => !c.revistoriaDe && (c.cpf || "").replace(/\D/g, "") === cpfLimpo) || null;
 }
 /* Etapa atual de um cliente no fluxo completo (cadastro → análise → vistoria → laudo → feedback).
    Antes de existir um "docs" pra esse CPF, quem manda é cliente.status (Em análise/Agendamento
    aprovado/Vistoria agendada). Depois que a vistoria é finalizada, o docs.statusCliente assume
    (Agendado/Laudo em análise/Laudo enviado por e-mail) — cliente.status não é mais tocado. */
 function etapaAtualCliente(cliente, docs = []) {
-  const cpfLimpo = (cliente.cpf || "").replace(/\D/g, "");
-  const doc = cpfLimpo ? docs.find((d) => (d.cpf || "").replace(/\D/g, "") === cpfLimpo) : null;
+  const doc = docDoCliente(cliente, docs);
   if (doc) return doc.statusCliente || "Agendado";
   return cliente.status || "Em análise";
 }
@@ -137,8 +171,7 @@ const ETAPAS_VISTORIA = ["Solicitação de vistoria", "Vistoria agendada", "Em v
 function etapaVistoriaCliente(cliente, docs = []) {
   // Documentação ART/TRT não tem vistoria — fica fora deste fluxo (vai direto pra Documentação).
   if (ehServicoDocumentacao(cliente)) return null;
-  const cpfLimpo = (cliente.cpf || "").replace(/\D/g, "");
-  const doc = cpfLimpo ? docs.find((d) => (d.cpf || "").replace(/\D/g, "") === cpfLimpo) : null;
+  const doc = docDoCliente(cliente, docs);
   // Assim que existe um doc, a vistoria já foi finalizada pelo técnico e virou laudo.
   if (doc) return "Vistoriado";
   if (cliente.status === "Em vistoria") return "Em vistoria";
@@ -539,6 +572,15 @@ function sugestoesEmail(valor) {
 
 const SERVICO_DOCUMENTACAO = SERVICO_OPCOES[1];
 const ehServicoDocumentacao = (c) => c?.servico === SERVICO_DOCUMENTACAO;
+/* Revistoria: retorno ao mesmo imóvel, pedido pelo cliente depois do laudo entregue. Não
+   aparece em SERVICO_OPCOES porque ninguém escolhe isso no cadastro — ela nasce do botão no
+   portal do cliente (POST /api/clientes/revistoria), já com os dados do atendimento antigo.
+   Daí em diante segue o caminho normal da vistoria: análise, agendamento, técnico, laudo. */
+const SERVICO_REVISTORIA = "Revistoria";
+const ehRevistoria = (c) => !!c?.revistoriaDe || c?.servico === SERVICO_REVISTORIA;
+/* "Revistoria" quando é a primeira; da segunda em diante o número importa para não
+   confundir quem olha a agenda ou a pasta do Drive. */
+const rotuloRevistoria = (seq) => (Number(seq) > 1 ? `${Number(seq)}ª revistoria` : "Revistoria");
 
 /* Etapa usada na aba Clientes: as mesmas 4 etapas dos "Indicadores do Agendamento", mais
    as situações que ficam fora do fluxo de vistoria (documentação ART/TRT e cancelamentos).
@@ -1113,6 +1155,16 @@ function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], ava
       itens.push({
         id: "aprovacao", urgente: podeAgir,
         texto: `${aguardando.length} cliente(s) aguardando aprovação`,
+        onde: { aba: "qualidade", sub: "analise" },
+      });
+    }
+    /* Revistoria pesa diferente de cadastro novo: é cliente já atendido que voltou porque
+       algo do laudo não foi resolvido. Sem aviso próprio, some no meio da fila. */
+    const revistorias = clientes.filter((c) => c.status === "Em análise" && ehRevistoria(c));
+    if (revistorias.length) {
+      itens.push({
+        id: "revistorias", urgente: podeAgir,
+        texto: `${revistorias.length} pedido(s) de revistoria para analisar`,
         onde: { aba: "qualidade", sub: "analise" },
       });
     }
@@ -2454,6 +2506,33 @@ function AppInterno({ session, onLogout }) {
   const laudoBloqueado = perfil === "vistoriador" && !!laudoNoServidor && !laudoNoServidor.editavelPeloTecnico;
   const laudoDevolvido = laudoNoServidor?.laudo_status === "devolvido_correcao";
 
+  /* ---- Revistoria: o laudo da vistoria anterior, aberto ao lado ----
+     Quem vai revistoriar precisa do que foi apontado da primeira vez. Não dá para usar
+     "meusLaudos": ali só entram os laudos do próprio técnico, e a vistoria original pode ter
+     sido de outro colega. A rota devolve somente leitura, e só para quem está escalado.
+     Vem vazio quando o cadastro aberto não é revistoria — é isso que esconde a aba. */
+  const [laudoAnterior, setLaudoAnterior] = useState(null);
+  const [laudoAnteriorCarregando, setLaudoAnteriorCarregando] = useState(false);
+  useEffect(() => {
+    let cancelado = false;
+    const cli = clientes.find((c) => c.id === clienteAtualId);
+    if (!clienteAtualId || !cli?.revistoriaDe || !fazVistoria({ role: perfil })) { setLaudoAnterior(null); return; }
+    setLaudoAnteriorCarregando(true);
+    apiFetch(`/api/vistoria/laudo-anterior/${clienteAtualId}`, { token })
+      .then((r) => { if (!cancelado) setLaudoAnterior(r.laudo || null); })
+      .catch(() => { if (!cancelado) setLaudoAnterior(null); })
+      .finally(() => { if (!cancelado) setLaudoAnteriorCarregando(false); });
+    return () => { cancelado = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clienteAtualId, clientes.length]);
+  const clienteEmEdicao = clientes.find((c) => c.id === clienteAtualId) || null;
+  /* Trocou para um cliente que não é revistoria: a aba some, e ficar nela deixaria a tela
+     vazia sem explicação. */
+  useEffect(() => {
+    if (!laudoAnterior && !laudoAnteriorCarregando && aba === "laudo-anterior") setAba("itens");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [laudoAnterior, laudoAnteriorCarregando]);
+
   /* ---- Calendário do vistoriador: agendamentos atribuídos a ele ---- */
   const [agendaVistoriador, setAgendaVistoriador] = useState([]);
   const [agendaVistoriadorCarregando, setAgendaVistoriadorCarregando] = useState(false);
@@ -2607,7 +2686,11 @@ function AppInterno({ session, onLogout }) {
     if (irParaItens && cli.status === "Vistoria agendada") patch.status = "Em vistoria";
     if (Object.keys(patch).length > 0) updCliente(cli.id, patch);
     if (irParaItens) { setAbaTop("laudos"); setAba("itens"); }
-    notify("Dados do cliente aplicados ao laudo ✓");
+    /* Revistoria: o técnico precisa saber, na hora que abre, que existe um laudo anterior —
+       senão ele começa do zero sem conferir o que já tinha sido apontado. */
+    notify(cli.revistoriaDe
+      ? "Revistoria ✓ O laudo anterior está na aba \"Laudo anterior\""
+      : "Dados do cliente aplicados ao laudo ✓");
   };
 
   /* ---- Finalizar vistoria: vistoriador envia o laudo (dados + itens) para a gerência
@@ -2889,7 +2972,11 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "laudos" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
             {[...(fazVistoria({ role: perfil }) ? [["agenda", "Minha agenda", CalendarDays]] : []),
-              ["itens", `Vistoria (${totalItens})`, Camera], ["laudo", "Laudo final", FileText],
+              ["itens", `Vistoria (${totalItens})`, Camera],
+              /* Só existe quando o cadastro aberto é uma revistoria: é o laudo da visita
+                 anterior, para consultar enquanto preenche o novo. */
+              ...(laudoAnterior ? [["laudo-anterior", "Laudo anterior", History]] : []),
+              ["laudo", "Laudo final", FileText],
               ...(perfil === "vistoriador" || perfil === "gerencia" ? [["realizados", "Laudos realizados", ClipboardCheck]] : []),
               ...(perfil === "vistoriador" ? [["banco-patologias", "Banco de patologias", AlertTriangle]] : [])]
               .map(([k, label, Icon]) => (
@@ -2935,6 +3022,9 @@ function AppInterno({ session, onLogout }) {
             statusLaudo={laudoNoServidor?.laudoStatusLabel} devolvido={laudoDevolvido}
             motivoDevolucao={laudoNoServidor?.motivo_devolucao} patologiasBanco={patologiasBanco}
             minhaAssinatura={minhaAssinatura} salvarMinhaAssinatura={salvarMinhaAssinatura} removerMinhaAssinatura={removerMinhaAssinatura} />
+        )}
+        {abaTop === "laudos" && aba === "laudo-anterior" && (
+          <AbaLaudoAnterior laudo={laudoAnterior} carregando={laudoAnteriorCarregando} cliente={clienteEmEdicao} assinatura={assinatura} />
         )}
         {abaTop === "laudos" && aba === "laudo" && <LaudoModelo laudo={montarLaudoModelo(dados, itens)} assinatura={assinatura} assinaturaVistoriador={minhaAssinatura} aprovado={perfil === "gerencia"} />}
         {abaTop === "laudos" && aba === "realizados" && (
@@ -3053,11 +3143,15 @@ function RascunhoLinha({ r, onLoad, onDel }) {
 
 /* ================= Notificações: solicitações de clientes pendentes ================= */
 function NotificacoesClientes({ clientes, preencherComCliente, style }) {
-  // Documentação ART/TRT não tem vistoria: vai do cadastro direto para a Documentação.
-  // Sem este filtro esses clientes apareciam aqui com "Iniciar vistoria", que não existe
-  // para eles. Cancelado também sai — não faz sentido oferecer vistoria de algo cancelado.
+  /* Só o que já está na agenda dele, e nada mais:
+     - Documentação ART/TRT não tem vistoria (aparecia aqui com "Iniciar vistoria", que não
+       existe para ela), e cancelado deixou de ser compromisso;
+     - a revistoria nasce com o técnico da vistoria original já sugerido no cadastro, mas
+       ainda "Em análise" — sem o filtro por status, ela apareceria com o botão de iniciar
+       antes de o Atendimento aprovar e marcar a data. */
   const pendentes = clientes
-    .filter((c) => !c.atendido && !ehServicoDocumentacao(c) && c.status !== "Cancelado")
+    .filter((c) => !c.atendido && !ehServicoDocumentacao(c)
+      && ["Vistoria agendada", "Em vistoria"].includes(c.status))
     .sort((a, b) => `${a.dataDesejada}${a.horarioDesejado}`.localeCompare(`${b.dataDesejada}${b.horarioDesejado}`));
 
   if (pendentes.length === 0) return null;
@@ -3268,7 +3362,11 @@ function CalendarioVistoriador({ agenda = [], carregando, clientes = [], preench
                       {a.horario_desejado || "—"}
                     </div>
                     <div style={{ flex: 1, minWidth: 180 }}>
-                      <div style={{ fontWeight: 700, fontSize: 14 }}>{a.nome}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <div style={{ fontWeight: 700, fontSize: 14 }}>{a.nome}</div>
+                        {/* Retorno a um imóvel já vistoriado: o técnico precisa saber antes de sair. */}
+                        {a.revistoria_seq > 0 && <SeloRevistoria seq={a.revistoria_seq} />}
+                      </div>
                       <div style={{ fontSize: 12.5, color: "#65758b" }}>
                         {a.servico}{a.empreendimento ? ` · ${a.empreendimento}` : ""}{a.bloco_torre ? ` (${a.bloco_torre})` : ""}
                       </div>
@@ -3280,7 +3378,7 @@ function CalendarioVistoriador({ agenda = [], carregando, clientes = [], preench
                           const cli = clientes.find((c) => c.id === a.id);
                           if (cli) preencherComCliente(cli, { irParaItens: true });
                         }}>
-                        <Check size={14} /> {a.status === "Em vistoria" ? "Continuar vistoria" : "Iniciar vistoria"}
+                        <Check size={14} /> {a.status === "Em vistoria" ? "Continuar" : "Iniciar"} {a.revistoria_seq > 0 ? "revistoria" : "vistoria"}
                       </button>
                     )}
                   </div>
@@ -3319,7 +3417,10 @@ function KanbanClientes({ clientes, docs, onAbrir }) {
             {porEtapa[etapa].map((c) => (
               <button key={c.id} onClick={() => onAbrir(c)}
                 style={{ textAlign: "left", background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 10, cursor: "pointer" }}>
-                <div style={{ fontWeight: 700, fontSize: 13.5 }}>{c.nome}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  <div style={{ fontWeight: 700, fontSize: 13.5 }}>{c.nome}</div>
+                  {ehRevistoria(c) && <SeloRevistoria seq={c.revistoriaSeq} />}
+                </div>
                 <div style={{ fontSize: 12, color: "#65758b", marginTop: 2 }}>
                   {c.empreendimento || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}
                 </div>
@@ -3574,7 +3675,9 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
                       ) : "—"}
                     </td>
                     <td style={{ padding: "8px 10px" }}>{c.empreendimento || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}</td>
-                    <td style={{ padding: "8px 10px" }}>{c.servico || "—"}</td>
+                    <td style={{ padding: "8px 10px" }}>
+                      {ehRevistoria(c) ? <SeloRevistoria seq={c.revistoriaSeq} /> : (c.servico || "—")}
+                    </td>
                     <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
                       {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""}
                     </td>
@@ -3867,10 +3970,7 @@ function AbaQualidadeAcompanhamento({ clientes = [], clientesCarregando, docs = 
 
   const avaliacaoPorDoc = {};
   avaliacoes.forEach((a) => { if (a.doc_id) avaliacaoPorDoc[a.doc_id] = a; });
-  const docDoCliente = (c) => {
-    const cpfLimpo = (c.cpf || "").replace(/\D/g, "");
-    return cpfLimpo ? docs.find((d) => (d.cpf || "").replace(/\D/g, "") === cpfLimpo) : null;
-  };
+  const docDoCadastro = (c) => docDoCliente(c, docs);
 
   const termo = busca.trim().toLowerCase();
   const clientesPorEtapa = {};
@@ -3906,7 +4006,7 @@ function AbaQualidadeAcompanhamento({ clientes = [], clientesCarregando, docs = 
                   </div>
                   <div style={{ display: "grid", gap: 14 }}>
                     {daEtapa.map((c) => {
-                      const doc = docDoCliente(c);
+                      const doc = docDoCadastro(c);
                       const avaliacao = doc ? avaliacaoPorDoc[doc.id] : null;
                       return (
                         <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
@@ -4066,10 +4166,20 @@ function CardClientePendente({ c, todos, podeAgir, onAprovar, onRecusar }) {
   const conflitos = conflitosDeHorario(c, todos);
   return (
     <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, minWidth: 250, maxWidth: 270, flexShrink: 0, display: "flex", flexDirection: "column", gap: 5 }}>
-      <strong style={{ fontSize: 14 }}>{c.nome}</strong>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <strong style={{ fontSize: 14 }}>{c.nome}</strong>
+        {ehRevistoria(c) && <SeloRevistoria seq={c.revistoriaSeq} />}
+      </div>
       <div style={{ fontSize: 12, color: "#65758b" }}>{mascararCpf(c.cpf)}</div>
       <div style={{ fontSize: 12, color: "#65758b" }}>{c.endereco || c.empreendimento || "Endereço não informado"}</div>
       <div style={{ fontSize: 12, color: AZUL_MARINHO, fontWeight: 700 }}>{c.servico}</div>
+      {/* No pedido de revistoria, o motivo é o que a pessoa do Atendimento precisa ler antes
+          de aprovar: é ele que diz se o caso é retorno mesmo ou outra coisa. */}
+      {ehRevistoria(c) && c.observacoes && (
+        <div style={{ background: "#F1EAFB", color: "#33224a", padding: "6px 8px", borderRadius: 8, fontSize: 11.5, whiteSpace: "pre-wrap" }}>
+          {c.observacoes}
+        </div>
+      )}
       <div style={{ fontSize: 12, color: "#4a5a70" }}>
         {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""}
       </div>
@@ -4339,7 +4449,10 @@ function PainelDiaAgendamento({ diaISO, clientes = [], todosClientes = [], visto
                       </span>
                       <strong style={{ fontSize: 14 }}>{c.horarioDesejado || "sem horário"}</strong>
                     </div>
-                    <div style={{ fontSize: 13.5, fontWeight: 700 }}>{c.nome}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 700 }}>{c.nome}</div>
+                      {ehRevistoria(c) && <SeloRevistoria seq={c.revistoriaSeq} />}
+                    </div>
                     <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.endereco || c.empreendimento || "—"}</div>
                     <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.servico}</div>
                     {podeAgir && (c.status === "Vistoria agendada" || c.status === "Em vistoria") ? (
@@ -4407,6 +4520,12 @@ function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesAprovados
   const clienteEscolhido = listaClientes.find((c) => c.id === clienteId);
   const data = clienteEscolhido?.dataDesejada || "";
   const hora = clienteEscolhido?.horarioDesejado || "";
+  /* Revistoria já nasce com o técnico da vistoria original — quem agenda vê a sugestão
+     preenchida e troca se precisar. */
+  useEffect(() => {
+    if (clienteEscolhido?.vistoriadorId) setVistoriadorId(String(clienteEscolhido.vistoriadorId));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clienteId]);
 
   const confirmar = async () => {
     setErro("");
@@ -4440,13 +4559,23 @@ function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesAprovados
             <label style={lab}>Cliente aprovado</label>
             <select style={inp} value={clienteId} onChange={(e) => setClienteId(e.target.value)}>
               <option value="">selecionar…</option>
-              {listaClientes.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.empreendimento ? ` · ${c.empreendimento}` : ""}</option>)}
+              {listaClientes.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.nome}{c.empreendimento ? ` · ${c.empreendimento}` : ""}{ehRevistoria(c) ? ` · ${rotuloRevistoria(c.revistoriaSeq).toUpperCase()}` : ""}
+                </option>
+              ))}
             </select>
             {listaClientes.length === 0 && <span style={{ fontSize: 12, color: "#8593a8" }}>Nenhum cliente aprovado aguardando agendamento{diaInicial ? " neste dia" : ""}.</span>}
           </div>
           {clienteEscolhido && (
             <div style={{ fontSize: 12.5, color: "#65758b" }}>
               {clienteEscolhido.servico} · {clienteEscolhido.endereco || clienteEscolhido.empreendimento || "sem endereço"}
+            </div>
+          )}
+          {clienteEscolhido && ehRevistoria(clienteEscolhido) && clienteEscolhido.observacoes && (
+            <div style={{ background: "#F1EAFB", borderRadius: 8, padding: "9px 11px" }}>
+              <div style={{ ...lab, color: "#4A2385", marginBottom: 4 }}>Motivo do pedido</div>
+              <p style={{ fontSize: 12.5, color: "#33224a", margin: 0, whiteSpace: "pre-wrap" }}>{clienteEscolhido.observacoes}</p>
             </div>
           )}
           <div style={cell(true)}>
@@ -4579,7 +4708,11 @@ function CardVistoriaResumo({ c, aberto, onToggle, children }) {
     <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, overflow: "hidden" }}>
       <button onClick={onToggle} style={{ width: "100%", background: "#fff", border: "none", cursor: "pointer", padding: 12, display: "flex", alignItems: "center", gap: 12, textAlign: "left" }}>
         <div style={{ flex: 1, minWidth: 160 }}>
-          <div style={{ fontWeight: 700, fontSize: 14 }}>{c.nome}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>{c.nome}</div>
+            {/* Retorno a um imóvel já vistoriado — quem agenda precisa ver antes de abrir. */}
+            {ehRevistoria(c) && <SeloRevistoria seq={c.revistoriaSeq} />}
+          </div>
           <div style={{ fontSize: 12, color: "#65758b" }}>{c.empreendimento || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}</div>
         </div>
         <div style={{ fontSize: 12.5, color: AZUL_MARINHO, fontWeight: 700, whiteSpace: "nowrap" }}>
@@ -4611,10 +4744,7 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
     }
   }, [abrirAutomaticoId]);
 
-  const temDoc = (c) => {
-    const cpfLimpo = (c.cpf || "").replace(/\D/g, "");
-    return cpfLimpo && docs.some((d) => (d.cpf || "").replace(/\D/g, "") === cpfLimpo);
-  };
+  const temDoc = (c) => !!docDoCliente(c, docs);
   const termo = busca.trim().toLowerCase();
   // Documentação ART/TRT não passa por vistoria — não aparece nesta aba. O filtroEtapa vem
   // do clique nos indicadores acima.
@@ -4666,7 +4796,9 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
   };
 
   const confirmar = async (c) => {
-    const vistoriadorId = valorCampo(c, "vistoriadorId", "");
+    /* Mesmo padrão do select: na revistoria o técnico da vistoria original já vem no
+       cadastro, e sem isto o botão reclamaria de um campo que a tela mostra preenchido. */
+    const vistoriadorId = valorCampo(c, "vistoriadorId", c.vistoriadorId || "");
     if (!vistoriadorId) { notify("Escolha o vistoriador responsável"); return; }
     if (!c.dataDesejada || !c.horarioDesejado) { notify("Este cliente não definiu data/horário no cadastro."); return; }
     const conflito = clientes.find((o) =>
@@ -4710,10 +4842,20 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
                 <CardVistoriaResumo key={c.id} c={c} aberto={abertoId === c.id} onToggle={() => setAbertoId(abertoId === c.id ? null : c.id)}>
                   {g.chave === "pendente" ? (
                     <>
+                      {/* Revistoria: o que o cliente escreveu no pedido é o que orienta a
+                          visita — some se ficar só no cadastro, onde ninguém abre. */}
+                      {ehRevistoria(c) && c.observacoes && (
+                        <div style={{ background: "#F1EAFB", borderRadius: 8, padding: "10px 12px", marginBottom: 12 }}>
+                          <div style={{ ...lab, color: "#4A2385", marginBottom: 4 }}>Motivo do pedido</div>
+                          <p style={{ fontSize: 13, color: "#33224a", margin: 0, whiteSpace: "pre-wrap" }}>{c.observacoes}</p>
+                        </div>
+                      )}
                       <Grid>
                         <div style={cell(false)}>
                           <label style={lab}>Vistoriador</label>
-                          <select style={inp} value={valorCampo(c, "vistoriadorId", "")} onChange={(e) => setCampo(c.id, "vistoriadorId", e.target.value)} disabled={!podeAgir}>
+                          {/* Na revistoria vem sugerido o técnico da vistoria original (o
+                              cadastro já nasce com ele) — trocar continua livre. */}
+                          <select style={inp} value={valorCampo(c, "vistoriadorId", c.vistoriadorId || "")} onChange={(e) => setCampo(c.id, "vistoriadorId", e.target.value)} disabled={!podeAgir}>
                             <option value="">selecionar…</option>
                             {vistoriadores.map((v) => <option key={v.id} value={v.id}>{rotuloTecnico(v)}</option>)}
                           </select>
@@ -4924,6 +5066,56 @@ function SeletorAmbientePatologias({ onFechar, onAdicionar, patologiasBanco = []
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ================= Revistoria: o laudo da visita anterior, somente leitura =================
+   Fica ao lado da vistoria em andamento (sub-aba "Laudo anterior") pelo motivo prático: em
+   campo, o técnico confere item por item o que foi apontado antes e o que continua. Nada aqui
+   é editável nem entra no laudo novo — copiar item de um laudo para o outro seria assinar
+   como visto o que talvez não tenha sido revisto hoje. */
+function AbaLaudoAnterior({ laudo, carregando, cliente, assinatura }) {
+  if (carregando) {
+    return <Card icon={History} titulo="Laudo anterior"><p style={{ color: "#8593a8", fontSize: 14, margin: 0 }}>Carregando…</p></Card>;
+  }
+  if (!laudo) {
+    return (
+      <Card icon={History} titulo="Laudo anterior">
+        <p style={{ color: "#8593a8", fontSize: 14, margin: 0 }}>
+          Não encontramos o laudo da vistoria anterior deste imóvel.
+        </p>
+      </Card>
+    );
+  }
+
+  const dataAnterior = laudo.dados?.vistoria?.data
+    ? laudo.dados.vistoria.data.split("-").reverse().join("/")
+    : (laudo.criadoEm ? new Date(laudo.criadoEm).toLocaleDateString("pt-BR") : "");
+  const totalItens = (laudo.itens || []).length;
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <Card icon={History} titulo={laudo.revistoriaSeq > 0 ? `${rotuloRevistoria(laudo.revistoriaSeq)} anterior` : "Vistoria anterior"}>
+        <div style={{ background: "#F1EAFB", color: "#4A2385", borderRadius: 8, padding: "10px 12px", fontSize: 13, marginBottom: 12 }}>
+          Somente leitura. Preencha a revistoria na aba <strong>Vistoria</strong> — este documento fica aqui para consulta.
+        </div>
+        <TabelaDados rows={[
+          ["Realizada em", dataAnterior || "—"],
+          ["Técnico", laudo.vistoriadorNome || "—"],
+          ["Não conformidades apontadas", String(totalItens)],
+          ["Imóvel", `${laudo.empreendimento || "—"}${laudo.blocoTorre ? ` · ${laudo.blocoTorre}` : ""}`],
+        ]} />
+        {cliente?.observacoes && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ ...lab, marginBottom: 4 }}>O que o cliente pediu para revisar</div>
+            <p style={{ fontSize: 13.5, color: "#334", background: CINZA_CLARO, borderRadius: 8, padding: "10px 12px", margin: 0, whiteSpace: "pre-wrap" }}>
+              {cliente.observacoes}
+            </p>
+          </div>
+        )}
+      </Card>
+      <LaudoModelo laudo={montarLaudoModelo(laudo.dados || {}, laudo.itens || [])} assinatura={assinatura} aprovado />
     </div>
   );
 }
@@ -5356,10 +5548,23 @@ const STATUS_COR = {
   "Laudo pronto": { cor: "#2E7D32", bg: "#E6F4EA" },
   // status do cliente (clientes.status) — cancelamento pedido pelo Atendimento, aguardando a Gerência
   "Cancelamento solicitado": { cor: "#B26A00", bg: "#FFF4E0" },
+  /* Revistoria não é status, é o tipo do atendimento — mas usa o mesmo selo, porque quem
+     olha a fila precisa distinguir na hora um retorno de uma vistoria nova. */
+  "Revistoria": { cor: "#6E36BE", bg: "#F1EAFB" },
 };
 function Selo({ valor }) {
   const s = STATUS_COR[valor] || { cor: "#65758b", bg: "#EEF1F5" };
   return <span style={{ background: s.bg, color: s.cor, padding: "3px 9px", borderRadius: 20, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>{valor}</span>;
+}
+/* Marca de revistoria. Anda junto do selo de status (nunca no lugar dele): status diz em que
+   ponto do fluxo o atendimento está; isto diz que é retorno a um imóvel já vistoriado — quem
+   agenda e quem vai a campo precisam ver as duas coisas. */
+function SeloRevistoria({ seq = 1 }) {
+  return (
+    <span style={{ background: "#F1EAFB", color: "#6E36BE", padding: "3px 9px", borderRadius: 20, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <RefreshCcw size={11} /> {rotuloRevistoria(seq)}
+    </span>
+  );
 }
 
 /* ================= Confirmação de exclusão (reutilizável) ================= */
@@ -5631,14 +5836,9 @@ function TabelaRegistrosVistoriaDoc({ docs, addDoc, updDoc, delDoc, carregando, 
 
   /* Registro sem cliente correspondente (criado na mão aqui) continua aparecendo mesmo
      filtrando por documentação — não tem como saber a que serviço pertence. */
-  const clientePorCpf = (cpf) => {
-    const cpfLimpo = (cpf || "").replace(/\D/g, "");
-    return cpfLimpo ? clientes.find((c) => (c.cpf || "").replace(/\D/g, "") === cpfLimpo) : null;
-  };
-
   const filtrados = docs.filter((d) => {
     if (somenteDocumentacao) {
-      const cli = clientePorCpf(d.cpf);
+      const cli = clienteDoDoc(d, clientes);
       if (cli && !ehServicoDocumentacao(cli)) return false;
     }
     if (filtroVistoria && d.vistoria !== filtroVistoria) return false;
@@ -5825,12 +6025,16 @@ function BarraStatus({ titulo, contagens }) {
 const fmtReal = (v) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const fmtPct = (v, base) => (base > 0 ? `${((Number(v) || 0) / base * 100).toFixed(1).replace(".", ",")}%` : "—");
 const SERVICO_VISTORIA = "Vistoria de entrega de chaves";
+/* Vistoria e revistoria contam junto em tudo que mede trabalho de campo: as duas mandam um
+   técnico ao imóvel, geram laudo e são cobradas pelo preço do empreendimento. O que separa
+   as duas é o histórico do cliente, não a operação. */
+const ehTrabalhoDeVistoria = (c) => c?.servico === SERVICO_VISTORIA || c?.servico === SERVICO_REVISTORIA;
 
 /* Indicadores de "Vistorias" agora vêm de clientes (cadastros reais do portal público),
    não de docs — docs só ganha uma linha quando a equipe cria manualmente um registro em
    Documentação, o que deixava esses números zerados mesmo com cadastros reais existindo. */
 function CardIndicadoresGerais({ docs, clientes = [], modo = "completo" }) {
-  const vistoriasClientes = clientes.filter((c) => c.servico === SERVICO_VISTORIA);
+  const vistoriasClientes = clientes.filter(ehTrabalhoDeVistoria);
   const totalRegistros = vistoriasClientes.length;
   const concluidas = vistoriasClientes.filter((c) => c.atendido).length;
 
@@ -6678,17 +6882,14 @@ function AbaLaudosRealizados({ laudos = [], carregando, recarregar, assinatura, 
     : 0;
 
   /* Vistoria "sem laudo": já chegou a ser agendada ou iniciada, mas não existe nenhum "docs"
-     para o CPF dela — ou seja, o técnico nunca chegou a enviar o laudo pra Gerência. Não dá
+     para aquele cadastro — ou seja, o técnico nunca chegou a enviar o laudo pra Gerência. Não dá
      pra usar cliente.status sozinho: uma vez que o docs nasce, o status do cliente congela
      (quem manda a partir daí é docs.statusCliente), então "Em vistoria" continua aparecendo
      mesmo depois do laudo enviado — só a ausência de um docs correspondente é confiável. */
-  const temDocEnviado = (c) => {
-    const cpfLimpo = (c.cpf || "").replace(/\D/g, "");
-    return cpfLimpo ? docs.some((d) => (d.cpf || "").replace(/\D/g, "") === cpfLimpo) : false;
-  };
+  const temDocEnviado = (c) => !!docDoCliente(c, docs);
   const vistoriasSemLaudo = ehGerencia
     ? clientes.filter((c) =>
-        c.servico === SERVICO_VISTORIA &&
+        ehTrabalhoDeVistoria(c) &&
         ["Vistoria agendada", "Em vistoria"].includes(c.status) &&
         !temDocEnviado(c))
     : [];
@@ -7686,7 +7887,7 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
     if (c.status === "Cancelado") return;
     if (ehServicoDocumentacao(c)) {
       if (c.status === STATUS_DOC_CONCLUIDA) registrar(c, "documentacao");
-    } else if (c.servico === SERVICO_VISTORIA) {
+    } else if (ehTrabalhoDeVistoria(c)) {
       if (vistoriaEntregue(c)) {
         registrar(c, "vistoria");
         if (c.vistoriadorId) {
@@ -8549,14 +8750,27 @@ function AcessoLaudoFinal({ cpf, notify, aoDescobrirFoto, emailConhecido }) {
       )}
       {laudos && laudos.length > 0 && (
         <div style={{ display: "grid", gap: 12 }}>
-          {laudos.map((l) => (
-            <div key={l.docId}>
-              <a href={`${API_URL}/api/laudo-final/download?token=${encodeURIComponent(l.tokenDownload)}`}
-                target="_blank" rel="noopener noreferrer" className="btn-solid" style={{ textDecoration: "none", justifyContent: "center" }}>
-                <FileText size={14} /> Baixar laudo{l.empreendimento ? ` — ${l.empreendimento}` : ""}
-              </a>
-            </div>
-          ))}
+          {/* Um imóvel pode ter mais de um laudo (vistoria + revistorias). Sem dizer qual é
+              qual, os botões sairiam idênticos e o cliente baixaria o errado. */}
+          {laudos.map((l) => {
+            const quando = l.dataVistoria
+              ? l.dataVistoria.split("-").reverse().join("/")
+              : (l.aprovadoEm ? new Date(l.aprovadoEm).toLocaleDateString("pt-BR") : "");
+            const tipo = l.revistoriaSeq > 0 ? rotuloRevistoria(l.revistoriaSeq) : "Vistoria";
+            return (
+              <div key={l.docId}>
+                <a href={`${API_URL}/api/laudo-final/download?token=${encodeURIComponent(l.tokenDownload)}`}
+                  target="_blank" rel="noopener noreferrer" className="btn-solid" style={{ textDecoration: "none", justifyContent: "center" }}>
+                  <FileText size={14} /> Baixar laudo — {tipo}{quando ? ` de ${quando}` : ""}
+                </a>
+                {l.empreendimento && (
+                  <div style={{ fontSize: 11.5, color: "#8593a8", textAlign: "center", marginTop: 4 }}>
+                    {l.empreendimento}{l.blocoTorre ? ` · ${l.blocoTorre}` : ""}
+                  </div>
+                )}
+              </div>
+            );
+          })}
           <p style={{ fontSize: 11, color: "#8593a8", margin: 0 }}>O link expira em alguns minutos por segurança — se der erro, confirme de novo.</p>
         </div>
       )}
@@ -10099,6 +10313,80 @@ function EditorCatalogoParceiro({ itens = [], carregando, onSalvar, onExcluir, l
   );
 }
 
+/* ================= Pedido de revistoria (portal do cliente) =================
+   Só data, horário e motivo: o resto (nome, CPF, imóvel) vem do atendimento de origem, no
+   servidor — o cliente não redigita cadastro para marcar um retorno. A data e o horário são
+   "desejados", como no cadastro: quem confirma é o Atendimento. */
+function ModalPedirRevistoria({ atendimento, onFechar, onEnviar }) {
+  const [data, setData] = useState("");
+  const [horario, setHorario] = useState("");
+  const [motivo, setMotivo] = useState("");
+  const [erro, setErro] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const hojeISO = paraChaveISO(new Date());
+
+  const enviar = async () => {
+    setErro("");
+    if (!data || !horario) { setErro("Escolha a data e o horário desejados."); return; }
+    if (data < hojeISO) { setErro("A data precisa ser de hoje em diante."); return; }
+    if (!motivo.trim()) { setErro("Conte o que precisa ser revisto."); return; }
+    setEnviando(true);
+    const ok = await onEnviar({ dataDesejada: data, horarioDesejado: horario, observacoes: motivo.trim() });
+    setEnviando(false);
+    if (!ok) setErro("Não foi possível enviar o pedido. Tente de novo.");
+  };
+
+  return (
+    <div className="no-print" style={overlay} onClick={onFechar}>
+      <div style={{ ...modal, maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <strong>Pedir revistoria</strong>
+          <button className="icon-btn" onClick={onFechar}><X size={16} /></button>
+        </div>
+        <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 14px" }}>
+          {atendimento?.empreendimento || "Seu imóvel"}{atendimento?.blocoTorre ? ` · ${atendimento.blocoTorre}` : ""} —
+          usamos os mesmos dados da vistoria anterior. Nossa equipe confirma a data com você.
+        </p>
+
+        <div style={{ display: "grid", gap: 12 }}>
+          <Grid>
+            <div style={cell(false)}>
+              <label style={lab}>Data desejada</label>
+              <input style={inp} type="date" min={hojeISO} value={data} onChange={(e) => setData(e.target.value)} />
+            </div>
+            <div style={cell(false)}>
+              <label style={lab}>Horário desejado</label>
+              <select style={inp} value={horario} onChange={(e) => setHorario(e.target.value)}>
+                <option value="">selecionar…</option>
+                {HORARIOS_COMERCIAIS.map((h) => <option key={h} value={h}>{h}</option>)}
+              </select>
+            </div>
+          </Grid>
+          <div style={cell(true)}>
+            <label style={lab}>O que precisa ser revisto?</label>
+            <textarea style={{ ...inp, minHeight: 90, resize: "vertical" }} value={motivo}
+              placeholder="Ex.: a infiltração do banheiro da suíte continua, e o rejunte da cozinha não foi refeito."
+              onChange={(e) => setMotivo(e.target.value)} />
+            <span style={{ fontSize: 11.5, color: "#8593a8" }}>É esta descrição que o técnico lê antes de ir ao imóvel.</span>
+          </div>
+          {erro && (
+            <div style={{ background: "#FCEAEA", color: "#C62828", padding: "8px 10px", borderRadius: 8, fontSize: 12.5 }}>
+              <AlertTriangle size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} /> {erro}
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+          <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={onFechar}>Cancelar</button>
+          <button className="btn-solid" onClick={enviar} disabled={enviando}>
+            {enviando ? <Loader2 size={15} className="spin" /> : <RefreshCcw size={15} />} Enviar pedido
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ================= Portal do cliente (área logada, papel "cliente") =================
    Reaproveita ao máximo o que já existia na consulta pública: CartaoAtendimentoCliente
    (laudo/documentação/avaliação) e a vitrine de parceiros — só troca "CPF digitado" por
@@ -10186,6 +10474,23 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pedidoRetorno]);
 
+  /* Revistoria: retorno ao mesmo imóvel depois do laudo entregue. Quem decide se o botão
+     aparece é o servidor (podePedirRevistoria) — ele conhece a regra inteira: laudo já
+     entregue e nenhuma revistoria em andamento para aquele imóvel. */
+  const [pedindoRevistoria, setPedindoRevistoria] = useState(null); // atendimento de origem
+  const pedirRevistoria = async (corpo) => {
+    try {
+      await apiFetch("/api/clientes/revistoria", {
+        method: "POST", token: session.token,
+        body: { ...corpo, origemId: pedindoRevistoria?.clienteId },
+      });
+      setPedindoRevistoria(null);
+      notify("Pedido de revistoria enviado ✓ Nossa equipe entra em contato para confirmar a data.");
+      await carregar();
+      return true;
+    } catch (e) { notify(`Não foi possível pedir a revistoria: ${e.message}`); return false; }
+  };
+
   /* Cross-sell: quem já é cliente (fez vistoria, por ex.) pede Documentação ART/TRT sem
      preencher o cadastro de novo — os dados vêm do cadastro já existente. */
   const [solicitandoDoc, setSolicitandoDoc] = useState(false);
@@ -10245,7 +10550,10 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
                 return (
                   <div key={d.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
-                      <strong style={{ fontSize: 14 }}>{d.servico || "Atendimento"}</strong>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <strong style={{ fontSize: 14 }}>{d.servico || "Atendimento"}</strong>
+                        {d.revistoriaSeq > 1 && <SeloRevistoria seq={d.revistoriaSeq} />}
+                      </div>
                       {d.status && <Selo valor={d.status} />}
                     </div>
                     {(d.empreendimento || d.blocoTorre) && (
@@ -10264,6 +10572,18 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
                       </div>
                     )}
                     <CartaoAtendimentoCliente doc={d} cpf={cliente?.cpf || ""} notify={notify} emailConhecido={cliente?.email || ""} />
+                    {/* Só depois do laudo entregue, e uma por vez — quem decide é o servidor. */}
+                    {d.podePedirRevistoria && (
+                      <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${CINZA_BORDA}` }}>
+                        <p style={{ fontSize: 12.5, color: "#65758b", margin: "0 0 8px" }}>
+                          Algum ponto do laudo não foi resolvido? Peça o retorno da nossa equipe ao mesmo imóvel.
+                        </p>
+                        <button className="btn-ghost" style={{ color: "#6E36BE", background: "#F1EAFB" }}
+                          onClick={() => setPedindoRevistoria(d)}>
+                          <RefreshCcw size={14} /> Preciso de uma revistoria
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -10379,6 +10699,11 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
         <div className="no-print" style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: AZUL_MARINHO, color: "#fff", padding: "10px 18px", borderRadius: 10, fontSize: 13.5, boxShadow: "0 6px 20px rgba(0,0,0,.2)" }}>
           {toast}
         </div>
+      )}
+
+      {pedindoRevistoria && (
+        <ModalPedirRevistoria atendimento={pedindoRevistoria}
+          onFechar={() => setPedindoRevistoria(null)} onEnviar={pedirRevistoria} />
       )}
 
       {session.usuario.senhaProvisoria && (
