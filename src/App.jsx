@@ -49,30 +49,61 @@ const TIMEOUT_API_MS = 60000;
    não manda cabeçalho de CORS e o navegador transforma o 503 num "Failed to fetch" seco. */
 const MSG_API_FORA = "O sistema está fora do ar no momento. Não é problema no seu acesso nem na sua senha — tente de novo em alguns minutos.";
 
+/* ---- Insistir sozinho antes de dizer que o sistema caiu ----
+   O serviço da API hiberna quando fica um tempo sem uso, e volta a subir a cada publicação.
+   Nessas janelas de alguns segundos a chamada falha ou volta 502/503 — quem clicou não fez
+   nada de errado, e mandar a pessoa "tentar de novo em alguns minutos" é passar para ela um
+   trabalho que o app faz melhor e mais rápido.
+   Só GET é repetido: repetir POST/PATCH criaria cadastro, laudo, revistoria ou pedido em
+   duplicidade — o mesmo clique viraria dois. E só vale insistir no que é passageiro: 4xx
+   (senha errada, cadastro em análise) e 500 (defeito no servidor) devolvem sempre a mesma
+   coisa, então repetir só faria a pessoa esperar mais para ler a mesma mensagem. */
+const TENTATIVAS_GET = 3;
+const ESPERA_ENTRE_TENTATIVAS_MS = [1500, 4000];
+const STATUS_PASSAGEIROS = [502, 503, 504];
+const esperar = (ms) => new Promise((resolver) => setTimeout(resolver, ms));
+
 async function apiFetch(caminho, { method = "GET", body, token } = {}) {
-  let resp;
-  try {
-    resp = await fetch(`${API_URL}${caminho}`, {
-      method,
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      // AbortSignal.timeout não existe em navegador antigo; sem ele, fica só sem o limite.
-      signal: AbortSignal.timeout?.(TIMEOUT_API_MS),
-    });
-  } catch {
-    /* Estouro do tempo, rede fora ou o navegador barrando a resposta do servidor: nada
-       disso é acionável pela pessoa, e nenhum "Failed to fetch" deve chegar à tela. */
-    throw new Error(MSG_API_FORA);
+  const maxTentativas = method === "GET" ? TENTATIVAS_GET : 1;
+  let ultimoErro = null;
+
+  for (let tentativa = 0; tentativa < maxTentativas; tentativa++) {
+    if (tentativa > 0) await esperar(ESPERA_ENTRE_TENTATIVAS_MS[tentativa - 1] ?? 4000);
+
+    let resp;
+    try {
+      resp = await fetch(`${API_URL}${caminho}`, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        // AbortSignal.timeout não existe em navegador antigo; sem ele, fica só sem o limite.
+        signal: AbortSignal.timeout?.(TIMEOUT_API_MS),
+      });
+    } catch (e) {
+      /* Estouro do tempo, rede fora ou o navegador barrando a resposta do servidor: nada
+         disso é acionável pela pessoa, e nenhum "Failed to fetch" deve chegar à tela. */
+      ultimoErro = new Error(MSG_API_FORA);
+      /* Tempo esgotado já custou o limite inteiro (TIMEOUT_API_MS). Insistir uma vez cobre o
+         servidor acordando; insistir de novo deixaria a tela girando por minutos. */
+      if (e?.name === "TimeoutError" && tentativa >= 1) break;
+      continue;
+    }
+
+    let dados = null;
+    try { dados = await resp.json(); } catch { /* resposta vazia, ou HTML de erro da hospedagem */ }
+    if (resp.ok) return dados;
+
+    /* 5xx é defeito do servidor, não da pessoa. Os 4xx seguem passando a mensagem do backend
+       ("senha inválida", "cadastro em análise"), que é justamente o que ela precisa ler. */
+    const falha = new Error(dados?.erro || (resp.status >= 500 ? MSG_API_FORA : `Erro ${resp.status}`));
+    if (!STATUS_PASSAGEIROS.includes(resp.status)) throw falha;
+    ultimoErro = falha;
   }
-  let dados = null;
-  try { dados = await resp.json(); } catch { /* resposta vazia, ou HTML de erro da hospedagem */ }
-  /* 5xx é defeito do servidor, não da pessoa. Os 4xx seguem passando a mensagem do backend
-     ("senha inválida", "cadastro em análise"), que é justamente o que ela precisa ler. */
-  if (!resp.ok) throw new Error(dados?.erro || (resp.status >= 500 ? MSG_API_FORA : `Erro ${resp.status}`));
-  return dados;
+
+  throw ultimoErro || new Error(MSG_API_FORA);
 }
 
 /* Registra um acesso ao sistema, uma vez por aba do navegador (por área). O identificador é
@@ -2029,10 +2060,16 @@ function AppInterno({ session, onLogout }) {
     const t = setInterval(carregarClientes, 20000);
     return () => clearInterval(t);
   }, []);
+  /* Devolve se a gravação foi aceita pelo servidor. A falha continua avisada aqui (é o mesmo
+     aviso em qualquer tela), mas quem chama precisa saber: sem o retorno, as telas de edição
+     comemoravam "salvo ✓" logo depois de o servidor recusar a alteração — e a lista já
+     mostrava o valor novo, porque a atualização local é otimista. */
   const updCliente = async (id, patch) => {
     setClientes((atual) => atual.map((c) => (c.id === id ? { ...c, ...patch } : c)));
-    try { await apiFetch(`/api/clientes/${id}`, { method: "PATCH", token, body: patch }); }
-    catch (e) { notify(`Não foi possível atualizar cliente: ${e.message}`); }
+    try {
+      await apiFetch(`/api/clientes/${id}`, { method: "PATCH", token, body: patch });
+      return true;
+    } catch (e) { notify(`Não foi possível atualizar cliente: ${e.message}`); return false; }
   };
   /* Manutenção da lista oficial de empreendimentos (só Gerência). */
   const adicionarEmpreendimento = async (empreendimento, construtora) => {
@@ -3645,7 +3682,11 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
   const abrirEdicao = (c) => setEditando({ ...c });
   const salvar = async () => {
     try {
-      await atualizarCliente(editando.id, editando);
+      /* Fechar o modal e dizer "atualizado ✓" sem o servidor ter aceitado escondia a falha:
+         a lista já mostra o valor novo (atualização otimista), e a pessoa só descobria na
+         próxima vez que abrisse a tela. */
+      const ok = await atualizarCliente(editando.id, editando);
+      if (!ok) return;
       setEditando(null);
       notify("Cliente atualizado ✓");
     } catch (e) { notify(`Erro: ${e.message}`); }
@@ -7284,9 +7325,13 @@ function AbaPerfilCliente({ clientes = [], token, notify, atualizarCliente, rese
   const salvar = async () => {
     setSalvando(true);
     try {
-      await atualizarCliente(form.id, form);
-      notify("Cadastro atualizado ✓");
-      await carregar(form.id);
+      /* Só recarrega e comemora se o servidor aceitou — a lista de clientes é atualizada de
+         forma otimista, então "salvo ✓" sem confirmação viraria um dado errado na tela. */
+      const ok = await atualizarCliente(form.id, form);
+      if (ok) {
+        notify("Cadastro atualizado ✓");
+        await carregar(form.id);
+      }
     } catch (e) { notify(`Erro ao salvar: ${e.message}`); }
     setSalvando(false);
   };
