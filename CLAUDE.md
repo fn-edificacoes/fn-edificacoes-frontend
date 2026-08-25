@@ -105,6 +105,33 @@ abre a `TelaCadastroParceiro`. O login do parceiro nasce desativado e só abre q
 Gerência homologa: quem mexer nesse fluxo precisa manter a mensagem de "cadastro em
 análise" que o backend devolve, senão o parceiro acha que errou a senha.
 
+## Revistoria
+
+Retorno ao mesmo imóvel, pedido pelo cliente no próprio portal depois que o laudo é
+entregue. Não altera o atendimento antigo: vira **um cadastro novo** (`servico`
+`"Revistoria"`, com `revistoriaDe` e `revistoriaSeq`), que segue o mesmo caminho da
+vistoria — análise do Atendimento, agendamento, técnico, laudo. As duas ficam no perfil do
+cliente e em pastas separadas no Drive.
+
+- `PainelCliente` → `ModalPedirRevistoria`: o botão só aparece quando o servidor manda
+  `podePedirRevistoria` (laudo entregue e nenhuma revistoria em andamento).
+- Técnico: a sub-aba **Laudo anterior** (`AbaLaudoAnterior`) só existe quando o cadastro
+  aberto é revistoria; é somente leitura, de propósito — nada é copiado para o laudo novo.
+- **`docDoCliente(cliente, docs)` é como se acha o laudo de um cadastro.** Nunca casar por
+  CPF: vistoria e revistoria compartilham o CPF, e o `find` devolvia sempre a primeira,
+  fazendo a revistoria nascer com cara de "já vistoriada".
+
+## Perfil do cliente (Gerência)
+
+Sub-aba **Gerência → Perfil do cliente** (`AbaPerfilCliente`): busca por nome, CPF, e-mail ou
+empreendimento e abre o cadastro completo — atendimentos com laudo e documentação para
+baixar, situação do acesso ao portal, cupons, orçamentos e pedidos —, tudo em `GET
+/api/clientes/:id/perfil`, sem pedir senha nem e-mail do cliente.
+
+É visão administrativa, não "entrar como o cliente": a edição sai pelo mesmo `updCliente` de
+sempre. Os campos do cadastro moram em `CamposCadastroCliente`, compartilhado com o modal de
+"Editar cliente" da aba Clientes — mexer em um muda os dois, de propósito.
+
 ## Rotas públicas (querystring, sem login)
 
 O app não usa router; as páginas públicas são interceptadas no começo de `App()`:
