@@ -121,6 +121,17 @@ cliente e em pastas separadas no Drive.
   CPF: vistoria e revistoria compartilham o CPF, e o `find` devolvia sempre a primeira,
   fazendo a revistoria nascer com cara de "já vistoriada".
 
+## Perfil do cliente (Gerência)
+
+Sub-aba **Gerência → Perfil do cliente** (`AbaPerfilCliente`): busca por nome, CPF, e-mail ou
+empreendimento e abre o cadastro completo — atendimentos com laudo e documentação para
+baixar, situação do acesso ao portal, cupons, orçamentos e pedidos —, tudo em `GET
+/api/clientes/:id/perfil`, sem pedir senha nem e-mail do cliente.
+
+É visão administrativa, não "entrar como o cliente": a edição sai pelo mesmo `updCliente` de
+sempre. Os campos do cadastro moram em `CamposCadastroCliente`, compartilhado com o modal de
+"Editar cliente" da aba Clientes — mexer em um muda os dois, de propósito.
+
 ## Rotas públicas (querystring, sem login)
 
 O app não usa router; as páginas públicas são interceptadas no começo de `App()`:

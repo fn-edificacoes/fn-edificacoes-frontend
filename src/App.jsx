@@ -2990,7 +2990,7 @@ function AppInterno({ session, onLogout }) {
         {/* Sub-navegação (somente dentro do módulo Gerência) */}
         {abaTop === "gerencia" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
-            {[["visao-geral", "Visão geral", LayoutGrid], ["acompanhamento", "Acompanhamento", ClipboardList], ["parceiros", "Parceiros e Afiliados", Users], ["financeiro", "Financeiro", DollarSign], ["prospeccao", "Prospecção", TrendingUp], ["patologias", "Banco de patologias", AlertTriangle]].map(([k, label, Icon]) => (
+            {[["visao-geral", "Visão geral", LayoutGrid], ["acompanhamento", "Acompanhamento", ClipboardList], ["perfil-cliente", "Perfil do cliente", User], ["parceiros", "Parceiros e Afiliados", Users], ["financeiro", "Financeiro", DollarSign], ["prospeccao", "Prospecção", TrendingUp], ["patologias", "Banco de patologias", AlertTriangle]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setAbaGerencia(k)} className="tab" style={{ borderBottomColor: abaGerencia === k ? AZUL_MEDIO : "transparent", color: abaGerencia === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
                 <Icon size={15} /> {label}
               </button>
@@ -3062,7 +3062,7 @@ function AppInterno({ session, onLogout }) {
             podeExcluir={perfil === "gerencia"} excluirParceiro={excluirParceiro} />
         )}
         {abaTop === "gerencia" && (
-          <AbaGerencia sub={abaGerencia} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem} docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} clientes={clientes} updCliente={updCliente} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
+          <AbaGerencia sub={abaGerencia} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem} docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} clientes={clientes} updCliente={updCliente} resetarSenhaCliente={resetarSenhaCliente} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
             usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} salvarPerfilTecnico={salvarPerfilTecnico} usuarioAtualId={session.usuario.id}
             avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
             parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual}
@@ -3509,6 +3509,67 @@ function CardEncaminharDocumentacao({ clientes = [], atualizarCliente, notify })
 /* Caminho manual de "esqueci minha senha": o cliente liga no WhatsApp, a Gerência define uma
    senha nova aqui e passa por telefone/WhatsApp. Funciona também pra quem nunca teve senha
    (cria a conta na hora, sem precisar do fluxo de e-mail). */
+/* Os campos do cadastro do cliente, num lugar só. Estavam escritos à mão dentro do modal de
+   "Editar cliente"; a Gerência agora edita o mesmo cadastro pela aba de perfil, e duas cópias
+   dos mesmos campos divergiriam na primeira mudança. */
+function CamposCadastroCliente({ dados, onChange }) {
+  const set = (patch) => onChange({ ...dados, ...patch });
+  return (
+    <>
+      <Grid>
+        <Field label="Nome" value={dados.nome} onChange={(v) => set({ nome: v })} full />
+        <Field label="CPF" value={dados.cpf} onChange={(v) => set({ cpf: v })} />
+        <Field label="Telefone" value={dados.telefone} onChange={(v) => set({ telefone: v })} />
+        <Field label="E-mail" value={dados.email} onChange={(v) => set({ email: v })} />
+        <div style={cell(false)}>
+          <label style={lab}>Instagram (opcional)</label>
+          <input style={inp} placeholder="@perfildocliente" value={dados.instagram || ""}
+            onChange={(e) => set({ instagram: e.target.value })}
+            onBlur={(e) => set({ instagram: normalizarInstagram(e.target.value) })} />
+          {dados.instagram && (
+            <a href={linkInstagram(dados.instagram)} target="_blank" rel="noopener noreferrer"
+              style={{ fontSize: 11.5, color: AZUL_MEDIO, fontWeight: 600 }}>Abrir perfil</a>
+          )}
+        </div>
+        <div style={cell(true)}>
+          <label style={lab}>Serviço desejado</label>
+          <select style={inp} value={dados.servico} onChange={(e) => set({ servico: e.target.value })}>
+            {/* Revistoria não está em SERVICO_OPCOES (nasce do portal do cliente); mantém o
+                valor salvo na lista para uma edição qualquer não transformá-la em vistoria. */}
+            {ehRevistoria(dados) && <option value={SERVICO_REVISTORIA}>{SERVICO_REVISTORIA}</option>}
+            {SERVICO_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </div>
+        <Field label="Construtora" value={dados.construtora} onChange={(v) => set({ construtora: v })} />
+        <Field label="Empreendimento" value={dados.empreendimento} onChange={(v) => set({ empreendimento: v })} />
+        <Field label="Endereço completo" value={dados.endereco} onChange={(v) => set({ endereco: v })} full />
+        <Field label="CEP" value={dados.cep} onChange={(v) => set({ cep: v })} />
+        <Field label="Bloco / Apto" value={dados.blocoTorre} onChange={(v) => set({ blocoTorre: v })} />
+        <Field label="Data desejada" type="date" value={dados.dataDesejada} onChange={(v) => set({ dataDesejada: v })} />
+        <div style={cell(false)}>
+          <label style={lab}>Horário desejado</label>
+          <select style={inp} value={dados.horarioDesejado || ""} onChange={(e) => set({ horarioDesejado: e.target.value })}>
+            <option value="">selecionar…</option>
+            {/* Mantém um horário fora do comercial que já esteja salvo, pra não perder dado. */}
+            {dados.horarioDesejado && !HORARIOS_COMERCIAIS.includes(dados.horarioDesejado) && (
+              <option value={dados.horarioDesejado}>{dados.horarioDesejado} (fora do horário comercial)</option>
+            )}
+            {HORARIOS_COMERCIAIS.map((h) => <option key={h} value={h}>{h}</option>)}
+          </select>
+        </div>
+        <div style={cell(true)}>
+          <label style={lab}>Status do agendamento</label>
+          <select style={inp} value={dados.atendido ? "1" : "0"} onChange={(e) => set({ atendido: e.target.value === "1" })}>
+            <option value="0">Agendado / pendente</option>
+            <option value="1">Concluído</option>
+          </select>
+        </div>
+      </Grid>
+      <Area label="Observações" value={dados.observacoes} onChange={(v) => set({ observacoes: v })} rows={2} />
+    </>
+  );
+}
+
 function ModalResetarSenhaCliente({ cliente, resetarSenhaCliente, notify, onFechar }) {
   const [senha, setSenha] = useState("");
   const [salvando, setSalvando] = useState(false);
@@ -3700,53 +3761,7 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
               <strong>Editar cliente</strong>
               <button className="icon-btn" onClick={() => setEditando(null)}><X size={16} /></button>
             </div>
-            <Grid>
-              <Field label="Nome" value={editando.nome} onChange={(v) => setEditando({ ...editando, nome: v })} full />
-              <Field label="CPF" value={editando.cpf} onChange={(v) => setEditando({ ...editando, cpf: v })} />
-              <Field label="Telefone" value={editando.telefone} onChange={(v) => setEditando({ ...editando, telefone: v })} />
-              <Field label="E-mail" value={editando.email} onChange={(v) => setEditando({ ...editando, email: v })} />
-              <div style={cell(false)}>
-                <label style={lab}>Instagram (opcional)</label>
-                <input style={inp} placeholder="@perfildocliente" value={editando.instagram || ""}
-                  onChange={(e) => setEditando({ ...editando, instagram: e.target.value })}
-                  onBlur={(e) => setEditando({ ...editando, instagram: normalizarInstagram(e.target.value) })} />
-                {editando.instagram && (
-                  <a href={linkInstagram(editando.instagram)} target="_blank" rel="noopener noreferrer"
-                    style={{ fontSize: 11.5, color: AZUL_MEDIO, fontWeight: 600 }}>Abrir perfil</a>
-                )}
-              </div>
-              <div style={cell(true)}>
-                <label style={lab}>Serviço desejado</label>
-                <select style={inp} value={editando.servico} onChange={(e) => setEditando({ ...editando, servico: e.target.value })}>
-                  {SERVICO_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
-                </select>
-              </div>
-              <Field label="Construtora" value={editando.construtora} onChange={(v) => setEditando({ ...editando, construtora: v })} />
-              <Field label="Empreendimento" value={editando.empreendimento} onChange={(v) => setEditando({ ...editando, empreendimento: v })} />
-              <Field label="Endereço completo" value={editando.endereco} onChange={(v) => setEditando({ ...editando, endereco: v })} full />
-              <Field label="CEP" value={editando.cep} onChange={(v) => setEditando({ ...editando, cep: v })} />
-              <Field label="Bloco / Apto" value={editando.blocoTorre} onChange={(v) => setEditando({ ...editando, blocoTorre: v })} />
-              <Field label="Data desejada" type="date" value={editando.dataDesejada} onChange={(v) => setEditando({ ...editando, dataDesejada: v })} />
-              <div style={cell(false)}>
-                <label style={lab}>Horário desejado</label>
-                <select style={inp} value={editando.horarioDesejado || ""} onChange={(e) => setEditando({ ...editando, horarioDesejado: e.target.value })}>
-                  <option value="">selecionar…</option>
-                  {/* Mantém um horário fora do comercial que já esteja salvo, pra não perder dado. */}
-                  {editando.horarioDesejado && !HORARIOS_COMERCIAIS.includes(editando.horarioDesejado) && (
-                    <option value={editando.horarioDesejado}>{editando.horarioDesejado} (fora do horário comercial)</option>
-                  )}
-                  {HORARIOS_COMERCIAIS.map((h) => <option key={h} value={h}>{h}</option>)}
-                </select>
-              </div>
-              <div style={cell(true)}>
-                <label style={lab}>Status do agendamento</label>
-                <select style={inp} value={editando.atendido ? "1" : "0"} onChange={(e) => setEditando({ ...editando, atendido: e.target.value === "1" })}>
-                  <option value="0">Agendado / pendente</option>
-                  <option value="1">Concluído</option>
-                </select>
-              </div>
-            </Grid>
-            <Area label="Observações" value={editando.observacoes} onChange={(v) => setEditando({ ...editando, observacoes: v })} rows={2} />
+            <CamposCadastroCliente dados={editando} onChange={setEditando} />
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
               <div style={{ display: "flex", gap: 8 }}>
                 {podeExcluir && (
@@ -7236,6 +7251,273 @@ function CardProspeccao({ prospeccao = [], carregando, atualizar, publicarNoDriv
   );
 }
 
+/* ================= Gerência · Perfil do cliente =================
+   Abre o cadastro de qualquer cliente sem pedir a senha nem o e-mail dele: a Gerência já está
+   autenticada, e a confirmação por CPF + e-mail existe para o acesso público, que não tem
+   login nenhum. Aqui ela vê o mesmo que o cliente vê no portal — atendimentos, laudos,
+   documentação, cupons, pedidos — e edita o cadastro no mesmo lugar.
+   De propósito NÃO é um "entrar como o cliente": nada é feito em nome dele, e cada alteração
+   continua saindo pelo PATCH normal, gravada como ação da Gerência. */
+function AbaPerfilCliente({ clientes = [], token, notify, atualizarCliente, resetarSenhaCliente }) {
+  const [busca, setBusca] = useState("");
+  const [abertoId, setAbertoId] = useState(null);
+  const [perfil, setPerfil] = useState(null);
+  const [carregando, setCarregando] = useState(false);
+  const [form, setForm] = useState(null);
+  const [salvando, setSalvando] = useState(false);
+  const [resetandoSenha, setResetandoSenha] = useState(false);
+
+  const carregar = async (id) => {
+    setCarregando(true);
+    try {
+      const r = await apiFetch(`/api/clientes/${id}/perfil`, { token });
+      setPerfil(r);
+      setForm(mapClienteDaApi(r.cliente));
+    } catch (e) {
+      notify(`Não foi possível abrir o perfil: ${e.message}`);
+      setPerfil(null); setForm(null); setAbertoId(null);
+    }
+    setCarregando(false);
+  };
+  useEffect(() => { if (abertoId) carregar(abertoId); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [abertoId]);
+
+  const salvar = async () => {
+    setSalvando(true);
+    try {
+      await atualizarCliente(form.id, form);
+      notify("Cadastro atualizado ✓");
+      await carregar(form.id);
+    } catch (e) { notify(`Erro ao salvar: ${e.message}`); }
+    setSalvando(false);
+  };
+
+  /* Busca só a partir de duas letras: a lista inteira aqui não ajuda ninguém, e a base tem
+     dado pessoal — quem procura sabe o nome, o CPF ou o empreendimento. */
+  const termo = busca.trim().toLowerCase();
+  const digitos = termo.replace(/\D/g, "");
+  const encontrados = termo.length < 2 ? [] : clientes.filter((c) =>
+    `${c.nome} ${c.empreendimento} ${c.blocoTorre}`.toLowerCase().includes(termo)
+    || (digitos.length >= 3 && (c.cpf || "").replace(/\D/g, "").includes(digitos))
+    || (c.email || "").toLowerCase().includes(termo)
+  ).slice(0, 25);
+
+  if (!abertoId) {
+    return (
+      <Card icon={Users} titulo="Perfil do cliente">
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
+          Procure por nome, CPF, e-mail ou empreendimento e abra o perfil completo — o mesmo que o
+          cliente enxerga no portal, sem precisar da senha nem do e-mail dele.
+        </p>
+        <input style={{ ...inp, width: "100%" }} autoFocus placeholder="Buscar cliente…"
+          value={busca} onChange={(e) => setBusca(e.target.value)} />
+        {termo.length >= 2 && encontrados.length === 0 && (
+          <p style={{ color: "#8593a8", fontSize: 13.5, marginTop: 12 }}>Nenhum cliente encontrado.</p>
+        )}
+        <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+          {encontrados.map((c) => (
+            <button key={c.id} onClick={() => setAbertoId(c.id)}
+              style={{ textAlign: "left", background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <strong style={{ fontSize: 14 }}>{c.nome}</strong>
+                  {ehRevistoria(c) && <SeloRevistoria seq={c.revistoriaSeq} />}
+                </div>
+                <div style={{ fontSize: 12.5, color: "#65758b" }}>
+                  {mascararCpf(c.cpf)}{c.empreendimento ? ` · ${c.empreendimento}` : ""}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}
+                </div>
+              </div>
+              <ChevronRight size={16} color="#8593a8" />
+            </button>
+          ))}
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, width: "auto" }}
+        onClick={() => { setAbertoId(null); setPerfil(null); setForm(null); }}>
+        <ChevronLeft size={15} /> Voltar para a busca
+      </button>
+
+      {carregando && <Card icon={Users} titulo="Perfil do cliente"><p style={{ color: "#8593a8", fontSize: 14, margin: 0 }}>Carregando…</p></Card>}
+
+      {!carregando && perfil && form && (
+        <>
+          <Card icon={User} titulo={form.nome || "Cliente"}>
+            <TabelaDados rows={[
+              ["CPF", form.cpf || "—"],
+              ["Telefone", form.telefone || "—"],
+              ["E-mail", form.email || "—"],
+              ["Imóvel", `${form.empreendimento || "—"}${form.blocoTorre ? ` · ${form.blocoTorre}` : ""}`],
+              ["Endereço", form.endereco || "—"],
+            ]} />
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {form.telefone && (
+                <a className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, textDecoration: "none" }}
+                  href={`https://wa.me/55${(form.telefone || "").replace(/\D/g, "")}`} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink size={14} /> WhatsApp
+                </a>
+              )}
+              {form.email && (
+                <a className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, textDecoration: "none" }} href={`mailto:${form.email}`}>
+                  <Mail size={14} /> E-mail
+                </a>
+              )}
+            </div>
+          </Card>
+
+          {/* Acesso ao portal: a senha nunca é exibida (nem existe em texto no banco). O que a
+              Gerência precisa saber é se ele consegue entrar — e, se não conseguir, definir uma. */}
+          <Card icon={Lock} titulo="Acesso ao portal">
+            <TabelaDados rows={[
+              ["Situação", perfil.acesso?.temSenha
+                ? (perfil.acesso.ativo ? "Tem senha e pode entrar" : "Tem senha, mas o acesso está desativado")
+                : "Ainda sem senha — nunca entrou no portal"],
+              ["E-mail de acesso", perfil.acesso?.email || "—"],
+              ["Senha provisória", perfil.acesso?.senhaProvisoria ? "Sim — será trocada no próximo acesso" : ""],
+            ]} />
+            <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setResetandoSenha(true)}>
+              <Lock size={15} /> {perfil.acesso?.temSenha ? "Resetar senha do portal" : "Criar senha do portal"}
+            </button>
+            {!form.email && (
+              <p style={{ fontSize: 12, color: "#B26A00", margin: "8px 0 0" }}>
+                Este cadastro não tem e-mail: preencha abaixo antes de criar a senha, senão ele não tem como entrar.
+              </p>
+            )}
+          </Card>
+
+          <Card icon={ClipboardCheck} titulo={`Atendimentos (${perfil.atendimentos.length})`}>
+            <div style={{ display: "grid", gap: 10 }}>
+              {perfil.atendimentos.map((a) => (
+                <div key={a.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12,
+                  outline: a.id === form.id ? `2px solid ${AZUL_MEDIO}` : "none" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                    {/* Na revistoria o selo já diz o que é — repetir o nome do serviço ao lado
+                        dele só ocupa espaço. */}
+                    {a.revistoriaSeq > 0
+                      ? <SeloRevistoria seq={a.revistoriaSeq} />
+                      : <strong style={{ fontSize: 13.5 }}>{a.servico || "Atendimento"}</strong>}
+                    <Selo valor={a.laudo?.statusCliente || a.status} />
+                    {a.id !== form.id && (
+                      <button className="btn-ghost" style={{ color: AZUL_MEDIO, padding: "3px 9px", fontSize: 12, marginLeft: "auto" }}
+                        onClick={() => setAbertoId(a.id)}>
+                        Editar este
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 12.5, color: "#65758b" }}>
+                    {a.empreendimento || "—"}{a.blocoTorre ? ` · ${a.blocoTorre}` : ""}
+                    {a.dataDesejada ? ` · ${a.dataDesejada.split("-").reverse().join("/")}` : ""}{a.horarioDesejado ? ` ${a.horarioDesejado}` : ""}
+                  </div>
+                  {a.vistoriadorNome && <div style={{ fontSize: 12.5, color: "#65758b" }}>Técnico: {a.vistoriadorNome}</div>}
+                  {a.observacoes && (
+                    <p style={{ fontSize: 12.5, color: "#4a5a70", background: CINZA_CLARO, borderRadius: 8, padding: "7px 9px", margin: "6px 0 0", whiteSpace: "pre-wrap" }}>
+                      {a.observacoes}
+                    </p>
+                  )}
+                  {a.laudo?.avaliacaoNota && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 12.5, color: "#65758b" }}>
+                      <EstrelasNota nota={a.laudo.avaliacaoNota} />
+                      {a.laudo.avaliacaoComentario ? `“${a.laudo.avaliacaoComentario}”` : ""}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                    {a.laudo?.tokenDownload && (
+                      <a className="btn-solid" style={{ textDecoration: "none", width: "auto", padding: "7px 12px", fontSize: 12.5 }}
+                        href={`${API_URL}/api/laudo-final/download?token=${encodeURIComponent(a.laudo.tokenDownload)}`}
+                        target="_blank" rel="noopener noreferrer">
+                        <FileText size={13} /> Baixar laudo
+                      </a>
+                    )}
+                    {(a.documentosArt || []).map((d) => (
+                      <a key={d.id} className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, textDecoration: "none", padding: "7px 12px", fontSize: 12.5 }}
+                        href={`${API_URL}/api/documentos-art/download?token=${encodeURIComponent(d.tokenDownload)}`}
+                        target="_blank" rel="noopener noreferrer">
+                        <FileText size={13} /> {d.tipo}
+                      </a>
+                    ))}
+                  </div>
+                  {a.laudo && !a.laudo.tokenDownload && (
+                    <div style={{ fontSize: 11.5, color: "#8593a8", marginTop: 6 }}>
+                      Laudo ainda não arquivado no Drive — o download aparece depois da aprovação.
+                    </div>
+                  )}
+                </div>
+              ))}
+              {perfil.atendimentos.length === 0 && <p style={{ color: "#8593a8", fontSize: 13.5, margin: 0 }}>Nenhum atendimento.</p>}
+            </div>
+          </Card>
+
+          <Card icon={Edit3} titulo="Editar cadastro">
+            <p style={{ fontSize: 12.5, color: "#65758b", margin: "0 0 12px" }}>
+              Alterações valem para este atendimento ({form.servico || "—"}
+              {form.dataDesejada ? ` · ${form.dataDesejada.split("-").reverse().join("/")}` : ""}). Os outros da mesma
+              pessoa ficam como estão — use "Editar este" na lista acima para trocar.
+            </p>
+            <CamposCadastroCliente dados={form} onChange={setForm} />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }}
+                onClick={() => setForm(mapClienteDaApi(perfil.cliente))}>Desfazer</button>
+              <button className="btn-solid" onClick={salvar} disabled={salvando}>
+                {salvando ? <Loader2 size={15} className="spin" /> : <Save size={15} />} Salvar cadastro
+              </button>
+            </div>
+          </Card>
+
+          {perfil.cupons?.length > 0 && (
+            <Card icon={Handshake} titulo={`Cupons de parceiros (${perfil.cupons.length})`}>
+              <div style={{ display: "grid", gap: 8 }}>
+                {perfil.cupons.map((v) => (
+                  <div key={v.codigo} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontSize: 13 }}>
+                    <span className="mono" style={{ fontWeight: 700, color: AZUL_MARINHO }}>{v.codigo}</span>
+                    <span style={{ color: "#65758b" }}>{v.parceiro || "—"} · {v.beneficio || "—"}</span>
+                    <Selo valor={v.usado_em ? "Usado" : v.status === "ativo" ? "Ativo" : v.status} />
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {perfil.orcamentos?.length > 0 && (
+            <Card icon={FileText} titulo={`Orçamentos pedidos (${perfil.orcamentos.length})`}>
+              <div style={{ display: "grid", gap: 8 }}>
+                {perfil.orcamentos.map((l) => (
+                  <div key={l.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontSize: 13 }}>
+                    <strong>{l.parceiro || "—"}</strong>
+                    <span style={{ color: "#65758b" }}>{l.servico_titulo || "—"}</span>
+                    <Selo valor={LEAD_STATUS_LABEL[l.status] || l.status} />
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {perfil.pedidos?.length > 0 && (
+            <Card icon={ShoppingCart} titulo={`Pedidos (${perfil.pedidos.length})`}>
+              <div style={{ display: "grid", gap: 8 }}>
+                {perfil.pedidos.map((p) => (
+                  <div key={p.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontSize: 13 }}>
+                    <strong>{fmtReal(p.valor_total)}</strong>
+                    <span style={{ color: "#65758b" }}>{new Date(p.criado_em).toLocaleDateString("pt-BR")}</span>
+                    <Selo valor={PEDIDO_STATUS_LABEL[p.status] || p.status} />
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+        </>
+      )}
+
+      {resetandoSenha && form && (
+        <ModalResetarSenhaCliente cliente={form} resetarSenhaCliente={resetarSenhaCliente}
+          notify={notify} onFechar={() => { setResetandoSenha(false); carregar(form.id); }} />
+      )}
+    </div>
+  );
+}
+
 function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendimento, excluirCliente, empreendimentosRef = [], carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco }) {
   const porVistoria = docs.reduce((acc, d) => { acc[d.vistoria] = (acc[d.vistoria] || 0) + 1; return acc; }, {});
   const porStatusProducao = docs.reduce((acc, d) => { acc[d.statusProducao] = (acc[d.statusProducao] || 0) + 1; return acc; }, {});
@@ -8175,10 +8457,14 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", token, perfil, decidirComissaoItem, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
+function AbaGerencia({ sub = "visao-geral", token, perfil, decidirComissaoItem, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
   if (sub === "acompanhamento") {
     return <TabelaRegistrosVistoriaDoc docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc}
       carregando={carregando} notify={notify} clientes={clientes} precos={precos} />;
+  }
+  if (sub === "perfil-cliente") {
+    return <AbaPerfilCliente clientes={clientes} token={token} notify={notify}
+      atualizarCliente={updCliente} resetarSenhaCliente={resetarSenhaCliente} />;
   }
   if (sub === "parceiros") {
     return <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual}
