@@ -150,5 +150,8 @@ O app não usa router; as páginas públicas são interceptadas no começo de `A
 - Estilo é `style={{...}}` inline com as constantes de cor do topo (`AZUL_MARINHO`,
   `AZUL_MEDIO`, `CINZA_CLARO`, `CINZA_BORDA`) e os helpers `cell()`, `lab`, `inp`. Não há
   CSS-in-JS nem framework.
-- Toda chamada de API passa por `apiFetch`, que já trata erro e token.
+- Toda chamada de API passa por `apiFetch`, que já trata erro e token. **GET é repetido até
+  3 vezes** quando a falha é passageira (rede, 502/503/504) — a API hiberna sem uso e reinicia
+  a cada publicação, e a segunda tentativa quase sempre pega ela de pé. POST/PATCH nunca são
+  repetidos: o mesmo clique viraria dois cadastros, laudos ou pedidos.
 - Não há testes automatizados. A verificação é `npm run build` e abrir a tela no navegador.
