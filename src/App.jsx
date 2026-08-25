@@ -4503,11 +4503,14 @@ function PainelDiaAgendamento({ diaISO, clientes = [], todosClientes = [], visto
   const agenda = clientes.filter((c) => c.status !== "Cancelado" && !ehServicoDocumentacao(c)).sort((a, b) => (a.horarioDesejado || "").localeCompare(b.horarioDesejado || ""));
   const nomeVistoriador = (id) => vistoriadores.find((v) => String(v.id) === String(id))?.nome || null;
 
-  /* Trocar o técnico direto no painel do dia — é aqui que a remanejada acontece, olhando a
-     agenda inteira da data. Mesma regra da sub-aba Vistoria: não desmarca nada e recusa
-     quem já tem outra vistoria no mesmo horário. O conflito é conferido contra a agenda
-     completa (todosClientes), porque o painel pode estar filtrado por etapa. */
-  const trocarTecnico = async (c, novoId) => {
+  /* Definir ou trocar o técnico direto no painel do dia — é aqui que a remanejada acontece,
+     olhando a agenda inteira da data. Vale para qualquer cadastro do dia, não só os já
+     agendados: em quem ainda está em análise ou aprovado, escolher o técnico também agenda,
+     que é o mesmo gesto do "Aprovar e agendar" da Análise, só que decidido olhando o dia
+     cheio. Não desmarca nada e recusa quem já tem outra vistoria no mesmo horário — o
+     conflito é conferido contra a agenda completa (todosClientes), porque o painel pode
+     estar filtrado por etapa. */
+  const definirTecnico = async (c, novoId) => {
     if (!novoId || String(novoId) === String(c.vistoriadorId)) return;
     const universo = todosClientes.length ? todosClientes : clientes;
     const conflito = vistoriaNoMesmoHorario(universo, {
@@ -4518,13 +4521,23 @@ function PainelDiaAgendamento({ diaISO, clientes = [], todosClientes = [], visto
       notify(`${nomeNovo} já tem vistoria às ${c.horarioDesejado} nesse dia (${conflito.nome}). Escolha outro.`);
       return;
     }
+    const jaEstaNaAgenda = c.status === "Vistoria agendada" || c.status === "Em vistoria";
     setTrocandoId(c.id);
     try {
-      await updCliente(c.id, { vistoriadorId: novoId });
-      notify(`Vistoria transferida para ${nomeNovo} ✓`);
-    } catch (e) { notify(`Não foi possível trocar o técnico: ${e.message}`); }
+      const ok = await updCliente(c.id, jaEstaNaAgenda
+        ? { vistoriadorId: novoId }
+        : { vistoriadorId: novoId, status: "Vistoria agendada" });
+      if (ok) {
+        notify(jaEstaNaAgenda
+          ? `Vistoria transferida para ${nomeNovo} ✓`
+          : `${ehRevistoria(c) ? "Revistoria" : "Vistoria"} agendada com ${nomeNovo} ✓ — já entrou na agenda`);
+      }
+    } catch (e) { notify(`Não foi possível definir o técnico: ${e.message}`); }
     setTrocandoId(null);
   };
+  /* Cancelar continua fora de quem já está em campo: a vistoria começou, e desmarcar por aqui
+     deixaria o técnico dentro do imóvel sem nada no sistema. */
+  const podeCancelar = (c) => podeAgir && c.status !== "Em vistoria";
 
   return (
     <div className="no-print" style={{ ...overlay, justifyItems: "end" }} onClick={onFechar}>
@@ -4562,12 +4575,12 @@ function PainelDiaAgendamento({ diaISO, clientes = [], todosClientes = [], visto
                     </div>
                     <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.endereco || c.empreendimento || "—"}</div>
                     <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.servico}</div>
-                    {podeAgir && (c.status === "Vistoria agendada" || c.status === "Em vistoria") ? (
+                    {podeAgir ? (
                       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
                         <span style={{ fontSize: 12, color: "#65758b" }}>Técnico:</span>
                         <select style={{ ...inp, width: "auto", minWidth: 165, padding: "5px 8px", fontSize: 12.5 }}
                           value={c.vistoriadorId || ""} disabled={trocandoId === c.id}
-                          onChange={(e) => trocarTecnico(c, e.target.value)}>
+                          onChange={(e) => definirTecnico(c, e.target.value)}>
                           <option value="">ainda não atribuído</option>
                           {vistoriadores.map((v) => <option key={v.id} value={v.id}>{rotuloTecnico(v)}</option>)}
                         </select>
@@ -4576,12 +4589,19 @@ function PainelDiaAgendamento({ diaISO, clientes = [], todosClientes = [], visto
                     ) : (
                       <div style={{ fontSize: 12, color: "#65758b" }}>Técnico: {nomeTecnico || "ainda não atribuído"}</div>
                     )}
+                    {/* Escolher o técnico aqui é o que coloca a vistoria na agenda dele — dizer
+                        isso antes evita a dúvida de "aprovei, e agora?". */}
+                    {podeAgir && c.status !== "Vistoria agendada" && c.status !== "Em vistoria" && (
+                      <div style={{ fontSize: 11.5, color: "#65758b" }}>
+                        Escolher o técnico já agenda e aprova este atendimento.
+                      </div>
+                    )}
                     <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                       <Selo valor={c.status} />
-                      {podeAgir && c.status === "Vistoria agendada" && (
+                      {podeCancelar(c) && (
                         <button className="btn-ghost" style={{ color: "#C62828", padding: "3px 8px", fontSize: 12 }}
                           onClick={() => setConfirmandoCancelamento(c)}>
-                          Cancelar vistoria
+                          {c.status === "Vistoria agendada" ? "Cancelar vistoria" : "Cancelar atendimento"}
                         </button>
                       )}
                     </div>
@@ -4598,11 +4618,13 @@ function PainelDiaAgendamento({ diaISO, clientes = [], todosClientes = [], visto
         )}
 
       <ConfirmModal aberto={!!confirmandoCancelamento}
-        titulo={ehGerencia ? "Cancelar vistoria" : "Solicitar cancelamento"}
+        titulo={ehGerencia ? "Cancelar atendimento" : "Solicitar cancelamento"}
         mensagem={confirmandoCancelamento
           ? (ehGerencia
-              ? `Cancelar a vistoria de "${confirmandoCancelamento.nome}"? Ela sai da agenda do técnico imediatamente.`
-              : `Solicitar o cancelamento da vistoria de "${confirmandoCancelamento.nome}"? A gerência decide se confirma.`)
+              /* Quem ainda não foi agendado não está na agenda de ninguém — prometer que "sai
+                 da agenda do técnico" nesse caso descreveria algo que não vai acontecer. */
+              ? `Cancelar o atendimento de "${confirmandoCancelamento.nome}"?${confirmandoCancelamento.status === "Vistoria agendada" ? " Ele sai da agenda do técnico imediatamente." : ""}`
+              : `Solicitar o cancelamento do atendimento de "${confirmandoCancelamento.nome}"? A gerência decide se confirma.`)
           : ""}
         onConfirm={async () => {
           const alvo = confirmandoCancelamento;
@@ -4778,7 +4800,7 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
       const ok = await updCliente(c.id, { status: "Vistoria agendada", vistoriadorId });
       if (!ok) return;
       setClienteAprovado(null);
-      notify(`${ehRevistoria(c) ? "Revistoria" : "Vistoria"} agendada com ${nomeTecnico} ✓ — já está na agenda dele`);
+      notify(`${ehRevistoria(c) ? "Revistoria" : "Vistoria"} agendada com ${nomeTecnico} ✓ — já entrou na agenda`);
     } catch (e) { notify(`Erro: ${e.message}`); }
   };
   const recusar = async (c) => {
@@ -4801,7 +4823,7 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
       const alvo = clientes.find((c) => c.id === dados.clienteId);
       const ok = await updCliente(dados.clienteId, { vistoriadorId: dados.vistoriadorId, dataDesejada: dados.dataDesejada, horarioDesejado: dados.horarioDesejado, status: "Vistoria agendada" });
       if (!ok) return;
-      notify(`${ehRevistoria(alvo) ? "Revistoria" : "Vistoria"} agendada ✓ — já está na agenda do técnico`);
+      notify(`${ehRevistoria(alvo) ? "Revistoria" : "Vistoria"} agendada ✓ — já entrou na agenda`);
       setAgendando(null);
     } catch (e) { notify(`Erro: ${e.message}`); }
   };
