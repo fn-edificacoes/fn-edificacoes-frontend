@@ -2317,6 +2317,57 @@ function AppInterno({ session, onLogout }) {
   /* ---- Vales (todos, para Gerência/Vendas acompanharem leads/conversão de Parceiros) ---- */
   const [vales, setVales] = useState([]);
   const [valesCarregando, setValesCarregando] = useState(false);
+  /* ---- Prospecção de parceiros: a lista de empresas que ainda não são parceiras ----
+     É o passo anterior ao convite — a Gerência levanta, o vendedor liga e negocia. Só quem
+     trabalha com parceiro carrega isso. */
+  const [prospeccaoParceiros, setProspeccaoParceiros] = useState([]);
+  const [prospeccaoParceirosCarregando, setProspeccaoParceirosCarregando] = useState(false);
+  const carregarProspeccaoParceiros = async () => {
+    if (!["gerencia", "vendas"].includes(perfil)) return;
+    setProspeccaoParceirosCarregando(true);
+    try {
+      const r = await apiFetch("/api/parceiros-prospeccao", { token });
+      setProspeccaoParceiros(r.empresas || []);
+    } catch (e) { notify(`Não foi possível carregar a prospecção: ${e.message}`); }
+    setProspeccaoParceirosCarregando(false);
+  };
+  useEffect(() => { carregarProspeccaoParceiros(); }, []);
+  const atualizarProspeccaoParceiro = async (id, patch) => {
+    /* Atualização otimista: quem está ligando muda a situação e segue para a próxima empresa
+       sem esperar a resposta. Se o servidor recusar, o aviso aparece e a lista recarrega. */
+    setProspeccaoParceiros((atual) => atual.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+    try {
+      await apiFetch(`/api/parceiros-prospeccao/${id}`, { method: "PATCH", token, body: patch });
+      return true;
+    } catch (e) {
+      notify(`Não foi possível salvar: ${e.message}`);
+      carregarProspeccaoParceiros();
+      return false;
+    }
+  };
+  const adicionarEmpresaProspeccao = async (dados) => {
+    try {
+      await apiFetch("/api/parceiros-prospeccao", { method: "POST", token, body: dados });
+      notify("Empresa adicionada à lista ✓");
+      await carregarProspeccaoParceiros();
+      return true;
+    } catch (e) { notify(`Não foi possível adicionar: ${e.message}`); return false; }
+  };
+  const importarEmpresasProspeccao = async (empresas) => {
+    try {
+      const r = await apiFetch("/api/parceiros-prospeccao/importar", { method: "POST", token, body: { empresas } });
+      notify(`${r.inseridas} empresa(s) importada(s)${r.repetidas ? ` · ${r.repetidas} já estavam na lista` : ""} ✓`);
+      await carregarProspeccaoParceiros();
+      return true;
+    } catch (e) { notify(`Não foi possível importar: ${e.message}`); return false; }
+  };
+  const removerEmpresaProspeccao = async (id) => {
+    try {
+      await apiFetch(`/api/parceiros-prospeccao/${id}`, { method: "DELETE", token });
+      setProspeccaoParceiros((atual) => atual.filter((e) => e.id !== id));
+    } catch (e) { notify(`Não foi possível remover: ${e.message}`); }
+  };
+
   const carregarVales = async () => {
     if (!["gerencia", "vendas"].includes(perfil)) return;
     setValesCarregando(true);
@@ -3128,10 +3179,17 @@ function AppInterno({ session, onLogout }) {
             vales={vales} valesCarregando={valesCarregando} vendas={vendas} vendasCarregando={vendasCarregando} atualizarVenda={atualizarVenda}
             criarParceiroManual={criarParceiroManual} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem}
             salvarItemCatalogo={salvarItemCatalogoAdmin} excluirItemCatalogo={excluirItemCatalogoAdmin} notify={notify}
-            podeExcluir={perfil === "gerencia"} excluirParceiro={excluirParceiro} />
+            podeExcluir={perfil === "gerencia"} excluirParceiro={excluirParceiro}
+            prospeccaoParceiros={prospeccaoParceiros} prospeccaoParceirosCarregando={prospeccaoParceirosCarregando}
+            atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
+            importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao} />
         )}
         {abaTop === "gerencia" && (
-          <AbaGerencia sub={abaGerencia} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem} docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} clientes={clientes} updCliente={updCliente} resetarSenhaCliente={resetarSenhaCliente} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
+          <AbaGerencia sub={abaGerencia} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem}
+            prospeccaoParceiros={prospeccaoParceiros} prospeccaoParceirosCarregando={prospeccaoParceirosCarregando}
+            atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
+            importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao}
+            docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} clientes={clientes} updCliente={updCliente} resetarSenhaCliente={resetarSenhaCliente} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
             usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} salvarPerfilTecnico={salvarPerfilTecnico} usuarioAtualId={session.usuario.id}
             avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
             parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual}
@@ -7983,11 +8041,222 @@ function CardBancoPatologias({ patologias = [], carregando, onCriar, onAtualizar
   );
 }
 
-function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas = [], vendasCarregando, atualizarVenda, notify, token, perfil, decidirComissaoItem }) {
+/* ================= Prospecção de parceiros: a checklist de quem ainda não é parceiro =======
+   A lista que a Gerência levanta e o vendedor trabalha no telefone. Cada empresa tem o
+   contato à mão (ligar, WhatsApp, Instagram) e a situação da conversa — que é o que o
+   vendedor muda enquanto negocia. Quando fecha, o passo seguinte é mandar o link de cadastro,
+   e daí em diante vale o fluxo normal: cadastro, homologação da Gerência, vitrine. */
+const SITUACOES_PROSPECCAO = ["A contatar", "Confirmar contato", "Em negociação", "Aguardando retorno", "Fechada", "Sem interesse"];
+STATUS_COR["A contatar"] = { cor: "#2C75B5", bg: "#EAF2FB" };
+STATUS_COR["Confirmar contato"] = { cor: "#6E36BE", bg: "#F1EAFB" };
+STATUS_COR["Em negociação"] = { cor: "#B26A00", bg: "#FFF4E0" };
+STATUS_COR["Aguardando retorno"] = { cor: "#B26A00", bg: "#FFF4E0" };
+STATUS_COR["Fechada"] = { cor: "#2E7D32", bg: "#E6F4EA" };
+STATUS_COR["Sem interesse"] = { cor: "#65758b", bg: "#EEF1F5" };
+
+/* Só os dígitos, com o 55 na frente — é o que o WhatsApp aceita no link. */
+const linkWhatsapp = (telefone) => {
+  const d = (telefone || "").replace(/\D/g, "");
+  if (d.length < 10) return null;
+  return `https://wa.me/55${d}`;
+};
+
+function LinhaProspeccaoParceiro({ empresa, situacoes, onAtualizar, onRemover, podeRemover }) {
+  const [aberto, setAberto] = useState(false);
+  const [proximoPasso, setProximoPasso] = useState(empresa.proximoPasso || "");
+  const [observacoes, setObservacoes] = useState(empresa.observacoes || "");
+  const [salvando, setSalvando] = useState(false);
+  const whats = linkWhatsapp(empresa.telefone) || (empresa.link && empresa.link.includes("wa.me") ? empresa.link : null);
+
+  const salvarAnotacoes = async () => {
+    setSalvando(true);
+    await onAtualizar(empresa.id, { proximoPasso, observacoes });
+    setSalvando(false);
+  };
+
+  return (
+    <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: 12, flexWrap: "wrap" }}>
+        <button onClick={() => setAberto(!aberto)}
+          style={{ flex: 1, minWidth: 200, textAlign: "left", background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>{empresa.empresa}</div>
+          <div style={{ fontSize: 12.5, color: "#65758b" }}>
+            {empresa.categoria || "sem categoria"}{empresa.cidade ? ` · ${empresa.cidade}` : ""}
+          </div>
+        </button>
+
+        {/* Contato ao alcance da mão: quem está ligando não deveria ter de abrir o cadastro
+            para achar o número. */}
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          {empresa.telefone && <span className="mono" style={{ fontSize: 12.5, color: AZUL_MARINHO }}>{empresa.telefone}</span>}
+          {whats && (
+            <a className="btn-ghost" style={{ color: "#0F7259", background: "#E6F4EA", textDecoration: "none", padding: "5px 10px", fontSize: 12 }}
+              href={whats} target="_blank" rel="noopener noreferrer">WhatsApp</a>
+          )}
+          {empresa.instagram && empresa.instagram.startsWith("@") && (
+            <a className="btn-ghost" style={{ color: "#6E36BE", background: "#F1EAFB", textDecoration: "none", padding: "5px 10px", fontSize: 12 }}
+              href={linkInstagram(empresa.instagram)} target="_blank" rel="noopener noreferrer">{empresa.instagram}</a>
+          )}
+          {!empresa.telefone && !whats && empresa.link && (
+            <a className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO, textDecoration: "none", padding: "5px 10px", fontSize: 12 }}
+              href={empresa.link} target="_blank" rel="noopener noreferrer">Abrir link</a>
+          )}
+        </div>
+
+        <select style={{ ...inp, width: "auto", minWidth: 160, padding: "6px 9px", fontSize: 12.5 }}
+          value={empresa.situacao} onChange={(e) => onAtualizar(empresa.id, { situacao: e.target.value })}>
+          {situacoes.map((sit) => <option key={sit} value={sit}>{sit}</option>)}
+        </select>
+        {aberto ? <ChevronDown size={16} color="#8593a8" /> : <ChevronRight size={16} color="#8593a8" />}
+      </div>
+
+      {aberto && (
+        <div style={{ padding: "0 12px 12px", display: "grid", gap: 10 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 12.5, color: "#65758b" }}>
+            <span>Último contato: <strong>{empresa.ultimoContato ? new Date(empresa.ultimoContato).toLocaleDateString("pt-BR") : "ainda não"}</strong></span>
+            <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, padding: "4px 10px", fontSize: 12 }}
+              onClick={() => onAtualizar(empresa.id, { registrarContato: true })}>
+              Registrar contato de hoje
+            </button>
+          </div>
+          <div style={cell(true)}>
+            <label style={lab}>Próximo passo</label>
+            <input style={inp} value={proximoPasso} placeholder="Ex.: retornar quinta, falar com o dono"
+              onChange={(e) => setProximoPasso(e.target.value)} />
+          </div>
+          <div style={cell(true)}>
+            <label style={lab}>Observações</label>
+            <textarea style={{ ...inp, minHeight: 64, resize: "vertical" }} value={observacoes}
+              onChange={(e) => setObservacoes(e.target.value)} />
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+            {podeRemover ? (
+              <button className="btn-ghost" style={{ color: "#C62828", padding: "5px 10px", fontSize: 12.5 }}
+                onClick={() => onRemover(empresa.id)}>
+                <Trash2 size={13} /> Tirar da lista
+              </button>
+            ) : <span />}
+            <button className="btn-solid" style={{ width: "auto", padding: "7px 14px", fontSize: 12.5 }}
+              onClick={salvarAnotacoes} disabled={salvando}>
+              {salvando ? <Loader2 size={13} className="spin" /> : <Save size={13} />} Salvar anotações
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CardProspeccaoParceiros({ empresas = [], carregando, onAtualizar, onAdicionar, onImportar, onRemover, podeGerenciar }) {
+  const [busca, setBusca] = useState("");
+  const [filtroSituacao, setFiltroSituacao] = useState("");
+  const [nova, setNova] = useState(null);
+  const [colando, setColando] = useState("");
+
+  const porSituacao = {};
+  empresas.forEach((e) => { porSituacao[e.situacao] = (porSituacao[e.situacao] || 0) + 1; });
+
+  const termo = busca.trim().toLowerCase();
+  const lista = empresas.filter((e) =>
+    (!filtroSituacao || e.situacao === filtroSituacao) &&
+    (!termo || `${e.empresa} ${e.categoria} ${e.cidade}`.toLowerCase().includes(termo))
+  );
+
+  /* Importação colando da planilha: uma empresa por linha, campos separados por vírgula,
+     ponto e vírgula ou tabulação — é como a lista sai de qualquer planilha. */
+  const importar = async () => {
+    const empresasColadas = colando.split("\n").map((l) => l.trim()).filter(Boolean).map((linha) => {
+      const partes = linha.split(/[;,\t]/).map((x) => x.trim());
+      return { empresa: partes[0] || "", categoria: partes[1] || "", cidade: partes[2] || "", telefone: partes[3] || "", instagram: partes[4] || "" };
+    }).filter((e) => e.empresa);
+    if (empresasColadas.length === 0) return;
+    if (await onImportar(empresasColadas)) setColando("");
+  };
+
+  return (
+    <Card icon={Handshake} titulo={`Empresas para prospectar (${empresas.length})`}>
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
+        Quem ainda não é parceiro. Ligue, negocie e vá marcando a situação — quando a parceria
+        fechar, o passo seguinte é mandar o link de cadastro e o fluxo normal assume.
+      </p>
+
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+        <button onClick={() => setFiltroSituacao("")}
+          style={{ display: "flex", alignItems: "center", gap: 6, background: !filtroSituacao ? AZUL_MEDIO : "#fff", color: !filtroSituacao ? "#fff" : "#4a5a70", border: `1px solid ${CINZA_BORDA}`, borderRadius: 20, padding: "5px 12px", fontSize: 12.5, cursor: "pointer" }}>
+          Todas <strong>{empresas.length}</strong>
+        </button>
+        {SITUACOES_PROSPECCAO.filter((sit) => porSituacao[sit]).map((sit) => (
+          <button key={sit} onClick={() => setFiltroSituacao(filtroSituacao === sit ? "" : sit)}
+            style={{ display: "flex", alignItems: "center", gap: 6, background: filtroSituacao === sit ? "#EAF2FB" : "#fff", border: `1px solid ${filtroSituacao === sit ? AZUL_MEDIO : CINZA_BORDA}`, borderRadius: 20, padding: "4px 10px", fontSize: 12.5, cursor: "pointer" }}>
+            <Selo valor={sit} /> <strong>{porSituacao[sit]}</strong>
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <input style={{ ...inp, flex: 1, minWidth: 200 }} placeholder="Buscar por empresa, categoria ou cidade…"
+          value={busca} onChange={(e) => setBusca(e.target.value)} />
+        {podeGerenciar && (
+          <button className="btn-solid" style={{ width: "auto", padding: "9px 14px" }}
+            onClick={() => setNova(nova ? null : { empresa: "", categoria: "", cidade: "", telefone: "", instagram: "" })}>
+            <Plus size={15} /> Nova empresa
+          </button>
+        )}
+      </div>
+
+      {nova && (
+        <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, marginBottom: 14, display: "grid", gap: 10 }}>
+          <Grid>
+            <Field label="Empresa" value={nova.empresa} onChange={(v) => setNova({ ...nova, empresa: v })} full />
+            <Field label="Categoria" value={nova.categoria} onChange={(v) => setNova({ ...nova, categoria: v })} />
+            <Field label="Cidade / área" value={nova.cidade} onChange={(v) => setNova({ ...nova, cidade: v })} />
+            <Field label="Telefone" value={nova.telefone} onChange={(v) => setNova({ ...nova, telefone: v })} />
+            <Field label="Instagram" value={nova.instagram} onChange={(v) => setNova({ ...nova, instagram: v })} />
+          </Grid>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setNova(null)}>Cancelar</button>
+            <button className="btn-solid" onClick={async () => { if (await onAdicionar(nova)) setNova(null); }}>
+              <Plus size={15} /> Adicionar
+            </button>
+          </div>
+
+          {/* Colar direto da planilha: é assim que a lista costuma nascer. */}
+          <div style={cell(true)}>
+            <label style={lab}>Ou cole várias de uma vez (uma por linha: empresa, categoria, cidade, telefone, @instagram)</label>
+            <textarea style={{ ...inp, minHeight: 70, resize: "vertical", fontFamily: "monospace", fontSize: 12.5 }}
+              value={colando} onChange={(e) => setColando(e.target.value)}
+              placeholder="Vidraçaria Recife, Vidraçaria, Recife/PE, (81) 99999-0000, @vidracaria" />
+            <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, width: "auto", marginTop: 6 }}
+              onClick={importar} disabled={!colando.trim()}>
+              Importar lista colada
+            </button>
+          </div>
+        </div>
+      )}
+
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && lista.length === 0 && (
+        <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhuma empresa nesta situação.</p>
+      )}
+      <div style={{ display: "grid", gap: 8 }}>
+        {lista.map((e) => (
+          <LinhaProspeccaoParceiro key={e.id} empresa={e} situacoes={SITUACOES_PROSPECCAO}
+            onAtualizar={onAtualizar} onRemover={onRemover} podeRemover={podeGerenciar} />
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas = [], vendasCarregando, atualizarVenda, notify, token, perfil, decidirComissaoItem, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao }) {
   const [cadastrando, setCadastrando] = useState(false);
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <CardIndicadoresParceiros parceiros={parceiros} vales={vales} valesCarregando={valesCarregando} vendas={vendas} />
+      <CardProspeccaoParceiros empresas={prospeccaoParceiros} carregando={prospeccaoParceirosCarregando}
+        onAtualizar={atualizarProspeccaoParceiro} onAdicionar={adicionarEmpresaProspeccao}
+        onImportar={importarEmpresasProspeccao} onRemover={removerEmpresaProspeccao}
+        podeGerenciar={perfil === "gerencia"} />
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }} onClick={() => setCadastrando(true)}>
           <Plus size={15} /> Cadastrar parceiro
@@ -8633,7 +8902,7 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", token, perfil, decidirComissaoItem, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
+function AbaGerencia({ sub = "visao-geral", token, perfil, decidirComissaoItem, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
   if (sub === "acompanhamento") {
     return <TabelaRegistrosVistoriaDoc docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc}
       carregando={carregando} notify={notify} clientes={clientes} precos={precos} />;
@@ -8647,7 +8916,10 @@ function AbaGerencia({ sub = "visao-geral", token, perfil, decidirComissaoItem, 
       salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} vales={vales} valesCarregando={valesCarregando}
       vendas={vendas} vendasCarregando={vendasCarregando} atualizarVenda={atualizarVenda} notify={notify}
       token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem}
-      podeExcluir excluirParceiro={excluirParceiro} />;
+      podeExcluir excluirParceiro={excluirParceiro}
+      prospeccaoParceiros={prospeccaoParceiros} prospeccaoParceirosCarregando={prospeccaoParceirosCarregando}
+      atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
+      importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao} />;
   }
   if (sub === "patologias") {
     return <CardBancoPatologias patologias={patologiasBanco} carregando={patologiasBancoCarregando}
