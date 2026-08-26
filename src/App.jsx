@@ -2918,12 +2918,15 @@ function AppInterno({ session, onLogout }) {
     const laudoDoCliente = meusLaudos.find((l) => l.cliente_id === cli.id) || null;
     if (laudoDoCliente?.laudo_status === "devolvido_correcao") {
       /* O conteúdo não vem mais junto da lista (ela ficou grande demais para trafegar), então
-         é buscado aqui, na hora de retomar a correção. Enquanto chega, a tela fica com o que
-         já estava — e se falhar, o técnico vê o aviso em vez de um laudo em branco. */
+         é buscado aqui, na hora de retomar a correção. Se a API ainda for a antiga, ele já
+         veio na lista e é usado direto — nenhuma versão das duas pontas deixa o técnico sem
+         o trabalho dele. */
       try {
-        const r = await apiFetch(`/api/laudos/${laudoDoCliente.doc_id}/conteudo`, { token });
-        setDados(r.dados);
-        setItens((r.itens || []).map((i) => ({ ...i, id: idCounter++, fotos: i.fotos || [] })));
+        const conteudo = laudoDoCliente.itens
+          ? laudoDoCliente
+          : await apiFetch(`/api/laudos/${laudoDoCliente.doc_id}/conteudo`, { token });
+        setDados(conteudo.dados);
+        setItens((conteudo.itens || []).map((i) => ({ ...i, id: idCounter++, fotos: i.fotos || [] })));
       } catch {
         notify("Não consegui trazer o laudo devolvido do servidor. Atualize a página e tente de novo.");
       }
@@ -7357,6 +7360,20 @@ function AbaLaudosRealizados({ laudos: laudosRecebidos = [], carregando, recarre
     if (abertoId === docId) { setAbertoId(null); return; }
     setAbertoId(docId);
     if (conteudos[docId] || !token) return;
+
+    /* Enquanto a API antiga estiver no ar, o conteúdo ainda vem dentro da lista. Usar o que
+       já está na mão evita uma ida ao servidor — e evita que a tela fique sem o laudo caso a
+       rota nova ainda não exista lá. Some sozinho quando as duas pontas estiverem na mesma
+       versão: aí a lista chega sem conteúdo e a busca acontece. */
+    const naLista = laudosRecebidos.find((l) => l.doc_id === docId);
+    if (naLista?.itens) {
+      setConteudos((c) => ({
+        ...c,
+        [docId]: { dados: naLista.dados, itens: naLista.itens, vistoriadorAssinatura: naLista.vistoriador_assinatura || null },
+      }));
+      return;
+    }
+
     setBuscandoConteudo(docId);
     try {
       const r = await apiFetch(`/api/laudos/${docId}/conteudo`, { token });
