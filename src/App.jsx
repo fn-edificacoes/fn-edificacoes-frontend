@@ -155,6 +155,10 @@ function mapClienteDaApi(c) {
     status: c.status || "Em análise", cep: c.cep || "", vistoriadorId: c.vistoriador_id || "",
     precisaCadastroEmpreendimento: !!c.precisa_cadastro_empreendimento,
     pagamento: c.pagamento || "Pendente", areaPrivativa: c.area_privativa || "",
+    /* O servidor já diz se este cadastro virou laudo. Sem isso, quem não recebe os registros
+       de "docs" (o Atendimento) não conseguia distinguir vistoria em campo de vistoria
+       entregue — e contava as duas como "Em vistoria". */
+    temLaudo: !!c.tem_laudo,
     /* Revistoria: cadastro de retorno ao mesmo imóvel. revistoriaDe aponta para o
        atendimento de origem; revistoriaSeq é a ordem (1ª, 2ª…). */
     revistoriaDe: c.revistoria_de || null,
@@ -176,6 +180,12 @@ function docDoCliente(cliente, docs = []) {
   if (!cpfLimpo) return null;
   return docs.find((d) => !d.clienteId && (d.cpf || "").replace(/\D/g, "") === cpfLimpo) || null;
 }
+/* Este cadastro já virou laudo? Quem tem os registros de "docs" responde por eles; quem não
+   tem (o Atendimento) responde pelo booleano que o servidor manda junto do cadastro. As duas
+   fontes dizem a mesma coisa — a diferença é só o que cada perfil pode receber. */
+function clienteJaTemLaudo(cliente, docs = []) {
+  return !!docDoCliente(cliente, docs) || !!cliente?.temLaudo;
+}
 /* O caminho inverso: de qual cadastro veio este registro de vistoria. */
 function clienteDoDoc(doc, clientes = []) {
   if (!doc) return null;
@@ -192,6 +202,9 @@ function clienteDoDoc(doc, clientes = []) {
 function etapaAtualCliente(cliente, docs = []) {
   const doc = docDoCliente(cliente, docs);
   if (doc) return doc.statusCliente || "Agendado";
+  /* Sem os registros em mãos (Atendimento), o detalhe do pós-vistoria não dá para saber —
+     mas dá para não mentir dizendo que a visita ainda está acontecendo. */
+  if (cliente.temLaudo) return "Vistoria realizada";
   return cliente.status || "Em análise";
 }
 /* As 4 etapas operacionais do fluxo de vistoria, na ordem em que acontecem. Diferente de
@@ -201,9 +214,8 @@ const ETAPAS_VISTORIA = ["Solicitação de vistoria", "Vistoria agendada", "Em v
 function etapaVistoriaCliente(cliente, docs = []) {
   // Documentação ART/TRT não tem vistoria — fica fora deste fluxo (vai direto pra Documentação).
   if (ehServicoDocumentacao(cliente)) return null;
-  const doc = docDoCliente(cliente, docs);
-  // Assim que existe um doc, a vistoria já foi finalizada pelo técnico e virou laudo.
-  if (doc) return "Vistoriado";
+  // Assim que existe laudo, a vistoria já foi finalizada pelo técnico.
+  if (clienteJaTemLaudo(cliente, docs)) return "Vistoriado";
   if (cliente.status === "Em vistoria") return "Em vistoria";
   if (cliente.status === "Vistoria agendada") return "Vistoria agendada";
   if (cliente.status === "Cancelado" || cliente.status === "Cancelamento solicitado") return null;
@@ -506,7 +518,9 @@ const STATUS_INTERNO_OPCOES = ["Agendado", "Em vistoria", "Laudo em elaboração
 const MODULOS_POR_PERFIL = {
   vistoriador: ["laudos"],
   documentacao: ["documentacao"],
-  atendimento: ["clientes", "qualidade", "vendas"],
+  /* Vendas saiu daqui: parceiros, cupons e comissão são assunto de quem vende e da Gerência.
+     O Atendimento cuida do cliente da vistoria — cadastro, agendamento e acompanhamento. */
+  atendimento: ["clientes", "qualidade"],
   qualidade: ["qualidade"],
   vendas: ["vendas"],
   gerencia: ["laudos", "documentacao", "gerencia", "usuarios", "clientes", "qualidade"],
@@ -2174,7 +2188,7 @@ function AppInterno({ session, onLogout }) {
   const [parceiros, setParceiros] = useState([]);
   const [parceirosCarregando, setParceirosCarregando] = useState(false);
   const carregarParceiros = async () => {
-    if (!["gerencia", "vendas", "atendimento"].includes(perfil)) return;
+    if (!["gerencia", "vendas"].includes(perfil)) return;
     setParceirosCarregando(true);
     try {
       const r = await apiFetch("/api/parceiros", { token });
@@ -2304,7 +2318,7 @@ function AppInterno({ session, onLogout }) {
   const [vales, setVales] = useState([]);
   const [valesCarregando, setValesCarregando] = useState(false);
   const carregarVales = async () => {
-    if (!["gerencia", "vendas", "atendimento"].includes(perfil)) return;
+    if (!["gerencia", "vendas"].includes(perfil)) return;
     setValesCarregando(true);
     try {
       const r = await apiFetch("/api/vales", { token });
@@ -2320,7 +2334,7 @@ function AppInterno({ session, onLogout }) {
   const [vendas, setVendas] = useState([]);
   const [vendasCarregando, setVendasCarregando] = useState(false);
   const carregarVendas = async () => {
-    if (!["gerencia", "vendas", "atendimento"].includes(perfil)) return;
+    if (!["gerencia", "vendas"].includes(perfil)) return;
     setVendasCarregando(true);
     try {
       const r = await apiFetch("/api/vendas", { token });
@@ -3106,6 +3120,7 @@ function AppInterno({ session, onLogout }) {
             solicitarExclusaoAvaliacao={solicitarExclusaoAvaliacao} manterAvaliacao={manterAvaliacao} excluirAvaliacao={excluirAvaliacao}
             clientes={clientesAtivos} clientesCarregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} preencherComCliente={preencherComCliente}
             agendarAgoraId={agendarAgoraId} setAgendarAgoraId={setAgendarAgoraId}
+            perfil={perfil}
             podeAgir={perfil === "atendimento" || perfil === "gerencia"} ehGerencia={perfil === "gerencia"} />
         )}
         {abaTop === "vendas" && (
@@ -3657,7 +3672,16 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
   // fluxo de vistoria (ART/TRT e cancelados) — ver ETAPAS_CLIENTE.
   const contagemPorEtapa = {};
   daVistoria.forEach((c) => { const et = etapaClienteCompleta(c, docs); contagemPorEtapa[et] = (contagemPorEtapa[et] || 0) + 1; });
-  const etapasComClientes = ETAPAS_CLIENTE.filter((e) => contagemPorEtapa[e]);
+  /* "Em vistoria" fica fora da faixa no Atendimento. O número ali nunca foi o de vistorias
+     acontecendo agora: o status do cadastro congela em "Em vistoria" quando o laudo nasce, e
+     quem separa o já vistoriado do que está em campo é o registro em "docs" — que o
+     Atendimento não recebe (a rota é de Gerência/Documentação/Agendamento). Sem esse dado o
+     contador só somava, e mostrava dezenas de vistorias entregues como se estivessem
+     abertas. A Gerência, que enxerga os docs, continua vendo a etapa certa. */
+  const escondeEmVistoria = perfil === "atendimento";
+  const etapasComClientes = ETAPAS_CLIENTE
+    .filter((e) => contagemPorEtapa[e])
+    .filter((e) => !(escondeEmVistoria && e === "Em vistoria"));
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -3841,7 +3865,7 @@ function LinhaDoTempo({ etapaAtual }) {
 /* Dispatcher das 3 sub-abas do setor Qualidade (mesmo padrão de "sub" já usado em AbaGerencia). */
 /* Dashboard de indicadores visível nas 3 sub-abas de Qualidade: etapa do fluxo dos
    clientes, status do bloco ART Documentações, e média das avaliações dos clientes. */
-function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [], filtroEtapa, aoTrocarEtapa }) {
+function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [], filtroEtapa, aoTrocarEtapa, mostrarArt = true, mostrarAvaliacoes = true }) {
   const porEtapa = {};
   clientes.forEach((c) => { const et = etapaVistoriaCliente(c, docs); if (et) porEtapa[et] = (porEtapa[et] || 0) + 1; });
 
@@ -3886,6 +3910,10 @@ function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [], f
             })}
           </div>
         </div>
+        {/* ART/TRT e feedback não são trabalho de quem agenda vistoria: no Atendimento a faixa
+            fica só com as etapas do fluxo de campo. Os números de ART também dependiam dos
+            registros em "docs", que esse perfil não recebe — apareciam sempre zerados. */}
+        {mostrarArt && (
         <div>
           <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>ART/TRT Documentações por status</div>
           <div style={{ display: "grid", gap: 6 }}>
@@ -3897,6 +3925,8 @@ function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [], f
             ))}
           </div>
         </div>
+        )}
+        {mostrarAvaliacoes && (
         <div>
           <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>Avaliações dos clientes</div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -3907,12 +3937,13 @@ function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [], f
             </div>
           </div>
         </div>
+        )}
       </div>
     </Card>
   );
 }
 
-function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, agendarAgoraId, setAgendarAgoraId, podeAgir = false, ehGerencia = false }) {
+function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, agendarAgoraId, setAgendarAgoraId, podeAgir = false, ehGerencia = false, perfil }) {
   const [diaParaAbrir, setDiaParaAbrir] = useState(null); // data (ISO) que o calendário da Análise deve abrir já selecionada
   // Etapa escolhida nos indicadores — filtra a lista da sub-aba aberta. Fica aqui (e não em
   // cada sub-aba) pra que o filtro continue valendo ao trocar de sub-aba.
@@ -3930,7 +3961,8 @@ function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, u
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <CardIndicadoresQualidade clientes={clientes} docs={docs} avaliacoes={avaliacoes}
-        filtroEtapa={filtroEtapa} aoTrocarEtapa={setFiltroEtapa} />
+        filtroEtapa={filtroEtapa} aoTrocarEtapa={setFiltroEtapa}
+        mostrarArt={perfil !== "atendimento"} mostrarAvaliacoes={perfil !== "atendimento"} />
       {!podeAgir && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#EAF2FB", color: AZUL_MARINHO, borderRadius: 8, padding: "8px 12px", fontSize: 12.5 }}>
           <Info size={14} /> Modo leitura — aprovar agendamento, encaminhar técnico e aprovar feedback agora é exclusivo do perfil Atendimento.
@@ -4858,7 +4890,7 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
     }
   }, [abrirAutomaticoId]);
 
-  const temDoc = (c) => !!docDoCliente(c, docs);
+  const temDoc = (c) => clienteJaTemLaudo(c, docs);
   const termo = busca.trim().toLowerCase();
   // Documentação ART/TRT não passa por vistoria — não aparece nesta aba. O filtroEtapa vem
   // do clique nos indicadores acima.
