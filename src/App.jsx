@@ -47,6 +47,11 @@ const TIMEOUT_API_MS = 60000;
    quando o serviço estava suspenso no Render, a tela dizia "verifique sua internet" e todo
    mundo foi procurar defeito no lugar errado — inclusive porque a página de erro do Render
    não manda cabeçalho de CORS e o navegador transforma o 503 num "Failed to fetch" seco. */
+/* A senha provisória que o sistema cria para quem ainda não tem acesso ao portal. Precisa
+   bater com a do backend (ver db.js): quando as duas divergiram, o cliente entrava e ficava
+   preso na troca obrigatória, porque a tela mandava uma senha atual que não era a dele. */
+const SENHA_PROVISORIA_PADRAO = "12345678";
+
 const MSG_API_FORA = "O sistema está fora do ar no momento. Não é problema no seu acesso nem na sua senha — tente de novo em alguns minutos.";
 
 /* ---- Insistir sozinho antes de dizer que o sistema caiu ----
@@ -1591,7 +1596,7 @@ function TelaLogin({ onLogin, onVoltar }) {
            liberado com a senha padrão — só falta ele saber disso, já que não existe mais uma
            tela separada de "primeiro acesso" pedindo pra criar a dele. */}
         <p style={{ textAlign: "center", color: "#8593a8", fontSize: 12, margin: "14px 0 0" }}>
-          Primeiro acesso? Use o e-mail cadastrado e a senha <strong>12345678</strong> — você troca assim que entrar.
+          Primeiro acesso? Use o e-mail cadastrado e a senha <strong>{SENHA_PROVISORIA_PADRAO}</strong> — você troca assim que entrar.
         </p>
         <div style={{ display: "flex", justifyContent: "center", marginTop: 6, fontSize: 12.5 }}>
           <a href="https://wa.me/5581983061305" target="_blank" rel="noopener noreferrer" style={{ color: "#8593a8", textDecoration: "none" }}>
@@ -11328,12 +11333,12 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
   const [toast, setToast] = useState("");
   const notify = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
 
-  /* Cliente já cadastrado ganhou a senha padrão "12345678", provisória — o portal trava numa
-     troca obrigatória antes de mostrar qualquer coisa. A senha atual já é sabida (é a
-     padrão), então só pede a nova, sem repetir a "12345678" pro cliente digitar. */
+  /* Cliente já cadastrado ganhou a senha padrão, provisória — o portal trava numa troca
+     obrigatória antes de mostrar qualquer coisa. A senha atual já é sabida (é a padrão), então
+     só pede a nova, sem o cliente digitar a antiga. */
   const trocarSenhaObrigatoria = async (senhaNova) => {
     try {
-      await apiFetch("/api/auth/trocar-senha", { method: "POST", token: session.token, body: { senhaAtual: "12345678", senhaNova } });
+      await apiFetch("/api/auth/trocar-senha", { method: "POST", token: session.token, body: { senhaAtual: SENHA_PROVISORIA_PADRAO, senhaNova } });
       onSessaoAtualizada({ ...session, usuario: { ...session.usuario, senhaProvisoria: false } });
       return true;
     } catch (e) { notify(e.message); return false; }
@@ -11642,9 +11647,12 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
   );
 }
 
-/* Bloqueia o portal até quem entrou com a senha padrão ("123456", do Primeiro acesso) trocar
-   por uma senha só dele — sem botão de fechar/cancelar, de propósito. A senha atual já é
-   sabida (a própria "123456"), então só pede a nova. */
+/* Bloqueia o portal até quem entrou com a senha padrão trocar por uma senha só dele — sem
+   botão de fechar/cancelar, de propósito. A senha atual já é sabida (é a própria padrão),
+   então só pede a nova.
+   O valor vem de SENHA_PROVISORIA_PADRAO: já existiram duas padrões diferentes no sistema, e
+   a tela ficou pedindo a troca mandando a senha errada — quem tinha a antiga não conseguia
+   sair deste modal. Um lugar só evita a divergência voltar. */
 function ModalTrocarSenhaObrigatoria({ onTrocar }) {
   const [senhaNova, setSenhaNova] = useState("");
   const [confirmacao, setConfirmacao] = useState("");
@@ -11654,7 +11662,7 @@ function ModalTrocarSenhaObrigatoria({ onTrocar }) {
   const salvar = async () => {
     setErro("");
     if (senhaNova.length < 8) { setErro("A nova senha precisa ter pelo menos 8 caracteres."); return; }
-    if (senhaNova === "123456") { setErro("Escolha uma senha diferente da temporária."); return; }
+    if (senhaNova === SENHA_PROVISORIA_PADRAO) { setErro("Escolha uma senha diferente da temporária."); return; }
     if (senhaNova !== confirmacao) { setErro("As senhas não conferem."); return; }
     setSalvando(true);
     const ok = await onTrocar(senhaNova);
