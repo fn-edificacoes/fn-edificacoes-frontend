@@ -138,8 +138,37 @@ O app não usa router; as páginas públicas são interceptadas no começo de `A
 
 - `?portfolio=<id>` — catálogo de um parceiro
 - `?pagina=fn-clube` / `?pagina=fn-home` — as áreas de benefícios
-- `?criar-senha=<token>` — link de e-mail do primeiro acesso do cliente
+- `?pagina=privacidade` — política de privacidade (`PaginaPrivacidade`)
+- `?criar-senha=<token>` — link de e-mail do primeiro acesso ou da senha esquecida
 - `?parceiro-cadastro=1` — link privado de cadastro de parceiro, enviado por WhatsApp
+
+## Entrar no sistema
+
+**Não existe senha padrão.** Ela já foi `12345678`, escrita na própria tela de login, e 38
+das 78 contas ainda estavam com ela — o e-mail de um cliente bastava para abrir o laudo do
+imóvel dele. Hoje a senha provisória nasce aleatória e ninguém a conhece.
+
+Quem precisa entrar usa **"Receba um link por e-mail"** (`PrimeiroAcessoPorEmail`), que
+serve aos dois casos — primeiro acesso e senha esquecida — para cliente, parceiro e equipe.
+A resposta é sempre a mesma frase, exista ou não o e-mail: senão a tela vira uma forma de
+descobrir quem é cliente da FN.
+
+Um 401 vindo do servidor encerra a sessão e volta para o login com o motivo à vista (ver
+`ligarSessaoAoApi`, no topo do arquivo). Um 403 não faz isso de propósito — quase sempre é
+falta de permissão para uma tela, e deslogar por isso seria pior.
+
+## Fotos do laudo vêm como URL, não como base64
+
+O backend guarda as fotos no Drive e devolve uma **URL assinada de uma hora** no lugar da
+imagem. Para as telas nada muda: continua sendo uma string no `src`. Duas consequências
+para quem mexe aqui:
+
+- `redimensionar()` devolve a string intacta quando ela não é `data:` — não dá para passar
+  uma imagem de outra origem por um canvas.
+- **A lista de laudos não traz o conteúdo.** `AbaLaudosRealizados` busca
+  `/api/laudos/:docId/conteudo` quando alguém abre uma linha. Com o conteúdo na lista, uma
+  abertura de tela baixava 62 MB — foi o que consumiu a banda mensal da hospedagem e
+  suspendeu o serviço.
 
 ## Convenções
 
