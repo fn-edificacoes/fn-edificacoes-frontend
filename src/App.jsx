@@ -7,7 +7,7 @@ import {
   AlertTriangle, CircleAlert, Info, Copy, Sparkles, Loader2,
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
-  ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History
+  ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download
 } from "lucide-react";
 
 /* ============================================================
@@ -669,10 +669,22 @@ const novoCadastroCliente = () => ({
   construtora: "", empreendimento: "", blocoTorre: "", endereco: "", cep: "",
   servico: SERVICO_OPCOES[0], dataDesejada: "", horarioDesejado: "", areaPrivativa: "", observacoes: "",
   atendido: false,
+  /* O aceite da política é gravado no cadastro com data, hora e versão do texto (ver
+     VERSAO_POLITICA_PRIVACIDADE no backend). Sem esse registro não há como demonstrar a base
+     legal do tratamento depois — que é exatamente o que a LGPD cobra de quem coleta CPF,
+     telefone, endereço e fotos do interior da casa das pessoas. */
+  aceiteTermos: false,
   criadoEm: new Date().toISOString(),
 });
 
+/* A versão precisa ser a mesma do backend: é ela que diz a que texto a pessoa disse sim. */
+const VERSAO_POLITICA_PRIVACIDADE = "2026-08";
+
 async function redimensionar(dataUrl, max = 1024) {
+  /* Foto que já está no Drive chega como URL, não como base64 (ver laudo-fotos.js no
+     backend). Passar por aqui não faria sentido — só sujaria o canvas com uma imagem de
+     outra origem e devolveria a mesma coisa depois de um erro. */
+  if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:")) return dataUrl;
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
@@ -2055,6 +2067,7 @@ export default function App() {
   const paginaFn = new URLSearchParams(window.location.search).get("pagina");
   if (paginaFn === "fn-clube") return <PaginaBeneficiosFn tipo="servico" />;
   if (paginaFn === "fn-home") return <PaginaBeneficiosFn tipo="produto" />;
+  if (paginaFn === "privacidade") return <PaginaPrivacidade />;
 
   // Link de criação de senha do portal do cliente (?criar-senha=<token>), vindo do e-mail de
   // "primeiro acesso" — também funciona sem sessão, e tem prioridade sobre ela.
@@ -2977,6 +2990,9 @@ function AppInterno({ session, onLogout }) {
       } else {
         notify("Laudo enviado para a gerência ✓");
       }
+      /* O laudo chegou inteiro: a cópia de socorro perdeu a razão de existir. */
+      apiFetch(`/api/vistoria/${clienteAtualId}/rascunho`, { method: "DELETE", token }).catch(() => {});
+      setRascunhoServidorEm(null);
       /* A trava agora vem do servidor: recarregar a lista é o que a aplica na tela. */
       await carregarMeusLaudos();
       carregarDocs();
@@ -3025,6 +3041,57 @@ function AppInterno({ session, onLogout }) {
         ? "Sem espaço no celular. Exclua rascunhos antigos em \"Abrir\" e tente de novo."
         : "Não foi possível salvar o rascunho.");
     }
+  };
+
+  /* ---- A cópia que não mora no celular ----
+     O IndexedDB resolveu a aba descartada, mas não resolve celular perdido, quebrado ou
+     trocado no meio do dia — e resolve menos ainda o caso que de fato aconteceu: a vistoria
+     de 03/08 que nunca chegou ao servidor e não tinha cópia em lugar nenhum.
+     Sobe a cada 45 segundos de silêncio (e não a cada 4, como a cópia local: aqui vão as
+     fotos pela rede, muitas vezes de dentro de um apartamento sem sinal). Falhar é normal e
+     silencioso — a cópia local continua sendo a primeira linha. */
+  const rascunhoNoServidor = useRef({ enviando: false, ultimo: "" });
+  const [rascunhoServidorEm, setRascunhoServidorEm] = useState(null);
+  useEffect(() => {
+    if (!clienteAtualId) return;
+    if (itens.length === 0 && !dados.contratante?.nome) return;
+    const t = setTimeout(async () => {
+      if (rascunhoNoServidor.current.enviando) return;
+      const assinatura = `${clienteAtualId}|${itens.length}|${JSON.stringify(dados).length}`;
+      rascunhoNoServidor.current.enviando = true;
+      try {
+        await apiFetch(`/api/vistoria/${clienteAtualId}/rascunho`, { method: "PUT", token, body: { dados, itens } });
+        rascunhoNoServidor.current.ultimo = assinatura;
+        setRascunhoServidorEm(new Date().toISOString());
+      } catch { /* sem rede, ou rota antiga: a cópia local já guardou */ }
+      rascunhoNoServidor.current.enviando = false;
+    }, 45000);
+    return () => clearTimeout(t);
+  }, [dados, itens, clienteAtualId]);
+
+  /* Ao abrir um cadastro com a tela ainda em branco, oferece o que estiver guardado no
+     servidor. Não sobrescreve nada sozinho: quem decide é o técnico. */
+  const [rascunhoDoServidor, setRascunhoDoServidor] = useState(null);
+  useEffect(() => {
+    setRascunhoDoServidor(null);
+    if (!clienteAtualId) return;
+    if (itens.length > 0) return;
+    let cancelado = false;
+    (async () => {
+      try {
+        const r = await apiFetch(`/api/vistoria/${clienteAtualId}/rascunho`, { token });
+        if (!cancelado && r.rascunho && (r.rascunho.itens || []).length > 0) setRascunhoDoServidor(r.rascunho);
+      } catch { /* rota antiga ou sem rascunho: segue sem oferecer nada */ }
+    })();
+    return () => { cancelado = true; };
+  }, [clienteAtualId]);
+
+  const recuperarDoServidor = () => {
+    if (!rascunhoDoServidor) return;
+    setDados(rascunhoDoServidor.dados);
+    setItens((rascunhoDoServidor.itens || []).map((i) => ({ ...i, id: idCounter++, fotos: i.fotos || [] })));
+    setRascunhoDoServidor(null);
+    notify("Rascunho recuperado do servidor ✓");
   };
 
   /* Salvamento automático: o técnico não precisa lembrar de apertar "Salvar". Grava
@@ -3269,6 +3336,28 @@ function AppInterno({ session, onLogout }) {
       <main style={{ maxWidth: 1080, margin: "0 auto", padding: "22px 18px 80px" }}>
         {abaTop === "laudos" && <NotificacoesClientes clientes={clientesAtivos} preencherComCliente={preencherComCliente} style={{ marginBottom: 18 }} />}
         {abaTop === "documentacao" && <FaixaIndicadoresGerais docs={docs} clientes={clientesAtivos} modo="art" style={{ marginBottom: 18 }} />}
+
+        {/* A vistoria que existe no servidor e não existe nesta tela. Aparece só quando o
+            editor está vazio — recuperar nunca passa por cima de trabalho em andamento. */}
+        {abaTop === "laudos" && aba === "itens" && rascunhoDoServidor && (
+          <div style={{ background: "#FFF4E5", border: "1px solid #F0C48A", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+            <div style={{ fontWeight: 700, color: "#B26A00", fontSize: 14, marginBottom: 4 }}>
+              Existe uma vistoria começada para este cliente
+            </div>
+            <div style={{ fontSize: 13, color: "#7a5320", marginBottom: 10 }}>
+              {(rascunhoDoServidor.itens || []).length} item(ns), guardados no servidor em{" "}
+              {fmtDataHora(rascunhoDoServidor.atualizadoEm)}. Recuperar traz tudo de volta, inclusive as fotos.
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn-solid" style={{ width: "auto", padding: "7px 12px" }} onClick={recuperarDoServidor}>
+                <Undo2 size={14} /> Recuperar
+              </button>
+              <button className="btn-ghost" style={{ width: "auto", padding: "7px 12px" }} onClick={() => setRascunhoDoServidor(null)}>
+                Começar do zero
+              </button>
+            </div>
+          </div>
+        )}
 
         {abaTop === "laudos" && aba === "itens" && (
           <AbaItens itens={itens} setItens={setItens} updItem={updItem} escolherPatologia={escolherPatologia}
@@ -6384,6 +6473,18 @@ function BarraStatus({ titulo, contagens }) {
   );
 }
 const fmtReal = (v) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+/* Datas curtas para as listas administrativas. Aceita tanto ISO com hora quanto "2026-08-24"
+   solto — o segundo caso vira Date em UTC e, sem o T12:00, cairia no dia anterior no Brasil. */
+const fmtData = (v) => {
+  if (!v) return "—";
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? new Date(`${v}T12:00:00`) : new Date(v);
+  return isNaN(d) ? "—" : d.toLocaleDateString("pt-BR");
+};
+const fmtDataHora = (v) => {
+  if (!v) return "—";
+  const d = new Date(v);
+  return isNaN(d) ? "—" : d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+};
 const fmtPct = (v, base) => (base > 0 ? `${((Number(v) || 0) / base * 100).toFixed(1).replace(".", ",")}%` : "—");
 const SERVICO_VISTORIA = "Vistoria de entrega de chaves";
 /* Vistoria e revistoria contam junto em tudo que mede trabalho de campo: as duas mandam um
@@ -7892,7 +7993,280 @@ function AbaPerfilCliente({ clientes = [], token, notify, atualizarCliente, rese
   );
 }
 
-function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendimento, excluirCliente, empreendimentosRef = [], carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco }) {
+/* ---- Gerência · a entrega do laudo por e-mail ----
+   Este cartão existe por um motivo específico: entre 05/08 e 26/08 o sistema marcou 40 laudos
+   como "enviado por e-mail" e nenhum saiu. A falha do SMTP morria num log que ninguém lê, e a
+   tela dizia que estava tudo certo. Agora quem está na Gerência vê o que saiu, o que falhou e
+   com qual erro — e tem o botão para mandar de novo. */
+function CardEntregaEmails({ token, notify }) {
+  const [dados, setDados] = useState(null);
+  const [carregando, setCarregando] = useState(false);
+  const [testando, setTestando] = useState(false);
+  const [reenviando, setReenviando] = useState(false);
+
+  const carregar = async () => {
+    setCarregando(true);
+    try { setDados(await apiFetch("/api/admin/emails", { token })); }
+    catch (e) { notify(e.message); }
+    setCarregando(false);
+  };
+  useEffect(() => { carregar(); }, []);
+
+  const testar = async () => {
+    setTestando(true);
+    try {
+      const r = await apiFetch("/api/admin/emails/testar", { method: "POST", token });
+      notify(r.ok ? "Servidor de e-mail respondendo \u2713" : `Servidor de e-mail fora: ${r.erro}`);
+      carregar();
+    } catch (e) { notify(e.message); }
+    setTestando(false);
+  };
+
+  const reenviarTodos = async () => {
+    setReenviando(true);
+    try {
+      const r = await apiFetch("/api/admin/emails/reenviar-laudos", { method: "POST", token });
+      notify(`${r.enviados} de ${r.total} laudo(s) enviados.`);
+      carregar();
+    } catch (e) { notify(e.message); }
+    setReenviando(false);
+  };
+
+  const envios = dados?.envios || [];
+  const semEmail = dados?.laudosSemEmail || [];
+  const ultimoErro = envios.find((e) => !e.ok);
+  const ultimoOk = envios.find((e) => e.ok);
+
+  return (
+    <Card icon={Mail} titulo="Entrega de e-mails">
+      {carregando && !dados && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+
+      {semEmail.length > 0 && (
+        <div style={{ background: "#FCEAEA", border: "1px solid #F1B9B9", borderRadius: 10, padding: "12px 14px", marginBottom: 14 }}>
+          <div style={{ fontWeight: 700, color: "#C62828", fontSize: 14.5, marginBottom: 4 }}>
+            {semEmail.length} laudo(s) aprovado(s) que o cliente nunca recebeu
+          </div>
+          <div style={{ fontSize: 13, color: "#8a3a3a", marginBottom: 10 }}>
+            O sistema tenta de novo sozinho a cada dez minutos. O botão abaixo tenta todos agora.
+          </div>
+          <div style={{ display: "grid", gap: 4, marginBottom: 10 }}>
+            {semEmail.slice(0, 6).map((l) => (
+              <div key={l.doc_id} style={{ fontSize: 12.5, color: "#6d3030" }}>
+                {l.cliente} {l.empreendimento ? `· ${l.empreendimento}` : ""}
+              </div>
+            ))}
+            {semEmail.length > 6 && <div style={{ fontSize: 12.5, color: "#8a3a3a" }}>e mais {semEmail.length - 6}…</div>}
+          </div>
+          <button className="btn-solid" style={{ width: "auto", padding: "8px 14px" }} onClick={reenviarTodos} disabled={reenviando}>
+            {reenviando ? <Loader2 size={14} className="spin" /> : <Send size={14} />} Enviar todos agora
+          </button>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+        <button className="btn-ghost" style={{ width: "auto", padding: "7px 12px" }} onClick={testar} disabled={testando}>
+          {testando ? <Loader2 size={14} className="spin" /> : <RefreshCcw size={14} />} Testar servidor de e-mail
+        </button>
+        <button className="btn-ghost" style={{ width: "auto", padding: "7px 12px" }} onClick={carregar}>
+          <RefreshCcw size={14} /> Atualizar
+        </button>
+      </div>
+
+      {dados && envios.length === 0 && (
+        <p style={{ color: "#8593a8", fontSize: 13.5 }}>Nenhum envio registrado ainda.</p>
+      )}
+      {ultimoErro && (
+        <p style={{ fontSize: 12.5, color: "#C62828", margin: "0 0 8px" }}>
+          Último erro: {ultimoErro.erro}
+        </p>
+      )}
+      {ultimoOk && (
+        <p style={{ fontSize: 12.5, color: "#2E7D32", margin: "0 0 8px" }}>
+          Último envio bem-sucedido: {fmtDataHora(ultimoOk.criado_em)} para {ultimoOk.para}
+        </p>
+      )}
+      {envios.length > 0 && (
+        <div style={{ maxHeight: 240, overflowY: "auto", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+            <tbody>
+              {envios.map((e, i) => (
+                <tr key={i} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                  <td style={{ padding: "6px 9px", whiteSpace: "nowrap", color: "#8593a8" }}>{fmtDataHora(e.criado_em)}</td>
+                  <td style={{ padding: "6px 9px" }}>{e.tipo}</td>
+                  <td style={{ padding: "6px 9px", wordBreak: "break-all" }}>{e.para}</td>
+                  <td style={{ padding: "6px 9px", color: e.ok ? "#2E7D32" : "#C62828", fontWeight: 600 }}>
+                    {e.ok ? "enviado" : (e.erro || "falhou")}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/* ---- Gerência · vistorias com data passada e nenhum laudo ----
+   Sete casos ficaram assim em agosto, e só apareceram porque alguém foi procurar. Um deles
+   era uma vistoria que o técnico fez e que nunca chegou ao servidor: o rascunho vivia só no
+   celular dele. Ninguém era avisado de nada. */
+function CardVistoriasSemLaudo({ token }) {
+  const [lista, setLista] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try { setLista((await apiFetch("/api/vistorias-atrasadas?dias=2", { token })).vistorias || []); }
+      catch { /* silencioso: é um aviso, não pode derrubar a tela */ }
+      setCarregando(false);
+    })();
+  }, []);
+
+  if (carregando || lista.length === 0) return null;
+
+  return (
+    <Card icon={AlertTriangle} titulo={`Vistorias sem laudo (${lista.length})`}>
+      <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 12px" }}>
+        A data da vistoria já passou e nenhum laudo chegou ao servidor. Onde aparece "rascunho no
+        servidor", o técnico começou o laudo e não enviou — dá para cobrar sabendo que o trabalho existe.
+      </p>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <tbody>
+          {lista.map((v) => (
+            <tr key={v.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+              <td style={{ padding: "8px 9px", whiteSpace: "nowrap", color: "#C62828", fontWeight: 600 }}>{fmtData(v.data_desejada)}</td>
+              <td style={{ padding: "8px 9px" }}>
+                {v.nome}
+                <div style={{ fontSize: 11.5, color: "#8593a8" }}>{[v.empreendimento, v.bloco_torre].filter(Boolean).join(" · ")}</div>
+              </td>
+              <td style={{ padding: "8px 9px", color: "#65758b" }}>{v.vistoriador_nome || "sem técnico"}</td>
+              <td style={{ padding: "8px 9px", textAlign: "right" }}>
+                {v.tem_rascunho
+                  ? <span style={{ fontSize: 11.5, background: "#FFF4E5", color: "#B26A00", padding: "3px 8px", borderRadius: 20 }}>rascunho no servidor</span>
+                  : <span style={{ fontSize: 11.5, color: "#8593a8" }}>nada enviado</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
+  );
+}
+
+/* ---- Gerência · pedidos de exclusão de dados (LGPD) ----
+   O titular tem direito de pedir a exclusão, e a FN tem o direito de recusar enquanto o laudo
+   tiver valor legal — mas a recusa precisa ser dita, por escrito, e ficar guardada. É isso que
+   este cartão faz existir. */
+function CardPedidosExclusao({ token, notify }) {
+  const [pedidos, setPedidos] = useState([]);
+  const [resposta, setResposta] = useState({});
+
+  const carregar = async () => {
+    try { setPedidos((await apiFetch("/api/pedidos-exclusao", { token })).pedidos || []); }
+    catch { /* aviso, não pode derrubar a tela */ }
+  };
+  useEffect(() => { carregar(); }, []);
+
+  const decidir = async (id, status) => {
+    try {
+      await apiFetch(`/api/pedidos-exclusao/${id}`, { method: "PATCH", token, body: { status, resposta: resposta[id] || "" } });
+      notify(status === "atendido" ? "Pedido marcado como atendido \u2713" : "Pedido respondido \u2713");
+      carregar();
+    } catch (e) { notify(e.message); }
+  };
+
+  const abertos = pedidos.filter((p) => p.status === "aberto");
+  if (pedidos.length === 0) return null;
+
+  return (
+    <Card icon={Trash2} titulo={`Pedidos de exclusão de dados${abertos.length ? ` (${abertos.length} aberto(s))` : ""}`}>
+      <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 12px" }}>
+        Prazo de resposta: 15 dias. Recusar exige escrever o motivo — é o que a lei cobra depois.
+      </p>
+      <div style={{ display: "grid", gap: 10 }}>
+        {pedidos.slice(0, 20).map((p) => (
+          <div key={p.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "11px 13px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+              <div>
+                <strong style={{ fontSize: 14, color: AZUL_MARINHO }}>{p.nome || "(sem nome)"}</strong>
+                <div style={{ fontSize: 12.5, color: "#8593a8" }}>{p.email} · {fmtDataHora(p.criado_em)}</div>
+              </div>
+              <span style={{ fontSize: 11.5, padding: "3px 9px", borderRadius: 20, alignSelf: "flex-start",
+                background: p.status === "aberto" ? "#FFF4E5" : p.status === "atendido" ? "#E6F4EA" : "#F1F4F8",
+                color: p.status === "aberto" ? "#B26A00" : p.status === "atendido" ? "#2E7D32" : "#65758b" }}>
+                {p.status}
+              </span>
+            </div>
+            {p.motivo && <p style={{ fontSize: 13, color: "#4a5a70", margin: "8px 0 0" }}>{p.motivo}</p>}
+            {p.resposta && <p style={{ fontSize: 12.5, color: "#65758b", margin: "6px 0 0" }}><strong>Resposta:</strong> {p.resposta}</p>}
+            {p.status === "aberto" && (
+              <div style={{ marginTop: 10 }}>
+                <input style={{ ...inp, marginBottom: 8 }} placeholder="O que foi feito (obrigatório para recusar)"
+                  value={resposta[p.id] || ""} onChange={(e) => setResposta((r) => ({ ...r, [p.id]: e.target.value }))} />
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button className="btn-solid" style={{ width: "auto", padding: "7px 12px" }} onClick={() => decidir(p.id, "atendido")}>
+                    <Check size={14} /> Dados excluídos
+                  </button>
+                  <button className="btn-ghost" style={{ width: "auto", padding: "7px 12px" }} onClick={() => decidir(p.id, "recusado")}>
+                    <X size={14} /> Não é possível excluir
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+/* ---- Gerência · backup ----
+   Não havia exportação própria nenhuma: o backup do provedor era a única linha de defesa, e
+   fica fora do nosso alcance se a conta for suspensa — o que já aconteceu. Agora sai uma cópia
+   por semana para o Drive da FN, e dá para forçar uma na hora. */
+function CardBackup({ token, notify }) {
+  const [dados, setDados] = useState(null);
+  const [gerando, setGerando] = useState(false);
+
+  const carregar = async () => {
+    try { setDados(await apiFetch("/api/admin/backups", { token })); }
+    catch { /* aviso, não derruba a tela */ }
+  };
+  useEffect(() => { carregar(); }, []);
+
+  const gerar = async () => {
+    setGerando(true);
+    try {
+      const r = await apiFetch("/api/admin/backups", { method: "POST", token });
+      notify(`Backup gravado no Drive: ${r.arquivo}`);
+      carregar();
+    } catch (e) { notify(e.message); }
+    setGerando(false);
+  };
+
+  const ultimo = dados?.backups?.[0];
+  return (
+    <Card icon={Download} titulo="Backup do sistema">
+      <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
+        Uma cópia por semana, em JSON, na pasta <strong>{dados?.pasta || "00_BACKUP"}</strong> do Drive da FN.
+        Vai o conteúdo do trabalho — sem senha e sem foto, que já está no Drive.
+      </p>
+      {ultimo ? (
+        <p style={{ fontSize: 13, color: "#2E7D32", margin: "0 0 10px" }}>
+          Último: {ultimo.arquivo} · {fmtDataHora(ultimo.criado_em)} · {(Number(ultimo.tamanho_bytes || 0) / 1048576).toFixed(1)} MB · {ultimo.linhas} linhas
+        </p>
+      ) : (
+        <p style={{ fontSize: 13, color: "#B26A00", margin: "0 0 10px" }}>Nenhum backup gerado ainda.</p>
+      )}
+      <button className="btn-ghost" style={{ width: "auto", padding: "7px 12px" }} onClick={gerar} disabled={gerando}>
+        {gerando ? <Loader2 size={14} className="spin" /> : <Download size={14} />} Gerar backup agora
+      </button>
+    </Card>
+  );
+}
+
+function AbaGerenciaVisaoGeral({ token, docs, clientes, updCliente, padronizarEmpreendimento, excluirCliente, empreendimentosRef = [], carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco }) {
   const porVistoria = docs.reduce((acc, d) => { acc[d.vistoria] = (acc[d.vistoria] || 0) + 1; return acc; }, {});
   const porStatusProducao = docs.reduce((acc, d) => { acc[d.statusProducao] = (acc[d.statusProducao] || 0) + 1; return acc; }, {});
   const totalRegistrosDocs = docs.length;
@@ -7908,6 +8282,9 @@ function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendi
   return (
     <div style={{ display: "grid", gap: 16 }}>
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando indicadores…</p>}
+
+      <CardEntregaEmails token={token} notify={notify} />
+      <CardVistoriasSemLaudo token={token} />
 
       <CardPainelLaudos painel={painel} carregando={painelCarregando} recarregar={carregarPainel} usuarios={usuarios} notify={notify} />
       <CardLaudosPendentes laudosPendentes={laudosPendentes} carregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} editarLaudo={editarLaudo} reenviarDrive={reenviarDrive} marcarEmAnalise={marcarEmAnalise}
@@ -7966,6 +8343,9 @@ function AbaGerenciaVisaoGeral({ docs, clientes, updCliente, padronizarEmpreendi
           </table>
         </Card>
       )}
+
+      <CardPedidosExclusao token={token} notify={notify} />
+      <CardBackup token={token} notify={notify} />
 
       <CardAssinaturaGerencia assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify} />
     </div>
@@ -9143,7 +9523,7 @@ function AbaGerencia({ sub = "visao-geral", token, perfil, decidirComissaoItem, 
       adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento} notify={notify} usuarios={usuarios} />;
   }
   return (
-    <AbaGerenciaVisaoGeral docs={docs} clientes={clientes} updCliente={updCliente} carregando={carregando}
+    <AbaGerenciaVisaoGeral token={token} docs={docs} clientes={clientes} updCliente={updCliente} carregando={carregando}
       padronizarEmpreendimento={padronizarEmpreendimento} excluirCliente={excluirCliente} empreendimentosRef={empreendimentosRef} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
       usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} salvarPerfilTecnico={salvarPerfilTecnico} usuarioAtualId={usuarioAtualId}
       avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
@@ -9805,6 +10185,7 @@ function AbaCliente({ notify, onLogin, onIrParaLogin }) {
     if (form.cpf && !cpfValido(form.cpf)) { notify("CPF inválido — confira os números digitados"); return; }
     if (!form.senha.trim() || form.senha.length < 6) { notify("Crie uma senha de no mínimo 6 caracteres para acessar seu portal"); return; }
     if (!form.email.trim()) { notify("Informe um e-mail para criar a senha do portal"); return; }
+    if (!form.aceiteTermos) { notify("Marque o aceite da política de privacidade para continuar"); return; }
     const construtoraFinal = construtoraSel === OUTROS ? construtoraOutros.trim() : construtoraSel;
     const empreendimentoFinal = empreendimentoSel === OUTROS ? empreendimentoOutros.trim() : empreendimentoSel;
     const precisaCadastroEmpreendimento = construtoraSel === OUTROS || empreendimentoSel === OUTROS;
@@ -9812,7 +10193,11 @@ function AbaCliente({ notify, onLogin, onIrParaLogin }) {
     try {
       const r = await apiFetch("/api/clientes", {
         method: "POST",
-        body: { ...form, instagram: normalizarInstagram(form.instagram), construtora: construtoraFinal.toUpperCase(), empreendimento: empreendimentoFinal.toUpperCase(), precisaCadastroEmpreendimento },
+        body: {
+          ...form, instagram: normalizarInstagram(form.instagram),
+          construtora: construtoraFinal.toUpperCase(), empreendimento: empreendimentoFinal.toUpperCase(),
+          precisaCadastroEmpreendimento, aceiteVersao: VERSAO_POLITICA_PRIVACIDADE,
+        },
       });
       setCadastroRealizado(form.servico);
       setForm(novoCadastroCliente());
@@ -9997,6 +10382,17 @@ function AbaCliente({ notify, onLogin, onIrParaLogin }) {
           )}
         </Grid>
         <Area label="Observações (opcional)" value={form.observacoes} onChange={(v) => setFMaiusc("observacoes", v)} rows={2} placeholder="EX.: MELHOR HORÁRIO PARA CONTATO, DETALHES DO IMÓVEL..." />
+
+        <label style={{ display: "flex", gap: 9, alignItems: "flex-start", marginTop: 14, fontSize: 13, color: "#4a5a70", cursor: "pointer" }}>
+          <input type="checkbox" checked={form.aceiteTermos} onChange={(e) => setF("aceiteTermos", e.target.checked)}
+            style={{ marginTop: 2, width: 16, height: 16, flexShrink: 0 }} />
+          <span>
+            Autorizo a FN Edificações a usar meus dados para prestar o serviço contratado e falar comigo sobre ele.
+            Li a <a href="?pagina=privacidade" target="_blank" rel="noopener noreferrer" style={{ color: AZUL_MEDIO }}>política de privacidade</a>,
+            que explica o que é guardado, por quanto tempo e como pedir a exclusão.
+          </span>
+        </label>
+
         <button className="btn-solid" style={{ marginTop: 12 }} onClick={enviar} disabled={enviando}>
           {enviando ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} Enviar cadastro
         </button>
@@ -10510,6 +10906,116 @@ function PaginaPortfolioParceiro({ parceiroId }) {
           {toast}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ---- Página pública: política de privacidade (?pagina=privacidade) ----
+   Existe porque o cadastro pedia CPF, telefone, endereço e depois fotos do interior do
+   imóvel sem que houvesse, em lugar nenhum, o que era guardado, por quanto tempo e como
+   sair. Escrita para ser lida por quem contrata a vistoria, não por advogado: cada linha
+   diz uma coisa concreta que o sistema realmente faz.
+   Ao mudar este texto, mude junto VERSAO_POLITICA_PRIVACIDADE aqui e no backend — é a
+   versão que fica gravada no cadastro de quem aceitou. */
+function PaginaPrivacidade() {
+  const secao = { margin: "26px 0 0" };
+  const h2 = { color: AZUL_MARINHO, fontSize: 17, margin: "0 0 8px" };
+  const texto = { fontSize: 14, lineHeight: 1.65, color: "#4a5a70", margin: "0 0 10px" };
+
+  return (
+    <div style={{ minHeight: "100vh", background: CINZA_CLARO, fontFamily: "'Inter', system-ui, sans-serif" }}>
+      <header style={{ background: AZUL_MARINHO, padding: "16px 18px" }}>
+        <div style={{ maxWidth: 760, margin: "0 auto", display: "flex", alignItems: "center", gap: 12 }}>
+          <img src={LOGO_URL} alt="FN Edificações" style={{ height: 34 }} />
+          <div style={{ color: "#fff", fontWeight: 700, fontSize: 15 }}>Política de Privacidade</div>
+        </div>
+      </header>
+
+      <main style={{ maxWidth: 760, margin: "0 auto", padding: "24px 18px 80px" }}>
+        <div style={{ background: "#fff", borderRadius: 14, padding: "26px 24px", boxShadow: "0 4px 16px rgba(18,51,91,.07)" }}>
+          <p style={{ ...texto, fontSize: 13, color: "#8593a8" }}>
+            Versão {VERSAO_POLITICA_PRIVACIDADE} · FN Edificações · sistema.fnedificacoes.com.br
+          </p>
+
+          <div style={secao}>
+            <h2 style={h2}>O que a gente guarda</h2>
+            <p style={texto}>
+              Nome, CPF, telefone, e-mail, endereço do imóvel e os dados do serviço contratado.
+              Na vistoria, também as fotos do imóvel que entram no laudo e, na entrega de chaves,
+              uma foto sua com o vistoriador — que é o registro de que a vistoria aconteceu com
+              você presente. Na revistoria essa foto não é obrigatória.
+            </p>
+          </div>
+
+          <div style={secao}>
+            <h2 style={h2}>Para que serve</h2>
+            <p style={texto}>
+              Para prestar o serviço que você contratou: agendar, fazer a vistoria, emitir o laudo
+              ou a documentação e entregar tudo a você. O laudo é documento técnico com
+              responsabilidade profissional registrada — por isso ele não é apagado quando dá
+              vontade: ele é a prova do que foi encontrado no imóvel, e serve tanto a você quanto
+              a nós.
+            </p>
+          </div>
+
+          <div style={secao}>
+            <h2 style={h2}>Com quem é compartilhado</h2>
+            <p style={texto}>
+              Com a equipe da FN que trabalha no seu atendimento, e com o Google Drive, onde os
+              arquivos do seu laudo ficam guardados. Nenhum arquivo do Drive é público: o download
+              passa pelo nosso sistema, com link temporário. Não vendemos, não cedemos e não
+              trocamos dados de cliente com ninguém.
+            </p>
+            <p style={texto}>
+              Se você usar o FN Clube ou o FN Home e pedir um orçamento a um parceiro, seu nome e
+              contato vão para aquele parceiro — só o dele, só naquele pedido, e só porque é o que
+              faz o orçamento chegar até você.
+            </p>
+          </div>
+
+          <div style={secao}>
+            <h2 style={h2}>Por quanto tempo</h2>
+            <p style={texto}>
+              O laudo e a documentação técnica ficam enquanto tiverem valor legal e contratual.
+              Os registros de acesso ao sistema e o histórico de e-mails enviados são apagados
+              depois de 12 meses. Rascunho de vistoria não enviado é apagado depois de 90 dias.
+              Cadastro de quem nunca fechou serviço é apagado quando você pedir.
+            </p>
+          </div>
+
+          <div style={secao}>
+            <h2 style={h2}>Seus direitos</h2>
+            <p style={texto}>
+              Você pode ver, corrigir e pedir a exclusão dos seus dados. Dentro do portal do
+              cliente há um botão para isso, e o pedido fica registrado com a resposta. Quando
+              não for possível apagar algo — o laudo, enquanto tiver valor legal —, a recusa vem
+              por escrito, com o motivo.
+            </p>
+            <p style={texto}>
+              Também dá para pedir pelo WhatsApp{" "}
+              <a href="https://wa.me/5581983061305" target="_blank" rel="noopener noreferrer" style={{ color: AZUL_MEDIO }}>
+                (81) 98306-1305
+              </a>{" "}
+              ou por e-mail, em <strong>fn.edificar@gmail.com</strong>. O prazo de resposta é de
+              até 15 dias.
+            </p>
+          </div>
+
+          <div style={secao}>
+            <h2 style={h2}>Segurança</h2>
+            <p style={texto}>
+              As senhas são guardadas cifradas, e ninguém da FN consegue lê-las — nem para te
+              ajudar: o caminho é sempre um link enviado ao seu e-mail. O acesso ao sistema é por
+              login, e cada pessoa da equipe só enxerga o que o trabalho dela exige.
+            </p>
+          </div>
+
+          <p style={{ ...texto, marginTop: 26, fontSize: 12.5, color: "#8593a8" }}>
+            Dúvida sobre esta política? Fale com a gente — a gente responde em português e sem
+            enrolação.
+          </p>
+        </div>
+      </main>
     </div>
   );
 }
@@ -11419,6 +11925,67 @@ function ModalPedirRevistoria({ atendimento, onFechar, onEnviar }) {
    Reaproveita ao máximo o que já existia na consulta pública: CartaoAtendimentoCliente
    (laudo/documentação/avaliação) e a vitrine de parceiros — só troca "CPF digitado" por
    "CPF do próprio login". */
+/* ---- Portal do cliente · privacidade ----
+   O sistema guarda CPF, telefone, endereço, fotos do interior do imóvel e a foto do cliente,
+   e até aqui não havia caminho nenhum para o titular pedir a exclusão: quem quisesse sair
+   pedia por WhatsApp e alguém apagava na mão — ou não. O pedido agora fica registrado, com
+   resposta obrigatória, inclusive quando a resposta é "não dá para apagar ainda". */
+function CardPrivacidadeCliente({ token, notify }) {
+  const [aberto, setAberto] = useState(false);
+  const [motivo, setMotivo] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [enviado, setEnviado] = useState("");
+
+  const pedir = async () => {
+    setEnviando(true);
+    try {
+      const r = await apiFetch("/api/portal/pedir-exclusao", { method: "POST", token, body: { motivo } });
+      setEnviado(r.mensagem || "Pedido registrado.");
+    } catch (e) { notify(e.message); }
+    setEnviando(false);
+  };
+
+  return (
+    <Card icon={Lock} titulo="Seus dados">
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
+        A FN guarda seus dados para prestar o serviço que você contratou. A{" "}
+        <a href="?pagina=privacidade" target="_blank" rel="noopener noreferrer" style={{ color: AZUL_MEDIO }}>
+          política de privacidade
+        </a>{" "}
+        explica o que fica guardado, por quanto tempo e com quem é compartilhado.
+      </p>
+
+      {enviado ? (
+        <p style={{ fontSize: 13, color: "#2E7D32", background: "#E6F4EA", borderRadius: 8, padding: "10px 12px", margin: 0 }}>
+          {enviado}
+        </p>
+      ) : !aberto ? (
+        <button className="btn-ghost" style={{ width: "auto", padding: "7px 12px" }} onClick={() => setAberto(true)}>
+          <Trash2 size={14} /> Pedir exclusão dos meus dados
+        </button>
+      ) : (
+        <div>
+          <p style={{ fontSize: 12.5, color: "#8593a8", margin: "0 0 8px" }}>
+            O laudo técnico tem valor legal e pode não ser possível apagá-lo — nesse caso você
+            recebe a recusa por escrito, com o motivo. O prazo de resposta é de até 15 dias.
+          </p>
+          <textarea style={{ ...inp, minHeight: 70, resize: "vertical" }} value={motivo}
+            placeholder="Conte, se quiser, o que você gostaria que fosse apagado."
+            onChange={(e) => setMotivo(e.target.value)} />
+          <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+            <button className="btn-solid" style={{ width: "auto", padding: "8px 14px" }} onClick={pedir} disabled={enviando}>
+              {enviando ? <Loader2 size={14} className="spin" /> : <Send size={14} />} Enviar pedido
+            </button>
+            <button className="btn-ghost" style={{ width: "auto", padding: "8px 14px" }} onClick={() => setAberto(false)}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
@@ -11722,6 +12289,8 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
         )}
 
         <SecaoParceirosVitrine notify={notify} clienteLogado={cliente} token={session.token} />
+
+        <CardPrivacidadeCliente token={session.token} notify={notify} />
       </main>
 
       {toast && (
