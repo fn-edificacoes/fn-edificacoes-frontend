@@ -1186,7 +1186,7 @@ function diasDesde(quando) {
   return (Date.now() - d.getTime()) / 86400000;
 }
 
-function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], avaliacoes = [], documentosArt = [], agendaVistoriador = [], meusLaudos = [], parceiros = [] }) {
+function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], avaliacoes = [], documentosArt = [], agendaVistoriador = [], meusLaudos = [], parceiros = [], usuarioAtualId = null }) {
   const itens = [];
   const hojeISO = paraChaveISO(new Date());
 
@@ -1226,6 +1226,30 @@ function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], ava
         id: "em-vistoria",
         texto: `${emVistoria.length} vistoria(s) em andamento agora`,
         onde: { aba: "qualidade", sub: "vistoria" },
+      });
+    }
+  }
+
+  /* --- Vendas: o que aconteceu com quem ele convidou ---
+     A homologação é da Gerência, mas quem precisa agir depois dela é o vendedor: montar o
+     perfil junto com o parceiro e começar a acompanhar as vendas. Sem este aviso ele só
+     descobria a aprovação abrindo a lista por acaso. */
+  if (perfil === "vendas") {
+    const meus = parceiros.filter((p) => p.vendedorId && p.vendedorId === usuarioAtualId);
+    const aprovadosRecentes = meus.filter((p) => p.status === "aprovado" && p.aprovadoEm && diasDesde(p.aprovadoEm) <= 7);
+    if (aprovadosRecentes.length) {
+      itens.push({
+        id: "parceiros-aprovados",
+        texto: `${aprovadosRecentes.length} parceiro(s) que você convidou foi(ram) aprovado(s)`,
+        onde: { aba: "vendas" },
+      });
+    }
+    const emAnalise = meus.filter((p) => p.status === "em_analise");
+    if (emAnalise.length) {
+      itens.push({
+        id: "parceiros-em-analise",
+        texto: `${emAnalise.length} parceiro(s) seu(s) aguardando homologação da Gerência`,
+        onde: { aba: "vendas" },
       });
     }
   }
@@ -1514,7 +1538,7 @@ function ModalTrocarSenha({ token, onFechar, notify }) {
 
 /* ================= Componente principal ================= */
 /* ================= Login (equipe, clientes e parceiros) ================= */
-function TelaLogin({ onLogin, onVoltar, onCadastroParceiro }) {
+function TelaLogin({ onLogin, onVoltar }) {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [erro, setErro] = useState("");
@@ -1579,18 +1603,13 @@ function TelaLogin({ onLogin, onVoltar, onCadastroParceiro }) {
           ← Sou cliente e quero me cadastrar
         </button>
 
-        {/* Parceiro/filiado se cadastra por aqui também. Antes o cadastro só existia atrás do
-            link privado ?parceiro-cadastro=1, então quem chegava na tela de login não tinha
-            por onde começar — e nem sabia que era nesta mesma tela que ele entra depois. */}
-        <div style={{ borderTop: `1px solid ${CINZA_BORDA}`, marginTop: 16, paddingTop: 14, textAlign: "center" }}>
-          <button type="button" onClick={onCadastroParceiro}
-            style={{ background: "none", border: "none", color: AZUL_MARINHO, fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0 }}>
-            Sou parceiro ou filiado e quero me cadastrar
-          </button>
-          <p style={{ color: "#8593a8", fontSize: 12, margin: "6px 0 0" }}>
-            Já é parceiro? Entre com o mesmo e-mail e senha do cadastro.
-          </p>
-        </div>
+        {/* Não há mais botão de cadastro de parceiro aqui: parceiro entra por convite de um
+            vendedor (link com o código dele). Quem chegava sozinho por esta tela virava fila
+            para a Gerência sem ninguém saber de onde tinha vindo. O aviso fica: quem já é
+            parceiro entra por aqui. */}
+        <p style={{ color: "#8593a8", fontSize: 12, margin: "10px 0 0", textAlign: "center" }}>
+          Já é parceiro? Entre com o mesmo e-mail e senha do cadastro.
+        </p>
       </div>
     </div>
   );
@@ -1907,7 +1926,6 @@ export default function App() {
   const [session, setSessionEstado] = useState(() => carregarSessaoSalva());
   const [mostrarLogin, setMostrarLogin] = useState(false);
   const [linkParceiroFechado, setLinkParceiroFechado] = useState(false);
-  const [mostrarCadastroParceiro, setMostrarCadastroParceiro] = useState(false);
 
   const setSession = (s) => { guardarSessao(s); setSessionEstado(s); };
 
@@ -1954,26 +1972,24 @@ export default function App() {
     );
   }
 
-  /* Cadastro de parceiro/filiado: chega aqui de dois jeitos — pelo link direto que a FN manda
-     por WhatsApp/e-mail (?parceiro-cadastro=1) ou pelo botão da própria tela de login, que é
-     onde o parceiro entra depois de aprovado. */
+  /* Cadastro de parceiro/filiado: só pelo link de convite de um vendedor
+     (?parceiro-cadastro=<código dele>). O código identifica quem convidou e é validado no
+     servidor antes de o formulário abrir — sem ele não existe caminho para esta tela. */
   const linkCadastroParceiro = new URLSearchParams(window.location.search).get("parceiro-cadastro");
 
   if (!session) {
-    if ((linkCadastroParceiro && !linkParceiroFechado) || mostrarCadastroParceiro) {
-      /* Voltar cai onde a pessoa estava: no login, se ela veio de lá (mostrarLogin segue
-         ligado); no portal do cliente, se ela abriu o link direto. */
-      const fecharCadastro = () => { setLinkParceiroFechado(true); setMostrarCadastroParceiro(false); };
+    if (linkCadastroParceiro && !linkParceiroFechado) {
+      const fecharCadastro = () => setLinkParceiroFechado(true);
       return (
         <TelaCadastroParceiro
+          convite={linkCadastroParceiro}
           onVoltar={fecharCadastro}
           onIrParaLogin={() => { fecharCadastro(); setMostrarLogin(true); }}
         />
       );
     }
     return mostrarLogin
-      ? <TelaLogin onLogin={setSession} onVoltar={() => setMostrarLogin(false)}
-          onCadastroParceiro={() => setMostrarCadastroParceiro(true)} />
+      ? <TelaLogin onLogin={setSession} onVoltar={() => setMostrarLogin(false)} />
       : <PortalCliente onIrParaLogin={() => setMostrarLogin(true)} onLogin={setSession} />;
   }
   if (session.usuario.role === "afiliado") {
@@ -2237,7 +2253,11 @@ function AppInterno({ session, onLogout }) {
      não exige token; só embute o formulário direto no sistema em vez da tela pública. */
   const criarParceiroManual = async (dadosParceiro) => {
     try {
-      const r = await apiFetch("/api/parceiros/signup", { method: "POST", body: dadosParceiro });
+      /* Mesma rota do convite, com o código de quem está cadastrando: o parceiro que a equipe
+         preenche por telefone também fica vinculado a quem o trouxe. */
+      const r = await apiFetch("/api/parceiros/signup", {
+        method: "POST", body: { ...dadosParceiro, convite: meuConvite?.codigo },
+      });
       await carregarParceiros();
       return { ok: true, status: r.status };
     } catch (e) {
@@ -2317,6 +2337,21 @@ function AppInterno({ session, onLogout }) {
   /* ---- Vales (todos, para Gerência/Vendas acompanharem leads/conversão de Parceiros) ---- */
   const [vales, setVales] = useState([]);
   const [valesCarregando, setValesCarregando] = useState(false);
+  /* ---- O link de convite de quem está logado ----
+     O mesmo código serve para dois caminhos: o link que o vendedor manda para a empresa se
+     cadastrar e o cadastro manual que ele mesmo preenche por telefone. Nos dois, o parceiro
+     nasce vinculado a quem trouxe. */
+  const [meuConvite, setMeuConvite] = useState(null);
+  useEffect(() => {
+    if (!["gerencia", "vendas"].includes(perfil)) return;
+    let vivo = true;
+    apiFetch("/api/parceiros/meu-convite", { token })
+      .then((r) => { if (vivo) setMeuConvite(r); })
+      .catch(() => { /* o cartão do convite mostra o aviso; aqui o silêncio evita ruído no login */ });
+    return () => { vivo = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /* ---- Prospecção de parceiros: a lista de empresas que ainda não são parceiras ----
      É o passo anterior ao convite — a Gerência levanta, o vendedor liga e negocia. Só quem
      trabalha com parceiro carrega isso. */
@@ -3029,7 +3064,7 @@ function AppInterno({ session, onLogout }) {
               <div style={{ opacity: 0.7 }}>{PERFIL_LABEL[perfil] || perfil}</div>
             </div>
             <SinoNotificacoes
-              itens={calcularNotificacoes({ perfil, clientes: clientesAtivos, laudosPendentes, avaliacoes, documentosArt, agendaVistoriador, meusLaudos, parceiros })}
+              itens={calcularNotificacoes({ perfil, clientes: clientesAtivos, laudosPendentes, avaliacoes, documentosArt, agendaVistoriador, meusLaudos, parceiros, usuarioAtualId: session.usuario.id })}
               onIr={({ aba, sub }) => {
                 if (aba) setAbaTop(aba);
                 if (sub && aba === "qualidade") setAbaQualidade(sub);
@@ -3182,13 +3217,14 @@ function AppInterno({ session, onLogout }) {
             podeExcluir={perfil === "gerencia"} excluirParceiro={excluirParceiro}
             prospeccaoParceiros={prospeccaoParceiros} prospeccaoParceirosCarregando={prospeccaoParceirosCarregando}
             atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
-            importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao} />
+            importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao} meuConvite={meuConvite} />
         )}
         {abaTop === "gerencia" && (
           <AbaGerencia sub={abaGerencia} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem}
             prospeccaoParceiros={prospeccaoParceiros} prospeccaoParceirosCarregando={prospeccaoParceirosCarregando}
             atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
             importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao}
+            meuConvite={meuConvite}
             docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} clientes={clientes} updCliente={updCliente} resetarSenhaCliente={resetarSenhaCliente} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
             usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} salvarPerfilTecnico={salvarPerfilTecnico} usuarioAtualId={session.usuario.id}
             avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
@@ -8061,7 +8097,57 @@ const linkWhatsapp = (telefone) => {
   return `https://wa.me/55${d}`;
 };
 
-function LinhaProspeccaoParceiro({ empresa, situacoes, onAtualizar, onRemover, podeRemover }) {
+/* ================= Convite de parceiro: o link de cada vendedor =================
+   Parceiro não se cadastra sozinho — entra pelo link de quem está negociando com ele. O
+   código no fim da URL é o que diz ao sistema quem convidou, e é isso que faz o vendedor
+   receber o aviso da homologação e enxergar os parceiros dele na lista. */
+function CardConviteParceiro({ convite, notify }) {
+  const [copiado, setCopiado] = useState(false);
+  const carregando = !convite;
+
+  const copiar = async () => {
+    try {
+      await navigator.clipboard.writeText(convite.link);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2500);
+    } catch { notify("Copie o link manualmente: seu navegador bloqueou a cópia automática."); }
+  };
+
+  const textoWhatsapp = convite
+    ? encodeURIComponent(`Olá! Aqui é da FN Edificações. Para fazer parte da nossa rede de parceiros, é só preencher seu cadastro por este link: ${convite.link}`)
+    : "";
+
+  return (
+    <Card icon={Handshake} titulo="Convidar parceiro">
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
+        Este link é seu. Quem se cadastrar por ele entra como parceiro convidado por você — e você
+        recebe o aviso quando a Gerência homologar.
+      </p>
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14, margin: 0 }}>Gerando seu link…</p>}
+      {!carregando && convite && (
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, background: CINZA_CLARO, borderRadius: 8, padding: "10px 12px", flexWrap: "wrap" }}>
+            <span className="mono" style={{ fontSize: 12.5, color: AZUL_MARINHO, flex: 1, minWidth: 200, overflowWrap: "anywhere" }}>
+              {convite.link}
+            </span>
+            <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: "#fff", padding: "6px 12px" }} onClick={copiar}>
+              <Copy size={14} /> {copiado ? "Copiado ✓" : "Copiar"}
+            </button>
+            <a className="btn-solid" style={{ width: "auto", padding: "7px 14px", textDecoration: "none" }}
+              href={`https://wa.me/?text=${textoWhatsapp}`} target="_blank" rel="noopener noreferrer">
+              <Send size={14} /> Enviar por WhatsApp
+            </a>
+          </div>
+          <p style={{ fontSize: 12, color: "#8593a8", margin: "8px 0 0" }}>
+            Código do convite: <span className="mono">{convite.codigo}</span>
+          </p>
+        </>
+      )}
+    </Card>
+  );
+}
+
+function LinhaProspeccaoParceiro({ empresa, situacoes, onAtualizar, onRemover, podeRemover, linkConvite }) {
   const [aberto, setAberto] = useState(false);
   const [proximoPasso, setProximoPasso] = useState(empresa.proximoPasso || "");
   const [observacoes, setObservacoes] = useState(empresa.observacoes || "");
@@ -8129,6 +8215,22 @@ function LinhaProspeccaoParceiro({ empresa, situacoes, onAtualizar, onRemover, p
             <textarea style={{ ...inp, minHeight: 64, resize: "vertical" }} value={observacoes}
               onChange={(e) => setObservacoes(e.target.value)} />
           </div>
+          {/* Fechou a negociação: o passo seguinte é a empresa preencher o cadastro. O link
+              vai por WhatsApp já com o texto pronto, sem sair desta tela. */}
+          {empresa.situacao === "Fechada" && linkConvite && (
+            <div style={{ background: "#E6F4EA", borderRadius: 8, padding: "10px 12px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12.5, color: "#1B6B51", flex: 1, minWidth: 180 }}>
+                Negociação fechada — mande o link de cadastro para a empresa entrar na fila da Gerência.
+              </span>
+              <a className="btn-solid" style={{ width: "auto", padding: "7px 12px", fontSize: 12.5, textDecoration: "none" }}
+                href={whats
+                  ? `${whats}?text=${encodeURIComponent(`Olá! Aqui é da FN Edificações. Para concluirmos a parceria, preencha seu cadastro neste link: ${linkConvite}`)}`
+                  : `https://wa.me/?text=${encodeURIComponent(`Olá! Aqui é da FN Edificações. Para concluirmos a parceria, preencha seu cadastro neste link: ${linkConvite}`)}`}
+                target="_blank" rel="noopener noreferrer">
+                <Send size={13} /> Enviar link de cadastro
+              </a>
+            </div>
+          )}
           <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
             {podeRemover ? (
               <button className="btn-ghost" style={{ color: "#C62828", padding: "5px 10px", fontSize: 12.5 }}
@@ -8147,7 +8249,7 @@ function LinhaProspeccaoParceiro({ empresa, situacoes, onAtualizar, onRemover, p
   );
 }
 
-function CardProspeccaoParceiros({ empresas = [], carregando, onAtualizar, onAdicionar, onImportar, onRemover, podeGerenciar }) {
+function CardProspeccaoParceiros({ empresas = [], carregando, onAtualizar, onAdicionar, onImportar, onRemover, podeGerenciar, linkConvite }) {
   const [busca, setBusca] = useState("");
   const [filtroSituacao, setFiltroSituacao] = useState("");
   const [nova, setNova] = useState(null);
@@ -8241,22 +8343,23 @@ function CardProspeccaoParceiros({ empresas = [], carregando, onAtualizar, onAdi
       <div style={{ display: "grid", gap: 8 }}>
         {lista.map((e) => (
           <LinhaProspeccaoParceiro key={e.id} empresa={e} situacoes={SITUACOES_PROSPECCAO}
-            onAtualizar={onAtualizar} onRemover={onRemover} podeRemover={podeGerenciar} />
+            onAtualizar={onAtualizar} onRemover={onRemover} podeRemover={podeGerenciar} linkConvite={linkConvite} />
         ))}
       </div>
     </Card>
   );
 }
 
-function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas = [], vendasCarregando, atualizarVenda, notify, token, perfil, decidirComissaoItem, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao }) {
+function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas = [], vendasCarregando, atualizarVenda, notify, token, perfil, decidirComissaoItem, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite }) {
   const [cadastrando, setCadastrando] = useState(false);
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <CardIndicadoresParceiros parceiros={parceiros} vales={vales} valesCarregando={valesCarregando} vendas={vendas} />
+      <CardConviteParceiro convite={meuConvite} notify={notify} />
       <CardProspeccaoParceiros empresas={prospeccaoParceiros} carregando={prospeccaoParceirosCarregando}
         onAtualizar={atualizarProspeccaoParceiro} onAdicionar={adicionarEmpresaProspeccao}
         onImportar={importarEmpresasProspeccao} onRemover={removerEmpresaProspeccao}
-        podeGerenciar={perfil === "gerencia"} />
+        podeGerenciar={perfil === "gerencia"} linkConvite={meuConvite?.link} />
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }} onClick={() => setCadastrando(true)}>
           <Plus size={15} /> Cadastrar parceiro
@@ -8902,7 +9005,7 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", token, perfil, decidirComissaoItem, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
+function AbaGerencia({ sub = "visao-geral", token, perfil, decidirComissaoItem, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
   if (sub === "acompanhamento") {
     return <TabelaRegistrosVistoriaDoc docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc}
       carregando={carregando} notify={notify} clientes={clientes} precos={precos} />;
@@ -8919,7 +9022,7 @@ function AbaGerencia({ sub = "visao-geral", token, perfil, decidirComissaoItem, 
       podeExcluir excluirParceiro={excluirParceiro}
       prospeccaoParceiros={prospeccaoParceiros} prospeccaoParceirosCarregando={prospeccaoParceirosCarregando}
       atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
-      importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao} />;
+      importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao} meuConvite={meuConvite} />;
   }
   if (sub === "patologias") {
     return <CardBancoPatologias patologias={patologiasBanco} carregando={patologiasBancoCarregando}
@@ -9870,6 +9973,11 @@ function mapParceiroDaApi(p) {
     beneficio: p.beneficio || "", descricaoBeneficio: p.descricao_beneficio || p.descricaoBeneficio || "",
     avaliacao: p.avaliacao || "",
     comissoesPendentes: Number(p.comissoes_pendentes || 0),
+    /* Quem convidou este parceiro — é o que liga o cadastro ao vendedor, do aviso da
+       homologação até a carteira dele. */
+    vendedorId: p.vendedor_id || null,
+    vendedorNome: p.vendedor_nome || "",
+    aprovadoEm: p.aprovado_em || null,
   };
 }
 
@@ -10302,11 +10410,22 @@ function PaginaBeneficiosFn({ tipo }) {
 }
 
 /* ---- Tela pública: cadastro de Parceiro/Afiliado (sem login) ---- */
-function TelaCadastroParceiro({ onVoltar, onIrParaLogin }) {
+function TelaCadastroParceiro({ convite, onVoltar, onIrParaLogin }) {
   const [form, setForm] = useState(novoCadastroParceiro());
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState("");
   const [resultado, setResultado] = useState(null); // { id, status }
+  /* O convite é conferido antes de o formulário abrir: link velho, código errado ou vendedor
+     desativado param aqui, e não depois de a pessoa preencher tudo. */
+  const [conviteEstado, setConviteEstado] = useState({ checando: true, valido: false, convidadoPor: "", erro: "" });
+  useEffect(() => {
+    let vivo = true;
+    apiFetch(`/api/parceiros/convite/${encodeURIComponent(convite || "")}`)
+      .then((r) => { if (vivo) setConviteEstado({ checando: false, valido: true, convidadoPor: r.convidadoPor || "", erro: "" }); })
+      .catch((e) => { if (vivo) setConviteEstado({ checando: false, valido: false, convidadoPor: "", erro: e.message }); });
+    return () => { vivo = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [convite]);
 
   const setF = (campo, v) => setForm((f) => ({ ...f, [campo]: v }));
 
@@ -10335,13 +10454,46 @@ function TelaCadastroParceiro({ onVoltar, onIrParaLogin }) {
     setEnviando(true);
     try {
       const { comissao, beneficio, descricaoBeneficio, ...dadosDoCadastro } = form;
-      const r = await apiFetch("/api/parceiros/signup", { method: "POST", body: dadosDoCadastro });
+      const r = await apiFetch("/api/parceiros/signup", { method: "POST", body: { ...dadosDoCadastro, convite } });
       setResultado({ id: r.id, status: r.status || "em_analise" });
     } catch (e) {
       setErro(e.message); // apiFetch já traduz servidor fora do ar e falha de rede
     }
     setEnviando(false);
   };
+
+  if (conviteEstado.checando) {
+    return (
+      <div style={{ minHeight: "100vh", background: CINZA_CLARO, display: "grid", placeItems: "center", fontFamily: "'Inter', system-ui, sans-serif" }}>
+        <p style={{ color: "#65758b", fontSize: 14 }}>Conferindo seu convite…</p>
+      </div>
+    );
+  }
+
+  if (!conviteEstado.valido) {
+    return (
+      <div style={{ minHeight: "100vh", background: CINZA_CLARO, display: "grid", placeItems: "center", padding: 18, fontFamily: "'Inter', system-ui, sans-serif" }}>
+        <div style={{ background: "#fff", borderRadius: 16, padding: "36px 30px", width: "100%", maxWidth: 420, boxShadow: "0 10px 30px rgba(18,51,91,.12)", textAlign: "center" }}>
+          <div style={{ width: 56, height: 56, borderRadius: "50%", background: "#FFF4E0", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
+            <AlertTriangle size={26} color="#B26A00" />
+          </div>
+          <h2 style={{ color: AZUL_MARINHO, fontSize: 19, margin: "0 0 8px" }}>Convite não encontrado</h2>
+          <p style={{ color: "#65758b", fontSize: 13.5, margin: "0 0 18px" }}>
+            {conviteEstado.erro || "O cadastro de parceiro é feito por convite."} Fale com quem está
+            negociando com você na FN e peça um link novo.
+          </p>
+          <a className="btn-solid" style={{ textDecoration: "none", justifyContent: "center" }}
+            href="https://wa.me/5581983061305" target="_blank" rel="noopener noreferrer">
+            Falar com a FN no WhatsApp
+          </a>
+          <button type="button" onClick={onIrParaLogin}
+            style={{ width: "100%", marginTop: 12, background: "none", border: "none", color: AZUL_MEDIO, fontSize: 13, cursor: "pointer" }}>
+            Já sou parceiro e quero entrar
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (resultado) {
     return (
@@ -11840,6 +11992,11 @@ function CardParceiros({ parceiros, carregando, atualizarParceiro, podeExcluir =
                   <td style={{ padding: "8px 10px" }}><Selo valor={PARCEIRO_STATUS_LABEL[p.status] || p.status} /></td>
                   <td style={{ padding: "8px 10px", fontWeight: 600 }}>
                     {p.empresa}<div style={{ fontWeight: 400, fontSize: 12, color: "#8593a8" }}>{p.responsavel}{p.cidade ? ` · ${p.cidade}/${p.uf}` : ""}</div>
+                    {/* De onde veio o cadastro: a Gerência homologa sabendo quem trouxe, e o
+                        vendedor reconhece os dele na lista. */}
+                    {p.vendedorNome && (
+                      <div style={{ fontWeight: 400, fontSize: 11.5, color: AZUL_MEDIO }}>convidado por {p.vendedorNome}</div>
+                    )}
                     {p.comissoesPendentes > 0 && (
                       <div style={{ marginTop: 4, display: "inline-block", background: "#FFF4E0", color: "#B26A00", fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 6 }}>
                         {p.comissoesPendentes} comissão(ões) a aprovar
