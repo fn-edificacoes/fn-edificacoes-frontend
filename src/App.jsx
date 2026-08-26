@@ -2542,6 +2542,11 @@ function AppInterno({ session, onLogout }) {
   const laudoNoServidor = meusLaudos.find((l) => l.cliente_id && l.cliente_id === clienteAtualId) || null;
   const laudoBloqueado = perfil === "vistoriador" && !!laudoNoServidor && !laudoNoServidor.editavelPeloTecnico;
   const laudoDevolvido = laudoNoServidor?.laudo_status === "devolvido_correcao";
+  /* Já enviado, mas ainda editável: a gerência ainda não pegou o laudo para analisar. O
+     técnico corrige e reenvia sozinho — só precisa saber que o envio já aconteceu, senão
+     acha que o laudo se perdeu e manda de novo achando que é a primeira vez. */
+  const laudoEnviadoAindaEditavel = perfil === "vistoriador" && !!laudoNoServidor
+    && !laudoBloqueado && !laudoDevolvido;
 
   /* ---- Revistoria: o laudo da vistoria anterior, aberto ao lado ----
      Quem vai revistoriar precisa do que foi apontado da primeira vez. Não dá para usar
@@ -2979,9 +2984,14 @@ function AppInterno({ session, onLogout }) {
               {/* O vistoriador envia para aprovação; a Gerência, que também vistoria, não
                   teria a quem enviar — o mesmo botão finaliza e aprova de uma vez. */}
               {fazVistoria({ role: perfil }) && (
-                <button className="btn-solid" style={{ background: AZUL_MARINHO }} onClick={enviarParaGerencia} disabled={enviandoParaGerencia || laudoBloqueado} title={laudoBloqueado ? "Este laudo já foi enviado — desbloqueie para corrigir e reenviar" : ""}>
+                <button className="btn-solid" style={{ background: AZUL_MARINHO }} onClick={enviarParaGerencia} disabled={enviandoParaGerencia || laudoBloqueado} title={laudoBloqueado ? "Este laudo está com a gerência — peça a devolução para corrigir" : ""}>
                   {enviandoParaGerencia ? <Loader2 size={15} className="spin" /> : laudoBloqueado ? <Lock size={15} /> : <Send size={15} />}{" "}
-                  {laudoBloqueado ? "Laudo enviado" : perfil === "gerencia" ? "Finalizar e aprovar" : "Enviar para gerência"}
+                  {laudoBloqueado ? "Laudo enviado"
+                    : perfil === "gerencia" ? "Finalizar e aprovar"
+                    /* Já enviado e ainda editável: o botão diz que é reenvio, senão parece
+                       que o primeiro envio não aconteceu. */
+                    : laudoEnviadoAindaEditavel ? "Reenviar para gerência"
+                    : "Enviar para gerência"}
                 </button>
               )}
             </>
@@ -3056,6 +3066,7 @@ function AppInterno({ session, onLogout }) {
             addFotos={addFotos} removerFoto={removerFoto} contagem={contagem} dados={dados} setD={setD}
             fotoCliente={dados.fotoCliente} setFotoCliente={setFotoCliente} notify={notify} setAba={setAba}
             bloqueado={laudoBloqueado} onPedirDesbloqueio={() => setConfirmandoDesbloqueio(true)}
+            enviadoAindaEditavel={laudoEnviadoAindaEditavel}
             statusLaudo={laudoNoServidor?.laudoStatusLabel} devolvido={laudoDevolvido}
             motivoDevolucao={laudoNoServidor?.motivo_devolucao} patologiasBanco={patologiasBanco}
             minhaAssinatura={minhaAssinatura} salvarMinhaAssinatura={salvarMinhaAssinatura} removerMinhaAssinatura={removerMinhaAssinatura} />
@@ -3145,10 +3156,11 @@ function AppInterno({ session, onLogout }) {
 
       {toast && <div className="no-print" style={toastStyle}><Check size={15} /> {toast}</div>}
 
-      <ConfirmModal aberto={confirmandoDesbloqueio} titulo="Laudo em análise pela gerência"
-        mensagem={"Este laudo já foi enviado e está sob responsabilidade da gerência, por isso não pode mais ser editado aqui. "
-          + "Se algo precisa ser corrigido, peça à gerência que devolva o laudo para correção — assim a edição é reaberta "
-          + "e o motivo da devolução fica registrado no histórico."}
+      <ConfirmModal aberto={confirmandoDesbloqueio} titulo="Laudo fora de edição"
+        mensagem={"Depois de enviado, o laudo continua editável por você até a gerência começar a analisar. "
+          + "Deste ponto em diante ele é responsabilidade dela — ou já virou documento emitido, com PDF arquivado e "
+          + "e-mail enviado ao cliente. Se algo precisa ser corrigido agora, peça à gerência que devolva o laudo para "
+          + "correção: a edição reabre e o motivo fica registrado no histórico."}
         onConfirm={fecharAvisoBloqueio} onCancel={fecharAvisoBloqueio} />
     </div>
   );
@@ -5277,7 +5289,7 @@ function AbaLaudoAnterior({ laudo, carregando, cliente, assinatura }) {
   );
 }
 
-function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, dados, setD, fotoCliente, setFotoCliente, notify, setAba, bloqueado, onPedirDesbloqueio, statusLaudo, devolvido, motivoDevolucao, patologiasBanco = [], minhaAssinatura, salvarMinhaAssinatura, removerMinhaAssinatura }) {
+function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, dados, setD, fotoCliente, setFotoCliente, notify, setAba, bloqueado, onPedirDesbloqueio, enviadoAindaEditavel = false, statusLaudo, devolvido, motivoDevolucao, patologiasBanco = [], minhaAssinatura, salvarMinhaAssinatura, removerMinhaAssinatura }) {
   const fotoClienteRef = useRef();        // câmera (capture="environment")
   const fotoClienteGaleriaRef = useRef(); // galeria do aparelho
   const [seletorAberto, setSeletorAberto] = useState(false);
@@ -5305,6 +5317,19 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
           <button className="btn-ghost" style={{ color: "#B26A00", background: "#fff", padding: "6px 12px" }} onClick={onPedirDesbloqueio}>
             Entenda
           </button>
+        </div>
+      )}
+
+      {/* Enviado, mas a gerência ainda não começou a analisar: a edição segue aberta. Sem
+          este aviso, a tela fica idêntica à de um laudo que nunca foi enviado — e o técnico
+          não tem como saber que já mandou. */}
+      {enviadoAindaEditavel && (
+        <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 10, background: "#EAF2FB", border: `1px solid ${AZUL_MEDIO}`, borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
+          <Send size={16} color={AZUL_MARINHO} />
+          <span style={{ fontSize: 13, color: AZUL_MARINHO, flex: 1 }}>
+            Laudo já enviado para a gerência{statusLaudo ? ` (${statusLaudo})` : ""}. Enquanto ela não começar a
+            analisar, você ainda pode corrigir aqui e enviar de novo — vale a última versão enviada.
+          </span>
         </div>
       )}
 
