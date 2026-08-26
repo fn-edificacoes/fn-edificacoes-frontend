@@ -2745,7 +2745,13 @@ function AppInterno({ session, onLogout }) {
   const setFotoCliente = (foto) => setDados((d) => ({ ...d, fotoCliente: foto }));
   const enviarParaGerencia = async () => {
     if (!clienteAtualId) { notify("Selecione um cliente cadastrado em \"Dados do laudo\" antes de enviar."); return; }
-    if (!dados.fotoCliente) { notify("Anexe a foto com o cliente antes de enviar (obrigatória)."); return; }
+    /* Na revistoria a foto com o cliente não é exigida: a visita é um retorno, muitas vezes
+       com o imóvel já ocupado e sem ninguém para posar — cobrar a foto ali só travaria o
+       laudo. A obrigatoriedade continua valendo na vistoria de entrega. */
+    if (!dados.fotoCliente && !ehRevistoria(clienteEmEdicao)) {
+      notify("Anexe a foto com o cliente antes de enviar (obrigatória).");
+      return;
+    }
     setEnviandoParaGerencia(true);
     try {
       const itensComprimidos = await Promise.all(itens.map(async (item) => ({
@@ -3065,6 +3071,7 @@ function AppInterno({ session, onLogout }) {
           <AbaItens itens={itens} setItens={setItens} updItem={updItem} escolherPatologia={escolherPatologia}
             addFotos={addFotos} removerFoto={removerFoto} contagem={contagem} dados={dados} setD={setD}
             fotoCliente={dados.fotoCliente} setFotoCliente={setFotoCliente} notify={notify} setAba={setAba}
+            fotoClienteObrigatoria={!ehRevistoria(clienteEmEdicao)}
             bloqueado={laudoBloqueado} onPedirDesbloqueio={() => setConfirmandoDesbloqueio(true)}
             enviadoAindaEditavel={laudoEnviadoAindaEditavel}
             statusLaudo={laudoNoServidor?.laudoStatusLabel} devolvido={laudoDevolvido}
@@ -5289,7 +5296,7 @@ function AbaLaudoAnterior({ laudo, carregando, cliente, assinatura }) {
   );
 }
 
-function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, dados, setD, fotoCliente, setFotoCliente, notify, setAba, bloqueado, onPedirDesbloqueio, enviadoAindaEditavel = false, statusLaudo, devolvido, motivoDevolucao, patologiasBanco = [], minhaAssinatura, salvarMinhaAssinatura, removerMinhaAssinatura }) {
+function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, dados, setD, fotoCliente, setFotoCliente, fotoClienteObrigatoria = true, notify, setAba, bloqueado, onPedirDesbloqueio, enviadoAindaEditavel = false, statusLaudo, devolvido, motivoDevolucao, patologiasBanco = [], minhaAssinatura, salvarMinhaAssinatura, removerMinhaAssinatura }) {
   const fotoClienteRef = useRef();        // câmera (capture="environment")
   const fotoClienteGaleriaRef = useRef(); // galeria do aparelho
   const [seletorAberto, setSeletorAberto] = useState(false);
@@ -5429,9 +5436,11 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
       </div>
 
       <div style={{ marginBottom: 16 }}>
-        <Card icon={Camera} titulo="Foto com o cliente (obrigatória)">
+        <Card icon={Camera} titulo={`Foto com o cliente ${fotoClienteObrigatoria ? "(obrigatória)" : "(opcional na revistoria)"}`}>
           <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
-            Tire uma foto sua com o cliente durante a vistoria, igual às fotos dos itens. Necessária pra enviar o laudo para a gerência — assim que tirar, você já vai direto pro laudo final.
+            {fotoClienteObrigatoria
+              ? "Tire uma foto sua com o cliente durante a vistoria, igual às fotos dos itens. Necessária pra enviar o laudo para a gerência — assim que tirar, você já vai direto pro laudo final."
+              : "Se der para tirar, tire — ela entra no laudo do mesmo jeito. Na revistoria ela não trava o envio: é um retorno, e nem sempre tem alguém no imóvel para a foto."}
           </p>
           <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
             {fotoCliente ? (
