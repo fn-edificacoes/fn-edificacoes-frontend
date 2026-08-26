@@ -2074,7 +2074,12 @@ function AppInterno({ session, onLogout }) {
   /* ---- Cliente: cadastros (lidos via API — cadastro em si acontece na tela pública, sem login) ---- */
   const [clientes, setClientes] = useState([]);
   const [clientesCarregando, setClientesCarregando] = useState(false);
+  /* Vendas não trabalha com o cliente da vistoria — e a rota recusa o papel dele. Sem esta
+     guarda, quem entrava por Vendas era recebido por um "você não tem permissão" que não
+     dizia respeito a nada do que ele veio fazer. */
+  const podeVerClientes = ["gerencia", "vistoriador", "documentacao", "atendimento", "qualidade"].includes(perfil);
   const carregarClientes = async () => {
+    if (!podeVerClientes) return;
     setClientesCarregando(true);
     try {
       const r = await apiFetch("/api/clientes", { token });
@@ -9981,7 +9986,65 @@ function mapParceiroDaApi(p) {
   };
 }
 
-const novaComissaoLinha = () => ({ name: "", p: "" });
+/* Uma linha da proposta comercial: a categoria (ou produto) e os dois percentuais que
+   fecham o acordo — "d" é o desconto que o cliente FN recebe, "p" é a comissão que fica com
+   a FN. Antes existia só a comissão, e o desconto combinado vivia no texto do benefício,
+   solto: ninguém conseguia comparar duas propostas nem conferir o que fora acertado. */
+const novaComissaoLinha = () => ({ name: "", d: "", p: "" });
+
+/* Os dois percentuais lado a lado, com rótulo em cima de cada um: sem isso a linha vira dois
+   campos de "%" iguais e ninguém lembra qual é qual na hora de preencher. Usado no cadastro
+   feito pela equipe e no perfil que o próprio parceiro edita — os mesmos números, o mesmo
+   formulário. */
+function ComissaoPorCategoria({ linhas = [], onMudar, onAdicionar, onRemover }) {
+  return (
+    <>
+      <div style={{ display: "grid", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, fontSize: 11.5, color: "#8593a8", fontWeight: 600 }}>
+          <span style={{ flex: 1 }}>Categoria / produto</span>
+          <span style={{ width: 104, textAlign: "center" }}>Desconto ao cliente</span>
+          <span style={{ width: 104, textAlign: "center" }}>Comissão da FN</span>
+          <span style={{ width: 30 }} />
+        </div>
+        {linhas.map((linha, idx) => (
+          <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input style={{ ...inp, flex: 1 }} placeholder="Ex.: Mão de obra, box de vidro" value={linha.name}
+              onChange={(e) => onMudar(idx, { name: e.target.value })} />
+            <div style={{ position: "relative", width: 104 }}>
+              <input style={{ ...inp, width: "100%", paddingRight: 26 }} type="number" min="0" max="100" placeholder="0"
+                value={linha.d ?? ""} onChange={(e) => onMudar(idx, { d: e.target.value })} />
+              <span style={{ position: "absolute", right: 9, top: 9, fontSize: 12.5, color: "#8593a8" }}>%</span>
+            </div>
+            <div style={{ position: "relative", width: 104 }}>
+              <input style={{ ...inp, width: "100%", paddingRight: 26 }} type="number" min="0" max="100" placeholder="0"
+                value={linha.p ?? ""} onChange={(e) => onMudar(idx, { p: e.target.value })} />
+              <span style={{ position: "absolute", right: 9, top: 9, fontSize: 12.5, color: "#8593a8" }}>%</span>
+            </div>
+            <button type="button" className="icon-btn" onClick={() => onRemover(idx)} disabled={linhas.length === 1}>
+              <Trash2 size={15} color="#c62828" />
+            </button>
+          </div>
+        ))}
+      </div>
+      <button type="button" className="btn-add" style={{ marginTop: 10, padding: 10, fontSize: 13 }} onClick={onAdicionar}>
+        <Plus size={15} /> Adicionar categoria
+      </button>
+    </>
+  );
+}
+
+/* "Mão de obra: 10% ao cliente · 15% FN" — a leitura curta usada nas listas. */
+function resumoDaProposta(comissao = []) {
+  return comissao
+    .filter((c) => c.name)
+    .map((c) => {
+      const partes = [];
+      if (c.d !== undefined && c.d !== null && c.d !== "") partes.push(`${c.d}% ao cliente`);
+      if (c.p !== undefined && c.p !== null && c.p !== "") partes.push(`${c.p}% FN`);
+      return partes.length ? `${c.name}: ${partes.join(" · ")}` : c.name;
+    })
+    .join(" | ");
+}
 const novoCadastroParceiro = () => ({
   email: "", senha: "", tipo: "servico", empresa: "", responsavel: "", cnpj: "",
   cidade: "", uf: "", whatsapp: "", instagram: "", site: "", logo: "",
@@ -10038,7 +10101,7 @@ function ModalCriarParceiroManual({ onFechar, criarParceiroManual, notify }) {
               {PARCEIRO_TIPO_OPCOES.map((o) => <option key={o.valor} value={o.valor}>{o.label}</option>)}
             </select>
           </div>
-          <Field label="CNPJ" value={form.cnpj} onChange={(v) => setF("cnpj", v)} />
+          <Field label="CNPJ/CPF" value={form.cnpj} onChange={(v) => setF("cnpj", v)} />
           <Field label="Empresa" value={form.empresa} onChange={(v) => setF("empresa", v)} full />
           <Field label="Responsável" value={form.responsavel} onChange={(v) => setF("responsavel", v)} />
           <Field label="WhatsApp" value={form.whatsapp} onChange={(v) => setF("whatsapp", v)} />
@@ -10049,23 +10112,12 @@ function ModalCriarParceiroManual({ onFechar, criarParceiroManual, notify }) {
         </Grid>
 
         <div style={{ marginTop: 16 }}>
-          <label style={lab}>Categorias e percentual de comissão</label>
-          <div style={{ display: "grid", gap: 8, marginTop: 6 }}>
-            {form.comissao.map((linha, idx) => (
-              <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input style={{ ...inp, flex: 1 }} placeholder="Categoria (ex.: Mão de obra)" value={linha.name}
-                  onChange={(e) => setComissaoLinha(idx, { name: e.target.value })} />
-                <input style={{ ...inp, width: 90 }} type="number" min="0" max="100" placeholder="%" value={linha.p}
-                  onChange={(e) => setComissaoLinha(idx, { p: e.target.value })} />
-                <button type="button" className="icon-btn" onClick={() => removerComissaoLinha(idx)} disabled={form.comissao.length === 1}>
-                  <Trash2 size={15} color="#c62828" />
-                </button>
-              </div>
-            ))}
-          </div>
-          <button type="button" className="btn-add" style={{ marginTop: 10, padding: 10, fontSize: 13 }} onClick={addComissaoLinha}>
-            <Plus size={15} /> Adicionar categoria de comissão
-          </button>
+          <label style={lab}>Proposta por categoria ou produto</label>
+          <p style={{ fontSize: 12, color: "#8593a8", margin: "2px 0 8px" }}>
+            Os dois lados do acordo: quanto o cliente FN economiza e quanto fica com a FN.
+          </p>
+          <ComissaoPorCategoria linhas={form.comissao} onMudar={setComissaoLinha}
+            onAdicionar={addComissaoLinha} onRemover={removerComissaoLinha} />
         </div>
 
         <Field label="Benefício oferecido (resumo)" value={form.beneficio} onChange={(v) => setF("beneficio", v)} full />
@@ -10565,7 +10617,7 @@ function TelaCadastroParceiro({ convite, onVoltar, onIrParaLogin }) {
                 {PARCEIRO_TIPO_OPCOES.map((o) => <option key={o.valor} value={o.valor}>{o.label}</option>)}
               </select>
             </div>
-            <Field label="CNPJ" value={form.cnpj} onChange={(v) => setF("cnpj", v)} />
+            <Field label="CNPJ/CPF" value={form.cnpj} onChange={(v) => setF("cnpj", v)} />
             <Field label="Empresa" value={form.empresa} onChange={(v) => setF("empresa", v)} full />
             <Field label="Responsável" value={form.responsavel} onChange={(v) => setF("responsavel", v)} />
             <Field label="WhatsApp" value={form.whatsapp} onChange={(v) => setF("whatsapp", v)} />
@@ -10651,7 +10703,7 @@ function CardPerfilParceiro({ parceiro, token, onSalvo }) {
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState("");
 
-  const comissaoTexto = parceiro.comissao.length > 0 ? parceiro.comissao.map((c) => `${c.name}: ${c.p}%`).join(" · ") : "";
+  const comissaoTexto = resumoDaProposta(parceiro.comissao);
   const setF = (campo, v) => setForm((f) => ({ ...f, [campo]: v }));
 
   /* A proposta comercial (comissão e benefício) saiu do cadastro público e é montada aqui,
@@ -10667,7 +10719,9 @@ function CardPerfilParceiro({ parceiro, token, onSalvo }) {
     setForm({
       responsavel: parceiro.responsavel || "", whatsapp: parceiro.whatsapp || "", instagram: parceiro.instagram || "",
       site: parceiro.site || "", cidade: parceiro.cidade || "", uf: parceiro.uf || "", logo: parceiro.logo || "",
-      comissao: parceiro.comissao.length > 0 ? parceiro.comissao.map((c) => ({ name: c.name || "", p: c.p ?? "" })) : [novaComissaoLinha()],
+      comissao: parceiro.comissao.length > 0
+        ? parceiro.comissao.map((c) => ({ name: c.name || "", d: c.d ?? "", p: c.p ?? "" }))
+        : [novaComissaoLinha()],
       beneficio: parceiro.beneficio || "", descricaoBeneficio: parceiro.descricaoBeneficio || "",
     });
     setErro("");
@@ -10734,23 +10788,12 @@ function CardPerfilParceiro({ parceiro, token, onSalvo }) {
             </div>
 
             <div style={{ marginTop: 16 }}>
-              <label style={lab}>Categorias e percentual de comissão</label>
-              <div style={{ display: "grid", gap: 8, marginTop: 6 }}>
-                {form.comissao.map((linha, idx) => (
-                  <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <input style={{ ...inp, flex: 1 }} placeholder="Categoria (ex.: Mão de obra)" value={linha.name}
-                      onChange={(e) => setComissaoLinha(idx, { name: e.target.value })} />
-                    <input style={{ ...inp, width: 90 }} type="number" min="0" max="100" placeholder="%" value={linha.p}
-                      onChange={(e) => setComissaoLinha(idx, { p: e.target.value })} />
-                    <button type="button" className="icon-btn" onClick={() => removerComissaoLinha(idx)} disabled={form.comissao.length === 1}>
-                      <Trash2 size={15} color="#c62828" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <button type="button" className="btn-add" style={{ marginTop: 10, padding: 10, fontSize: 13 }} onClick={addComissaoLinha}>
-                <Plus size={15} /> Adicionar categoria de comissão
-              </button>
+              <label style={lab}>Proposta por categoria ou produto</label>
+              <p style={{ fontSize: 12, color: "#8593a8", margin: "2px 0 8px" }}>
+                Desconto que o cliente FN recebe e comissão que fica com a FN, em cada item.
+              </p>
+              <ComissaoPorCategoria linhas={form.comissao} onMudar={setComissaoLinha}
+                onAdicionar={addComissaoLinha} onRemover={removerComissaoLinha} />
             </div>
 
             <Field label="Benefício oferecido (resumo)" value={form.beneficio} onChange={(v) => setF("beneficio", v)} full />
@@ -12005,7 +12048,7 @@ function CardParceiros({ parceiros, carregando, atualizarParceiro, podeExcluir =
                   </td>
                   <td style={{ padding: "8px 10px" }}>{PARCEIRO_TIPO_LABEL[p.tipo] || p.tipo}</td>
                   <td style={{ padding: "8px 10px", fontSize: 12 }}>
-                    {p.comissao.length > 0 ? p.comissao.map((c) => `${c.name} ${c.p}%`).join(", ") : "—"}
+                    {p.comissao.length > 0 ? resumoDaProposta(p.comissao) : "—"}
                   </td>
                   <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
                     <button className="icon-btn" onClick={() => setPerfilDe(p)} title="Editar perfil de venda"><User size={15} color={AZUL_MEDIO} /></button>
