@@ -2906,7 +2906,7 @@ function AppInterno({ session, onLogout }) {
     carregarUsuarios();
   };
 
-  const preencherComCliente = (cli, { irParaItens = false } = {}) => {
+  const preencherComCliente = async (cli, { irParaItens = false } = {}) => {
     if (!cli) return;
     /* Troca de cliente: sem isto, itens/fotoCliente da vistoria anterior continuavam no
        estado — o laudo do novo cliente nascia com não conformidades e foto de outro imóvel,
@@ -2917,8 +2917,16 @@ function AppInterno({ session, onLogout }) {
     const trocouDeCliente = clienteAtualId !== null && clienteAtualId !== cli.id;
     const laudoDoCliente = meusLaudos.find((l) => l.cliente_id === cli.id) || null;
     if (laudoDoCliente?.laudo_status === "devolvido_correcao") {
-      setDados(laudoDoCliente.dados);
-      setItens((laudoDoCliente.itens || []).map((i) => ({ ...i, id: idCounter++, fotos: i.fotos || [] })));
+      /* O conteúdo não vem mais junto da lista (ela ficou grande demais para trafegar), então
+         é buscado aqui, na hora de retomar a correção. Enquanto chega, a tela fica com o que
+         já estava — e se falhar, o técnico vê o aviso em vez de um laudo em branco. */
+      try {
+        const r = await apiFetch(`/api/laudos/${laudoDoCliente.doc_id}/conteudo`, { token });
+        setDados(r.dados);
+        setItens((r.itens || []).map((i) => ({ ...i, id: idCounter++, fotos: i.fotos || [] })));
+      } catch {
+        notify("Não consegui trazer o laudo devolvido do servidor. Atualize a página e tente de novo.");
+      }
     } else if (trocouDeCliente) {
       setItens([novoItem()]);
       setDados((d) => ({ ...d, fotoCliente: null }));
@@ -3377,7 +3385,7 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "laudos" && aba === "realizados" && (
           <AbaLaudosRealizados laudos={meusLaudos} carregando={meusLaudosCarregando}
             recarregar={carregarMeusLaudos} assinatura={assinatura} ehGerencia={perfil === "gerencia"}
-            clientes={clientesAtivos} docs={docs} usuarios={usuarios} />
+            clientes={clientesAtivos} docs={docs} usuarios={usuarios} token={token} />
         )}
         {abaTop === "laudos" && aba === "agenda" && fazVistoria({ role: perfil }) && (
           <CalendarioVistoriador agenda={agendaVistoriador} carregando={agendaVistoriadorCarregando} clientes={clientesAtivos} preencherComCliente={preencherComCliente} />
@@ -7336,9 +7344,27 @@ function EstrelasNota({ nota }) {
   );
 }
 
-function AbaLaudosRealizados({ laudos: laudosRecebidos = [], carregando, recarregar, assinatura, ehGerencia, clientes = [], docs = [], usuarios = [] }) {
+function AbaLaudosRealizados({ laudos: laudosRecebidos = [], carregando, recarregar, assinatura, ehGerencia, clientes = [], docs = [], usuarios = [], token }) {
   const [abertoId, setAbertoId] = useState(null);
   const [filtro, setFiltro] = useState("");
+
+  /* A lista chega sem o conteúdo dos laudos. Com ele, 39 laudos somavam 62 MB por abertura
+     de tela — foi assim que a banda do mês da hospedagem acabou e o serviço foi suspenso.
+     O documento é buscado quando alguém abre a linha, e fica guardado para não vir duas vezes. */
+  const [conteudos, setConteudos] = useState({});
+  const [buscandoConteudo, setBuscandoConteudo] = useState(null);
+  const abrir = async (docId) => {
+    if (abertoId === docId) { setAbertoId(null); return; }
+    setAbertoId(docId);
+    if (conteudos[docId] || !token) return;
+    setBuscandoConteudo(docId);
+    try {
+      const r = await apiFetch(`/api/laudos/${docId}/conteudo`, { token });
+      setConteudos((c) => ({ ...c, [docId]: r }));
+    } catch { /* sem conteúdo: a linha mostra o aviso abaixo */ }
+    setBuscandoConteudo(null);
+  };
+
   const nomePorVistoriadorId = {};
   usuarios.forEach((u) => { if (fazVistoria(u)) nomePorVistoriadorId[u.id] = u.nome; });
 
@@ -7499,7 +7525,7 @@ function AbaLaudosRealizados({ laudos: laudosRecebidos = [], carregando, recarre
           const unidade = [l.bloco_torre, l.apartamento].filter(Boolean).join(" · ");
           return (
             <div key={l.doc_id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, overflow: "hidden" }}>
-              <button onClick={() => setAbertoId(aberto ? null : l.doc_id)}
+              <button onClick={() => abrir(l.doc_id)}
                 style={{ width: "100%", background: "#fff", border: "none", cursor: "pointer", padding: 12, display: "flex", alignItems: "center", gap: 10, textAlign: "left", flexWrap: "wrap" }}>
                 <span style={{ background: etapa.bg, color: etapa.cor, borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 800, whiteSpace: "nowrap" }}>
                   {etapa.rotulo}
@@ -7570,12 +7596,20 @@ function AbaLaudosRealizados({ laudos: laudosRecebidos = [], carregando, recarre
 
                   {/* Mesmo documento que o cliente recebe. Só marcamos como aprovado o que já
                       foi entregue — o que está em análise continua saindo como preliminar. */}
-                  <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, overflow: "hidden" }}>
-                    <LaudoModelo laudo={montarLaudoModelo(l.dados || {}, l.itens || [])}
-                      assinatura={assinatura}
-                      assinaturaVistoriador={l.vistoriador_assinatura ? { imagem: l.vistoriador_assinatura } : null}
-                      aprovado={entregue} />
-                  </div>
+                  {buscandoConteudo === l.doc_id && (
+                    <p style={{ color: "#8593a8", fontSize: 13.5 }}>Carregando o laudo…</p>
+                  )}
+                  {buscandoConteudo !== l.doc_id && !conteudos[l.doc_id] && (
+                    <p style={{ color: "#8593a8", fontSize: 13.5 }}>Não foi possível carregar o conteúdo deste laudo.</p>
+                  )}
+                  {conteudos[l.doc_id] && (
+                    <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, overflow: "hidden" }}>
+                      <LaudoModelo laudo={montarLaudoModelo(conteudos[l.doc_id].dados || {}, conteudos[l.doc_id].itens || [])}
+                        assinatura={assinatura}
+                        assinaturaVistoriador={conteudos[l.doc_id].vistoriadorAssinatura ? { imagem: conteudos[l.doc_id].vistoriadorAssinatura } : null}
+                        aprovado={entregue} />
+                    </div>
+                  )}
                 </div>
               )}
             </div>
