@@ -63,6 +63,17 @@ const ESPERA_ENTRE_TENTATIVAS_MS = [1500, 4000];
 const STATUS_PASSAGEIROS = [502, 503, 504];
 const esperar = (ms) => new Promise((resolver) => setTimeout(resolver, ms));
 
+/* O apiFetch é uma função solta, fora do React, mas duas coisas que só ele enxerga precisam
+   mexer na sessão: o servidor recusar o token (conta desativada, senha trocada em outro
+   aparelho) e o servidor devolver um token novo depois de uma troca de senha. Em vez de
+   passar callbacks por dez níveis de componente, o App registra as duas aqui na entrada. */
+let aoPerderSessao = null;
+let aoRenovarToken = null;
+function ligarSessaoAoApi({ perdeuSessao, renovouToken }) {
+  aoPerderSessao = perdeuSessao;
+  aoRenovarToken = renovouToken;
+}
+
 async function apiFetch(caminho, { method = "GET", body, token } = {}) {
   const maxTentativas = method === "GET" ? TENTATIVAS_GET : 1;
   let ultimoErro = null;
@@ -98,6 +109,12 @@ async function apiFetch(caminho, { method = "GET", body, token } = {}) {
 
     /* 5xx é defeito do servidor, não da pessoa. Os 4xx seguem passando a mensagem do backend
        ("senha inválida", "cadastro em análise"), que é justamente o que ela precisa ler. */
+    /* 401 com token na mão significa que o servidor não reconhece mais esta sessão — o token
+       venceu, a conta foi desativada ou a senha mudou. Seguir na tela só produz erro atrás de
+       erro; melhor cair no login com o motivo à vista. O 403 fica de fora de propósito: quase
+       sempre é falta de permissão para uma tela específica, e deslogar por isso seria pior. */
+    if (resp.status === 401 && token && aoPerderSessao) aoPerderSessao(dados?.erro || "");
+
     const falha = new Error(dados?.erro || (resp.status >= 500 ? MSG_API_FORA : `Erro ${resp.status}`));
     if (!STATUS_PASSAGEIROS.includes(resp.status)) throw falha;
     ultimoErro = falha;
@@ -1499,7 +1516,8 @@ function ModalTrocarSenha({ token, onFechar, notify }) {
     if (nova === atual) { setErro("A nova senha precisa ser diferente da atual."); return; }
     setSalvando(true);
     try {
-      await apiFetch("/api/auth/trocar-senha", { method: "POST", token, body: { senhaAtual: atual, senhaNova: nova } });
+      const r = await apiFetch("/api/auth/trocar-senha", { method: "POST", token, body: { senhaAtual: atual, senhaNova: nova } });
+      if (r?.token) aoRenovarToken?.(r.token);
       notify("Senha alterada ✓");
       onFechar();
     } catch (e) { setErro(e.message); }
@@ -1988,6 +2006,27 @@ export default function App() {
   const [linkParceiroFechado, setLinkParceiroFechado] = useState(false);
 
   const setSession = (s) => { guardarSessao(s); setSessionEstado(s); };
+
+  useEffect(() => {
+    ligarSessaoAoApi({
+      perdeuSessao: (motivo) => {
+        setSessionEstado((atual) => {
+          if (!atual) return atual;
+          guardarSessao(null);
+          alert(motivo || "Sua sessão foi encerrada. Entre novamente para continuar.");
+          return null;
+        });
+      },
+      /* Trocar a senha derruba as sessões antigas, inclusive a de quem trocou — o backend
+         devolve um token novo justamente para essa não cair junto. */
+      renovouToken: (token) => setSessionEstado((atual) => {
+        if (!atual) return atual;
+        const nova = { ...atual, token };
+        guardarSessao(nova);
+        return nova;
+      }),
+    });
+  }, []);
 
   /* Quando o token vence, encerra a sessão avisando — antes o sistema seguia aberto
      disparando "Erro 401" em cada tela, e a pessoa achava que o sistema tinha quebrado. */
@@ -11394,8 +11433,8 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
      aleatória e chega por e-mail, então só quem a recebeu sabe qual é. */
   const trocarSenhaObrigatoria = async (senhaAtual, senhaNova) => {
     try {
-      await apiFetch("/api/auth/trocar-senha", { method: "POST", token: session.token, body: { senhaAtual, senhaNova } });
-      onSessaoAtualizada({ ...session, usuario: { ...session.usuario, senhaProvisoria: false } });
+      const r = await apiFetch("/api/auth/trocar-senha", { method: "POST", token: session.token, body: { senhaAtual, senhaNova } });
+      onSessaoAtualizada({ ...session, token: r?.token || session.token, usuario: { ...session.usuario, senhaProvisoria: false } });
       return true;
     } catch (e) { notify(e.message); return false; }
   };
