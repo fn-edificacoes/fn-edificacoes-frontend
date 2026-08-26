@@ -47,11 +47,6 @@ const TIMEOUT_API_MS = 60000;
    quando o serviço estava suspenso no Render, a tela dizia "verifique sua internet" e todo
    mundo foi procurar defeito no lugar errado — inclusive porque a página de erro do Render
    não manda cabeçalho de CORS e o navegador transforma o 503 num "Failed to fetch" seco. */
-/* A senha provisória que o sistema cria para quem ainda não tem acesso ao portal. Precisa
-   bater com a do backend (ver db.js): quando as duas divergiram, o cliente entrava e ficava
-   preso na troca obrigatória, porque a tela mandava uma senha atual que não era a dele. */
-const SENHA_PROVISORIA_PADRAO = "12345678";
-
 const MSG_API_FORA = "O sistema está fora do ar no momento. Não é problema no seu acesso nem na sua senha — tente de novo em alguns minutos.";
 
 /* ---- Insistir sozinho antes de dizer que o sistema caiu ----
@@ -1543,6 +1538,64 @@ function ModalTrocarSenha({ token, onFechar, notify }) {
 
 /* ================= Componente principal ================= */
 /* ================= Login (equipe, clientes e parceiros) ================= */
+/* Primeiro acesso e recuperação de senha do cliente, no mesmo lugar: os dois casos terminam
+   em "receba um link no seu e-mail", e separá-los só obrigaria a pessoa a saber em qual dos
+   dois ela está. A resposta é sempre a mesma frase, exista ou não o e-mail — senão a tela vira
+   uma forma de descobrir quem é cliente da FN. */
+function PrimeiroAcessoPorEmail() {
+  const [aberto, setAberto] = useState(false);
+  const [email, setEmail] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [mensagem, setMensagem] = useState("");
+
+  const pedir = async () => {
+    if (!email.trim()) return;
+    setEnviando(true);
+    try {
+      const r = await apiFetch("/api/clientes/solicitar-senha", { method: "POST", body: { email } });
+      setMensagem(r.mensagem || "Se esse e-mail estiver cadastrado, você vai receber um link em instantes.");
+    } catch (e) {
+      setMensagem(e.message);
+    }
+    setEnviando(false);
+  };
+
+  if (!aberto) {
+    return (
+      <p style={{ textAlign: "center", color: "#8593a8", fontSize: 12, margin: "14px 0 0" }}>
+        Primeiro acesso ou esqueceu a senha?{" "}
+        <button type="button" onClick={() => setAberto(true)}
+          style={{ background: "none", border: "none", color: AZUL_MEDIO, fontSize: 12, cursor: "pointer", padding: 0, textDecoration: "underline" }}>
+          Receba um link por e-mail
+        </button>
+      </p>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 14, borderTop: `1px solid ${CINZA_BORDA}`, paddingTop: 14 }}>
+      <label style={lab}>Seu e-mail cadastrado</label>
+      {mensagem ? (
+        <p style={{ fontSize: 12.5, color: "#2E7D32", background: "#E6F4EA", borderRadius: 8, padding: "9px 11px", margin: "6px 0 0" }}>
+          {mensagem}
+        </p>
+      ) : (
+        <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+          <input style={{ ...inp, flex: 1, minWidth: 170 }} type="email" value={email} placeholder="voce@email.com"
+            onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && pedir()} />
+          <button type="button" className="btn-solid" style={{ width: "auto", padding: "9px 14px" }}
+            onClick={pedir} disabled={enviando}>
+            {enviando ? <Loader2 size={14} className="spin" /> : <Mail size={14} />} Enviar
+          </button>
+        </div>
+      )}
+      <p style={{ fontSize: 11.5, color: "#8593a8", margin: "8px 0 0" }}>
+        O link vale por 30 minutos e leva à tela de criar uma senha só sua.
+      </p>
+    </div>
+  );
+}
+
 function TelaLogin({ onLogin, onVoltar }) {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
@@ -1592,15 +1645,17 @@ function TelaLogin({ onLogin, onVoltar }) {
           {carregando ? <><Loader2 size={15} className="spin" /> Entrando…</> : "Entrar"}
         </button>
 
-        {/* Todo cliente já cadastrado (mesmo de antes de existir senha própria) já tem acesso
-           liberado com a senha padrão — só falta ele saber disso, já que não existe mais uma
-           tela separada de "primeiro acesso" pedindo pra criar a dele. */}
-        <p style={{ textAlign: "center", color: "#8593a8", fontSize: 12, margin: "14px 0 0" }}>
-          Primeiro acesso? Use o e-mail cadastrado e a senha <strong>{SENHA_PROVISORIA_PADRAO}</strong> — você troca assim que entrar.
-        </p>
+        {/* Aqui já esteve escrita a senha padrão do primeiro acesso — a mesma para todos os
+            clientes, à vista de qualquer visitante. Quem soubesse o e-mail de um cliente abria a
+            conta dele e via laudo, documentos e dados pessoais. Agora o caminho é o link por
+            e-mail: só entra quem recebe na própria caixa. */}
+        <PrimeiroAcessoPorEmail />
+        {/* Continua valendo para quem não tem e-mail no cadastro — só deixou de se chamar
+            "esqueci minha senha", porque agora existe caminho automático para isso logo acima
+            e dois links com o mesmo nome mandavam a pessoa para lados diferentes. */}
         <div style={{ display: "flex", justifyContent: "center", marginTop: 6, fontSize: 12.5 }}>
           <a href="https://wa.me/5581983061305" target="_blank" rel="noopener noreferrer" style={{ color: "#8593a8", textDecoration: "none" }}>
-            Esqueci minha senha
+            Sem e-mail no cadastro? Fale com a FN
           </a>
         </div>
 
@@ -11333,12 +11388,13 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
   const [toast, setToast] = useState("");
   const notify = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
 
-  /* Cliente já cadastrado ganhou a senha padrão, provisória — o portal trava numa troca
-     obrigatória antes de mostrar qualquer coisa. A senha atual já é sabida (é a padrão), então
-     só pede a nova, sem o cliente digitar a antiga. */
-  const trocarSenhaObrigatoria = async (senhaNova) => {
+  /* Quem entrou com senha provisória não vê o portal antes de trocá-la. A senha atual é
+     digitada pela pessoa: enquanto existiu uma senha padrão única, a tela a mandava sozinha —
+     e bastava ela divergir da do backend para o cliente ficar preso aqui. Hoje a provisória é
+     aleatória e chega por e-mail, então só quem a recebeu sabe qual é. */
+  const trocarSenhaObrigatoria = async (senhaAtual, senhaNova) => {
     try {
-      await apiFetch("/api/auth/trocar-senha", { method: "POST", token: session.token, body: { senhaAtual: SENHA_PROVISORIA_PADRAO, senhaNova } });
+      await apiFetch("/api/auth/trocar-senha", { method: "POST", token: session.token, body: { senhaAtual, senhaNova } });
       onSessaoAtualizada({ ...session, usuario: { ...session.usuario, senhaProvisoria: false } });
       return true;
     } catch (e) { notify(e.message); return false; }
@@ -11647,13 +11703,11 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
   );
 }
 
-/* Bloqueia o portal até quem entrou com a senha padrão trocar por uma senha só dele — sem
-   botão de fechar/cancelar, de propósito. A senha atual já é sabida (é a própria padrão),
-   então só pede a nova.
-   O valor vem de SENHA_PROVISORIA_PADRAO: já existiram duas padrões diferentes no sistema, e
-   a tela ficou pedindo a troca mandando a senha errada — quem tinha a antiga não conseguia
-   sair deste modal. Um lugar só evita a divergência voltar. */
+/* Bloqueia o portal até quem entrou com senha provisória trocar por uma senha só dele — sem
+   botão de fechar/cancelar, de propósito. Pede a senha atual: é a que a pessoa acabou de usar
+   para entrar, e o backend confere. */
 function ModalTrocarSenhaObrigatoria({ onTrocar }) {
+  const [senhaAtual, setSenhaAtual] = useState("");
   const [senhaNova, setSenhaNova] = useState("");
   const [confirmacao, setConfirmacao] = useState("");
   const [erro, setErro] = useState("");
@@ -11661,13 +11715,14 @@ function ModalTrocarSenhaObrigatoria({ onTrocar }) {
 
   const salvar = async () => {
     setErro("");
+    if (!senhaAtual) { setErro("Digite a senha que você usou para entrar."); return; }
     if (senhaNova.length < 8) { setErro("A nova senha precisa ter pelo menos 8 caracteres."); return; }
-    if (senhaNova === SENHA_PROVISORIA_PADRAO) { setErro("Escolha uma senha diferente da temporária."); return; }
+    if (senhaNova === senhaAtual) { setErro("Escolha uma senha diferente da temporária."); return; }
     if (senhaNova !== confirmacao) { setErro("As senhas não conferem."); return; }
     setSalvando(true);
-    const ok = await onTrocar(senhaNova);
+    const ok = await onTrocar(senhaAtual, senhaNova);
     setSalvando(false);
-    if (!ok) setErro("Não foi possível trocar a senha. Tente novamente.");
+    if (!ok) setErro("Não foi possível trocar a senha. Confira a senha atual e tente de novo.");
   };
 
   return (
@@ -11678,8 +11733,12 @@ function ModalTrocarSenhaObrigatoria({ onTrocar }) {
           Você entrou com a senha temporária. Escolha uma senha só sua para continuar.
         </p>
         <div style={cell(true)}>
+          <label style={lab}>Senha atual</label>
+          <input style={inp} type="password" value={senhaAtual} onChange={(e) => setSenhaAtual(e.target.value)} placeholder="a que você acabou de usar" autoFocus />
+        </div>
+        <div style={{ ...cell(true), marginTop: 12 }}>
           <label style={lab}>Nova senha</label>
-          <input style={inp} type="password" value={senhaNova} onChange={(e) => setSenhaNova(e.target.value)} placeholder="mínimo 8 caracteres" autoFocus />
+          <input style={inp} type="password" value={senhaNova} onChange={(e) => setSenhaNova(e.target.value)} placeholder="mínimo 8 caracteres" />
         </div>
         <div style={{ ...cell(true), marginTop: 12 }}>
           <label style={lab}>Repita a senha</label>

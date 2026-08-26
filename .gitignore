@@ -1,2 +1,6 @@
 .vercel
 modelo-laudo
+node_modules/
+dist/
+.env.local
+.claude/
