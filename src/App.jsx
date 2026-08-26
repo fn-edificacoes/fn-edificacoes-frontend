@@ -155,7 +155,6 @@ function mapClienteDaApi(c) {
     status: c.status || "Em análise", cep: c.cep || "", vistoriadorId: c.vistoriador_id || "",
     precisaCadastroEmpreendimento: !!c.precisa_cadastro_empreendimento,
     pagamento: c.pagamento || "Pendente", areaPrivativa: c.area_privativa || "",
-    encaminhadoDocumentacao: !!c.encaminhado_documentacao,
     /* Revistoria: cadastro de retorno ao mesmo imóvel. revistoriaDe aponta para o
        atendimento de origem; revistoriaSeq é a ordem (1ª, 2ª…). */
     revistoriaDe: c.revistoria_de || null,
@@ -3498,69 +3497,6 @@ function KanbanClientes({ clientes, docs, onAbrir }) {
   );
 }
 
-/* ================= Repasse de ART/TRT para a Documentação =================
-   Documentação ART/TRT não tem vistoria, então esses cadastros não entram na fila do
-   Atendimento. Mas alguém precisa reparar que chegaram e passar adiante — antes eles
-   simplesmente apareciam na aba da Documentação sem que ninguém do Atendimento soubesse.
-   Aqui o Atendimento vê o que chegou, confere e repassa. O repasse fica registrado. */
-function CardEncaminharDocumentacao({ clientes = [], atualizarCliente, notify }) {
-  const [enviando, setEnviando] = useState(null);
-
-  const art = clientes.filter((c) => ehServicoDocumentacao(c) && c.status !== "Cancelado");
-  const aguardando = art.filter((c) => !c.encaminhadoDocumentacao);
-  const jaEncaminhados = art.filter((c) => c.encaminhadoDocumentacao);
-
-  if (art.length === 0) return null;
-
-  const encaminhar = async (c) => {
-    setEnviando(c.id);
-    try {
-      await atualizarCliente(c.id, { encaminhadoDocumentacao: true });
-      notify(`${c.nome} encaminhado para a Documentação \u2713`);
-    } catch (e) { notify(`Não foi possível encaminhar: ${e.message}`); }
-    setEnviando(null);
-  };
-
-  return (
-    <Card icon={ClipboardList} titulo={`Documentação ART/TRT (${aguardando.length} a encaminhar)`}>
-      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-        Estes clientes pediram Documentação ART/TRT. Eles não passam por vistoria, por isso
-        ficam fora da fila acima. Confira os dados e repasse para o setor de Documentação.
-      </p>
-
-      {aguardando.length === 0 && (
-        <p style={{ fontSize: 13.5, color: "#2E7D32", margin: "0 0 12px" }}>
-          ✓ Todos os cadastros de ART/TRT já foram encaminhados.
-        </p>
-      )}
-
-      <div style={{ display: "grid", gap: 8 }}>
-        {aguardando.map((c) => (
-          <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ flex: 1, minWidth: 190 }}>
-              <div style={{ fontWeight: 700, fontSize: 14 }}>{c.nome}</div>
-              <div style={{ fontSize: 12.5, color: "#65758b" }}>
-                {c.empreendimento || c.endereco || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}
-                {c.telefone ? ` · ${c.telefone}` : ""}
-              </div>
-            </div>
-            <button className="btn-solid" style={{ width: "auto", padding: "8px 14px" }}
-              onClick={() => encaminhar(c)} disabled={enviando === c.id}>
-              {enviando === c.id ? <Loader2 size={14} className="spin" /> : <Send size={14} />} Encaminhar
-            </button>
-          </div>
-        ))}
-      </div>
-
-      {jaEncaminhados.length > 0 && (
-        <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${CINZA_BORDA}`, fontSize: 12.5, color: "#65758b" }}>
-          <strong style={{ color: "#2E7D32" }}>{jaEncaminhados.length}</strong> já encaminhado(s):{" "}
-          {jaEncaminhados.map((c) => c.nome).join(" · ")}
-        </div>
-      )}
-    </Card>
-  );
-}
 
 /* Caminho manual de "esqueci minha senha": o cliente liga no WhatsApp, a Gerência define uma
    senha nova aqui e passa por telefone/WhatsApp. Funciona também pra quem nunca teve senha
@@ -3735,7 +3671,6 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
           ))}
         </div>
       )}
-      <CardEncaminharDocumentacao clientes={clientes} atualizarCliente={atualizarCliente} notify={notify} />
 
       <Card icon={Users} titulo={`Clientes cadastrados (${daVistoria.length})`}>
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
@@ -6025,13 +5960,12 @@ function TabelaRegistrosVistoriaDoc({ docs, addDoc, updDoc, delDoc, carregando, 
   const [busca, setBusca] = useState("");
   const [removendo, setRemovendo] = useState(null);
 
-  /* Registro sem cliente correspondente (criado na mão aqui) continua aparecendo mesmo
-     filtrando por documentação — não tem como saber a que serviço pertence. */
+  /* Na tela da Documentação entra só o que é dela. Registro sem cadastro correspondente
+     (cliente apagado, ou criado à mão aqui) também fica de fora: não dá para saber a que
+     serviço pertence, e "na dúvida, mostra" enchia a tela de vistoria — que é justamente o
+     que a Documentação não tem o que fazer com. Na Gerência nada é escondido. */
   const filtrados = docs.filter((d) => {
-    if (somenteDocumentacao) {
-      const cli = clienteDoDoc(d, clientes);
-      if (cli && !ehServicoDocumentacao(cli)) return false;
-    }
+    if (somenteDocumentacao && !ehServicoDocumentacao(clienteDoDoc(d, clientes))) return false;
     if (filtroVistoria && d.vistoria !== filtroVistoria) return false;
     if (busca && !(`${d.cliente} ${d.empreendimento}`.toLowerCase().includes(busca.toLowerCase()))) return false;
     return true;
@@ -6044,7 +5978,13 @@ function TabelaRegistrosVistoriaDoc({ docs, addDoc, updDoc, delDoc, carregando, 
     const existe = docs.some((d) => d.id === editando.id);
     if (existe) updDoc(editando.id, editando); else addDoc(editando);
     setEditando(null);
-    notify("Registro salvo ✓");
+    /* Nesta tela a lista só mostra o que pertence a um cadastro de ART/TRT. Um registro
+       avulso salvo aqui sairia da vista na hora seguinte — dizer isso é melhor do que deixar
+       a pessoa procurando o que acabou de gravar. */
+    const ficaVisivel = !somenteDocumentacao || ehServicoDocumentacao(clienteDoDoc(editando, clientes));
+    notify(ficaVisivel
+      ? "Registro salvo ✓"
+      : "Registro salvo ✓ Ele não aparece nesta lista por não estar ligado a um cadastro de ART/TRT — a Gerência vê em Acompanhamento.");
   };
   const avancarStatusProducao = (d) => {
     const i = STATUS_PRODUCAO_OPCOES.indexOf(d.statusProducao);
@@ -6229,8 +6169,14 @@ function CardIndicadoresGerais({ docs, clientes = [], modo = "completo" }) {
   const totalRegistros = vistoriasClientes.length;
   const concluidas = vistoriasClientes.filter((c) => c.atendido).length;
 
-  const contarPor = (campo) => docs.reduce((acc, d) => { acc[d[campo]] = (acc[d[campo]] || 0) + 1; return acc; }, {});
-  const porStatusProducao = contarPor("statusProducao");
+  /* ART/TRT se mede pelos cadastros, não pelos registros de "docs". O bloco contava
+     status_producao de docs, mas registro em docs nasce de vistoria finalizada: na prática os
+     três cartões da aba Documentação mostravam o movimento da vistoria com rótulo de ART.
+     O trabalho da Documentação é outro — receber o pedido e anexar os dois arquivos —, e é
+     isso que estes números passam a dizer. */
+  const clientesArt = clientes.filter((c) => ehServicoDocumentacao(c) && c.status !== "Cancelado");
+  const artElaborando = clientesArt.filter((c) => c.status !== STATUS_DOC_CONCLUIDA).length;
+  const artProntas = clientesArt.filter((c) => c.status === STATUS_DOC_CONCLUIDA).length;
 
   const mostraVistoria = modo === "completo" || modo === "vistorias";
   const mostraArt = modo === "completo" || modo === "art";
@@ -6255,9 +6201,9 @@ function CardIndicadoresGerais({ docs, clientes = [], modo = "completo" }) {
               <FileText size={14} /> ART Documentações
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
-              <KpiCard label="Recebido" valor={porStatusProducao["Recebido"] || 0} cor="#2C75B5" Icon={FileText} />
-              <KpiCard label="Em produção" valor={porStatusProducao["Em produção"] || 0} cor="#B26A00" Icon={FileText} />
-              <KpiCard label="Realizado" valor={porStatusProducao["Realizado"] || 0} cor="#2E7D32" Icon={FileText} />
+              <KpiCard label="Pedidos" valor={clientesArt.length} cor="#2C75B5" Icon={FileText} />
+              <KpiCard label="Elaborando" valor={artElaborando} cor="#B26A00" Icon={FileText} />
+              <KpiCard label="Prontas" valor={artProntas} cor="#2E7D32" Icon={ClipboardCheck} />
             </div>
           </div>
         )}
