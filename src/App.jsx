@@ -7050,11 +7050,19 @@ function EstrelasNota({ nota }) {
   );
 }
 
-function AbaLaudosRealizados({ laudos = [], carregando, recarregar, assinatura, ehGerencia, clientes = [], docs = [], usuarios = [] }) {
+function AbaLaudosRealizados({ laudos: laudosRecebidos = [], carregando, recarregar, assinatura, ehGerencia, clientes = [], docs = [], usuarios = [] }) {
   const [abertoId, setAbertoId] = useState(null);
   const [filtro, setFiltro] = useState("");
   const nomePorVistoriadorId = {};
   usuarios.forEach((u) => { if (fazVistoria(u)) nomePorVistoriadorId[u.id] = u.nome; });
+
+  /* Laudo aprovado sai da lista do técnico — o servidor manda só o vínculo dele, sem
+     conteúdo (ver "arquivado" em /api/meus-laudos), justamente para o documento não
+     continuar disponível em quem já entregou o trabalho. O que sobra aqui é o que ele ainda
+     tem em mãos: laudos em andamento e os que voltaram por causa de uma revistoria.
+     Para a Gerência nada é marcado como arquivado — ela vê o acervo inteiro. */
+  const laudos = laudosRecebidos.filter((l) => !l.arquivado);
+  const arquivados = laudosRecebidos.length - laudos.length;
 
   const entregues = laudos.filter((l) => l.status_cliente === "Laudo enviado por e-mail");
   const emAnalise = laudos.filter((l) => l.status_cliente === "Laudo em análise");
@@ -7118,8 +7126,18 @@ function AbaLaudosRealizados({ laudos = [], carregando, recarregar, assinatura, 
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
         {ehGerencia
           ? "Todos os laudos enviados, por técnico, com o retorno do cliente."
-          : "Seus laudos e o que o cliente achou. Abrindo um laudo entregue você vê o documento exatamente como ele chegou ao cliente."}
+          : "Seus laudos em andamento e o que o cliente achou. Abrindo um laudo você vê o documento como ele chegou ao cliente."}
       </p>
+
+      {/* Dizer que sumiu de propósito, e por quê — lista que encolhe sem explicação parece
+          defeito, e o técnico ia procurar o laudo achando que perdeu o trabalho. */}
+      {!ehGerencia && arquivados > 0 && (
+        <div style={{ background: CINZA_CLARO, borderRadius: 8, padding: "9px 12px", fontSize: 12.5, color: "#4a5a70", marginBottom: 14 }}>
+          {arquivados === 1 ? "1 laudo aprovado saiu" : `${arquivados} laudos aprovados saíram`} desta lista: depois da
+          aprovação o documento fica com a Gerência. Se um imóvel voltar para revistoria, o laudo daquela visita
+          reaparece aqui enquanto ela durar.
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14, alignItems: "center" }}>
         {indicadores.map((i) => {
