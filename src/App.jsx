@@ -7769,6 +7769,39 @@ function CardProspeccao({ prospeccao = [], carregando, atualizar, publicarNoDriv
                     onChange={(v) => atualizar(p.id, { acao: v }, { silencioso: true })} />
                   <Area label="Observações" value={p.observacoes} rows={2}
                     onChange={(v) => atualizar(p.id, { observacoes: v }, { silencioso: true })} />
+
+                  {/* Contato de quem administra os grupos do prédio (WhatsApp/Instagram dos
+                      moradores) — é essa pessoa que costuma abrir a porta pra divulgar o
+                      serviço, então vale ter o acesso rápido salvo aqui. */}
+                  <div style={{ marginTop: 4, paddingTop: 10, borderTop: `1px dashed ${CINZA_BORDA}` }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>
+                      Parceiro adm dos grupos
+                    </div>
+                    <Grid>
+                      <Field label="Nome" value={p.parceiroAdmNome} full
+                        onChange={(v) => atualizar(p.id, { parceiroAdmNome: v }, { silencioso: true })} />
+                      <Field label="Instagram" value={p.parceiroAdmInstagram} placeholder="@perfil"
+                        onChange={(v) => atualizar(p.id, { parceiroAdmInstagram: v }, { silencioso: true })} />
+                      <Field label="WhatsApp" value={p.parceiroAdmWhatsapp} placeholder="DDD + número"
+                        onChange={(v) => atualizar(p.id, { parceiroAdmWhatsapp: v }, { silencioso: true })} />
+                    </Grid>
+                    {(linkWhatsapp(p.parceiroAdmWhatsapp) || p.parceiroAdmInstagram) && (
+                      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 8 }}>
+                        {linkWhatsapp(p.parceiroAdmWhatsapp) && (
+                          <a href={linkWhatsapp(p.parceiroAdmWhatsapp)} target="_blank" rel="noopener noreferrer"
+                            style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, color: "#2E7D32", fontWeight: 700, textDecoration: "none" }}>
+                            <ExternalLink size={13} /> Abrir WhatsApp
+                          </a>
+                        )}
+                        {p.parceiroAdmInstagram && (
+                          <a href={`https://instagram.com/${p.parceiroAdmInstagram.replace(/^@/, "").trim()}`} target="_blank" rel="noopener noreferrer"
+                            style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, color: AZUL_MEDIO, fontWeight: 700, textDecoration: "none" }}>
+                            <ExternalLink size={13} /> Abrir Instagram
+                          </a>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
