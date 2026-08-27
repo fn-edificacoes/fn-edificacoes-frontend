@@ -7643,10 +7643,25 @@ function AbaLaudosRealizados({ laudos: laudosRecebidos = [], carregando, recarre
   );
 }
 
-function CardProspeccao({ prospeccao = [], carregando, atualizar, publicarNoDrive, clientes = [], notify }) {
+function CardProspeccao({ prospeccao = [], carregando, atualizar, publicarNoDrive, clientes = [], notify, token }) {
   const [busca, setBusca] = useState("");
   const [publicando, setPublicando] = useState(false);
   const [linkPlanilha, setLinkPlanilha] = useState(null);
+  const [carregandoCsv, setCarregandoCsv] = useState(false);
+
+  /* CSV direto do sistema, sem depender de publicar no Drive antes — abre numa aba nova
+     pra visualizar rápido. Precisa de fetch com o token (não dá pra usar <a href> puro,
+     que não manda o Authorization), então baixa o conteúdo e abre como blob local. */
+  const verCsv = async () => {
+    setCarregandoCsv(true);
+    try {
+      const resp = await fetch(`${API_URL}/api/prospeccao/csv`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!resp.ok) throw new Error(`Erro ${resp.status}`);
+      const blob = await resp.blob();
+      window.open(URL.createObjectURL(blob), "_blank");
+    } catch (e) { notify(`Não foi possível abrir o CSV: ${e.message}`); }
+    setCarregandoCsv(false);
+  };
 
   const publicar = async () => {
     setPublicando(true);
@@ -7697,6 +7712,9 @@ function CardProspeccao({ prospeccao = [], carregando, atualizar, publicarNoDriv
               <ExternalLink size={14} /> Abrir planilha
             </a>
           )}
+          <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: "#fff" }} onClick={verCsv} disabled={carregandoCsv}>
+            {carregandoCsv ? <Loader2 size={14} className="spin" /> : <FileText size={14} />} Ver CSV
+          </button>
           <button className="btn-solid" style={{ width: "auto", padding: "8px 14px" }} onClick={publicar} disabled={publicando}>
             {publicando ? <Loader2 size={14} className="spin" /> : <Send size={14} />} Publicar no Drive
           </button>
@@ -9606,7 +9624,7 @@ function AbaGerencia({ sub = "visao-geral", token, perfil, decidirComissaoItem, 
   if (sub === "prospeccao") {
     return <CardProspeccao prospeccao={prospeccao} carregando={prospeccaoCarregando} atualizar={atualizarProspeccao}
       publicarNoDrive={publicarProspeccaoDrive}
-      clientes={clientes} notify={notify} />;
+      clientes={clientes} notify={notify} token={token} />;
   }
   if (sub === "financeiro") {
     return <AbaGerenciaFinanceiro docs={docs} clientes={clientes} precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
