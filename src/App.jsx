@@ -4859,6 +4859,12 @@ function PainelDiaAgendamento({ diaISO, clientes = [], todosClientes = [], visto
                     </div>
                     <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.endereco || c.empreendimento || "—"}</div>
                     <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.servico}</div>
+                    {linkWhatsapp(c.telefone) && (
+                      <a href={linkWhatsapp(c.telefone)} target="_blank" rel="noopener noreferrer"
+                        style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: "#2E7D32", fontWeight: 700, marginTop: 4, textDecoration: "none" }}>
+                        <ExternalLink size={12} /> WhatsApp: {c.telefone}
+                      </a>
+                    )}
                     {podeAgir ? (
                       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
                         <span style={{ fontSize: 12, color: "#65758b" }}>Técnico:</span>
