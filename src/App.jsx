@@ -6354,9 +6354,22 @@ function TabelaRegistrosVistoriaDoc({ docs, addDoc, updDoc, delDoc, carregando, 
                 </tr>
               </thead>
               <tbody>
-                {filtrados.map((d) => (
+                {filtrados.map((d) => {
+                  /* Revistoria e vistoria compartilham nome, CPF e empreendimento — sem o selo
+                     as duas linhas ficam idênticas na tela, e quem olha não sabe qual é qual.
+                     A contagem vem do próprio registro; para os cadastros antigos, que nasceram
+                     antes desse campo existir, cai no cadastro do cliente. */
+                  const cliDoRegistro = clienteDoDoc(d, clientes);
+                  const seqRevistoria = Number(d.revistoria_seq) || Number(cliDoRegistro?.revistoriaSeq) || 0;
+                  const marcarRevistoria = seqRevistoria > 0 || ehRevistoria(cliDoRegistro);
+                  return (
                   <tr key={d.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
-                    <td style={{ padding: "8px 10px", fontWeight: 600 }}>{d.cliente || "—"}</td>
+                    <td style={{ padding: "8px 10px", fontWeight: 600 }}>
+                      {d.cliente || "—"}
+                      {marcarRevistoria && (
+                        <div style={{ marginTop: 4 }}><SeloRevistoria seq={seqRevistoria || 1} /></div>
+                      )}
+                    </td>
                     <td style={{ padding: "8px 10px" }}>{d.empreendimento || "—"}{d.blocoTorre ? ` · ${d.blocoTorre}` : ""}</td>
                     <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{d.data ? d.data.split("-").reverse().join("/") : "—"}</td>
                     <td style={{ padding: "8px 10px" }}><Selo valor={d.pagamento} /></td>
@@ -6374,7 +6387,8 @@ function TabelaRegistrosVistoriaDoc({ docs, addDoc, updDoc, delDoc, carregando, 
                       <button className="icon-btn" onClick={() => setRemovendo(d)}><Trash2 size={15} color="#c62828" /></button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
