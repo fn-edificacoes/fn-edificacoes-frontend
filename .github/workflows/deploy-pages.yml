@@ -1,12 +1,19 @@
-# Publica o site no GitHub Pages a cada push na main.
-# Alternativa sem custo ao Netlify, que pausa os deploys de produção quando acabam os créditos.
-# Para ligar: no GitHub, Settings > Pages > Source: "GitHub Actions".
-name: Publicar no GitHub Pages
+# Publicação no GitHub Pages — HOJE DESLIGADA, mantida como caminho de volta.
+#
+# Desde 28/08/2026 o sistema roda no servidor da própria FN: sistema.fnedificacoes.com.br
+# aponta para lá, e quem publica é deploy/atualizar.sh no repositório do backend.
+#
+# Este workflow não dispara mais sozinho de propósito. Se disparasse a cada push, ficaria
+# gerando um site que ninguém acessa — e, pior, o GitHub Pages voltaria a reivindicar o
+# domínio, brigando com o servidor.
+#
+# Continua aqui porque é a rota de emergência: se o servidor cair de vez, rodar este
+# workflow pela aba Actions e reapontar o DNS devolve o sistema ao ar em minutos. Para isso
+# funcionar, o arquivo public/CNAME precisa ser recriado com o domínio.
+name: Publicar no GitHub Pages (manual, emergência)
 
 on:
-  push:
-    branches: [main]
-  workflow_dispatch: # permite publicar manualmente pelo site do GitHub
+  workflow_dispatch: # só pelo botão, na aba Actions
 
 permissions:
   contents: read
