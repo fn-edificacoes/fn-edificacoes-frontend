@@ -26,18 +26,26 @@ npm run build    # verificação mínima antes de qualquer commit
 npm run preview  # serve o dist/, útil para conferir no navegador
 ```
 
-`API_URL`, no topo do `src/App.jsx`, aponta para o backend no Render. Rodar local usando a
-API de produção mexe em dados reais — para tarefas que gravam, suba o backend local e
-troque essa constante temporariamente (não commite a troca).
+`API_URL`, no topo do `src/App.jsx`, cai em `https://sistema.fnedificacoes.com.br` quando
+`VITE_API_URL` não é definida. Rodar local usando a API de produção mexe em dados reais —
+para tarefas que gravam, suba o backend local e ponha `VITE_API_URL` num `.env.local`
+(que é ignorado pelo git).
 
 ## Publicação
 
-Push na `main` dispara `.github/workflows/deploy-pages.yml`: build e publicação no GitHub
-Pages, com o domínio vindo de `public/CNAME`. O workflow copia `dist/index.html` para
-`dist/404.html` porque o Pages não conhece as rotas do app.
+**Desde 28/08/2026 o site é gerado e servido no servidor próprio da FN**, junto com a API.
+Quem publica é o `deploy/atualizar.sh` do repositório do backend, rodado por SSH — ele faz
+`git pull` aqui, `npm run build` e copia o `dist/` para o nginx.
 
-⚠️ O `README.md` ainda descreve um deploy pelo Netlify. Está **desatualizado** — a
-publicação é pelo GitHub Pages, como descrito acima.
+Push na `main` **não publica nada sozinho**. O workflow do GitHub Pages continua no
+repositório, mas só dispara pelo botão, como rota de emergência (ver o cabeçalho dele).
+
+O app fala com a API pelo **mesmo domínio**, em `/api` — o `VITE_API_URL` é passado no
+build como `https://sistema.fnedificacoes.com.br`. Não há CORS no caminho, e o endereço da
+API deixou de estar escrito dentro do código.
+
+⚠️ O `README.md` ainda descreve um deploy pelo Netlify. Está **desatualizado** duas vezes:
+não é Netlify e não é mais GitHub Pages.
 
 ## Se a API cair ("o sistema travou")
 

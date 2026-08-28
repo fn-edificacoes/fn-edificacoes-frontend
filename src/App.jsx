@@ -24,12 +24,12 @@ const CINZA_BORDA = "#D8DEE7";
 /* Endereço da API. VITE_API_URL sobrescreve quando é preciso apontar para outro lugar
    (backend local, homologação) sem editar este arquivo; sem ela, vale o endereço abaixo.
 
-   ⚠️ Este endereço é do Render, não nosso. Trocar de hospedagem aqui obriga a mexer no
-   código, buildar e publicar o front de novo — foi o que doeu quando o serviço ficou
-   suspenso e o sistema inteiro caiu junto. O caminho definitivo é apontar
-   api.fnedificacoes.com.br para o serviço e usar esse endereço: aí trocar de servidor
-   vira uma mudança de DNS, sem tocar no app. Ver "Se a API cair" no CLAUDE.md. */
-const API_URL = import.meta.env.VITE_API_URL || "https://fn-edificacoes-api.onrender.com";
+   O endereço é o do próprio sistema, e não o de um provedor: site e API respondem no mesmo
+   domínio, com o nginx encaminhando /api. Isso acaba com o CORS e, principalmente, tira o
+   nome da hospedagem de dentro do código — aqui já esteve escrito o endereço do Render, e
+   trocar de servidor obrigava a mexer no arquivo, buildar e publicar o front de novo.
+   Hoje trocar de servidor é uma mudança de DNS. Ver CLAUDE.md. */
+const API_URL = import.meta.env.VITE_API_URL || "https://sistema.fnedificacoes.com.br";
 
 /* Caminho da logo montado a partir da base do site: na raiz (Netlify/Vercel) vira
    "/logo-...png" e no GitHub Pages, "/fn-edificacoes-frontend/logo-...png". Caminho
