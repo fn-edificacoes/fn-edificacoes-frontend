@@ -6757,10 +6757,31 @@ function SeloSincronizacao({ drive }) {
 /* Edição do laudo pela própria Gerência (sem devolver pro vistoriador) — pensada pra
    ajuste pontual de texto/severidade, não pra trocar foto. Trabalha em cópia local e só
    grava (via editarLaudo) quando a gerência clica em salvar. */
-function EditorLaudoGerencia({ laudo, onSalvar, onCancelar, salvando, patologiasBanco = [] }) {
+function EditorLaudoGerencia({ laudo, onSalvar, onCancelar, salvando, patologiasBanco = [], notify }) {
   const [dados, setDadosEdit] = useState(() => JSON.parse(JSON.stringify(laudo.dados || {})));
   const [itens, setItensEdit] = useState(() => (laudo.itens || []).map((i) => ({ ...i })));
   const [excluindoItemId, setExcluindoItemId] = useState(null);
+
+  /* A foto com o cliente é a única imagem que a gerência troca por aqui. As fotos dos itens
+     continuam fora: elas são o registro técnico do que o vistoriador viu no imóvel, e quem
+     mudou de ideia sobre elas precisa devolver o laudo para correção. A foto com o cliente
+     é outra coisa — é o comprovante de que a visita aconteceu, e vive saindo tremida, escura
+     ou com alguém de olho fechado. Trocar isso não muda o conteúdo técnico do laudo. */
+  const fotoClienteRef = useRef();
+  const trocarFotoCliente = (file) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { notify?.("Envie uma imagem (PNG ou JPG)"); return; }
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      // Mesmo tamanho das fotos da vistoria: sem isso uma foto de celular entra no laudo
+      // com vários megabytes e engorda a resposta da API inteira.
+      const reduzida = await redimensionar(e.target.result);
+      setDadosEdit((d) => ({ ...d, fotoCliente: reduzida }));
+      notify?.("Foto trocada — salve as correções para valer");
+    };
+    reader.onerror = () => notify?.("Não foi possível carregar a foto. Tente de novo.");
+    reader.readAsDataURL(file);
+  };
 
   const setD = (grupo, campo, val) => setDadosEdit((d) => ({ ...d, [grupo]: { ...(d[grupo] || {}), [campo]: val } }));
   const setItemCampo = (id, campo, val) => setItensEdit((arr) => arr.map((i) => (i.id === id ? { ...i, [campo]: val } : i)));
@@ -6780,7 +6801,9 @@ function EditorLaudoGerencia({ laudo, onSalvar, onCancelar, salvando, patologias
   return (
     <div style={{ display: "grid", gap: 18 }}>
       <p style={{ fontSize: 13, color: "#65758b", margin: 0, lineHeight: 1.55 }}>
-        Corrija texto, local ou severidade diretamente aqui. Fotos não são editáveis por aqui — se precisar trocar foto, use "Devolver para correção".
+        Corrija texto, local, severidade e a foto com o cliente diretamente aqui. As fotos dos
+        itens não mudam por aqui — elas são o registro técnico do imóvel; para trocá-las, use
+        "Devolver para correção".
       </p>
 
       <div>
@@ -6793,6 +6816,39 @@ function EditorLaudoGerencia({ laudo, onSalvar, onCancelar, salvando, patologias
           <Field label="Unidade" value={dados.imovel?.unidade || ""} onChange={(v) => setD("imovel", "unidade", v)} />
           <Field label="Endereço" value={dados.imovel?.endereco || ""} onChange={(v) => setD("imovel", "endereco", v)} full />
         </Grid>
+      </div>
+
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>Foto com o cliente</div>
+        <p style={{ fontSize: 12.5, color: "#8593a8", margin: "0 0 10px" }}>
+          É a que sai na última página do laudo, como registro de que a vistoria aconteceu com
+          o cliente presente.
+        </p>
+        <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+          {dados.fotoCliente ? (
+            <div style={{ position: "relative", width: 150, height: 150, borderRadius: 10, overflow: "hidden", border: `1px solid ${CINZA_BORDA}` }}>
+              <img src={dados.fotoCliente} alt="Foto com o cliente" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            </div>
+          ) : (
+            <div style={{ width: 150, height: 150, borderRadius: 10, border: `1px dashed ${CINZA_BORDA}`, background: CINZA_CLARO, display: "grid", placeItems: "center", color: "#8593a8", fontSize: 12.5, textAlign: "center", padding: 10 }}>
+              Este laudo não tem foto com o cliente
+            </div>
+          )}
+          <div style={{ display: "grid", gap: 8 }}>
+            <button type="button" className="btn-ghost" style={{ width: "auto", padding: "8px 13px" }}
+              onClick={() => fotoClienteRef.current?.click()}>
+              <Camera size={14} /> {dados.fotoCliente ? "Trocar foto" : "Enviar foto"}
+            </button>
+            {dados.fotoCliente && (
+              <button type="button" className="btn-ghost" style={{ width: "auto", padding: "8px 13px", color: "#C62828" }}
+                onClick={() => setDadosEdit((d) => ({ ...d, fotoCliente: null }))}>
+                <Trash2 size={14} /> Remover
+              </button>
+            )}
+            <input ref={fotoClienteRef} type="file" accept="image/*" style={{ display: "none" }}
+              onChange={(e) => { trocarFotoCliente(e.target.files?.[0]); e.target.value = ""; }} />
+          </div>
+        </div>
       </div>
 
       <div>
@@ -6990,7 +7046,7 @@ function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, d
               <EditorLaudoGerencia laudo={laudoPreview} salvando={salvandoEdicao}
                 onCancelar={() => setEditando(false)}
                 onSalvar={(patch, enviarTambem) => salvarEdicao(patch, enviarTambem)}
-                patologiasBanco={patologiasBanco} />
+                patologiasBanco={patologiasBanco} notify={notify} />
             ) : (
               <>
                 {/* Mesma peça que o cliente recebe — a gerência aprova vendo o resultado final. */}
