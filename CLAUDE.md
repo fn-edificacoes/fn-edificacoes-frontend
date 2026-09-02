@@ -12,7 +12,7 @@ São três repositórios, todos em `github.com/fn-edificacoes`:
 |---|---|---|
 | `fn-edificacoes-site` | site institucional | fnedificacoes.com.br |
 | `fn-edificacoes-frontend` | **este aqui** — o sistema | sistema.fnedificacoes.com.br |
-| `fn-edificacoes-backend` | a API deste front | Render + Postgres no Supabase |
+| `fn-edificacoes-backend` | a API deste front **e o banco** | servidor próprio da FN (VPS) |
 
 Mexer no fluxo de login, de cadastro ou de permissão quase sempre encosta no backend
 também — vale anexar os dois na mesma sessão. Cada repositório tem o seu `CLAUDE.md`.
@@ -47,36 +47,44 @@ API deixou de estar escrito dentro do código.
 ⚠️ O `README.md` ainda descreve um deploy pelo Netlify. Está **desatualizado** duas vezes:
 não é Netlify e não é mais GitHub Pages.
 
-## Se a API cair ("o sistema travou")
+## ⚠️ Onde estão os dados de verdade
 
-O front e a API são hospedados em lugares diferentes e caem separado. Antes de procurar
-defeito no código, descubra **qual dos dois** parou:
+Site, API e banco **rodam na mesma máquina da FN** desde 28/08/2026 — VPS Hostinger,
+`179.199.134.65`, PostgreSQL 16 local no banco `fn`. Para ver dado real:
 
 ```bash
-curl -s -o /dev/null -w "front %{http_code}
-" https://sistema.fnedificacoes.com.br/
-curl -s -i https://fn-edificacoes-api.onrender.com/ | head -5
+ssh -i ~/.ssh/fn-vps root@179.199.134.65
+sudo -u postgres psql -d fn
 ```
 
-Front 200 e API 5xx significa que **não há nada a corrigir neste repositório** — o serviço
-no Render é que está fora. Olhe o cabeçalho `x-render-routing` da resposta:
+Duas fontes antigas continuam de pé e **enganam quem for consultá-las**:
 
-| Resposta | O que é | O que fazer |
-|---|---|---|
-| `suspend-by-user` + "suspended by its owner" | serviço **suspenso** — quase sempre cobrança pendente ou cartão recusado | resolver o pagamento no Render e clicar em *Resume* |
-| demora de ~50s e depois responde | serviço **hibernado** (plano free) | normal, só a primeira chamada |
-| `502` / `504` | serviço caindo ao subir | ver os logs de deploy no Render |
+- o projeto no **Supabase** é uma cópia congelada na véspera da migração (o cadastro mais
+  novo lá é de 27/08/2026). Devolve número plausível e errado — em 02/09/2026 um relatório
+  inteiro do Financeiro foi montado em cima dele antes de alguém perceber;
+- `fn-edificacoes-api.onrender.com` responde **503**: a API não mora mais lá. O site
+  institucional apontava para esse endereço e ficou sem depoimento nenhum por uma semana,
+  sem erro na tela, porque a seção some sozinha quando o fetch falha.
 
-Já aconteceu (agosto/2026): o serviço ficou suspenso e o sistema inteiro parou. A página de
-erro da hospedagem não manda cabeçalho de CORS, então o navegador engole o 503 e o app só
-via um `Failed to fetch` — a tela dizia "verifique sua internet" e a busca foi para o lado
-errado. Hoje `apiFetch` traduz isso para uma mensagem que diz que o servidor está fora.
+## Se o sistema travar
 
-**O endereço da API ainda é o do Render, não nosso.** Enquanto for assim, trocar de
-hospedagem exige mexer no `API_URL`, buildar e publicar o front. Apontar
-`api.fnedificacoes.com.br` (CNAME) para o serviço e cadastrar esse domínio no Render
-reduz a troca a uma mudança de DNS — o app não precisa saber. Feito isso, o novo endereço
-entra em `API_URL`, no topo do `src/App.jsx`.
+Front e API estão na mesma máquina, mas são serviços diferentes. Antes de procurar defeito
+no código, descubra o que parou:
+
+```bash
+curl -s -o /dev/null -w "front %{http_code}\n" https://sistema.fnedificacoes.com.br/
+curl -s -o /dev/null -w "api %{http_code}\n" https://sistema.fnedificacoes.com.br/api/avaliacoes/vitrine
+```
+
+Front 200 e API 5xx: **não há nada a corrigir neste repositório**. No servidor,
+`systemctl status fn-api` e `journalctl -u fn-api -n 50` dizem o que houve — normalmente a
+API não subiu depois de uma publicação.
+
+Já aconteceu (agosto/2026, ainda no Render): o serviço ficou suspenso e o sistema inteiro
+parou. A página de erro da hospedagem não mandava cabeçalho de CORS, então o navegador
+engolia o 503 e o app só via um `Failed to fetch` — a tela dizia "verifique sua internet" e
+a busca foi para o lado errado. Hoje `apiFetch` traduz isso para uma mensagem que diz que o
+servidor está fora.
 
 ## Estrutura
 
