@@ -9895,7 +9895,15 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
   const [metricaGrafico, setMetricaGrafico] = useState("total");
 
   const nomeVistoriadorPorId = {};
-  usuarios.forEach((u) => { if (fazVistoria(u)) nomeVistoriadorPorId[u.id] = u.nome; });
+  /* A Gerência também vai a campo, mas não recebe por vistoria: o pagamento dela seria a
+     empresa pagando a si mesma. O valor que caberia ao técnico fica em casa e entra no lucro
+     (ver "lucro extra", abaixo). */
+  const ehGerenciaPorId = {};
+  usuarios.forEach((u) => {
+    if (!fazVistoria(u)) return;
+    nomeVistoriadorPorId[u.id] = u.nome;
+    ehGerenciaPorId[u.id] = u.role === "gerencia";
+  });
 
   const precoPorChave = {};
   const nomeCanonicoPorChave = {};
@@ -9912,12 +9920,15 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
      Agora o marco é o laudo aprovado e enviado ao cliente, que é quando o serviço de fato
      terminou (e é o mesmo momento em que o sistema já grava a data de aprovação). */
   const LAUDO_ENTREGUE = "Laudo enviado por e-mail";
-  const cpfsComLaudoEntregue = new Set(
-    docs.filter((d) => d.statusCliente === LAUDO_ENTREGUE)
-        .map((d) => String(d.cpf || "").replace(/\D/g, ""))
-        .filter(Boolean)
-  );
-  const vistoriaEntregue = (c) => cpfsComLaudoEntregue.has(String(c.cpf || "").replace(/\D/g, ""));
+  /* O laudo de um cadastro se acha por cliente_id (docDoCliente), nunca por CPF.
+     Casando por CPF, todo cadastro do mesmo CPF entrava como serviço entregue: quem comprou
+     duas unidades contava duas vezes, e a revistoria contava junto com a vistoria de origem.
+     Era isso que fazia o relatório somar 46 vistorias entregues quando existiam 37 laudos —
+     receita, custo e o pagamento aos vistoriadores saíam todos inflados. */
+  const laudoEntregueDoCliente = (c) => {
+    const doc = docDoCliente(c, docs);
+    return doc && doc.statusCliente === LAUDO_ENTREGUE ? doc : null;
+  };
 
   const SERVICOS = [
     { chave: "vistoria", rotulo: "Vistoria de entrega de chaves", campoPreco: "precoVistoria" },
@@ -9926,17 +9937,18 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
 
   // chave "empreendimento-normalizado||servico" -> { qtd, recebidos }
   const cruzamento = {};
-  const registrar = (c, servico) => {
+  const registrar = (c, servico, feitaPelaGerencia = false) => {
     const bruto = c.empreendimento?.trim() || "(sem empreendimento)";
     const chaveEmp = normalizarChaveEmpreendimento(bruto);
     const k = `${chaveEmp}||${servico}`;
     if (!cruzamento[k]) {
       // Nome exibido: prioriza a grafia cadastrada em "Preço por empreendimento" (é a que a
       // Gerência definiu como padrão); sem isso, a primeira grafia que aparecer decide.
-      cruzamento[k] = { chaveEmp, empreendimento: nomeCanonicoPorChave[chaveEmp] || bruto, servico, qtd: 0, qtdPagos: 0 };
+      cruzamento[k] = { chaveEmp, empreendimento: nomeCanonicoPorChave[chaveEmp] || bruto, servico, qtd: 0, qtdPagos: 0, qtdGerencia: 0 };
     }
     cruzamento[k].qtd += 1;
     if (c.pagamento === "Pago") cruzamento[k].qtdPagos += 1;
+    if (feitaPelaGerencia) cruzamento[k].qtdGerencia += 1;
   };
 
   // "vistoriadorId||chaveEmpreendimento" -> qtd de vistorias entregues ali por aquele técnico
@@ -9949,11 +9961,17 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
     if (ehServicoDocumentacao(c)) {
       if (c.status === STATUS_DOC_CONCLUIDA) registrar(c, "documentacao");
     } else if (ehTrabalhoDeVistoria(c)) {
-      if (vistoriaEntregue(c)) {
-        registrar(c, "vistoria");
-        if (c.vistoriadorId) {
+      const doc = laudoEntregueDoCliente(c);
+      if (doc) {
+        /* Quem recebe é quem assinou o laudo (o vistoriador gravado no registro da vistoria),
+           não quem estava escalado no cadastro. A Gerência assume vistoria de técnico sem que o
+           cadastro mude de nome, e o pagamento ia parar em quem não foi a campo. O cadastro só
+           entra como reserva, para os registros antigos que nasceram sem vistoriador. */
+        const quemFez = doc.vistoriadorId || c.vistoriadorId;
+        registrar(c, "vistoria", !!ehGerenciaPorId[quemFez]);
+        if (quemFez) {
           const chaveEmp = normalizarChaveEmpreendimento(c.empreendimento?.trim() || "(sem empreendimento)");
-          const k2 = `${c.vistoriadorId}||${chaveEmp}`;
+          const k2 = `${quemFez}||${chaveEmp}`;
           vistoriasPorTecnicoEmp[k2] = (vistoriasPorTecnicoEmp[k2] || 0) + 1;
         }
       }
@@ -9974,18 +9992,26 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
     porTecnico[vistoriadorId].valor += custoUnit * qtd;
   });
   const pagamentosTecnicos = Object.entries(porTecnico)
-    .map(([id, v]) => ({ id, nome: nomeVistoriadorPorId[id] || "(vistoriador removido)", ...v }))
+    .map(([id, v]) => ({ id, nome: nomeVistoriadorPorId[id] || "(vistoriador removido)", ehGerencia: !!ehGerenciaPorId[id], ...v }))
     .sort((a, b) => b.valor - a.valor);
-  const totalPagamentosTecnicos = pagamentosTecnicos.reduce((s, p) => s + p.valor, 0);
+  /* Só sai dinheiro para quem não é a casa: o valor da Gerência aparece na tabela para dar a
+     medida do trabalho, mas fora do total a pagar. */
+  const totalPagamentosTecnicos = pagamentosTecnicos.filter((x) => !x.ehGerencia).reduce((s, p) => s + p.valor, 0);
+  const totalTrabalhoGerencia = pagamentosTecnicos.filter((x) => x.ehGerencia).reduce((s, p) => s + p.valor, 0);
 
   const linhas = Object.values(cruzamento)
     .map((l) => {
       const def = SERVICOS.find((s) => s.chave === l.servico);
       const unitario = Number(precoPorChave[l.chaveEmp]?.[def.campoPreco]) || 0;
+      const custoUnitVistoria = Number(precoPorChave[l.chaveEmp]?.custoVistoria) || 0;
+      /* Vistoria feita pela Gerência não gera custo: ninguém é pago por ela. O valor que
+         caberia ao técnico fica na empresa e aparece como lucro extra — por isso ele sai do
+         custo da linha, e não só do total (senão a soma da tabela não bateria com o rodapé). */
+      const lucroExtra = l.servico === "vistoria" ? custoUnitVistoria * (l.qtdGerencia || 0) : 0;
       const custo = l.servico === "documentacao" ? CUSTO_UNITARIO_DOCUMENTACAO * l.qtd
-        : l.servico === "vistoria" ? (Number(precoPorChave[l.chaveEmp]?.custoVistoria) || 0) * l.qtd : 0;
+        : l.servico === "vistoria" ? custoUnitVistoria * (l.qtd - (l.qtdGerencia || 0)) : 0;
       const total = unitario * l.qtd;
-      return { ...l, rotulo: def.rotulo, unitario, total, recebido: unitario * l.qtdPagos, custo, lucro: total - custo };
+      return { ...l, rotulo: def.rotulo, unitario, total, recebido: unitario * l.qtdPagos, custo, lucroExtra, lucro: total - custo };
     })
     .sort((a, b) => b.total - a.total || a.empreendimento.localeCompare(b.empreendimento, "pt-BR"));
 
@@ -9999,6 +10025,9 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
   const totalServicos = linhasFiltradas.reduce((s, l) => s + l.qtd, 0);
   const totalCusto = linhasFiltradas.reduce((s, l) => s + l.custo, 0);
   const totalLucro = totalGeral - totalCusto;
+  /* Quanto do lucro veio de vistoria que a própria Gerência fez — trabalho que a empresa não
+     precisou pagar. Vem do mesmo cálculo das linhas, para bater com o rodapé da tabela. */
+  const totalLucroExtra = linhasFiltradas.reduce((s, l) => s + (l.lucroExtra || 0), 0);
   const semPreco = linhasFiltradas.filter((l) => l.unitario === 0);
 
   const num = { textAlign: "right", whiteSpace: "nowrap" };
@@ -10058,6 +10087,8 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
         documentações concluídas. Cada documentação ART/TRT tem custo fixo de {fmtReal(CUSTO_UNITARIO_DOCUMENTACAO)}
         (taxa de emissão) e cada vistoria tem o custo (pagamento ao vistoriador) definido por empreendimento
         em "Preços por empreendimento" — a coluna "Lucro" já desconta isso do total.
+        Vistoria feita pela própria Gerência não entra como custo: não há pagamento a fazer, e o valor que
+        caberia ao técnico aparece como <strong>lucro extra</strong>.
       </p>
 
       {linhas.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum serviço concluído ainda.</p>}
@@ -10069,6 +10100,10 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
             <KpiCard label="Custo" valor={fmtReal(totalCusto)} cor="#C62828" percentual={fmtPct(totalCusto, totalGeral)} />
             <KpiCard label="Recebido" valor={fmtReal(totalRecebido)} cor="#2E7D32" percentual={fmtPct(totalRecebido, totalGeral)} />
             <KpiCard label="Lucro" valor={fmtReal(totalLucro)} cor="#6A4C93" percentual={fmtPct(totalLucro, totalGeral)} />
+            {totalLucroExtra > 0 && (
+              <KpiCard label="Lucro extra (vistoria da Gerência)" valor={fmtReal(totalLucroExtra)} cor="#2E7D32"
+                percentual={fmtPct(totalLucroExtra, totalLucro)} />
+            )}
             <KpiCard label="A receber" valor={fmtReal(totalGeral - totalRecebido)} cor="#B26A00" percentual={fmtPct(totalGeral - totalRecebido, totalGeral)} />
           </div>
 
@@ -10184,7 +10219,8 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
       <Card icon={Users} titulo="Pagamento aos vistoriadores">
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
           Por vistoria entregue (laudo já enviado ao cliente), no valor de custo fixado por empreendimento
-          em "Preços por empreendimento".
+          em "Preços por empreendimento". Quem recebe o crédito é <strong>quem assinou o laudo</strong>, não
+          quem estava escalado no cadastro.
         </p>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -10198,21 +10234,37 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
             <tbody>
               {pagamentosTecnicos.map((p) => (
                 <tr key={p.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
-                  <td style={{ padding: "8px 10px", fontWeight: 600 }}>{p.nome}</td>
+                  <td style={{ padding: "8px 10px", fontWeight: 600 }}>
+                    {p.nome}
+                    {p.ehGerencia && (
+                      <span style={{ marginLeft: 8, background: "#E6F4EA", color: "#2E7D32", borderRadius: 20, padding: "2px 8px", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>
+                        Gerência · vira lucro
+                      </span>
+                    )}
+                  </td>
                   <td style={{ padding: "8px 10px", ...num }}>{p.qtd}</td>
-                  <td style={{ padding: "8px 10px", ...num, fontWeight: 700, color: AZUL_MARINHO }}>{fmtReal(p.valor)}</td>
+                  <td style={{ padding: "8px 10px", ...num, fontWeight: 700, color: p.ehGerencia ? "#2E7D32" : AZUL_MARINHO }}>
+                    {fmtReal(p.valor)}
+                  </td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr style={{ borderTop: `2px solid ${CINZA_BORDA}`, background: CINZA_CLARO }}>
-                <td style={{ padding: "9px 10px", fontWeight: 800, color: AZUL_MARINHO }}>Total</td>
+                <td style={{ padding: "9px 10px", fontWeight: 800, color: AZUL_MARINHO }}>Total a pagar</td>
                 <td style={{ padding: "9px 10px", ...num, fontWeight: 700 }}>{pagamentosTecnicos.reduce((s, p) => s + p.qtd, 0)}</td>
                 <td style={{ padding: "9px 10px", ...num, fontWeight: 800, color: AZUL_MARINHO }}>{fmtReal(totalPagamentosTecnicos)}</td>
               </tr>
             </tfoot>
           </table>
         </div>
+        {totalTrabalhoGerencia > 0 && (
+          <div style={{ marginTop: 10, background: "#E6F4EA", color: "#1B6B51", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>
+            {fmtReal(totalTrabalhoGerencia)} são de vistoria feita pela própria Gerência e ficam fora do total a
+            pagar — a empresa não paga a si mesma. Esse valor entra como <strong>lucro extra</strong> no card
+            "Receita por empreendimento e serviço".
+          </div>
+        )}
         {vistoriasSemCustoDefinido > 0 && (
           <div style={{ marginTop: 10, background: "#FFF4E0", color: "#B26A00", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>
             {vistoriasSemCustoDefinido} vistoria(s) sem "Custo vistoria" cadastrado para o empreendimento —
