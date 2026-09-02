@@ -9937,7 +9937,8 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
 
   // chave "empreendimento-normalizado||servico" -> { qtd, recebidos }
   const cruzamento = {};
-  const registrar = (c, servico, feitaPelaGerencia = false) => {
+  /* "pago" vem de fora porque não mora num lugar só: ver a chamada de cada serviço. */
+  const registrar = (c, servico, { feitaPelaGerencia = false, pago = false } = {}) => {
     const bruto = c.empreendimento?.trim() || "(sem empreendimento)";
     const chaveEmp = normalizarChaveEmpreendimento(bruto);
     const k = `${chaveEmp}||${servico}`;
@@ -9947,9 +9948,18 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
       cruzamento[k] = { chaveEmp, empreendimento: nomeCanonicoPorChave[chaveEmp] || bruto, servico, qtd: 0, qtdPagos: 0, qtdGerencia: 0 };
     }
     cruzamento[k].qtd += 1;
-    if (c.pagamento === "Pago") cruzamento[k].qtdPagos += 1;
+    if (pago) cruzamento[k].qtdPagos += 1;
     if (feitaPelaGerencia) cruzamento[k].qtdGerencia += 1;
   };
+
+  /* ---- Onde mora "está pago" ----
+     Em dois lugares, e a planilha só olhava um deles. O cadastro do cliente tem o campo
+     "pagamento", que o Atendimento usa nos pedidos de ART/TRT; o registro da vistoria (docs)
+     tem o dele, que é o marcado quando o serviço é concluído. Como a planilha lia só o
+     cadastro, as 72 vistorias apareciam com "Recebido R$ 0,00" — todas continuam "Pendente"
+     ali — enquanto 36 registros estavam marcados como pagos. Valia qualquer um dos dois:
+     marcar em qualquer das duas telas passa a refletir no financeiro na hora. */
+  const servicoPago = (c, doc) => doc?.pagamento === "Pago" || c.pagamento === "Pago";
 
   // "vistoriadorId||chaveEmpreendimento" -> qtd de vistorias entregues ali por aquele técnico
   // (o custo por vistoria varia por empreendimento, então precisa saber onde, não só quem).
@@ -9959,7 +9969,9 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
   clientes.forEach((c) => {
     if (c.status === "Cancelado") return;
     if (ehServicoDocumentacao(c)) {
-      if (c.status === STATUS_DOC_CONCLUIDA) registrar(c, "documentacao");
+      if (c.status === STATUS_DOC_CONCLUIDA) {
+        registrar(c, "documentacao", { pago: servicoPago(c, docDoCliente(c, docs)) });
+      }
     } else if (ehTrabalhoDeVistoria(c)) {
       const doc = laudoEntregueDoCliente(c);
       if (doc) {
@@ -9968,7 +9980,7 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
            cadastro mude de nome, e o pagamento ia parar em quem não foi a campo. O cadastro só
            entra como reserva, para os registros antigos que nasceram sem vistoriador. */
         const quemFez = doc.vistoriadorId || c.vistoriadorId;
-        registrar(c, "vistoria", !!ehGerenciaPorId[quemFez]);
+        registrar(c, "vistoria", { feitaPelaGerencia: !!ehGerenciaPorId[quemFez], pago: servicoPago(c, doc) });
         if (quemFez) {
           const chaveEmp = normalizarChaveEmpreendimento(c.empreendimento?.trim() || "(sem empreendimento)");
           const k2 = `${quemFez}||${chaveEmp}`;
@@ -10089,6 +10101,9 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
         em "Preços por empreendimento" — a coluna "Lucro" já desconta isso do total.
         Vistoria feita pela própria Gerência não entra como custo: não há pagamento a fazer, e o valor que
         caberia ao técnico aparece como <strong>lucro extra</strong>.
+        A coluna "Recebido" conta o que está marcado como <strong>Pago</strong> — no registro da vistoria
+        (Documentação/Acompanhamento) ou no cadastro do cliente; marcar em qualquer das duas telas já
+        aparece aqui.
       </p>
 
       {linhas.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum serviço concluído ainda.</p>}
