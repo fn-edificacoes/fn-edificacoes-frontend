@@ -2906,7 +2906,7 @@ function AppInterno({ session, onLogout }) {
     carregarUsuarios();
   };
 
-  const preencherComCliente = async (cli, { irParaItens = false } = {}) => {
+  const preencherComCliente = async (cli, { irParaItens = false, assumirVistoria = false } = {}) => {
     if (!cli) return;
     /* Troca de cliente: sem isto, itens/fotoCliente da vistoria anterior continuavam no
        estado — o laudo do novo cliente nascia com não conformidades e foto de outro imóvel,
@@ -2953,13 +2953,30 @@ function AppInterno({ session, onLogout }) {
     const patch = {};
     if (!cli.atendido) patch.atendido = true;
     if (irParaItens && cli.status === "Vistoria agendada") patch.status = "Em vistoria";
-    if (Object.keys(patch).length > 0) updCliente(cli.id, patch);
+    /* Gerência puxando um cadastro que não está na agenda dela (ver CardPuxarCliente): quem
+       vai a campo passa a ser ela. Sem gravar o vistoriador no cadastro, a vistoria não
+       entrava em "Minha agenda", o rascunho do servidor e o laudo anterior da revistoria
+       continuavam presos ao técnico antigo, e o gerente ficava com a tela de vistoria
+       preenchida sem caminho de volta ao cliente. Só a Gerência faz isso: o backend não
+       deixa o técnico trocar o responsável de um cadastro (PATCH /api/clientes/:id). */
+    if (assumirVistoria && perfil === "gerencia" && !ehServicoDocumentacao(cli)) {
+      if (String(cli.vistoriadorId || "") !== String(session.usuario.id)) patch.vistoriadorId = session.usuario.id;
+      if (irParaItens && ["Em análise", "Agendamento aprovado", "Vistoria agendada"].includes(cli.status)) patch.status = "Em vistoria";
+    }
+    if (Object.keys(patch).length > 0) {
+      await updCliente(cli.id, patch);
+      /* A agenda vem do servidor filtrada por vistoriador_id: sem recarregar, a vistoria
+         recém-assumida só apareceria na volta seguinte do intervalo de 20s. */
+      if (patch.vistoriadorId) carregarAgendaVistoriador({ silencioso: true });
+    }
     if (irParaItens) { setAbaTop("laudos"); setAba("itens"); }
     /* Revistoria: o técnico precisa saber, na hora que abre, que existe um laudo anterior —
        senão ele começa do zero sem conferir o que já tinha sido apontado. */
     notify(cli.revistoriaDe
       ? "Revistoria ✓ O laudo anterior está na aba \"Laudo anterior\""
-      : "Dados do cliente aplicados ao laudo ✓");
+      : patch.vistoriadorId
+        ? "Vistoria assumida por você ✓ Dados do cliente aplicados ao laudo"
+        : "Dados do cliente aplicados ao laudo ✓");
   };
 
   /* ---- Finalizar vistoria: vistoriador envia o laudo (dados + itens) para a gerência
@@ -3345,7 +3362,13 @@ function AppInterno({ session, onLogout }) {
       </header>
 
       <main style={{ maxWidth: 1080, margin: "0 auto", padding: "22px 18px 80px" }}>
-        {abaTop === "laudos" && <NotificacoesClientes clientes={clientesAtivos} preencherComCliente={preencherComCliente} style={{ marginBottom: 18 }} />}
+        {abaTop === "laudos" && <NotificacoesClientes clientes={clientesAtivos} preencherComCliente={preencherComCliente} usuarioAtualId={session.usuario.id} style={{ marginBottom: 18 }} />}
+        {/* Fica nas duas telas de onde se começa uma vistoria (a agenda e a própria vistoria);
+            no laudo final e nos laudos realizados só atrapalharia. */}
+        {abaTop === "laudos" && (aba === "itens" || aba === "agenda") && fazVistoria({ role: perfil }) && (
+          <CardPuxarCliente clientes={clientesAtivos} usuarios={usuarios} usuarioAtualId={session.usuario.id}
+            ehGerencia={perfil === "gerencia"} preencherComCliente={preencherComCliente} style={{ marginBottom: 18 }} />
+        )}
         {abaTop === "documentacao" && <FaixaIndicadoresGerais docs={docs} clientes={clientesAtivos} modo="art" style={{ marginBottom: 18 }} />}
 
         {/* A vistoria que existe no servidor e não existe nesta tela. Aparece só quando o
@@ -3510,16 +3533,22 @@ function RascunhoLinha({ r, onLoad, onDel }) {
 
 
 /* ================= Notificações: solicitações de clientes pendentes ================= */
-function NotificacoesClientes({ clientes, preencherComCliente, style }) {
+function NotificacoesClientes({ clientes, preencherComCliente, usuarioAtualId, style }) {
   /* Só o que já está na agenda dele, e nada mais:
      - Documentação ART/TRT não tem vistoria (aparecia aqui com "Iniciar vistoria", que não
        existe para ela), e cancelado deixou de ser compromisso;
      - a revistoria nasce com o técnico da vistoria original já sugerido no cadastro, mas
        ainda "Em análise" — sem o filtro por status, ela apareceria com o botão de iniciar
        antes de o Atendimento aprovar e marcar a data. */
+  /* E só o que é de quem está olhando. A Gerência recebe a lista de clientes inteira (a API
+     não filtra por técnico para ela), então este card virava a fila de todo mundo: o gerente
+     abria a vistoria de um colega sem perceber que não era dele. Cadastro ainda sem técnico
+     continua aparecendo — esse é de quem chegar primeiro. Para puxar de propósito o cliente
+     de outro técnico existe o card "Puxar cliente para a vistoria". */
   const pendentes = clientes
     .filter((c) => !c.atendido && !ehServicoDocumentacao(c)
-      && ["Vistoria agendada", "Em vistoria"].includes(c.status))
+      && ["Vistoria agendada", "Em vistoria"].includes(c.status)
+      && (!c.vistoriadorId || !usuarioAtualId || String(c.vistoriadorId) === String(usuarioAtualId)))
     .sort((a, b) => `${a.dataDesejada}${a.horarioDesejado}`.localeCompare(`${b.dataDesejada}${b.horarioDesejado}`));
 
   if (pendentes.length === 0) return null;
@@ -3551,6 +3580,91 @@ function NotificacoesClientes({ clientes, preencherComCliente, style }) {
             </div>
           ))}
         </div>
+      </Card>
+    </div>
+  );
+}
+
+/* ================= Puxar um cliente para a vistoria =================
+   A tela de vistoria só sabe de quem é o laudo quando alguém carrega um cadastro nela — a
+   aba "Dados do laudo" não existe mais. Os dois caminhos que sobraram (o card de pendentes
+   e "Minha agenda") mostram só o que já está atribuído a quem está olhando, e a Gerência,
+   que também vai a campo, ficava sem caminho nenhum quando o cadastro era de outro técnico
+   ou ainda não tinha sido escalado: dava para preencher a vistoria inteira e "Finalizar"
+   recusava no fim, pedindo um cliente que a tela não tinha como escolher. Aqui ela busca
+   qualquer cadastro e assume a vistoria (ver preencherComCliente). O técnico também vê o
+   card, mas a API só manda os cadastros dele — para ele isto é busca, não um jeito de pegar
+   vistoria de colega. */
+function CardPuxarCliente({ clientes = [], usuarios = [], usuarioAtualId, ehGerencia = false, preencherComCliente, style }) {
+  const [busca, setBusca] = useState("");
+  const [puxando, setPuxando] = useState(null);
+  const soDigitos = (v) => String(v || "").replace(/\D/g, "");
+  const termo = busca.trim().toLowerCase();
+  const digitos = soDigitos(termo);
+  /* ART/TRT não passa por vistoria: puxar um cadastro desses só criaria um laudo que ninguém
+     espera. Cancelado já fica de fora — a lista que chega aqui é a de ativos. */
+  const achados = termo.length < 2 ? [] : clientes
+    .filter((c) => !ehServicoDocumentacao(c))
+    .filter((c) => `${c.nome} ${c.empreendimento} ${c.blocoTorre} ${c.email}`.toLowerCase().includes(termo)
+      || (digitos.length >= 3 && soDigitos(c.cpf).includes(digitos)))
+    .slice(0, 12);
+  const nomeTecnico = (id) => usuarios.find((u) => String(u.id) === String(id))?.nome || "";
+
+  const puxar = async (c) => {
+    setPuxando(c.id);
+    await preencherComCliente(c, { irParaItens: true, assumirVistoria: true });
+    setPuxando(null);
+  };
+
+  return (
+    <div style={style}>
+      <Card icon={Search} titulo="Puxar cliente para a vistoria">
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
+          {ehGerencia
+            ? "Busque qualquer cadastro por nome, CPF ou empreendimento. Ao puxar, os dados vão para o laudo e a vistoria passa a ser sua — ela aparece em \"Minha agenda\" e o laudo sai no seu nome."
+            : "Busque um cadastro seu por nome, CPF ou empreendimento para carregar os dados no laudo."}
+        </p>
+        <input style={inp} value={busca} onChange={(e) => setBusca(e.target.value)}
+          placeholder="Nome, CPF ou empreendimento" />
+        {termo.length >= 2 && achados.length === 0 && (
+          <p style={{ fontSize: 13, color: "#8593a8", margin: "12px 0 0" }}>Nenhum cadastro encontrado.</p>
+        )}
+        {achados.length > 0 && (
+          <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+            {achados.map((c) => {
+              const deOutro = c.vistoriadorId && String(c.vistoriadorId) !== String(usuarioAtualId);
+              return (
+                <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontWeight: 700, fontSize: 14 }}>{c.nome}</span>
+                      {c.revistoriaSeq > 0 && <SeloRevistoria seq={c.revistoriaSeq} />}
+                      <Selo valor={c.status} />
+                    </div>
+                    <div style={{ fontSize: 12.5, color: "#65758b" }}>
+                      {c.servico}{c.empreendimento ? ` · ${c.empreendimento}` : ""}{c.blocoTorre ? ` (${c.blocoTorre})` : ""}
+                      {c.dataDesejada ? ` · ${c.dataDesejada.split("-").reverse().join("/")}` : ""}{c.horarioDesejado ? ` às ${c.horarioDesejado}` : ""}
+                    </div>
+                    {/* Quem vai pegar a vistoria de um colega precisa ver isso ANTES de clicar:
+                        puxar troca o responsável do cadastro. */}
+                    {deOutro && (
+                      <div style={{ fontSize: 12, color: "#B26A00", marginTop: 4 }}>
+                        Escalado para {nomeTecnico(c.vistoriadorId) || "outro técnico"} — puxar transfere a vistoria para você.
+                      </div>
+                    )}
+                    {c.temLaudo && (
+                      <div style={{ fontSize: 12, color: "#8593a8", marginTop: 4 }}>Este cadastro já tem laudo enviado.</div>
+                    )}
+                  </div>
+                  <button className="btn-solid" style={{ width: "auto", padding: "8px 14px" }}
+                    disabled={puxando === c.id} onClick={() => puxar(c)}>
+                    {puxando === c.id ? <Loader2 size={14} className="spin" /> : <Check size={14} />} Puxar dados
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </Card>
     </div>
   );
