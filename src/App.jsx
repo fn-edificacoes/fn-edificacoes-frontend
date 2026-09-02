@@ -2681,6 +2681,25 @@ function AppInterno({ session, onLogout }) {
   };
   useEffect(() => { carregarPainel(); }, []);
 
+  /* ---- O que os laudos encontram nos imóveis (Painel estratégico) ----
+     Vem somado do servidor porque a conta precisa abrir o conteúdo dos laudos, e conteúdo de
+     laudo carrega as fotos junto — foi assim que uma abertura de tela baixou 62 MB. Daqui só
+     chegam contagens. Se a API ainda for anterior a esta rota, o bloco da tela explica que
+     falta publicar; o resto do painel não depende dele e continua de pé. */
+  const [painelPatologias, setPainelPatologias] = useState(null);
+  const [painelPatologiasCarregando, setPainelPatologiasCarregando] = useState(false);
+  const [painelPatologiasIndisponivel, setPainelPatologiasIndisponivel] = useState(false);
+  const carregarPainelPatologias = async () => {
+    if (perfil !== "gerencia") return;
+    setPainelPatologiasCarregando(true);
+    try {
+      setPainelPatologias(await apiFetch("/api/painel/patologias", { token }));
+      setPainelPatologiasIndisponivel(false);
+    } catch { setPainelPatologiasIndisponivel(true); }
+    setPainelPatologiasCarregando(false);
+  };
+  useEffect(() => { carregarPainelPatologias(); }, []);
+
   /* Abrir o laudo marca "Em análise": o técnico passa a saber que o documento saiu da fila
      e alguém está olhando, em vez de ficar dias vendo "Enviado". O backend ignora a chamada
      quando o laudo já passou desse ponto, então abrir um aprovado não o faz retroceder. */
@@ -3341,7 +3360,7 @@ function AppInterno({ session, onLogout }) {
         {/* Sub-navegação (somente dentro do módulo Gerência) */}
         {abaTop === "gerencia" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
-            {[["visao-geral", "Visão geral", LayoutGrid], ["acompanhamento", "Acompanhamento", ClipboardList], ["perfil-cliente", "Perfil do cliente", User], ["parceiros", "Parceiros e Afiliados", Users], ["financeiro", "Financeiro", DollarSign], ["prospeccao", "Prospecção", TrendingUp], ["patologias", "Banco de patologias", AlertTriangle]].map(([k, label, Icon]) => (
+            {[["visao-geral", "Visão geral", LayoutGrid], ["painel", "Painel estratégico", BarChart3], ["acompanhamento", "Acompanhamento", ClipboardList], ["perfil-cliente", "Perfil do cliente", User], ["parceiros", "Parceiros e Afiliados", Users], ["financeiro", "Financeiro", DollarSign], ["prospeccao", "Prospecção", TrendingUp], ["patologias", "Banco de patologias", AlertTriangle]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setAbaGerencia(k)} className="tab" style={{ borderBottomColor: abaGerencia === k ? AZUL_MEDIO : "transparent", color: abaGerencia === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
                 <Icon size={15} /> {label}
               </button>
@@ -3467,6 +3486,8 @@ function AppInterno({ session, onLogout }) {
             adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento}
             laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} editarLaudo={editarLaudo} reenviarDrive={reenviarDrive} marcarEmAnalise={marcarEmAnalise}
       painel={painel} painelCarregando={painelCarregando} carregarPainel={carregarPainel}
+            painelPatologias={painelPatologias} painelPatologiasCarregando={painelPatologiasCarregando}
+            painelPatologiasIndisponivel={painelPatologiasIndisponivel} carregarPainelPatologias={carregarPainelPatologias}
             acessos={acessos} acessosCarregando={acessosCarregando}
             patologiasBanco={patologiasBanco} patologiasBancoCarregando={patologiasBancoCarregando}
             criarPatologia={criarPatologia} atualizarPatologia={atualizarPatologia} excluirPatologia={excluirPatologia}
@@ -8558,6 +8579,440 @@ function CardBackup({ token, notify }) {
   );
 }
 
+/* ================= Gerência · Painel estratégico =================
+   A leitura de negócio, separada da "Visão geral" — que é tela de operação (fila de laudos,
+   cancelamento pendente, e-mail que não saiu) e continua sendo. Aqui é o consolidado: para
+   onde a carteira está indo, quanto ela vale, quem está sobrecarregado e o que os laudos
+   encontram nos imóveis.
+
+   Quase tudo é somado aqui no navegador, em cima do que a tela já carregou (clientes, docs,
+   usuários, avaliações, prospecção, parceiros, vales): nenhuma chamada nova, e os números
+   acompanham o mesmo recarregamento do resto do sistema. Duas coisas vêm prontas do servidor
+   porque não dá para calcular daqui — os tempos médios (/api/painel/laudos, que precisa da
+   data de aprovação de cada laudo) e as patologias (/api/painel/patologias, que abre o
+   conteúdo dos laudos; conteúdo de laudo nunca desce para esta tela, ver as fotos do laudo).
+
+   Nada aqui é meta, projeção ou nota inventada: o banco não guarda isso. O único número que
+   não é medição vem marcado como estimativa, na cara. */
+
+/* Lista ordenada com barra proporcional. BarraStatus, que já existe, é outra coisa — uma
+   barra única empilhada por status; aqui cada linha se compara com a maior da lista. */
+function ListaRanking({ itens = [], cor = AZUL_MEDIO, vazio = "Sem dados ainda.", maxItens = 10 }) {
+  const lista = itens.slice(0, maxItens);
+  if (lista.length === 0) return <p style={{ color: "#8593a8", fontSize: 13.5, margin: 0 }}>{vazio}</p>;
+  const maior = Math.max(1, ...lista.map((i) => i.valor));
+  return (
+    <div style={{ display: "grid", gap: 9 }}>
+      {lista.map((i, idx) => (
+        <div key={`${i.chave}-${idx}`} style={{ display: "grid", gridTemplateColumns: "minmax(88px, 1.15fr) 1fr auto", alignItems: "center", gap: 10 }}>
+          <span title={i.chave} style={{ fontSize: 12.5, color: "#4a5a70", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.chave}</span>
+          <div style={{ height: 8, borderRadius: 4, background: CINZA_CLARO, overflow: "hidden" }}>
+            <div style={{ width: `${(i.valor / maior) * 100}%`, height: "100%", background: i.cor || cor }} />
+          </div>
+          <strong style={{ fontSize: 12.5, color: AZUL_MARINHO, minWidth: 38, textAlign: "right" }}>{i.rotulo != null ? i.rotulo : i.valor}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* Marca o que é conta nossa, não medição — para ninguém levar uma projeção para a reunião
+   achando que é número fechado do sistema. */
+function SeloEstimativa() {
+  return (
+    <span style={{ border: `1px dashed ${CINZA_BORDA}`, color: "#8593a8", borderRadius: 20, padding: "1px 8px", fontSize: 10.5, fontWeight: 600, marginLeft: 6, whiteSpace: "nowrap" }}>
+      estimativa
+    </span>
+  );
+}
+
+const ROTULO_STATUS_PARCEIRO = { aprovado: "Aprovado", em_analise: "Aguardando homologação", recusado: "Recusado" };
+
+function AbaGerenciaPainelEstrategico({
+  clientes = [], docs = [], usuarios = [], avaliacoes = [], prospeccao = [], prospeccaoParceiros = [],
+  parceiros = [], vales = [], painel, painelCarregando, carregarPainel,
+  patologias, patologiasCarregando, patologiasIndisponivel, recarregarPatologias,
+}) {
+  const total = clientes.length;
+  const atendidos = clientes.filter((c) => c.atendido).length;
+  const cancelados = clientes.filter((c) => c.status === "Cancelado").length;
+  const emAberto = clientes.filter((c) => ["Vistoria agendada", "Em vistoria"].includes(c.status));
+  const entregues = docs.filter((d) => d.statusCliente === "Laudo enviado por e-mail").length;
+
+  const receitaDoc = (d) => (Number(d.valorVistoria) || 0) + (Number(d.valorTrt) || 0);
+  const receitaTotal = docs.reduce((soma, d) => soma + receitaDoc(d), 0);
+  const receitaVistoria = docs.reduce((soma, d) => soma + (Number(d.valorVistoria) || 0), 0);
+  const receitaTrt = docs.reduce((soma, d) => soma + (Number(d.valorTrt) || 0), 0);
+  const comVistoria = docs.filter((d) => Number(d.valorVistoria) > 0);
+  const comTrt = docs.filter((d) => Number(d.valorTrt) > 0);
+  /* Ticket médio só entre os laudos que têm valor lançado: contar os que estão com zero
+     puxaria a média para baixo e faria parecer que o serviço vale menos do que é cobrado. */
+  const ticketVistoria = comVistoria.length ? Math.round(receitaVistoria / comVistoria.length) : 0;
+  const ticketTrt = comTrt.length ? Math.round(receitaTrt / comTrt.length) : 0;
+  const clientesPagos = clientes.filter((c) => c.pagamento === "Pago").length;
+  const docsPagos = docs.filter((d) => d.pagamento === "Pago").length;
+
+  const notaMedia = avaliacoes.length
+    ? avaliacoes.reduce((soma, a) => soma + (Number(a.nota) || 0), 0) / avaliacoes.length
+    : null;
+
+  /* ---- Carteira por empreendimento ----
+     Agrupado pela chave normalizada (a mesma da tela de Padronização): "VILA DAS PALMEIRAS",
+     "Vila das Palmeiras" e "RESIDENCIAL VILA DAS PALMEIRAS" são o mesmo prédio, e contar cada
+     grafia como uma obra diferente quebra justamente o indicador de concentração. */
+  const carteira = {};
+  const grupo = (bruto) => {
+    const chave = normalizarChaveEmpreendimento(bruto);
+    return carteira[chave] || (carteira[chave] = { chave, nomes: {}, clientes: 0, atendidos: 0, laudos: 0, receita: 0 });
+  };
+  clientes.forEach((c) => {
+    const bruto = (c.empreendimento || "").trim() || "(sem empreendimento)";
+    const g = grupo(bruto);
+    g.nomes[bruto] = (g.nomes[bruto] || 0) + 1;
+    g.clientes += 1;
+    if (c.atendido) g.atendidos += 1;
+  });
+  docs.forEach((d) => {
+    const g = grupo((d.empreendimento || "").trim() || "(sem empreendimento)");
+    g.laudos += 1;
+    g.receita += receitaDoc(d);
+  });
+  const listaCarteira = Object.values(carteira)
+    .map((g) => ({ ...g, nome: Object.entries(g.nomes).sort((a, b) => b[1] - a[1])[0]?.[0] || g.chave }))
+    .sort((a, b) => b.clientes - a.clientes || b.receita - a.receita);
+  const grafias = new Set(clientes.map((c) => (c.empreendimento || "").trim()).filter(Boolean)).size;
+  const maior = listaCarteira[0];
+  const concentracao = maior && total ? Math.round((maior.clientes / total) * 100) : 0;
+
+  /* ---- Equipe ---- */
+  const equipe = usuarios.filter(fazVistoria).map((u) => {
+    const meus = docs.filter((d) => String(d.vistoriadorId) === String(u.id));
+    return {
+      id: u.id, nome: u.nome, role: u.role, ativo: u.ativo,
+      laudos: meus.length,
+      receita: meus.reduce((soma, d) => soma + receitaDoc(d), 0),
+      agenda: clientes.filter((c) => String(c.vistoriadorId) === String(u.id) && ["Vistoria agendada", "Em vistoria"].includes(c.status)).length,
+    };
+  }).sort((a, b) => b.laudos - a.laudos || b.agenda - a.agenda);
+
+  const funil = [
+    { chave: "Cadastros recebidos", valor: total },
+    { chave: "Passaram da análise", valor: clientes.filter((c) => !["Em análise", "Cancelado", "Cancelamento solicitado"].includes(c.status)).length },
+    { chave: "Agendadas ou em campo", valor: emAberto.length },
+    { chave: "Laudo elaborado", valor: docs.length },
+    { chave: "Entregue ao cliente", valor: entregues },
+  ];
+
+  const contar = (lista, campo, vazio) => {
+    const mapa = {};
+    lista.forEach((x) => {
+      const k = String(x?.[campo] ?? "").trim() || vazio;
+      mapa[k] = (mapa[k] || 0) + 1;
+    });
+    return Object.entries(mapa).map(([chave, valor]) => ({ chave, valor })).sort((a, b) => b.valor - a.valor);
+  };
+  const porPrioridade = contar(prospeccao, "prioridade", "Sem prioridade")
+    /* Mesma cor que a aba Prospecção usa para cada prioridade: o vermelho de "Imediata" é o
+       mesmo nos dois lugares, senão cada tela ensina uma legenda diferente. */
+    .map((i) => ({ ...i, cor: (COR_PRIORIDADE[i.chave] || COR_PRIORIDADE["A confirmar"]).cor }));
+  const porRegiao = (() => {
+    const mapa = {};
+    prospeccao.forEach((pp) => {
+      const regiao = String(pp.regiao || "").trim();
+      const estado = String(pp.estado || "").trim();
+      const k = regiao ? `${regiao}${estado ? ` (${estado})` : ""}` : "Sem região definida";
+      mapa[k] = (mapa[k] || 0) + 1;
+    });
+    return Object.entries(mapa).map(([chave, valor]) => ({ chave, valor })).sort((a, b) => b.valor - a.valor);
+  })();
+  const parceirosPorStatus = contar(parceiros, "status", "sem situação")
+    .map((i) => ({ ...i, chave: ROTULO_STATUS_PARCEIRO[i.chave] || i.chave }));
+  const valesAtivos = vales.filter((v) => v.status === "ativo").length;
+  const valesUsados = vales.filter((v) => v.status === "usado").length;
+
+  const t = painel?.tempos;
+  const ind = painel?.indicadores;
+  const pt = patologias;
+  const paraRanking = (lista = []) => lista.map((x) => ({ chave: x.chave, valor: x.quantos }));
+
+  const bloco = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 };
+  const duasColunas = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 };
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <Card icon={BarChart3} titulo="Onde a operação está">
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+          Tudo desta tela sai do que está gravado no sistema, no momento em que ela é aberta. Onde o
+          sistema não guarda o dado (meta, previsão de receita, NPS), o número não aparece — e o que é
+          conta nossa vem marcado como estimativa.
+        </p>
+        <div style={bloco}>
+          <KpiCard label="Clientes cadastrados" valor={total} Icon={Users} />
+          <KpiCard label="Já atendidos" valor={atendidos} cor="#2E7D32" Icon={Check}
+            percentual={total ? `${Math.round((atendidos / total) * 100)}%` : null} />
+          <KpiCard label="Laudos elaborados" valor={docs.length} cor={AZUL_MEDIO} Icon={ClipboardCheck} />
+          <KpiCard label="Entregues ao cliente" valor={entregues} cor="#2E7D32" Icon={Mail} />
+          <KpiCard label="Receita registrada" valor={fmtReal(receitaTotal)} Icon={DollarSign} />
+          <KpiCard label="Vistorias em aberto" valor={emAberto.length} cor="#B26A00" Icon={CalendarDays} />
+        </div>
+      </Card>
+
+      <div style={duasColunas}>
+        <Card icon={ClipboardList} titulo="Funil do atendimento">
+          <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 12px" }}>
+            Do cadastro que chega pelo portal até o laudo no e-mail do cliente.
+          </p>
+          <ListaRanking itens={funil} />
+          {cancelados > 0 && (
+            <p style={{ fontSize: 12.5, color: "#8593a8", margin: "12px 0 0" }}>
+              {cancelados} cadastro(s) cancelado(s) estão fora das etapas acima.
+            </p>
+          )}
+        </Card>
+
+        <Card icon={CalendarDays} titulo="Tempo de ciclo">
+          {painelCarregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+          {!painelCarregando && !t && <p style={{ color: "#8593a8", fontSize: 13.5 }}>Sem laudo aprovado ainda — não há tempo médio para mostrar.</p>}
+          {t && (
+            <>
+              <div style={{ ...bloco, marginBottom: 12 }}>
+                <KpiCard label="Vistoria → laudo aprovado" valor={`${(t.diasVistoriaAteAprovacao ?? 0).toLocaleString("pt-BR")} d`} Icon={CalendarDays} />
+                <KpiCard label="Envio → aprovação" valor={`${(t.diasEnvioAteAprovacao ?? 0).toLocaleString("pt-BR")} d`} cor="#2E7D32" Icon={Check} />
+                <KpiCard label="Na fila da Gerência" valor={(ind?.aguardandoAnalise || 0) + (ind?.emAnalise || 0) + (ind?.reenviadas || 0)} cor="#B26A00" Icon={ClipboardList} />
+                <KpiCard label="Devolvidos para correção" valor={ind?.devolvidas || 0} cor={ind?.devolvidas ? "#C62828" : "#65758b"} Icon={Undo2} />
+              </div>
+              <p style={{ fontSize: 12.5, color: "#8593a8", margin: 0 }}>
+                Média de {t.base} laudo(s) já aprovado(s). O primeiro número é o que o cliente espera;
+                o segundo é só a revisão interna — é assim que se enxerga de que lado está a demora.
+              </p>
+            </>
+          )}
+        </Card>
+      </div>
+
+      <Card icon={Building2} titulo="Carteira por empreendimento">
+        <div style={{ ...bloco, marginBottom: 14 }}>
+          <KpiCard label="Empreendimentos com cliente" valor={listaCarteira.length} Icon={Building2} />
+          <KpiCard label="Grafias diferentes no cadastro" valor={grafias} cor={grafias > listaCarteira.length ? "#B26A00" : "#65758b"} Icon={AlertTriangle} />
+          <KpiCard label="Concentração no maior" valor={`${concentracao}%`} cor={concentracao >= 50 ? "#C62828" : AZUL_MARINHO} Icon={Percent} />
+          <KpiCard label="Progresso da carteira" valor={total ? `${Math.round((atendidos / total) * 100)}%` : "—"} cor="#2E7D32" Icon={TrendingUp} />
+        </div>
+        {grafias > listaCarteira.length && (
+          <p style={{ fontSize: 12.5, color: "#7a5320", background: "#FFF4E5", border: "1px solid #F0C48A", borderRadius: 8, padding: "8px 12px", margin: "0 0 14px" }}>
+            O mesmo prédio está cadastrado com grafias diferentes ({grafias} nomes para {listaCarteira.length} obras).
+            Aqui eles já foram somados como um só; no resto do sistema, não. A tela Gerência → Visão geral →
+            "Padronizar empreendimentos" unifica.
+          </p>
+        )}
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: CINZA_CLARO }}>
+                {["Empreendimento", "Clientes", "Atendidos", "Progresso", "Laudos", "Receita"].map((h, i) => (
+                  <th key={h} style={{ textAlign: i === 0 ? "left" : "right", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}`, whiteSpace: "nowrap" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {listaCarteira.slice(0, 12).map((e) => {
+                const p = e.clientes ? Math.round((e.atendidos / e.clientes) * 100) : 0;
+                return (
+                  <tr key={e.chave} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                    <td style={{ padding: "8px 10px", fontWeight: 600 }}>{e.nome}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right" }}>{e.clientes}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right" }}>{e.atendidos}</td>
+                    <td style={{ padding: "8px 10px", width: 130 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ flex: 1, height: 6, borderRadius: 3, background: CINZA_CLARO, overflow: "hidden" }}>
+                          <div style={{ width: `${p}%`, height: "100%", background: p >= 100 ? "#2E7D32" : AZUL_MEDIO }} />
+                        </div>
+                        <span style={{ fontSize: 11.5, color: "#65758b", minWidth: 32, textAlign: "right" }}>{p}%</span>
+                      </div>
+                    </td>
+                    <td style={{ padding: "8px 10px", textAlign: "right" }}>{e.laudos || "—"}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right", whiteSpace: "nowrap" }}>{e.receita ? fmtReal(e.receita) : "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      <div style={duasColunas}>
+        <Card icon={DollarSign} titulo="Financeiro">
+          <div style={{ ...bloco, marginBottom: 12 }}>
+            <KpiCard label="Receita registrada" valor={fmtReal(receitaTotal)} Icon={DollarSign} />
+            <KpiCard label="Ticket médio — vistoria" valor={fmtReal(ticketVistoria)} cor={AZUL_MEDIO} Icon={ClipboardCheck}
+              percentual={comVistoria.length ? `${comVistoria.length} laudos` : null} />
+            <KpiCard label="Ticket médio — ART/TRT" valor={fmtReal(ticketTrt)} cor={AZUL_MEDIO} Icon={FileText}
+              percentual={comTrt.length ? `${comTrt.length} docs` : null} />
+            <KpiCard label="Cadastros com pagamento" valor={clientesPagos} cor={clientesPagos < docsPagos ? "#C62828" : "#2E7D32"} Icon={Check}
+              percentual={total ? `${Math.round((clientesPagos / total) * 100)}%` : null} />
+          </div>
+          <ListaRanking maxItens={6} vazio="Nenhum laudo com valor lançado ainda."
+            itens={listaCarteira.filter((e) => e.receita > 0).map((e) => ({ chave: e.nome, valor: e.receita, rotulo: fmtReal(e.receita) }))} />
+          <p style={{ fontSize: 12.5, color: "#65758b", margin: "14px 0 0" }}>
+            Carteira em aberto: {emAberto.length} vistoria(s) contratada(s) e ainda sem laudo, que ao ticket médio
+            de hoje valem cerca de <strong style={{ color: AZUL_MARINHO }}>{fmtReal(emAberto.length * ticketVistoria)}</strong>
+            <SeloEstimativa />. O sistema não guarda valor previsto por cadastro — isto é o ticket médio aplicado à fila.
+          </p>
+          {clientesPagos < docsPagos && (
+            <p style={{ fontSize: 12.5, color: "#7a5320", background: "#FFF4E5", border: "1px solid #F0C48A", borderRadius: 8, padding: "8px 12px", margin: "12px 0 0" }}>
+              {docsPagos} laudo(s) constam pagos, mas só {clientesPagos} cadastro(s) de cliente estão marcados como
+              "Pago". Enquanto os dois não baterem, não dá para ler inadimplência pelo cadastro.
+            </p>
+          )}
+        </Card>
+
+        <Card icon={Users} titulo="Equipe em campo">
+          {equipe.length === 0 && <p style={{ color: "#8593a8", fontSize: 13.5 }}>Nenhum vistoriador cadastrado.</p>}
+          {equipe.length > 0 && (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: CINZA_CLARO }}>
+                    {["Quem", "Laudos", "Em aberto", "Receita gerada", ""].map((h, i) => (
+                      <th key={i} style={{ textAlign: i === 0 ? "left" : "right", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}`, whiteSpace: "nowrap" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {equipe.map((u) => (
+                    <tr key={u.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                      <td style={{ padding: "8px 10px", fontWeight: 600 }}>{rotuloTecnico(u)}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "right" }}>{u.laudos}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: u.agenda > 20 ? 800 : 400, color: u.agenda > 20 ? "#B26A00" : "inherit" }}>{u.agenda}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "right", whiteSpace: "nowrap" }}>{u.receita ? fmtReal(u.receita) : "—"}</td>
+                      <td style={{ padding: "8px 10px", textAlign: "right" }}>
+                        {!u.ativo && <span style={{ fontSize: 11, color: "#C62828", fontWeight: 700 }}>inativo</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p style={{ fontSize: 12.5, color: "#8593a8", margin: "12px 0 0" }}>
+            "Em aberto" é o que já está escalado e ainda não virou laudo — é por onde se enxerga sobrecarga
+            antes de o prazo estourar. A Gerência aparece aqui porque também vai a campo.
+          </p>
+        </Card>
+      </div>
+
+      <Card icon={AlertTriangle} titulo="Qualidade técnica — o que os laudos encontram">
+        {patologiasCarregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+        {!patologiasCarregando && patologiasIndisponivel && (
+          <p style={{ fontSize: 13, color: "#7a5320", background: "#FFF4E5", border: "1px solid #F0C48A", borderRadius: 8, padding: "10px 12px", margin: 0 }}>
+            Este bloco depende de uma rota nova da API (/api/painel/patologias) que ainda não está
+            publicada no servidor. O resto do painel não é afetado.
+            {recarregarPatologias && (
+              <button className="btn-ghost" style={{ width: "auto", padding: "5px 10px", marginLeft: 10 }} onClick={recarregarPatologias}>
+                <RefreshCcw size={13} /> Tentar de novo
+              </button>
+            )}
+          </p>
+        )}
+        {!patologiasCarregando && !patologiasIndisponivel && pt && (
+          <>
+            <div style={{ ...bloco, marginBottom: 16 }}>
+              <KpiCard label="Não conformidades" valor={pt.totais?.itens ?? 0} Icon={AlertTriangle} />
+              <KpiCard label="Média por laudo" valor={(pt.totais?.media ?? 0).toLocaleString("pt-BR")} cor={AZUL_MEDIO} Icon={ClipboardList} />
+              <KpiCard label="Maior laudo" valor={`${pt.totais?.maximo ?? 0} itens`} cor="#B26A00" Icon={FileText} />
+              <KpiCard label="Laudos analisados" valor={pt.totais?.laudos ?? 0} Icon={ClipboardCheck} />
+            </div>
+            <div style={duasColunas}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 10 }}>Por categoria</div>
+                <ListaRanking itens={paraRanking(pt.categorias)} />
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 10 }}>Ambientes mais críticos</div>
+                <ListaRanking itens={paraRanking(pt.ambientes)} cor="#B8912F" />
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 10 }}>Apontamentos mais repetidos</div>
+                <ListaRanking itens={paraRanking(pt.patologias)} />
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 10 }}>Severidade</div>
+                <ListaRanking maxItens={6}
+                  itens={paraRanking(pt.severidade).map((i) => ({ ...i, cor: i.chave === "Alta" ? "#C62828" : i.chave === "Média" ? "#E07B00" : "#5A7DA0" }))} />
+                <p style={{ fontSize: 12.5, color: "#8593a8", margin: "12px 0 0" }}>
+                  É o retrato do padrão de entrega das construtoras da carteira — e o argumento técnico
+                  que a FN leva para a mesa com elas.
+                </p>
+              </div>
+            </div>
+          </>
+        )}
+      </Card>
+
+      <div style={duasColunas}>
+        <Card icon={Star} titulo="Como o cliente avalia">
+          {avaliacoes.length === 0 && <p style={{ color: "#8593a8", fontSize: 13.5 }}>Nenhuma avaliação recebida ainda.</p>}
+          {avaliacoes.length > 0 && (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", marginBottom: 12 }}>
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: 30, fontWeight: 800, color: AZUL_MARINHO, lineHeight: 1 }}>{notaMedia.toFixed(1).replace(".", ",")}</div>
+                  <Estrelas valor={Math.round(notaMedia)} tamanho={16} />
+                </div>
+                <div style={{ fontSize: 13, color: "#65758b" }}>
+                  {avaliacoes.length} avaliação(ões) para {entregues} laudo(s) entregue(s)
+                  {entregues > 0 && ` — ${Math.round((avaliacoes.length / entregues) * 100)}% de retorno`}.
+                </div>
+              </div>
+              {entregues > 0 && avaliacoes.length / entregues < 0.25 && (
+                <p style={{ fontSize: 12.5, color: "#65758b", margin: 0 }}>
+                  A nota é boa, mas a amostra é pequena demais para sustentar conclusão. Pedir a avaliação no
+                  próprio e-mail de entrega do laudo é o jeito mais barato de mudar isso.
+                </p>
+              )}
+            </>
+          )}
+        </Card>
+
+        <Card icon={TrendingUp} titulo="Prospecção e parcerias">
+          <div style={{ ...bloco, marginBottom: 14 }}>
+            <KpiCard label="Empreendimentos mapeados" valor={prospeccao.length} Icon={Building2} />
+            <KpiCard label="Prioridade imediata" valor={prospeccao.filter((x) => x.prioridade === "Imediata").length} cor="#C62828" Icon={AlertTriangle} />
+            <KpiCard label="Empresas no pipeline" valor={prospeccaoParceiros.length} cor={AZUL_MEDIO} Icon={Handshake} />
+            <KpiCard label="Vales emitidos" valor={vales.length} Icon={ShoppingCart}
+              percentual={vales.length ? `${valesUsados} usados` : null} />
+          </div>
+          <div style={duasColunas}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 10 }}>Por prioridade</div>
+              <ListaRanking itens={porPrioridade} vazio="Nenhum empreendimento mapeado." />
+            </div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 10 }}>Por região</div>
+              <ListaRanking itens={porRegiao} cor="#B8912F" vazio="Nenhuma região preenchida." />
+            </div>
+          </div>
+          {parceirosPorStatus.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 10 }}>Parceiros cadastrados</div>
+              <ListaRanking itens={parceirosPorStatus} maxItens={5} />
+            </div>
+          )}
+          <p style={{ fontSize: 12.5, color: "#8593a8", margin: "12px 0 0" }}>
+            {valesAtivos} vale(s) ativo(s) esperando uso.
+          </p>
+        </Card>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <button className="btn-ghost" style={{ width: "auto", padding: "7px 12px" }}
+          onClick={() => { carregarPainel && carregarPainel(); recarregarPatologias && recarregarPatologias(); }}>
+          <RefreshCcw size={14} className={painelCarregando || patologiasCarregando ? "spin" : ""} /> Atualizar indicadores
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function AbaGerenciaVisaoGeral({ token, docs, clientes, updCliente, padronizarEmpreendimento, excluirCliente, empreendimentosRef = [], carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco }) {
   const porVistoria = docs.reduce((acc, d) => { acc[d.vistoria] = (acc[d.vistoria] || 0) + 1; return acc; }, {});
   const porStatusProducao = docs.reduce((acc, d) => { acc[d.statusProducao] = (acc[d.statusProducao] || 0) + 1; return acc; }, {});
@@ -9781,7 +10236,15 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", token, perfil, decidirComissaoItem, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
+function AbaGerencia({ sub = "visao-geral", token, perfil, decidirComissaoItem, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
+  if (sub === "painel") {
+    return <AbaGerenciaPainelEstrategico clientes={clientes} docs={docs} usuarios={usuarios}
+      avaliacoes={avaliacoes} prospeccao={prospeccao} prospeccaoParceiros={prospeccaoParceiros}
+      parceiros={parceiros} vales={vales}
+      painel={painel} painelCarregando={painelCarregando} carregarPainel={carregarPainel}
+      patologias={painelPatologias} patologiasCarregando={painelPatologiasCarregando}
+      patologiasIndisponivel={painelPatologiasIndisponivel} recarregarPatologias={carregarPainelPatologias} />;
+  }
   if (sub === "acompanhamento") {
     return <TabelaRegistrosVistoriaDoc docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc}
       carregando={carregando} notify={notify} clientes={clientes} precos={precos} />;
