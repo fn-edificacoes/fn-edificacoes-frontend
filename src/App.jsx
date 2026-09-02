@@ -172,6 +172,11 @@ function mapClienteDaApi(c) {
     status: c.status || "Em análise", cep: c.cep || "", vistoriadorId: c.vistoriador_id || "",
     precisaCadastroEmpreendimento: !!c.precisa_cadastro_empreendimento,
     pagamento: c.pagamento || "Pendente", areaPrivativa: c.area_privativa || "",
+    /* Cobrança da vistoria, lançada em Agendamento → Cobrança. null (e não 0) enquanto
+       ninguém lançou: "ainda não cobrado" é diferente de "cobrado R$ 0,00". */
+    valorCobrado: c.valor_cobrado == null ? null : Number(c.valor_cobrado),
+    valorRecebido: c.valor_recebido == null ? null : Number(c.valor_recebido),
+    cobrancaEm: c.cobranca_em || null,
     /* O servidor já diz se este cadastro virou laudo. Sem isso, quem não recebe os registros
        de "docs" (o Atendimento) não conseguia distinguir vistoria em campo de vistoria
        entregue — e contava as duas como "Em vistoria". */
@@ -1351,6 +1356,26 @@ function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], ava
         // Gerência acessa parceiros dentro da própria aba (sub-nav); vendas/atendimento têm
         // uma aba própria "vendas" sem sub-nav — cada perfil precisa do destino certo.
         onde: perfil === "gerencia" ? { aba: "gerencia", sub: "parceiros" } : { aba: "vendas" },
+      });
+    }
+  }
+
+  /* --- Cobrança esperando lançamento ---
+     A vistoria acontece e o dinheiro só existe no sistema quando alguém lança. Sem este aviso,
+     o Atendimento precisaria lembrar de abrir a aba por conta própria — e foi assim que a
+     planilha do Financeiro passou meses mostrando recebido zerado. */
+  if (perfil === "atendimento" || perfil === "gerencia") {
+    const aguardandoCobranca = clientes.filter((c) => {
+      if (!ehTrabalhoDeVistoria(c) || c.status === "Cancelado" || c.status === "Cancelamento solicitado") return false;
+      if (c.valorCobrado != null) return false;
+      const quando = momentoDeCobrar(c);
+      return quando && quando <= new Date();
+    });
+    if (aguardandoCobranca.length) {
+      itens.push({
+        id: "cobranca", urgente: true,
+        texto: `${aguardandoCobranca.length} vistoria(s) esperando o valor da cobrança`,
+        onde: { aba: "qualidade", sub: "cobranca" },
       });
     }
   }
@@ -3371,7 +3396,7 @@ function AppInterno({ session, onLogout }) {
         {/* Sub-navegação (somente dentro do módulo Qualidade) */}
         {abaTop === "qualidade" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
-            {[["analise", "Análise", ClipboardCheck], ["vistoria", "Vistoria", CalendarDays], ["feedback", "Feedback", Star], ["acompanhamento", "Acompanhamento", ClipboardList]].map(([k, label, Icon]) => (
+            {[["analise", "Análise", ClipboardCheck], ["vistoria", "Vistoria", CalendarDays], ["cobranca", "Cobrança", DollarSign], ["feedback", "Feedback", Star], ["acompanhamento", "Acompanhamento", ClipboardList]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setAbaQualidade(k)} className="tab" style={{ borderBottomColor: abaQualidade === k ? AZUL_MEDIO : "transparent", color: abaQualidade === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
                 <Icon size={15} /> {label}
               </button>
@@ -3452,7 +3477,7 @@ function AppInterno({ session, onLogout }) {
             solicitarExclusaoAvaliacao={solicitarExclusaoAvaliacao} manterAvaliacao={manterAvaliacao} excluirAvaliacao={excluirAvaliacao}
             clientes={clientesAtivos} clientesCarregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} preencherComCliente={preencherComCliente}
             agendarAgoraId={agendarAgoraId} setAgendarAgoraId={setAgendarAgoraId}
-            perfil={perfil}
+            perfil={perfil} precos={precos}
             podeAgir={perfil === "atendimento" || perfil === "gerencia"} ehGerencia={perfil === "gerencia"} />
         )}
         {abaTop === "vendas" && (
@@ -4376,7 +4401,7 @@ function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [], f
   );
 }
 
-function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, agendarAgoraId, setAgendarAgoraId, podeAgir = false, ehGerencia = false, perfil }) {
+function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, agendarAgoraId, setAgendarAgoraId, podeAgir = false, ehGerencia = false, perfil, precos = [] }) {
   const [diaParaAbrir, setDiaParaAbrir] = useState(null); // data (ISO) que o calendário da Análise deve abrir já selecionada
   // Etapa escolhida nos indicadores — filtra a lista da sub-aba aberta. Fica aqui (e não em
   // cada sub-aba) pra que o filtro continue valendo ao trocar de sub-aba.
@@ -4402,11 +4427,239 @@ function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, u
         </div>
       )}
       {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} abrirAutomaticoId={agendarAgoraId} aoAbrirAutomatico={() => setAgendarAgoraId(null)} aoConfirmar={aoConfirmarVistoria} filtroEtapa={filtroEtapa} />}
+      {sub === "cobranca" && <AbaQualidadeCobranca clientes={clientes} carregando={clientesCarregando} updCliente={updCliente}
+        usuarios={usuarios} precos={precos} notify={notify} podeAgir={podeAgir} />}
       {sub === "acompanhamento" && <AbaQualidadeAcompanhamento clientes={clientes} clientesCarregando={clientesCarregando}
         docs={docs} avaliacoes={avaliacoes} filtroEtapa={filtroEtapa} />}
       {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} clientes={clientes} clientesCarregando={clientesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
         solicitarExclusaoAvaliacao={solicitarExclusaoAvaliacao} manterAvaliacao={manterAvaliacao} excluirAvaliacao={excluirAvaliacao} podeAgir={podeAgir} ehGerencia={ehGerencia} filtroEtapa={filtroEtapa} />}
       {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} onAgendarAgora={irParaAgendamento} diaParaAbrir={diaParaAbrir} aoAbrirDia={() => setDiaParaAbrir(null)} filtroEtapa={filtroEtapa} aoTrocarEtapa={setFiltroEtapa} />}
+    </div>
+  );
+}
+
+/* ================= Agendamento · Setor de cobrança =================
+   A cobrança da vistoria não tinha dono. O valor só aparecia no sistema quando alguém
+   editava o registro do laudo, na tela da Gerência, dias depois — e o campo "pagamento" do
+   cadastro, que o relatório do Financeiro lia, ficava "Pendente" para sempre. Resultado: a
+   planilha mostrava R$ 0,00 de recebido num empreendimento inteiro já pago.
+
+   Aqui a cobrança vira etapa do Atendimento, com hora para começar: uma hora depois do
+   horário agendado o técnico já saiu do imóvel, e a visita entra nesta lista com o valor do
+   empreendimento sugerido. O atendente confirma ou corrige o valor (é ele quem negocia) e
+   diz como ficou o pagamento. É esse lançamento que alimenta o Financeiro — um lugar só,
+   com quem lançou e quando gravados junto. */
+
+/* Uma hora depois do horário agendado. O cadastro guarda só o início; a duração padrão que o
+   sistema assume para a visita é de uma hora (ver preencherComCliente). */
+const HORAS_ATE_COBRAR = 1;
+function momentoDeCobrar(c) {
+  if (!c?.dataDesejada) return null;
+  const [ano, mes, dia] = String(c.dataDesejada).split("-").map(Number);
+  if (!ano || !mes || !dia) return null;
+  const [hora, minuto] = String(c.horarioDesejado || "00:00").split(":").map(Number);
+  return new Date(ano, mes - 1, dia, (hora || 0) + HORAS_ATE_COBRAR, minuto || 0);
+}
+/* O valor sugerido é o preço do empreendimento cadastrado pela Gerência em "Preços por
+   empreendimento" — a mesma tabela que o Financeiro usa. Sugestão, não imposição: quem fecha
+   o valor é quem atende o cliente. */
+function precoSugerido(cliente, precos = []) {
+  const chave = normalizarChaveEmpreendimento(cliente?.empreendimento || "");
+  const preco = precos.find((p) => normalizarChaveEmpreendimento(p.empreendimento) === chave);
+  return Number(preco?.precoVistoria) || 0;
+}
+
+function LinhaCobranca({ cliente, sugerido, tecnico, podeAgir, onSalvar }) {
+  const lancado = cliente.valorCobrado != null;
+  const [valor, setValor] = useState(lancado ? String(cliente.valorCobrado) : (sugerido ? String(sugerido) : ""));
+  const [pagamento, setPagamento] = useState(cliente.pagamento || "Pendente");
+  const [recebido, setRecebido] = useState(cliente.valorRecebido != null ? String(cliente.valorRecebido) : "");
+  const [salvando, setSalvando] = useState(false);
+
+  const mudou = String(valor) !== (lancado ? String(cliente.valorCobrado) : (sugerido ? String(sugerido) : ""))
+    || pagamento !== (cliente.pagamento || "Pendente")
+    || String(recebido) !== (cliente.valorRecebido != null ? String(cliente.valorRecebido) : "");
+
+  const salvar = async () => {
+    const numero = Number(String(valor).replace(",", "."));
+    if (!Number.isFinite(numero) || numero < 0) { onSalvar.notify("Informe um valor válido."); return; }
+    /* "Pago" quita o que foi cobrado — guardar um recebido diferente do cobrado num pagamento
+       quitado só criaria dois números para a mesma coisa. Em "Pendente" nada entrou ainda. */
+    const recebidoNum = pagamento === "Pago" ? numero
+      : pagamento === "Parcial" ? Number(String(recebido).replace(",", ".")) || 0
+      : 0;
+    if (pagamento === "Parcial" && recebidoNum > numero) { onSalvar.notify("O valor recebido não pode passar do cobrado."); return; }
+    setSalvando(true);
+    await onSalvar.salvar(cliente.id, { valorCobrado: numero, valorRecebido: recebidoNum, pagamento });
+    /* Em "Pago" o recebido é gravado igual ao cobrado; sem espelhar aqui, o campo local
+       continuaria vazio e o botão Salvar ficaria aceso como se houvesse mudança pendente. */
+    setRecebido(String(recebidoNum));
+    setValor(String(numero));
+    setSalvando(false);
+  };
+
+  return (
+    <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, display: "grid", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <strong style={{ fontSize: 14 }}>{cliente.nome}</strong>
+            {ehRevistoria(cliente) && <SeloRevistoria seq={cliente.revistoriaSeq || 1} />}
+            <Selo valor={cliente.pagamento || "Pendente"} />
+          </div>
+          <div style={{ fontSize: 12.5, color: "#65758b" }}>
+            {cliente.empreendimento || "(sem empreendimento)"}{cliente.blocoTorre ? ` · ${cliente.blocoTorre}` : ""}
+            {cliente.dataDesejada ? ` · ${cliente.dataDesejada.split("-").reverse().join("/")}` : ""}
+            {cliente.horarioDesejado ? ` às ${cliente.horarioDesejado}` : ""}
+            {tecnico ? ` · ${tecnico}` : ""}
+          </div>
+        </div>
+        {!lancado && (
+          <span style={{ background: "#FFF4E0", color: "#B26A00", borderRadius: 20, padding: "3px 10px", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" }}>
+            Falta lançar
+          </span>
+        )}
+      </div>
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div style={{ ...cell(), minWidth: 150 }}>
+          <label style={lab}>Valor cobrado (R$)</label>
+          <input style={inp} type="number" min="0" step="0.01" value={valor} disabled={!podeAgir}
+            onChange={(e) => setValor(e.target.value)} placeholder={sugerido ? String(sugerido) : "0,00"} />
+          {sugerido > 0 && (
+            <span style={{ fontSize: 11.5, color: "#8593a8" }}>Tabela do empreendimento: {fmtReal(sugerido)}</span>
+          )}
+          {sugerido === 0 && (
+            <span style={{ fontSize: 11.5, color: "#B26A00" }}>Sem preço cadastrado para este empreendimento</span>
+          )}
+        </div>
+        <div style={{ ...cell(), minWidth: 130 }}>
+          <label style={lab}>Pagamento</label>
+          <select style={inp} value={pagamento} disabled={!podeAgir} onChange={(e) => setPagamento(e.target.value)}>
+            {PAGAMENTO_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </div>
+        {pagamento === "Parcial" && (
+          <div style={{ ...cell(), minWidth: 150 }}>
+            <label style={lab}>Já recebido (R$)</label>
+            <input style={inp} type="number" min="0" step="0.01" value={recebido} disabled={!podeAgir}
+              onChange={(e) => setRecebido(e.target.value)} placeholder="0,00" />
+          </div>
+        )}
+        {podeAgir && (
+          <button className="btn-solid" style={{ width: "auto", padding: "9px 14px" }}
+            onClick={salvar} disabled={salvando || !mudou}>
+            {salvando ? <Loader2 size={14} className="spin" /> : <Save size={14} />} Salvar
+          </button>
+        )}
+      </div>
+
+      {cliente.cobrancaEm && (
+        <div style={{ fontSize: 11.5, color: "#8593a8" }}>
+          Último lançamento em {fmtDataHora(cliente.cobrancaEm)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AbaQualidadeCobranca({ clientes = [], carregando, updCliente, usuarios = [], precos = [], notify, podeAgir = false }) {
+  const [filtro, setFiltro] = useState("lancar"); // lancar | aberto | quitadas | todas
+  const [busca, setBusca] = useState("");
+  const agora = new Date();
+
+  const nomeTecnico = (id) => usuarios.find((u) => String(u.id) === String(id))?.nome || "";
+
+  /* Só o que já foi a campo: ART/TRT não passa por vistoria (o pagamento dela continua na aba
+     Documentação) e cadastro cancelado não se cobra. */
+  const naJanela = clientes.filter((c) => {
+    if (!ehTrabalhoDeVistoria(c) || c.status === "Cancelado" || c.status === "Cancelamento solicitado") return false;
+    const quando = momentoDeCobrar(c);
+    return quando && quando <= agora;
+  });
+
+  const faltaLancar = naJanela.filter((c) => c.valorCobrado == null);
+  const emAberto = naJanela.filter((c) => c.valorCobrado != null && c.pagamento !== "Pago");
+  const quitadas = naJanela.filter((c) => c.valorCobrado != null && c.pagamento === "Pago");
+
+  const listaPorFiltro = filtro === "lancar" ? faltaLancar
+    : filtro === "aberto" ? emAberto
+    : filtro === "quitadas" ? quitadas
+    : naJanela;
+
+  const termo = busca.trim().toLowerCase();
+  const lista = (termo
+    ? listaPorFiltro.filter((c) => `${c.nome} ${c.empreendimento} ${c.blocoTorre}`.toLowerCase().includes(termo))
+    : listaPorFiltro
+  ).sort((a, b) => `${a.dataDesejada}${a.horarioDesejado}`.localeCompare(`${b.dataDesejada}${b.horarioDesejado}`));
+
+  const soma = (arr, f) => arr.reduce((s, c) => s + f(c), 0);
+  const totalCobrado = soma(naJanela, (c) => Number(c.valorCobrado) || 0);
+  const totalRecebido = soma(naJanela, (c) => (c.pagamento === "Pago" ? Number(c.valorCobrado) || 0 : Number(c.valorRecebido) || 0));
+
+  const salvar = async (id, patch) => {
+    const ok = await updCliente(id, patch);
+    if (ok) notify("Cobrança lançada ✓ — já entrou no Financeiro");
+  };
+
+  const CHIPS = [
+    ["lancar", "Falta lançar", faltaLancar.length],
+    ["aberto", "Em aberto", emAberto.length],
+    ["quitadas", "Quitadas", quitadas.length],
+    ["todas", "Todas", naJanela.length],
+  ];
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <Card icon={DollarSign} titulo="Setor de cobrança">
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+          Cada vistoria entra aqui uma hora depois do horário agendado. Confirme o valor cobrado — vem
+          sugerido pela tabela de preços do empreendimento, e pode ser alterado — e diga como ficou o
+          pagamento. O que for lançado aqui aparece no Financeiro como recebido, sem ninguém redigitar.
+        </p>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 14 }}>
+          <KpiCard label="Falta lançar" valor={faltaLancar.length} cor={faltaLancar.length ? "#B26A00" : "#2E7D32"} Icon={ClipboardList} />
+          <KpiCard label="Em aberto" valor={emAberto.length} cor={emAberto.length ? "#C62828" : "#65758b"} Icon={AlertTriangle} />
+          <KpiCard label="Total cobrado" valor={fmtReal(totalCobrado)} Icon={DollarSign} />
+          <KpiCard label="Já recebido" valor={fmtReal(totalRecebido)} cor="#2E7D32" Icon={Check} />
+        </div>
+
+        {!podeAgir && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#EAF2FB", color: AZUL_MARINHO, borderRadius: 8, padding: "8px 12px", fontSize: 12.5, marginBottom: 12 }}>
+            <Info size={14} /> Modo leitura — lançar cobrança é do perfil Atendimento.
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+          {CHIPS.map(([chave, rotulo, qtd]) => (
+            <button key={chave} onClick={() => setFiltro(chave)}
+              style={{ display: "flex", alignItems: "center", gap: 6, background: filtro === chave ? AZUL_MEDIO : "#fff", color: filtro === chave ? "#fff" : "#4a5a70", border: `1px solid ${filtro === chave ? AZUL_MEDIO : CINZA_BORDA}`, borderRadius: 20, padding: "5px 12px", fontSize: 12.5, cursor: "pointer" }}>
+              {rotulo} <strong>{qtd}</strong>
+            </button>
+          ))}
+        </div>
+
+        <input style={{ ...inp, width: "100%", marginBottom: 14 }} placeholder="Buscar por cliente, empreendimento ou bloco…"
+          value={busca} onChange={(e) => setBusca(e.target.value)} />
+
+        {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+        {!carregando && lista.length === 0 && (
+          <p style={{ color: "#8593a8", fontSize: 14 }}>
+            {naJanela.length === 0
+              ? "Nenhuma vistoria passou do horário ainda — a lista aparece uma hora depois do horário agendado."
+              : "Nada nesta situação."}
+          </p>
+        )}
+
+        <div style={{ display: "grid", gap: 10 }}>
+          {lista.map((c) => (
+            <LinhaCobranca key={c.id} cliente={c} sugerido={precoSugerido(c, precos)}
+              tecnico={nomeTecnico(c.vistoriadorId)} podeAgir={podeAgir}
+              onSalvar={{ salvar, notify }} />
+          ))}
+        </div>
+      </Card>
     </div>
   );
 }
@@ -9945,11 +10198,29 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
     if (!cruzamento[k]) {
       // Nome exibido: prioriza a grafia cadastrada em "Preço por empreendimento" (é a que a
       // Gerência definiu como padrão); sem isso, a primeira grafia que aparecer decide.
-      cruzamento[k] = { chaveEmp, empreendimento: nomeCanonicoPorChave[chaveEmp] || bruto, servico, qtd: 0, qtdPagos: 0, qtdGerencia: 0 };
+      cruzamento[k] = { chaveEmp, empreendimento: nomeCanonicoPorChave[chaveEmp] || bruto, servico,
+        qtd: 0, qtdPagos: 0, qtdGerencia: 0, qtdLancados: 0, cobrado: 0, recebido: 0 };
     }
     cruzamento[k].qtd += 1;
     if (pago) cruzamento[k].qtdPagos += 1;
     if (feitaPelaGerencia) cruzamento[k].qtdGerencia += 1;
+
+    /* ---- De onde sai o dinheiro desta linha ----
+       Vale o valor lançado no Setor de cobrança, que é o que foi de fato combinado com o
+       cliente. O preço de tabela do empreendimento entra só como reserva, para o serviço que
+       ainda não passou por lá — antes ele era a única fonte, e a planilha mostrava o preço
+       que a Gerência gostaria de cobrar, não o que foi cobrado.
+       Somamos valor a valor (e não preço × quantidade) porque cada cadastro pode ter fechado
+       num valor diferente dentro do mesmo empreendimento. */
+    const campoPreco = servico === "vistoria" ? "precoVistoria" : "precoDocumentacao";
+    const precoTabela = Number(precoPorChave[chaveEmp]?.[campoPreco]) || 0;
+    const cobrado = c.valorCobrado != null ? Number(c.valorCobrado) : precoTabela;
+    cruzamento[k].cobrado += cobrado;
+    if (c.valorCobrado != null) cruzamento[k].qtdLancados += 1;
+    /* Quitado entra inteiro; parcial entra pelo que já pingou; pendente não entra. */
+    cruzamento[k].recebido += pago ? cobrado
+      : c.pagamento === "Parcial" ? (Number(c.valorRecebido) || 0)
+      : 0;
   };
 
   /* ---- Onde mora "está pago" ----
@@ -10022,8 +10293,12 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
       const lucroExtra = l.servico === "vistoria" ? custoUnitVistoria * (l.qtdGerencia || 0) : 0;
       const custo = l.servico === "documentacao" ? CUSTO_UNITARIO_DOCUMENTACAO * l.qtd
         : l.servico === "vistoria" ? custoUnitVistoria * (l.qtd - (l.qtdGerencia || 0)) : 0;
-      const total = unitario * l.qtd;
-      return { ...l, rotulo: def.rotulo, unitario, total, recebido: unitario * l.qtdPagos, custo, lucroExtra, lucro: total - custo };
+      const total = l.cobrado;
+      /* O "valor unitário" da tela vira a média do que foi cobrado nesta linha — assim
+         unitário × quantidade continua batendo com o total, que é a conta que o olho faz. */
+      const unitarioExibido = l.qtd ? total / l.qtd : unitario;
+      return { ...l, rotulo: def.rotulo, unitario: unitarioExibido, precoTabela: unitario,
+        total, recebido: l.recebido, custo, lucroExtra, lucro: total - custo };
     })
     .sort((a, b) => b.total - a.total || a.empreendimento.localeCompare(b.empreendimento, "pt-BR"));
 
@@ -10040,7 +10315,8 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
   /* Quanto do lucro veio de vistoria que a própria Gerência fez — trabalho que a empresa não
      precisou pagar. Vem do mesmo cálculo das linhas, para bater com o rodapé da tabela. */
   const totalLucroExtra = linhasFiltradas.reduce((s, l) => s + (l.lucroExtra || 0), 0);
-  const semPreco = linhasFiltradas.filter((l) => l.unitario === 0);
+  /* Linha sem dinheiro nenhum: nem valor lançado na cobrança, nem preço de tabela. */
+  const semPreco = linhasFiltradas.filter((l) => l.total === 0);
 
   const num = { textAlign: "right", whiteSpace: "nowrap" };
 
@@ -10101,9 +10377,10 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
         em "Preços por empreendimento" — a coluna "Lucro" já desconta isso do total.
         Vistoria feita pela própria Gerência não entra como custo: não há pagamento a fazer, e o valor que
         caberia ao técnico aparece como <strong>lucro extra</strong>.
-        A coluna "Recebido" conta o que está marcado como <strong>Pago</strong> — no registro da vistoria
-        (Documentação/Acompanhamento) ou no cadastro do cliente; marcar em qualquer das duas telas já
-        aparece aqui.
+        Os valores vêm do <strong>Setor de cobrança</strong> (Agendamento → Cobrança), onde o Atendimento
+        lança o que foi cobrado e como ficou o pagamento; o ponto verde marca as linhas que já têm valor
+        lançado. O que ainda não passou por lá entra pelo preço de tabela do empreendimento. "Recebido"
+        soma o que está como Pago (valor cheio) e o que está como Parcial (só o que já entrou).
       </p>
 
       {linhas.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum serviço concluído ainda.</p>}
@@ -10181,8 +10458,12 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
                     <td style={{ padding: "8px 10px", fontWeight: 600 }}>{l.empreendimento}</td>
                     <td style={{ padding: "8px 10px", color: "#4a5a70" }}>{l.rotulo}</td>
                     <td style={{ padding: "8px 10px", ...num }}>{l.qtd}</td>
-                    <td style={{ padding: "8px 10px", ...num, color: l.unitario ? "#4a5a70" : "#B26A00" }}>
+                    <td style={{ padding: "8px 10px", ...num, color: l.unitario ? "#4a5a70" : "#B26A00" }}
+                      title={l.qtdLancados ? `${l.qtdLancados} de ${l.qtd} com valor lançado no Setor de cobrança` : "Preço de tabela do empreendimento"}>
                       {l.unitario ? fmtReal(l.unitario) : "sem preço"}
+                      {l.qtdLancados > 0 && (
+                        <span style={{ marginLeft: 5, color: "#2E7D32", fontWeight: 700 }} title="valor vindo do Setor de cobrança">•</span>
+                      )}
                     </td>
                     <td style={{ padding: "8px 10px", ...num, fontWeight: 700, color: AZUL_MARINHO }}>{fmtReal(l.total)}</td>
                     <td style={{ padding: "8px 10px", ...num, color: l.custo ? "#C62828" : "#8593a8" }}>
