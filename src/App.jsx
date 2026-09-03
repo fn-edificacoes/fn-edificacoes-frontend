@@ -13113,7 +13113,7 @@ function ModalPedirRevistoria({ atendimento, onFechar, onEnviar }) {
     <div className="no-print" style={overlay} onClick={onFechar}>
       <div style={{ ...modal, maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-          <strong>Pedir revistoria</strong>
+          <strong>{atendimento?.revistoriaSeq > 0 ? `Pedir revistoria ${Number(atendimento.revistoriaSeq) + 1}` : "Pedir revistoria"}</strong>
           <button className="icon-btn" onClick={onFechar}><X size={16} /></button>
         </div>
         <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 14px" }}>
@@ -13309,9 +13309,13 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pedidoRetorno]);
 
-  /* Revistoria: retorno ao mesmo imóvel depois do laudo entregue. Quem decide se o botão
-     aparece é o servidor (podePedirRevistoria) — ele conhece a regra inteira: laudo já
-     entregue e nenhuma revistoria em andamento para aquele imóvel. */
+  /* Revistoria: retorno ao mesmo imóvel depois do laudo entregue, e o ciclo se repete sem
+     limite — entregue o laudo da revistoria, abre o pedido da seguinte.
+
+     Quem decide se o botão aparece é o servidor (podePedirRevistoria): ele conhece a regra
+     inteira, que vale para a CORRENTE do imóvel — a vistoria original e todas as
+     revistorias juntas —, e não para um atendimento isolado. Um botão por imóvel, sempre
+     no atendimento mais recente. */
   const [pedindoRevistoria, setPedindoRevistoria] = useState(null); // atendimento de origem
   const pedirRevistoria = async (corpo) => {
     try {
@@ -13407,15 +13411,20 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
                       </div>
                     )}
                     <CartaoAtendimentoCliente doc={d} cpf={cliente?.cpf || ""} notify={notify} emailConhecido={cliente?.email || ""} />
-                    {/* Só depois do laudo entregue, e uma por vez — quem decide é o servidor. */}
+                    {/* Só depois do laudo entregue, e uma por vez — quem decide é o servidor.
+                        O convite aparece no atendimento mais recente do imóvel, seja ele a
+                        vistoria original ou a última revistoria: entregue um laudo, abre o
+                        pedido do próximo, quantas vezes o cliente precisar. */}
                     {d.podePedirRevistoria && (
                       <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${CINZA_BORDA}` }}>
                         <p style={{ fontSize: 12.5, color: "#65758b", margin: "0 0 8px" }}>
-                          Algum ponto do laudo não foi resolvido? Peça o retorno da nossa equipe ao mesmo imóvel.
+                          {d.revistoriaSeq > 0
+                            ? "Ainda ficou algum ponto pendente? Você pode pedir uma nova visita ao mesmo imóvel."
+                            : "Algum ponto do laudo não foi resolvido? Peça o retorno da nossa equipe ao mesmo imóvel."}
                         </p>
                         <button className="btn-ghost" style={{ color: "#6E36BE", background: "#F1EAFB" }}
                           onClick={() => setPedindoRevistoria(d)}>
-                          <RefreshCcw size={14} /> Preciso de uma revistoria
+                          <RefreshCcw size={14} /> {d.revistoriaSeq > 0 ? "Preciso de outra revistoria" : "Preciso de uma revistoria"}
                         </button>
                       </div>
                     )}
