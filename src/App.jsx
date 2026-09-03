@@ -11603,8 +11603,9 @@ function AbaGerenciaImportacao({ clientes = [], precos = [], empreendimentosRef 
       tipo,
       seJaExistir,
       registros: paraImportar.map((r) => {
-        const { linha, problemas, duplicata, completarId, valorPlanilha, chaveEmp, grupo,
+        const { problemas, duplicata, completarId, valorPlanilha, chaveEmp, grupo,
           dataBruta, situacaoBruta, ...campos } = r;
+        // linha viaja junto — é como o resultado da importação aponta o erro na planilha certa.
         const base = { ...campos, valor: valorFinal(r) };
         return seJaExistir === "completar" && completarId ? { ...base, completarId } : base;
       }),
