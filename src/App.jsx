@@ -7,7 +7,7 @@ import {
   AlertTriangle, CircleAlert, Info, Copy, Sparkles, Loader2,
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
-  ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download
+  ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart
 } from "lucide-react";
 
 /* ============================================================
@@ -191,6 +191,10 @@ function mapClienteDaApi(c) {
        de "docs" (o Atendimento) não conseguia distinguir vistoria em campo de vistoria
        entregue — e contava as duas como "Em vistoria". */
     temLaudo: !!c.tem_laudo,
+    /* De onde veio o cadastro: "portal" (o próprio cliente preencheu) ou "importacao" (carga da
+       base antiga, feita em Gerência → Importar base). Cadastro sem a coluna no banco — todos os
+       que existiam antes da carga — é do portal, que é o único jeito que havia de nascer. */
+    origem: c.origem || "portal",
     /* Revistoria: cadastro de retorno ao mesmo imóvel. revistoriaDe aponta para o
        atendimento de origem; revistoriaSeq é a ordem (1ª, 2ª…). */
     revistoriaDe: c.revistoria_de || null,
@@ -2252,6 +2256,25 @@ function AppInterno({ session, onLogout }) {
       return true;
     } catch (e) { notify(`Não foi possível atualizar cliente: ${e.message}`); return false; }
   };
+  /* ---- Carga da base antiga de clientes (Gerência → Importar base) ----
+     Rota própria, e não o POST /api/clientes do portal: o cadastro público dispara o fluxo
+     inteiro — análise do Atendimento, e-mail de boas-vindas, entrada na fila de agendamento —,
+     e nada disso faz sentido para um serviço prestado há dois anos. Ver o cabeçalho de
+     AbaGerenciaImportacao para o formato de cada registro.
+     Não é repetida em caso de falha (a regra do apiFetch para POST): o mesmo envio duas vezes
+     duplicaria a base inteira, que é o erro caro desta tela. */
+  const importarClientesHistorico = async (corpo) => {
+    try {
+      const r = await apiFetch("/api/clientes/importar-lote", { method: "POST", token, body: corpo });
+      /* Sem recarregar, os cadastros novos não apareceriam nos Indicadores nem no Perfil do
+         cliente até alguém trocar de tela — e quem acabou de importar 300 linhas quer ver. */
+      await Promise.all([carregarClientes(), carregarDocs()]);
+      return r;
+    } catch (e) {
+      notify(`Não foi possível importar: ${e.message}`);
+      return null;
+    }
+  };
   /* Manutenção da lista oficial de empreendimentos (só Gerência). */
   const adicionarEmpreendimento = async (empreendimento, construtora) => {
     try {
@@ -3395,7 +3418,7 @@ function AppInterno({ session, onLogout }) {
         {/* Sub-navegação (somente dentro do módulo Gerência) */}
         {abaTop === "gerencia" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
-            {[["visao-geral", "Visão geral", LayoutGrid], ["painel", "Painel estratégico", BarChart3], ["acompanhamento", "Acompanhamento", ClipboardList], ["reformas", "Reformas", Building2], ["perfil-cliente", "Perfil do cliente", User], ["parceiros", "Parceiros e Afiliados", Users], ["financeiro", "Financeiro", DollarSign], ["prospeccao", "Prospecção", TrendingUp], ["patologias", "Banco de patologias", AlertTriangle]].map(([k, label, Icon]) => (
+            {[["visao-geral", "Visão geral", LayoutGrid], ["indicadores", "Indicadores", PieChart], ["painel", "Painel estratégico", BarChart3], ["acompanhamento", "Acompanhamento", ClipboardList], ["reformas", "Reformas", Building2], ["perfil-cliente", "Perfil do cliente", User], ["parceiros", "Parceiros e Afiliados", Users], ["financeiro", "Financeiro", DollarSign], ["prospeccao", "Prospecção", TrendingUp], ["patologias", "Banco de patologias", AlertTriangle], ["importacao", "Importar base", Upload]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setAbaGerencia(k)} className="tab" style={{ borderBottomColor: abaGerencia === k ? AZUL_MEDIO : "transparent", color: abaGerencia === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
                 <Icon size={15} /> {label}
               </button>
@@ -3502,6 +3525,7 @@ function AppInterno({ session, onLogout }) {
         )}
         {abaTop === "gerencia" && (
           <AbaGerencia sub={abaGerencia} usuarioAtual={session.usuario} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem}
+            importarClientesHistorico={importarClientesHistorico}
             prospeccaoParceiros={prospeccaoParceiros} prospeccaoParceirosCarregando={prospeccaoParceirosCarregando}
             atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
             importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao}
@@ -6920,6 +6944,184 @@ const SERVICO_VISTORIA = "Vistoria de entrega de chaves";
    técnico ao imóvel, geram laudo e são cobradas pelo preço do empreendimento. O que separa
    as duas é o histórico do cliente, não a operação. */
 const ehTrabalhoDeVistoria = (c) => c?.servico === SERVICO_VISTORIA || c?.servico === SERVICO_REVISTORIA;
+
+/* ---------- Recorte por período: mês, trimestre e ano ----------
+   Todo indicador da Gerência somava a base inteira desde o primeiro cadastro. Com a base antiga
+   importada isso deixa de dizer alguma coisa: um total que mistura 2023 com o mês corrente não
+   serve nem para fechar o mês nem para comparar anos. O recorte mora aqui, num lugar só, e as
+   telas recebem a lista já filtrada.
+
+   A data que vale é a do serviço prestado (o registro em "docs"), não a do cadastro: pedido
+   feito em dezembro e atendido em janeiro é movimento de janeiro, que é como a Gerência fecha
+   o mês. Sem registro — pedido de ART/TRT ainda em elaboração — cai na data desejada. */
+const dataDeReferencia = (cliente, docs = []) => docDoCliente(cliente, docs)?.data || cliente?.dataDesejada || "";
+
+/* Cadastro que veio da carga da base antiga, e não do portal. A marca é gravada no banco
+   ("origem"): sem ela o histórico entraria na operação de hoje — fila do Agendamento, funil de
+   conversão, e o portal oferecendo revistoria de um laudo de dois anos atrás. */
+const ehHistorico = (c) => c?.origem === "importacao";
+
+const MESES_CURTOS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+const MESES_LONGOS = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+const PERIODO_TUDO = { granularidade: "tudo" };
+
+/* "2026-08-24" -> { ano: 2026, mes: 7 }. Lê como texto de propósito: data solta virando Date
+   cai no dia anterior no Brasil (é o mesmo fuso que já mordeu o fmtData), e no dia 1º isso
+   jogaria o registro para o mês passado. */
+function partesDaData(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ""));
+  return m ? { ano: Number(m[1]), mes: Number(m[2]) - 1 } : null;
+}
+function dentroDoPeriodo(iso, periodo) {
+  if (!periodo || periodo.granularidade === "tudo") return true;
+  const p = partesDaData(iso);
+  /* Registro sem data não pertence a recorte nenhum. Ele continua visível em "Todo o período"
+     e some assim que alguém escolhe um mês — é por isso que a tela diz quantos são: sumir em
+     silêncio é o que faz um total não bater com o outro. */
+  if (!p) return false;
+  if (p.ano !== periodo.ano) return false;
+  if (periodo.granularidade === "ano") return true;
+  if (periodo.granularidade === "trimestre") return Math.floor(p.mes / 3) === periodo.indice;
+  return p.mes === periodo.indice;
+}
+function rotuloPeriodo(periodo) {
+  if (!periodo || periodo.granularidade === "tudo") return "Todo o período";
+  if (periodo.granularidade === "ano") return String(periodo.ano);
+  if (periodo.granularidade === "trimestre") return `${periodo.indice + 1}º trimestre de ${periodo.ano}`;
+  return `${MESES_LONGOS[periodo.indice]} de ${periodo.ano}`;
+}
+/* O recorte imediatamente anterior ao escolhido, para a comparação nos cartões. "Todo o
+   período" não tem anterior — ali a comparação some, em vez de comparar com algo inventado. */
+function periodoAnterior(periodo) {
+  if (!periodo || periodo.granularidade === "tudo") return null;
+  if (periodo.granularidade === "ano") return { granularidade: "ano", ano: periodo.ano - 1, indice: 0 };
+  const quantos = periodo.granularidade === "trimestre" ? 4 : 12;
+  return periodo.indice - 1 >= 0
+    ? { ...periodo, indice: periodo.indice - 1 }
+    : { ...periodo, ano: periodo.ano - 1, indice: quantos - 1 };
+}
+
+/* Quanto este atendimento vale. A ordem é a mesma do relatório do Financeiro: manda o valor
+   lançado no Setor de cobrança (é o que foi combinado com o cliente); depois o que está gravado
+   no registro da vistoria — é onde a carga da base antiga escreve o valor da planilha; e o preço
+   de tabela do empreendimento entra só como reserva, para o que não passou por nenhum dos dois. */
+function valorDoAtendimento(cliente, doc, precoPorChave = {}) {
+  if (cliente?.valorCobrado != null) return Number(cliente.valorCobrado) || 0;
+  const noRegistro = (Number(doc?.valorVistoria) || 0) + (Number(doc?.valorTrt) || 0);
+  if (noRegistro > 0) return noRegistro;
+  const tabela = precoPorChave[normalizarChaveEmpreendimento(cliente?.empreendimento || "")];
+  return Number(ehServicoDocumentacao(cliente) ? tabela?.precoDocumentacao : tabela?.precoVistoria) || 0;
+}
+
+/* Os números de um recorte. "Terminado" não é a mesma coisa nos dois serviços — a vistoria
+   acaba quando o laudo chega ao cliente, a documentação quando os dois arquivos ficam prontos —,
+   e é por isso que o critério é escolhido registro a registro, e não uma vez para a lista toda. */
+function resumirAtendimentos(lista, docs, precoPorChave, periodo) {
+  const dentro = lista.filter((c) => dentroDoPeriodo(dataDeReferencia(c, docs), periodo));
+  let cobrado = 0, recebido = 0, concluidos = 0, comValor = 0;
+  dentro.forEach((c) => {
+    const doc = docDoCliente(c, docs);
+    const valor = valorDoAtendimento(c, doc, precoPorChave);
+    cobrado += valor;
+    if (valor > 0) comValor += 1;
+    /* Quitado entra inteiro; parcial entra pelo que já pingou; pendente não entra. "Pago" mora
+       em dois lugares (cadastro e registro da vistoria) e vale marcado em qualquer um dos dois —
+       ler só um deles é o que fazia o Financeiro mostrar "recebido R$ 0,00" com metade quitada. */
+    const pago = doc?.pagamento === "Pago" || c.pagamento === "Pago";
+    recebido += pago ? valor : c.pagamento === "Parcial" ? (Number(c.valorRecebido) || 0) : 0;
+    const terminou = ehServicoDocumentacao(c)
+      ? c.status === STATUS_DOC_CONCLUIDA
+      : doc?.statusCliente === "Laudo enviado por e-mail";
+    if (terminou) concluidos += 1;
+  });
+  return { qtd: dentro.length, concluidos, cobrado, recebido, ticket: comValor ? Math.round(cobrado / comValor) : 0, lista: dentro };
+}
+
+/* Seletor de recorte. Os anos saem do que existe na base, nunca de uma lista fixa: com o
+   histórico importado eles começam bem antes de o sistema existir, e um <select> chumbado
+   deixaria justamente a base antiga fora de alcance. */
+function FiltroPeriodo({ periodo, aoMudar, anos = [] }) {
+  const hoje = new Date();
+  const anosLista = anos.length ? anos : [hoje.getFullYear()];
+  const ano = periodo.ano ?? anosLista[0];
+
+  const trocarGranularidade = (g) => {
+    if (g === "tudo") { aoMudar(PERIODO_TUDO); return; }
+    /* Ao entrar num recorte, cai no período corrente quando o ano é o de hoje; em ano passado,
+       no primeiro — abrir "março" de um ano que já acabou não tem por que ser o padrão. */
+    const doAnoAtual = ano === hoje.getFullYear();
+    const indice = g === "mes" ? (doAnoAtual ? hoje.getMonth() : 0)
+      : g === "trimestre" ? (doAnoAtual ? Math.floor(hoje.getMonth() / 3) : 0)
+      : 0;
+    aoMudar({ granularidade: g, ano, indice });
+  };
+
+  const pilula = (ativo) => ({
+    background: ativo ? AZUL_MEDIO : "#fff", color: ativo ? "#fff" : "#4a5a70",
+    border: `1px solid ${ativo ? AZUL_MEDIO : CINZA_BORDA}`, borderRadius: 20,
+    padding: "6px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+  });
+
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {[["tudo", "Todo o período"], ["mes", "Por mês"], ["trimestre", "Por trimestre"], ["ano", "Por ano"]].map(([g, rotulo]) => (
+          <button key={g} style={pilula(periodo.granularidade === g)} onClick={() => trocarGranularidade(g)}>{rotulo}</button>
+        ))}
+      </div>
+
+      {periodo.granularidade !== "tudo" && (
+        <>
+          <select style={{ ...inp, width: "auto", minWidth: 100 }} value={ano}
+            onChange={(e) => aoMudar({ ...periodo, ano: Number(e.target.value) })}>
+            {anosLista.map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
+          {periodo.granularidade === "mes" && (
+            <select style={{ ...inp, width: "auto", minWidth: 130 }} value={periodo.indice}
+              onChange={(e) => aoMudar({ ...periodo, indice: Number(e.target.value) })}>
+              {MESES_LONGOS.map((m, i) => <option key={m} value={i}>{m}</option>)}
+            </select>
+          )}
+          {periodo.granularidade === "trimestre" && (
+            <select style={{ ...inp, width: "auto", minWidth: 150 }} value={periodo.indice}
+              onChange={(e) => aoMudar({ ...periodo, indice: Number(e.target.value) })}>
+              {[0, 1, 2, 3].map((i) => (
+                <option key={i} value={i}>{i + 1}º trimestre ({MESES_CURTOS[i * 3]}–{MESES_CURTOS[i * 3 + 2]})</option>
+              ))}
+            </select>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* Cartão com comparação embutida: um recorte de período sem "contra o quê" obriga quem lê a
+   guardar de cabeça o número do mês passado. A variação só aparece quando o período anterior
+   teve movimento — "+100%" em cima de zero não informa nada. */
+function KpiPeriodo({ label, valor, anterior, formatar = (v) => v, cor = AZUL_MARINHO, Icon, apoio }) {
+  const temBase = anterior != null && Number(anterior) > 0;
+  const variacao = temBase ? ((Number(valor) - Number(anterior)) / Number(anterior)) * 100 : null;
+  const subiu = variacao != null && variacao >= 0;
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: "13px 15px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7 }}>
+        {Icon && <Icon size={13} color={cor} />}
+        <div style={{ fontSize: 11.5, color: "#65758b" }}>{label}</div>
+      </div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 7, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 21, fontWeight: 800, color: cor, lineHeight: 1.1 }}>{formatar(valor)}</div>
+        {variacao != null && (
+          <span style={{ fontSize: 11, fontWeight: 700, color: subiu ? "#2E7D32" : "#C62828", background: subiu ? "#E6F4EA" : "#FCEAEA", borderRadius: 20, padding: "2px 7px" }}>
+            {subiu ? "▲" : "▼"} {Math.abs(variacao).toFixed(0)}%
+          </span>
+        )}
+      </div>
+      {apoio && <div style={{ fontSize: 11, color: "#8593a8", marginTop: 4 }}>{apoio}</div>}
+      {temBase && <div style={{ fontSize: 11, color: "#8593a8", marginTop: 3 }}>anterior: {formatar(anterior)}</div>}
+    </div>
+  );
+}
 
 /* Indicadores de "Vistorias" agora vêm de clientes (cadastros reais do portal público),
    não de docs — docs só ganha uma linha quando a equipe cria manualmente um registro em
@@ -10717,7 +10919,878 @@ function AbaGerenciaReformas({ usuarioAtual, perfil }) {
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", token, perfil, usuarioAtual, decidirComissaoItem, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
+/* ============================================================
+   GERÊNCIA · INDICADORES
+   Os mesmos números que a Visão geral já mostrava, agora separados nos três eixos que antes
+   ficavam somados num total só: histórico importado × operação de hoje, vistoria × ART/TRT, e
+   por empreendimento/construtora. O recorte de período (mês, trimestre, ano) vale para os três.
+   ============================================================ */
+function AbaGerenciaIndicadores({ clientes = [], docs = [], precos = [], carregando }) {
+  const [periodo, setPeriodo] = useState(PERIODO_TUDO);
+  const [origem, setOrigem] = useState("tudo"); // "tudo" | "historico" | "atual"
+  const [buscaObra, setBuscaObra] = useState("");
+
+  const precoPorChave = useMemo(() => {
+    const mapa = {};
+    precos.forEach((p) => { mapa[normalizarChaveEmpreendimento(p.empreendimento)] = p; });
+    return mapa;
+  }, [precos]);
+
+  /* Cancelado fica fora de tudo: não houve serviço, não há o que medir. */
+  const ativos = useMemo(() => clientes.filter((c) => c.status !== "Cancelado"), [clientes]);
+  const quantosHistoricos = useMemo(() => ativos.filter(ehHistorico).length, [ativos]);
+
+  const daOrigem = useMemo(() => ativos.filter((c) => {
+    if (origem === "historico") return ehHistorico(c);
+    if (origem === "atual") return !ehHistorico(c);
+    return true;
+  }), [ativos, origem]);
+
+  const anos = useMemo(() => {
+    const encontrados = new Set();
+    ativos.forEach((c) => {
+      const p = partesDaData(dataDeReferencia(c, docs));
+      if (p) encontrados.add(p.ano);
+    });
+    /* O ano corrente entra sempre, mesmo sem movimento: sem ele, a primeira vez que alguém
+       abrisse a tela em janeiro escolheria obrigatoriamente um ano passado. */
+    encontrados.add(new Date().getFullYear());
+    return [...encontrados].sort((a, b) => b - a);
+  }, [ativos, docs]);
+
+  const anterior = periodoAnterior(periodo);
+  const vistorias = daOrigem.filter(ehTrabalhoDeVistoria);
+  const documentacoes = daOrigem.filter(ehServicoDocumentacao);
+
+  const resumoVistoria = resumirAtendimentos(vistorias, docs, precoPorChave, periodo);
+  const resumoVistoriaAntes = anterior ? resumirAtendimentos(vistorias, docs, precoPorChave, anterior) : null;
+  const resumoDoc = resumirAtendimentos(documentacoes, docs, precoPorChave, periodo);
+  const resumoDocAntes = anterior ? resumirAtendimentos(documentacoes, docs, precoPorChave, anterior) : null;
+
+  /* Quem ficou de fora do recorte por não ter data nenhuma. Dito na tela porque a soma dos
+     recortes não fecha com o total, e sem essa linha a diferença vira um mistério. */
+  const semData = useMemo(
+    () => daOrigem.filter((c) => !partesDaData(dataDeReferencia(c, docs))).length,
+    [daOrigem, docs],
+  );
+
+  const carteira = useMemo(() => {
+    const mapa = {};
+    daOrigem.filter((c) => dentroDoPeriodo(dataDeReferencia(c, docs), periodo)).forEach((c) => {
+      /* Agrupado pela chave normalizada, a mesma da tela de Padronização: "VILA DAS PALMEIRAS"
+         e "Residencial Vila das Palmeiras" são o mesmo prédio, e contar cada grafia como uma
+         obra diferente quebra justamente o indicador de concentração. */
+      const bruto = (c.empreendimento || "").trim() || "(sem empreendimento)";
+      const chave = normalizarChaveEmpreendimento(bruto);
+      const g = mapa[chave] || (mapa[chave] = { chave, nomes: {}, construtoras: {}, vistorias: 0, documentacoes: 0, cobrado: 0, recebido: 0 });
+      g.nomes[bruto] = (g.nomes[bruto] || 0) + 1;
+      const construtora = (c.construtora || "").trim();
+      if (construtora) g.construtoras[construtora] = (g.construtoras[construtora] || 0) + 1;
+      const doc = docDoCliente(c, docs);
+      const valor = valorDoAtendimento(c, doc, precoPorChave);
+      g.cobrado += valor;
+      if (doc?.pagamento === "Pago" || c.pagamento === "Pago") g.recebido += valor;
+      if (ehServicoDocumentacao(c)) g.documentacoes += 1;
+      else if (ehTrabalhoDeVistoria(c)) g.vistorias += 1;
+    });
+    const maisComum = (obj) => Object.entries(obj).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+    return Object.values(mapa)
+      .map((g) => ({ ...g, nome: maisComum(g.nomes) || g.chave, construtora: maisComum(g.construtoras) }))
+      .sort((a, b) => b.cobrado - a.cobrado || (b.vistorias + b.documentacoes) - (a.vistorias + a.documentacoes));
+  }, [daOrigem, docs, periodo, precoPorChave]);
+
+  const termo = buscaObra.trim().toLowerCase();
+  const carteiraVisivel = termo
+    ? carteira.filter((g) => `${g.nome} ${g.construtora}`.toLowerCase().includes(termo))
+    : carteira;
+  const totalCarteira = carteiraVisivel.reduce((acc, g) => ({
+    vistorias: acc.vistorias + g.vistorias,
+    documentacoes: acc.documentacoes + g.documentacoes,
+    cobrado: acc.cobrado + g.cobrado,
+    recebido: acc.recebido + g.recebido,
+  }), { vistorias: 0, documentacoes: 0, cobrado: 0, recebido: 0 });
+
+  const pilulaOrigem = (chave, rotulo, quantos) => {
+    const ativo = origem === chave;
+    return (
+      <button key={chave} onClick={() => setOrigem(chave)}
+        style={{
+          background: ativo ? "#EAF2FB" : "#fff", border: `1px solid ${ativo ? AZUL_MEDIO : CINZA_BORDA}`,
+          color: ativo ? AZUL_MARINHO : "#4a5a70", borderRadius: 20, padding: "5px 13px",
+          fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+        }}>
+        {rotulo} <strong style={{ color: AZUL_MARINHO }}>{quantos}</strong>
+      </button>
+    );
+  };
+
+  const blocoServico = ({ titulo, Icon, cor, resumo, resumoAntes, rotuloConcluido }) => (
+    <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 12 }}>
+        <Icon size={15} color={cor} />
+        <strong style={{ fontSize: 13.5, color: AZUL_MARINHO }}>{titulo}</strong>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
+        <KpiPeriodo label="Atendimentos" valor={resumo.qtd} anterior={resumoAntes?.qtd} cor={cor} Icon={ClipboardList} />
+        <KpiPeriodo label={rotuloConcluido} valor={resumo.concluidos} anterior={resumoAntes?.concluidos} cor="#2E7D32" Icon={Check}
+          apoio={fmtPct(resumo.concluidos, resumo.qtd) + " do período"} />
+        <KpiPeriodo label="Cobrado" valor={resumo.cobrado} anterior={resumoAntes?.cobrado} formatar={fmtReal} cor={AZUL_MARINHO} Icon={DollarSign}
+          apoio={`ticket médio ${fmtReal(resumo.ticket)}`} />
+        <KpiPeriodo label="Recebido" valor={resumo.recebido} anterior={resumoAntes?.recebido} formatar={fmtReal} cor="#2E7D32" Icon={Percent}
+          apoio={fmtPct(resumo.recebido, resumo.cobrado) + " do cobrado"} />
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      <Card icon={PieChart} titulo="Indicadores por período">
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+          Vistoria e ART/TRT contados separadamente, com o histórico importado apartado da operação
+          de hoje. Escolha o recorte e todos os blocos abaixo passam a falar do mesmo período.
+        </p>
+
+        <div style={{ display: "grid", gap: 10, marginBottom: 14 }}>
+          <FiltroPeriodo periodo={periodo} aoMudar={setPeriodo} anos={anos} />
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            <span style={{ fontSize: 12, color: "#8593a8", marginRight: 2 }}>Origem:</span>
+            {pilulaOrigem("tudo", "Tudo", ativos.length)}
+            {pilulaOrigem("atual", "Operação atual", ativos.length - quantosHistoricos)}
+            {pilulaOrigem("historico", "Base antiga importada", quantosHistoricos)}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", fontSize: 12.5, color: "#4a5a70", marginBottom: 14 }}>
+          <strong style={{ color: AZUL_MARINHO }}>{rotuloPeriodo(periodo)}</strong>
+          <span>· {resumoVistoria.qtd + resumoDoc.qtd} atendimento(s) no recorte</span>
+          {periodo.granularidade !== "tudo" && semData > 0 && (
+            <span style={{ color: "#B26A00" }}>
+              · {semData} sem data cadastrada, visíveis só em "Todo o período"
+            </span>
+          )}
+        </div>
+
+        {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(330px, 1fr))", gap: 14 }}>
+          {blocoServico({ titulo: "Vistorias (inclui revistoria)", Icon: ClipboardCheck, cor: "#2C75B5", resumo: resumoVistoria, resumoAntes: resumoVistoriaAntes, rotuloConcluido: "Laudos entregues" })}
+          {blocoServico({ titulo: "Documentação ART/TRT", Icon: FileText, cor: "#6E36BE", resumo: resumoDoc, resumoAntes: resumoDocAntes, rotuloConcluido: "Documentações prontas" })}
+        </div>
+      </Card>
+
+      <Card icon={Building2} titulo={`Por empreendimento e construtora — ${rotuloPeriodo(periodo)}`}>
+        <input style={{ ...inp, marginBottom: 12 }} placeholder="Filtrar por empreendimento ou construtora…"
+          value={buscaObra} onChange={(e) => setBuscaObra(e.target.value)} />
+        {carteiraVisivel.length === 0 && (
+          <p style={{ color: "#8593a8", fontSize: 14, margin: 0 }}>Nenhum atendimento neste recorte.</p>
+        )}
+        {carteiraVisivel.length > 0 && (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: CINZA_CLARO }}>
+                  {["Empreendimento", "Construtora", "Vistorias", "ART/TRT", "Cobrado", "Recebido"].map((h, i) => (
+                    <th key={h} style={{ textAlign: i > 1 ? "right" : "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}`, whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {carteiraVisivel.map((g) => (
+                  <tr key={g.chave} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                    <td style={{ padding: "8px 10px", fontWeight: 600 }}>{g.nome}</td>
+                    <td style={{ padding: "8px 10px", color: "#4a5a70" }}>{g.construtora || "—"}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right" }}>{g.vistorias || "—"}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right" }}>{g.documentacoes || "—"}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right", whiteSpace: "nowrap" }}>{fmtReal(g.cobrado)}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right", whiteSpace: "nowrap", color: "#2E7D32" }}>{fmtReal(g.recebido)}</td>
+                  </tr>
+                ))}
+                <tr style={{ background: CINZA_CLARO, fontWeight: 700 }}>
+                  <td style={{ padding: "8px 10px" }} colSpan={2}>Total ({carteiraVisivel.length} empreendimento(s))</td>
+                  <td style={{ padding: "8px 10px", textAlign: "right" }}>{totalCarteira.vistorias}</td>
+                  <td style={{ padding: "8px 10px", textAlign: "right" }}>{totalCarteira.documentacoes}</td>
+                  <td style={{ padding: "8px 10px", textAlign: "right", whiteSpace: "nowrap" }}>{fmtReal(totalCarteira.cobrado)}</td>
+                  <td style={{ padding: "8px 10px", textAlign: "right", whiteSpace: "nowrap", color: "#2E7D32" }}>{fmtReal(totalCarteira.recebido)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </>
+  );
+}
+
+/* ============================================================
+   GERÊNCIA · IMPORTAR BASE ANTIGA
+   Carga dos clientes que já foram atendidos antes de o sistema existir: quem fez vistoria e
+   quem tirou ART/TRT, cada um na sua planilha. Não é cadastro pelo portal — o cadastro público
+   dispara o fluxo inteiro (análise do Atendimento, e-mail, fila de agendamento), e ninguém
+   quer isso para um serviço prestado em 2024. Por isso a carga tem rota própria:
+
+     POST /api/clientes/importar-lote      (token da Gerência)
+     body: { tipo: "vistoria" | "documentacao",          // padrão de quem não trouxer serviço
+             seJaExistir: "ignorar" | "completar" | "criar",
+             registros: [ … ] }
+     registro: { nome, cpf, telefone, email, construtora, empreendimento, blocoTorre,
+                 endereco, cep, data (ISO), valor (número ou null), pagamento,
+                 servico: "vistoria" | "documentacao", observacoes, completarId? }
+     resposta: { criados, atualizados, ignorados, erros: [{ linha, motivo }] }
+
+   Do outro lado, cada registro nasce como um cadastro com origem "importacao", já atendido e
+   com o serviço concluído (laudo entregue, ou documentação pronta), mais a linha em "docs" que
+   guarda a data e o valor da planilha — é dela que os indicadores por período tiram a data.
+   Nada de e-mail, senha provisória nem entrada na fila de agendamento.
+
+   "completar" existe porque as duas planilhas da FN são complementares, não independentes: o
+   controle interno tem data, valor e pagamento mas não tem CPF nem e-mail; as respostas do
+   formulário do site têm o contato mas não têm valor. Importar as duas em sequência sem
+   completar cria a mesma pessoa duas vezes, cada metade com um pedaço do cadastro. Completar
+   preenche só o que está vazio no cadastro existente (identificado por completarId): sobrescrever
+   o que já tem valor deixaria a planilha antiga mandar no dado que a equipe corrigiu depois.
+   ============================================================ */
+const apenasDigitos = (v) => String(v || "").replace(/\D/g, "");
+
+/* Campos que a carga entende, e as pistas usadas para adivinhar a coluna pelo cabeçalho da
+   planilha. A adivinhação é só um chute inicial: quem importa confere o de-para na tela antes
+   de gravar, porque cabeçalho de planilha antiga raramente é o que a gente espera. */
+const CAMPOS_IMPORTACAO = [
+  { chave: "nome", rotulo: "Nome do cliente", obrigatorio: true, exatas: ["nome", "cliente", "nome do cliente"], pistas: ["nome completo", "nome", "cliente", "proprietario", "comprador", "contratante"] },
+  { chave: "cpf", rotulo: "CPF", exatas: ["cpf"], pistas: ["cpf", "documento"] },
+  { chave: "telefone", rotulo: "Telefone", exatas: ["telefone", "celular", "whatsapp"], pistas: ["telefone", "celular", "whatsapp", "fone"] },
+  { chave: "email", rotulo: "E-mail", exatas: ["e-mail", "email"], pistas: ["e-mail", "email", "mail"] },
+  { chave: "construtora", rotulo: "Construtora", exatas: ["construtora"], pistas: ["construtora", "incorporadora"] },
+  { chave: "empreendimento", rotulo: "Empreendimento", exatas: ["empreendimento", "condominio", "obra"], pistas: ["empreendimento", "condominio", "obra", "edificio", "residencial", "predio"] },
+  { chave: "blocoTorre", rotulo: "Bloco / Apto", exatas: ["complemento", "bloco e apto", "bloco/torre", "bloco", "torre", "apto", "unidade"], pistas: ["bloco", "torre", "complemento", "apto", "apartamento", "unidade"] },
+  { chave: "endereco", rotulo: "Endereço", exatas: ["endereco"], pistas: ["endereco", "logradouro", "rua", "avenida"] },
+  { chave: "cep", rotulo: "CEP", exatas: ["cep"], pistas: ["cep"] },
+  /* "realizada"/"realizado" ficaram de fora das pistas de propósito: "Serviço a ser realizado"
+     casava com elas e virava a coluna de data na planilha de respostas do formulário. */
+  { chave: "data", rotulo: "Data do serviço", obrigatorio: true, exatas: ["data", "data da vistoria"], pistas: ["data", "carimbo", "emissao", "conclusao", "entrega"] },
+  { chave: "valor", rotulo: "Valor cobrado", exatas: ["valor", "valores"], pistas: ["valor", "preco", "total", "honorario"] },
+  { chave: "pagamento", rotulo: "Pagamento", exatas: ["pagamento"], pistas: ["pagamento", "pago", "quitado", "financeiro"] },
+  /* Serviço por linha. A planilha do formulário do site mistura os dois na mesma aba ("Vistoria
+     com Laudo Técnico" e "TRT Autorização para obra ou reforma (ART)"); a planilha de controle
+     interno não tem essa coluna e cai no tipo escolhido no botão. */
+  { chave: "servico", rotulo: "Serviço (vistoria ou ART/TRT)", exatas: ["servico"], pistas: ["servico a ser", "tipo de servico", "servico"] },
+  /* Situação: a planilha de controle registra o que de fato aconteceu, e nem toda linha virou
+     serviço prestado (ver concluidoNaPlanilha). "vistoria" e "relatorio" só valem como cabeçalho
+     inteiro: como pedaço de texto, o campo aberto "Descreva o serviço… (ex 1: VISTORIA)" da
+     planilha de respostas era escolhido como situação. */
+  { chave: "situacao", rotulo: "Situação do serviço", exatas: ["vistoria", "relatorio", "situacao", "status"], pistas: ["situacao do", "status do", "andamento"] },
+  { chave: "observacoes", rotulo: "Observações", exatas: ["observacoes", "obs"], pistas: ["observ", "anotacao", "detalhe"] },
+];
+
+const semAcentoMinusculo = (s) => String(s || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+/* Uma linha de planilha em colunas. Respeita aspas porque endereço com vírgula ("Rua X, 200")
+   vira duas colunas sem isso — e a planilha inteira desalinha a partir dali. Campo com quebra
+   de linha dentro das aspas continua fora de alcance: é raro, e a tela mostra a prévia
+   justamente para essa linha estranha aparecer antes de virar cadastro. */
+function separarLinha(linha, sep) {
+  const campos = [];
+  let atual = "", entreAspas = false;
+  for (let i = 0; i < linha.length; i++) {
+    const ch = linha[i];
+    if (entreAspas) {
+      if (ch === '"') {
+        if (linha[i + 1] === '"') { atual += '"'; i++; } else entreAspas = false;
+      } else atual += ch;
+    } else if (ch === '"') entreAspas = true;
+    else if (ch === sep) { campos.push(atual.trim()); atual = ""; }
+    else atual += ch;
+  }
+  campos.push(atual.trim());
+  return campos;
+}
+/* Ctrl+C do Excel/Sheets cola com tabulação; "salvar como CSV" no Brasil sai com ponto e
+   vírgula e nos EUA com vírgula. Vence o separador que mais aparece fora das aspas. */
+function separadorProvavel(linha) {
+  const fora = (sep) => {
+    let n = 0, entreAspas = false;
+    for (const ch of linha) {
+      if (ch === '"') entreAspas = !entreAspas;
+      else if (ch === sep && !entreAspas) n++;
+    }
+    return n;
+  };
+  return ["\t", ";", ","].map((s) => [s, fora(s)]).sort((a, b) => b[1] - a[1])[0][0];
+}
+function lerTabela(texto) {
+  const cruas = String(texto || "").split(/\r?\n/).filter((l) => l.trim());
+  if (!cruas.length) return { colunas: [], linhas: [] };
+  const sep = separadorProvavel(cruas[0]);
+  const linhas = cruas.map((l) => separarLinha(l, sep));
+  const largura = linhas.reduce((m, c) => Math.max(m, c.length), 0);
+  const completas = linhas.map((c) => { const p = c.slice(); while (p.length < largura) p.push(""); return p; });
+  return { colunas: completas[0], linhas: completas };
+}
+/* Duas passadas. A primeira só aceita o cabeçalho inteiro igual ao nome do campo ("DATA",
+   "VALORES", "VISTORIA") — sinal forte, e é como as planilhas de controle da FN são escritas.
+   Só depois vem a busca por pedaço de texto, que é onde moram os enganos: sem essa ordem,
+   "Serviço a ser realizado:" era escolhido como data e o campo aberto "Descreva o serviço…
+   (ex 1: VISTORIA)" virava a coluna de situação. */
+function adivinharMapa(colunas) {
+  const mapa = {};
+  const usadas = new Set();
+  const titulos = colunas.map((c) => semAcentoMinusculo(c).replace(/[\s:]+$/, ""));
+  const escolher = (chave, casa) => {
+    if (mapa[chave] >= 0) return;
+    const achado = titulos.findIndex((t, i) => !usadas.has(i) && !!t && casa(t));
+    mapa[chave] = achado;
+    if (achado >= 0) usadas.add(achado);
+  };
+  CAMPOS_IMPORTACAO.forEach(({ chave }) => { mapa[chave] = -1; });
+  CAMPOS_IMPORTACAO.forEach(({ chave, exatas = [] }) => escolher(chave, (t) => exatas.includes(t)));
+  CAMPOS_IMPORTACAO.forEach(({ chave, pistas }) => escolher(chave, (t) => pistas.some((p) => t.includes(p))));
+  return mapa;
+}
+
+/* Data da planilha para ISO. Aceita 24/08/2026, 24-08-2026, 2026-08-24 e ano de dois dígitos.
+   Dia e mês trocados é o erro clássico da planilha brasileira lida como americana: acima de 12
+   não há dúvida, e abaixo disso a leitura é dd/mm, que é como a FN escreve. */
+function dataDaPlanilha(bruto) {
+  const txt = String(bruto || "").trim();
+  if (!txt) return "";
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(txt);
+  if (iso) return `${iso[1]}-${String(Number(iso[2])).padStart(2, "0")}-${String(Number(iso[3])).padStart(2, "0")}`;
+  const br = /^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})/.exec(txt);
+  if (!br) return "";
+  const dia = Number(br[1]), mes = Number(br[2]);
+  let ano = Number(br[3]);
+  if (ano < 100) ano += ano < 70 ? 2000 : 1900;
+  if (dia < 1 || dia > 31 || mes < 1 || mes > 12) return "";
+  return `${ano}-${String(mes).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
+}
+/* "R$ 1.200,00" -> 1200. Na planilha brasileira o ponto é milhar e a vírgula é decimal; sem a
+   troca, 1.200,00 vira 1.2 e a receita do ano encolhe mil vezes sem ninguém perceber.
+
+   Sem vírgula o ponto é ambíguo, e os dois lados do erro custam caro: "12.000" é doze mil numa
+   planilha brasileira, "450.50" é quatrocentos e cinquenta e meio numa exportação americana. O
+   desempate é o tamanho do grupo — ponto seguido de exatamente três dígitos, até o fim, é
+   separador de milhar; qualquer outra coisa é decimal. Dinheiro não tem três casas decimais. */
+function valorDaPlanilha(bruto) {
+  const limpo = String(bruto || "").replace(/[^\d,.-]/g, "");
+  if (!limpo) return null;
+  const normalizado = limpo.includes(",") ? limpo.replace(/\./g, "").replace(",", ".")
+    : /^-?\d{1,3}(\.\d{3})+$/.test(limpo) ? limpo.replace(/\./g, "")
+    : limpo;
+  const n = Number(normalizado);
+  return Number.isFinite(n) ? n : null;
+}
+/* A coluna de pagamento vem escrita de tudo quanto é jeito. Só "pago"/"quitado"/"sim" viram
+   Pago: na dúvida fica Pendente, porque marcar recebido o que não foi é o erro que estraga o
+   Financeiro — o contrário aparece na hora, quando alguém procura a cobrança.
+
+   A negação é lida antes de tudo: "não pago" contém "pago", e procurar o positivo primeiro
+   marcava como quitado justamente a linha que dizia o contrário. */
+function pagamentoDaPlanilha(bruto) {
+  const t = semAcentoMinusculo(bruto);
+  if (!t) return "Pendente";
+  if (/(^|\W)(nao|sem|nunca)(\W|$)/.test(t) || /pendente|aberto|atrasad|devendo|inadimpl/.test(t)) return "Pendente";
+  if (t.includes("parcial") || t.includes("entrada") || t.includes("sinal")) return "Parcial";
+  if (/(^|\W)(pago|paga|quitado|quitada|sim|ok|recebido|recebida|liquidado)(\W|$)/.test(t)) return "Pago";
+  return "Pendente";
+}
+/* CPF com a máscara de sempre quando tem 11 dígitos, para o histórico ficar igual ao que o
+   portal grava. Fora disso vai como veio — cortar o que não entendemos perderia dado.
+
+   Dez dígitos com cara de CPF é o zero à esquerda que a planilha comeu ao guardar o campo como
+   número: "09690119460" virou 9690119460. Recompõe, senão o cadastro nasce com um CPF que não
+   existe e nunca casa com o cliente de verdade. */
+function cpfDaPlanilha(bruto) {
+  let d = apenasDigitos(bruto);
+  if (d.length === 10) d = `0${d}`;
+  return d.length === 11 ? d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4") : String(bruto || "").trim();
+}
+
+/* Qual serviço esta linha foi. "art"/"trt" com fronteira de palavra de propósito: sem ela,
+   "apartamento" contém "art" e toda linha com o apto na coluna viraria documentação. */
+function servicoDaPlanilha(bruto, padrao) {
+  const t = semAcentoMinusculo(bruto);
+  if (!t) return padrao;
+  if (/(^|\W)(art|trt|atr)(\W|$)|documenta|autorizacao/.test(t)) return "documentacao";
+  if (/vistoria|laudo/.test(t)) return "vistoria";
+  return padrao;
+}
+
+/* A carga cria o cadastro já concluído — é isso que faz dele histórico. Só que a planilha de
+   controle guarda também o que não chegou ao fim ("Cancelada", "Em processo", a linha com
+   "não teve vistoria" na observação), e importar isso como serviço prestado inventa receita de
+   um trabalho que ninguém fez. Sem a coluna apontada não há informação em contrário, e a linha
+   passa: presumir cancelamento seria o erro na direção oposta. */
+function concluidoNaPlanilha(bruto) {
+  const t = semAcentoMinusculo(bruto);
+  if (!t) return true;
+  return !/cancelad|nao realizad|nao teve|desistiu|em processo|em andamento|pendente|agendad|remarcad|aguardando/.test(t);
+}
+
+function AbaGerenciaImportacao({ clientes = [], precos = [], importarClientesHistorico, notify }) {
+  const [tipo, setTipo] = useState("vistoria"); // uma planilha de cada vez, e a tela diz qual
+  const [texto, setTexto] = useState("");
+  const [temCabecalho, setTemCabecalho] = useState(true);
+  const [mapa, setMapa] = useState({});
+  /* Ignorar é o padrão porque é o único que não estraga nada se estiver errado: não cria
+     cadastro repetido nem mexe no que já está gravado. */
+  const [seJaExistir, setSeJaExistir] = useState("ignorar"); // "ignorar" | "completar" | "criar"
+  const [incluirNaoConcluidas, setIncluirNaoConcluidas] = useState(false);
+  /* A base antiga é de serviço já prestado e já recebido — a Gerência confirmou que não há
+     pendência nela. Marcar tudo como Pago de uma vez evita depender de uma coluna que existe em
+     uma planilha e não existe na outra; desmarcando, cada linha volta a valer pelo que a
+     planilha diz (e o que não disser nada fica Pendente). */
+  const [todosPagos, setTodosPagos] = useState(true);
+  /* Valor por empreendimento e serviço, digitado aqui: a planilha de respostas do formulário não
+     tem coluna de valor nenhuma, e sem isso o histórico entraria com receita zero. Preenche só
+     as linhas que a planilha deixou em branco — valor escrito na planilha manda. */
+  const [valoresPorGrupo, setValoresPorGrupo] = useState({});
+  const [enviando, setEnviando] = useState(false);
+  const [resultado, setResultado] = useState(null);
+
+  const precoPorChave = useMemo(() => {
+    const mapaPrecos = {};
+    precos.forEach((p) => { mapaPrecos[normalizarChaveEmpreendimento(p.empreendimento)] = p; });
+    return mapaPrecos;
+  }, [precos]);
+
+  const tabela = useMemo(() => lerTabela(texto), [texto]);
+  const assinaturaColunas = tabela.colunas.join("|");
+  /* O de-para é refeito quando a planilha colada muda, nunca a cada tecla no <select>: senão a
+     tela desfazia a correção manual no instante seguinte. */
+  useEffect(() => {
+    setMapa(temCabecalho ? adivinharMapa(tabela.colunas) : {});
+    setResultado(null);
+  }, [assinaturaColunas, temCabecalho]);
+
+  const rotuloColuna = (i) => {
+    const titulo = (tabela.colunas[i] || "").trim();
+    return temCabecalho && titulo ? `${i + 1}. ${titulo}` : `Coluna ${i + 1}`;
+  };
+
+  /* Chaves de duplicata — duas, e não uma. A planilha de controle interno não tem CPF e a das
+     respostas do formulário tem: casar só por CPF deixaria a mesma pessoa entrar duas vezes, uma
+     por planilha. O empreendimento entra na chave porque quem comprou duas unidades tem dois
+     atendimentos legítimos com o mesmo CPF — e a revistoria repete o CPF de propósito. */
+  const chavesDeCadastro = (nome, cpf, empreendimento) => {
+    const obra = normalizarChaveEmpreendimento(empreendimento);
+    const chaves = [];
+    const cpfLimpo = apenasDigitos(cpf);
+    if (cpfLimpo.length === 11) chaves.push(`cpf:${cpfLimpo}||${obra}`);
+    const nomeLimpo = semAcentoMinusculo(nome).replace(/\s+/g, " ");
+    if (nomeLimpo) chaves.push(`nome:${nomeLimpo}||${obra}`);
+    return chaves;
+  };
+  const cadastroPorChave = useMemo(() => {
+    const mapaChaves = new Map();
+    clientes.forEach((c) => chavesDeCadastro(c.nome, c.cpf, c.empreendimento)
+      .forEach((k) => { if (!mapaChaves.has(k)) mapaChaves.set(k, c); }));
+    return mapaChaves;
+  }, [clientes]);
+
+  const registros = useMemo(() => {
+    const dados = temCabecalho ? tabela.linhas.slice(1) : tabela.linhas;
+    const vistas = new Set();
+    return dados.map((colunas, i) => {
+      const pegar = (chave) => {
+        const idx = mapa[chave];
+        return idx == null || idx < 0 ? "" : String(colunas[idx] ?? "").trim();
+      };
+      const registro = {
+        nome: pegar("nome"),
+        cpf: cpfDaPlanilha(pegar("cpf")),
+        telefone: pegar("telefone"),
+        email: pegar("email").toLowerCase(),
+        construtora: pegar("construtora"),
+        empreendimento: pegar("empreendimento"),
+        blocoTorre: pegar("blocoTorre"),
+        endereco: pegar("endereco"),
+        cep: pegar("cep"),
+        data: dataDaPlanilha(pegar("data")),
+        /* O valor definitivo só sai depois do passo 5 (valor por empreendimento) — ver
+           valorFinal. Aqui fica o que a planilha trouxe, que pode ser nada. */
+        valorPlanilha: valorDaPlanilha(pegar("valor")),
+        pagamento: todosPagos ? "Pago" : pagamentoDaPlanilha(pegar("pagamento")),
+        servico: servicoDaPlanilha(pegar("servico"), tipo),
+        observacoes: pegar("observacoes"),
+      };
+      const problemas = [];
+      if (!registro.nome) problemas.push("sem nome");
+      if (!registro.data) problemas.push(pegar("data") ? "data não reconhecida" : "sem data");
+      if (!concluidoNaPlanilha(pegar("situacao"))) problemas.push("não concluída");
+
+      const chaves = chavesDeCadastro(registro.nome, registro.cpf, registro.empreendimento);
+      let duplicata = null, existente = null;
+      if (chaves.some((k) => vistas.has(k))) { duplicata = "planilha"; problemas.push("repetida na planilha"); }
+      else {
+        existente = chaves.map((k) => cadastroPorChave.get(k)).find(Boolean) || null;
+        if (existente) { duplicata = "sistema"; problemas.push("já existe no sistema"); }
+      }
+      chaves.forEach((k) => vistas.add(k));
+      /* Preço de tabela é por empreendimento e por serviço: a mesma obra cobra um valor pela
+         vistoria e outro pela ART. Por isso o grupo do passo 5 é o par, não só a obra. */
+      const chaveEmp = normalizarChaveEmpreendimento(registro.empreendimento);
+      return {
+        ...registro, linha: i + (temCabecalho ? 2 : 1), problemas, duplicata,
+        completarId: existente?.id ?? null,
+        chaveEmp, grupo: `${chaveEmp}||${registro.servico}`,
+      };
+    });
+  }, [tabela, mapa, temCabecalho, cadastroPorChave, tipo, todosPagos]);
+
+  /* Sem nome não entra de jeito nenhum: cadastro anônimo não serve para nada e ninguém acha
+     depois para apagar. Serviço não concluído fica de fora por padrão (viraria receita de um
+     trabalho que ninguém fez), e a linha repetida dentro do próprio arquivo também — não há o
+     que completar nela. O resto é escolha de quem importa. Sem data entra: só fica fora dos
+     recortes de período, e a tela avisa antes de gravar. */
+  const bloqueada = (r) =>
+    r.problemas.includes("sem nome")
+    || (!incluirNaoConcluidas && r.problemas.includes("não concluída"))
+    || (r.duplicata === "planilha" && seJaExistir !== "criar")
+    || (r.duplicata === "sistema" && seJaExistir === "ignorar");
+  const paraImportar = registros.filter((r) => !bloqueada(r));
+  const semNome = registros.filter((r) => r.problemas.includes("sem nome")).length;
+  const duplicadas = registros.filter((r) => r.duplicata).length;
+  const jaNoSistema = registros.filter((r) => r.duplicata === "sistema").length;
+  const naoConcluidas = registros.filter((r) => r.problemas.includes("não concluída")).length;
+  const semDataValida = paraImportar.filter((r) => !r.data).length;
+  const qtdVistoria = paraImportar.filter((r) => r.servico === "vistoria").length;
+  const qtdDocumentacao = paraImportar.length - qtdVistoria;
+  const servicoPorLinha = mapa.servico >= 0;
+  const faltaObrigatorio = CAMPOS_IMPORTACAO.filter((c) => c.obrigatorio && !(mapa[c.chave] >= 0));
+  const acentoQuebrado = texto.includes("�");
+
+  /* Os empreendimentos que aparecem nas linhas que vão entrar, cada um com o serviço. É a lista
+     do passo 5 — e ela sai do que a planilha realmente traz, não do cadastro de preços: obra que
+     a FN atendeu em 2024 e nunca teve preço lançado precisa aparecer aqui do mesmo jeito. */
+  const grupos = useMemo(() => {
+    const mapaG = {};
+    paraImportar.forEach((r) => {
+      const g = mapaG[r.grupo] || (mapaG[r.grupo] = {
+        chave: r.grupo, chaveEmp: r.chaveEmp, servico: r.servico,
+        nome: r.empreendimento.trim() || "(sem empreendimento)",
+        linhas: 0, semValor: 0, valores: new Set(),
+      });
+      g.linhas += 1;
+      if (r.valorPlanilha == null) g.semValor += 1; else g.valores.add(r.valorPlanilha);
+    });
+    return Object.values(mapaG).sort((a, b) => b.linhas - a.linhas);
+  }, [paraImportar]);
+
+  /* Sugere o preço de tabela do empreendimento (Financeiro → Preços por empreendimento) e, na
+     falta dele, o valor que a própria planilha repete. O que já foi digitado nunca é
+     sobrescrito — quem corrigiu à mão não quer ver o número voltar sozinho. */
+  const assinaturaGrupos = grupos.map((g) => g.chave).join("|");
+  useEffect(() => {
+    setValoresPorGrupo((atual) => {
+      const novo = { ...atual };
+      grupos.forEach((g) => {
+        if (novo[g.chave] != null && novo[g.chave] !== "") return;
+        const tabela = precoPorChave[g.chaveEmp];
+        const daTabela = g.servico === "documentacao" ? tabela?.precoDocumentacao : tabela?.precoVistoria;
+        const unico = g.valores.size === 1 ? [...g.valores][0] : null;
+        novo[g.chave] = Number(daTabela) > 0 ? String(daTabela) : unico != null ? String(unico) : "";
+      });
+      return novo;
+    });
+  }, [assinaturaGrupos]);
+
+  /* Valor escrito na planilha manda; o digitado no passo 5 cobre o que ficou em branco. */
+  const valorFinal = (r) => {
+    if (r.valorPlanilha != null) return r.valorPlanilha;
+    const digitado = valorDaPlanilha(valoresPorGrupo[r.grupo]);
+    return digitado != null ? digitado : null;
+  };
+  const semValorNenhum = paraImportar.filter((r) => valorFinal(r) == null).length;
+  const receitaPrevista = paraImportar.reduce((soma, r) => soma + (valorFinal(r) || 0), 0);
+
+  const importar = async () => {
+    if (!paraImportar.length) return;
+    setEnviando(true);
+    setResultado(null);
+    const r = await importarClientesHistorico({
+      tipo,
+      seJaExistir,
+      registros: paraImportar.map((r) => {
+        const { linha, problemas, duplicata, completarId, valorPlanilha, chaveEmp, grupo, ...campos } = r;
+        const base = { ...campos, valor: valorFinal(r) };
+        return seJaExistir === "completar" && completarId ? { ...base, completarId } : base;
+      }),
+    });
+    setEnviando(false);
+    if (!r) return;
+    setResultado(r);
+    /* A planilha some da tela depois de gravar: deixá-la ali é o convite para o segundo clique
+       que duplica a base inteira. */
+    const mexeu = (r.criados || 0) + (r.atualizados || 0);
+    if (mexeu > 0) { setTexto(""); notify(`${mexeu} cadastro(s) importado(s) ✓`); }
+  };
+
+  const rotuloTipo = tipo === "vistoria" ? "Vistorias realizadas" : "Documentações ART/TRT";
+
+  return (
+    <>
+      <Card icon={Upload} titulo="Importar base antiga de clientes">
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 6px" }}>
+          Sobe para o sistema quem já foi atendido antes de ele existir. Cada cadastro nasce marcado
+          como <strong>histórico</strong>, com o serviço já concluído: não entra na fila do Agendamento,
+          não dispara e-mail e não vira convite de revistoria.
+        </p>
+        <p style={{ fontSize: 12.5, color: "#8593a8", margin: "0 0 16px" }}>
+          Uma planilha de cada vez — a de vistorias e a de ART/TRT são cargas separadas, porque o
+          serviço concluído de cada uma é diferente.
+        </p>
+
+        <div style={cell(true)}>
+          <label style={lab}>1. O que esta planilha contém</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {[["vistoria", "Vistorias realizadas", ClipboardCheck], ["documentacao", "Documentações ART/TRT", FileText]].map(([chave, rotulo, Icon]) => (
+              <button key={chave} onClick={() => { setTipo(chave); setResultado(null); }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 7,
+                  background: tipo === chave ? "#EAF2FB" : "#fff",
+                  border: `1.5px solid ${tipo === chave ? AZUL_MEDIO : CINZA_BORDA}`,
+                  color: AZUL_MARINHO, borderRadius: 10, padding: "9px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer",
+                }}>
+                <Icon size={15} /> {rotulo}
+              </button>
+            ))}
+          </div>
+          <p style={{ fontSize: 12, color: "#8593a8", margin: "7px 0 0" }}>
+            {servicoPorLinha
+              ? "A planilha tem coluna de serviço: cada linha vale pelo que está escrito nela, e esta escolha só decide as que vierem em branco."
+              : "Vale para a planilha inteira. Se ela misturar os dois serviços, aponte a coluna \"Serviço\" no passo 3 e cada linha passa a valer pelo que está escrito nela."}
+          </p>
+        </div>
+
+        <div style={{ ...cell(true), marginTop: 14 }}>
+          <label style={lab}>2. Cole a planilha (Ctrl+C na planilha inteira, Ctrl+V aqui) ou suba um CSV</label>
+          <textarea style={{ ...inp, minHeight: 130, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
+            value={texto} onChange={(e) => { setTexto(e.target.value); setResultado(null); }}
+            placeholder={"Nome\tCPF\tEmpreendimento\tBloco\tData\tValor\nMaria Silva\t000.000.000-00\tVila das Palmeiras\tB2 / 304\t14/03/2024\t450,00"} />
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
+            <input type="file" accept=".csv,.tsv,.txt" style={{ fontSize: 12.5 }}
+              onChange={(e) => {
+                const arquivo = e.target.files?.[0];
+                if (!arquivo) return;
+                const leitor = new FileReader();
+                leitor.onload = () => { setTexto(String(leitor.result || "")); setResultado(null); };
+                leitor.readAsText(arquivo, "utf-8");
+              }} />
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "#4a5a70" }}>
+              <input type="checkbox" checked={temCabecalho} onChange={(e) => setTemCabecalho(e.target.checked)} />
+              A primeira linha é o cabeçalho
+            </label>
+            {texto && <button className="btn-ghost" style={{ width: "auto", color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => { setTexto(""); setResultado(null); }}>Limpar</button>}
+          </div>
+          {acentoQuebrado && (
+            /* Excel salva CSV em Windows-1252 por padrão; lido como UTF-8 vira "Jo�o". Colar
+               direto da planilha passa pela área de transferência e não tem esse problema. */
+            <p style={{ fontSize: 12.5, color: "#B26A00", margin: "8px 0 0" }}>
+              Os acentos vieram quebrados neste arquivo (ele não está em UTF-8). Copie e cole direto
+              da planilha, ou salve o CSV como "UTF-8" antes de subir.
+            </p>
+          )}
+        </div>
+
+        {tabela.linhas.length > 0 && (
+          <div style={{ ...cell(true), marginTop: 14 }}>
+            <label style={lab}>3. Confira de qual coluna sai cada campo</label>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 10 }}>
+              {CAMPOS_IMPORTACAO.map((campo) => (
+                <div key={campo.chave}>
+                  <label style={{ ...lab, fontSize: 11.5 }}>
+                    {campo.rotulo}{campo.obrigatorio && <span style={{ color: "#C62828" }}> *</span>}
+                  </label>
+                  <select style={inp} value={mapa[campo.chave] ?? -1}
+                    onChange={(e) => setMapa({ ...mapa, [campo.chave]: Number(e.target.value) })}>
+                    <option value={-1}>— não usar —</option>
+                    {tabela.colunas.map((_, i) => <option key={i} value={i}>{rotuloColuna(i)}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
+            {faltaObrigatorio.length > 0 && (
+              <p style={{ fontSize: 12.5, color: "#C62828", margin: "10px 0 0" }}>
+                Falta apontar: {faltaObrigatorio.map((c) => c.rotulo).join(", ")}.
+              </p>
+            )}
+          </div>
+        )}
+      </Card>
+
+      {registros.length > 0 && (
+        <Card icon={Eye} titulo={`4. Prévia — ${rotuloTipo}`}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 14 }}>
+            <KpiCard label="Linhas lidas" valor={registros.length} Icon={ClipboardList} />
+            <KpiCard label="Serão importadas" valor={paraImportar.length} cor="#2E7D32" Icon={Check}
+              percentual={`${qtdVistoria} vist. · ${qtdDocumentacao} ART`} />
+            <KpiCard label="Já existem" valor={duplicadas} cor={duplicadas ? "#B26A00" : AZUL_MARINHO} Icon={Copy} />
+            <KpiCard label="Não concluídas" valor={naoConcluidas} cor={naoConcluidas ? "#B26A00" : AZUL_MARINHO} Icon={CircleAlert} />
+            <KpiCard label="Sem nome" valor={semNome} cor={semNome ? "#C62828" : AZUL_MARINHO} Icon={CircleAlert} />
+          </div>
+
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 7, fontSize: 12.5, color: "#4a5a70", marginBottom: 12 }}>
+            <input type="checkbox" checked={todosPagos} style={{ marginTop: 3 }} onChange={(e) => setTodosPagos(e.target.checked)} />
+            <span>
+              <strong style={{ color: AZUL_MARINHO }}>Todos já pagaram</strong> — marca as {paraImportar.length} linha(s)
+              como <strong>Pago</strong>, ignorando a coluna de pagamento da planilha. Desmarque para cada linha
+              valer pelo que a planilha diz.
+            </span>
+          </label>
+
+          {duplicadas > 0 && (
+            <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, marginBottom: 12 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>
+                {duplicadas} linha(s) já batem com alguém na base. O que fazer com elas?
+              </div>
+              <div style={{ display: "grid", gap: 7 }}>
+                {[
+                  ["ignorar", "Deixar de fora", "Não cria nem altera nada. É o padrão."],
+                  ["completar", `Completar o cadastro que já existe (${jaNoSistema})`, "Preenche só os campos vazios — CPF, e-mail, telefone, endereço. Não sobrescreve o que a equipe já corrigiu. É o modo para a segunda das duas planilhas."],
+                  ["criar", "Criar assim mesmo", "Gera cadastro repetido. Só quando forem mesmo dois atendimentos diferentes."],
+                ].map(([chave, rotulo, explicacao]) => (
+                  <label key={chave} style={{ display: "flex", gap: 8, fontSize: 12.5, color: "#4a5a70", cursor: "pointer", alignItems: "flex-start" }}>
+                    <input type="radio" name="seJaExistir" checked={seJaExistir === chave} style={{ marginTop: 3 }}
+                      onChange={() => { setSeJaExistir(chave); setResultado(null); }} />
+                    <span><strong style={{ color: AZUL_MARINHO }}>{rotulo}</strong> — {explicacao}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+          {naoConcluidas > 0 && (
+            <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: "#4a5a70", marginBottom: 10 }}>
+              <input type="checkbox" checked={incluirNaoConcluidas} onChange={(e) => setIncluirNaoConcluidas(e.target.checked)} />
+              Importar também as {naoConcluidas} linha(s) que a planilha não marca como concluídas
+              (entram como serviço prestado, e somam receita)
+            </label>
+          )}
+          {semDataValida > 0 && (
+            <p style={{ fontSize: 12.5, color: "#B26A00", margin: "0 0 10px" }}>
+              {semDataValida} linha(s) vão entrar sem data. Elas contam nos totais, mas ficam fora de
+              qualquer recorte de mês, trimestre ou ano nos Indicadores.
+            </p>
+          )}
+
+          <div style={{ overflowX: "auto", marginBottom: 14 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+              <thead>
+                <tr style={{ background: CINZA_CLARO }}>
+                  {["#", "Nome", "CPF", "Empreendimento", "Bloco/Apto", "Serviço", "Data", "Valor", "Pagamento", "Situação"].map((h) => (
+                    <th key={h} style={{ textAlign: "left", padding: "7px 9px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}`, whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {registros.slice(0, 12).map((r) => (
+                  <tr key={r.linha} style={{ borderBottom: `1px solid ${CINZA_BORDA}`, opacity: bloqueada(r) ? 0.5 : 1 }}>
+                    <td style={{ padding: "7px 9px", color: "#8593a8" }}>{r.linha}</td>
+                    <td style={{ padding: "7px 9px", fontWeight: 600 }}>{r.nome || "—"}</td>
+                    <td style={{ padding: "7px 9px" }}>{r.cpf || "—"}</td>
+                    <td style={{ padding: "7px 9px" }}>{r.empreendimento || "—"}</td>
+                    <td style={{ padding: "7px 9px" }}>{r.blocoTorre || "—"}</td>
+                    <td style={{ padding: "7px 9px", whiteSpace: "nowrap", color: r.servico === "documentacao" ? "#6E36BE" : "#2C75B5", fontWeight: 600 }}>
+                      {r.servico === "documentacao" ? "ART/TRT" : "Vistoria"}
+                    </td>
+                    <td style={{ padding: "7px 9px", whiteSpace: "nowrap" }}>{r.data ? fmtData(r.data) : "—"}</td>
+                    <td style={{ padding: "7px 9px", whiteSpace: "nowrap" }}>{valorFinal(r) == null ? "—" : fmtReal(valorFinal(r))}</td>
+                    <td style={{ padding: "7px 9px" }}><Selo valor={r.pagamento} /></td>
+                    <td style={{ padding: "7px 9px", color: r.problemas.length ? "#B26A00" : "#2E7D32", whiteSpace: "nowrap" }}>
+                      {r.problemas.length ? r.problemas.join(", ") : "ok"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {registros.length > 12 && (
+            <p style={{ fontSize: 12, color: "#8593a8", margin: 0 }}>
+              Mostrando as 12 primeiras de {registros.length} linhas.
+            </p>
+          )}
+        </Card>
+      )}
+
+      {grupos.length > 0 && (
+        <Card icon={DollarSign} titulo="5. Valor por empreendimento">
+          <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 6px" }}>
+            O valor digitado aqui preenche as linhas que a planilha deixou em branco — o que estiver
+            escrito na planilha continua valendo. Cada obra tem um valor para vistoria e outro para
+            ART/TRT, por isso os dois aparecem separados.
+          </p>
+          <p style={{ fontSize: 12.5, color: "#8593a8", margin: "0 0 14px" }}>
+            Já vem preenchido com o preço de tabela do empreendimento (Financeiro → Preços por
+            empreendimento) quando existe; senão, com o valor que a própria planilha repete.
+          </p>
+
+          <div style={{ overflowX: "auto", marginBottom: 14 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: CINZA_CLARO }}>
+                  {["Empreendimento", "Serviço", "Linhas", "Sem valor na planilha", "Valor a aplicar"].map((h, i) => (
+                    <th key={h} style={{ textAlign: i >= 2 ? "right" : "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}`, whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {grupos.map((g) => (
+                  <tr key={g.chave} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                    <td style={{ padding: "8px 10px", fontWeight: 600 }}>{g.nome}</td>
+                    <td style={{ padding: "8px 10px", color: g.servico === "documentacao" ? "#6E36BE" : "#2C75B5", fontWeight: 600, whiteSpace: "nowrap" }}>
+                      {g.servico === "documentacao" ? "ART/TRT" : "Vistoria"}
+                    </td>
+                    <td style={{ padding: "8px 10px", textAlign: "right" }}>{g.linhas}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right", color: g.semValor ? "#B26A00" : "#8593a8" }}>{g.semValor}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right" }}>
+                      <input style={{ ...inp, width: 120, textAlign: "right", padding: "6px 9px" }}
+                        placeholder="0,00" value={valoresPorGrupo[g.chave] ?? ""}
+                        onChange={(e) => setValoresPorGrupo({ ...valoresPorGrupo, [g.chave]: e.target.value })} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 14 }}>
+            <KpiCard label="Receita que entra no histórico" valor={fmtReal(receitaPrevista)} cor="#2E7D32" Icon={DollarSign} />
+            <KpiCard label="Linhas que ficam sem valor" valor={semValorNenhum} cor={semValorNenhum ? "#B26A00" : AZUL_MARINHO} Icon={CircleAlert} />
+          </div>
+
+          <button className="btn-solid" style={{ width: "auto", padding: "10px 18px" }}
+            onClick={importar} disabled={enviando || !paraImportar.length || faltaObrigatorio.length > 0}>
+            {enviando ? <><Loader2 size={15} className="spin" /> Importando…</> : <><Upload size={15} /> Importar {paraImportar.length} cadastro(s) — {qtdVistoria} vistoria(s) e {qtdDocumentacao} ART/TRT</>}
+          </button>
+        </Card>
+      )}
+
+      {resultado && (
+        <Card icon={Check} titulo="Resultado da importação">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
+            <KpiCard label="Cadastros criados" valor={resultado.criados ?? 0} cor="#2E7D32" Icon={Check} />
+            <KpiCard label="Cadastros completados" valor={resultado.atualizados ?? 0} cor="#2C75B5" Icon={Edit3} />
+            <KpiCard label="Ignorados pelo servidor" valor={resultado.ignorados ?? 0} cor="#B26A00" Icon={CircleAlert} />
+          </div>
+          {(resultado.erros || []).length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 6 }}>O que o servidor recusou</div>
+              <div style={{ display: "grid", gap: 4 }}>
+                {resultado.erros.slice(0, 20).map((e, i) => (
+                  <div key={i} style={{ fontSize: 12.5, color: "#4a5a70" }}>Linha {e.linha}: {e.motivo}</div>
+                ))}
+              </div>
+            </div>
+          )}
+          <p style={{ fontSize: 12.5, color: "#65758b", margin: "12px 0 0" }}>
+            Os cadastros importados já aparecem em <strong>Gerência → Indicadores</strong>, no filtro
+            "Base antiga importada", e no Perfil do cliente.
+          </p>
+        </Card>
+      )}
+    </>
+  );
+}
+
+function AbaGerencia({ sub = "visao-geral", token, perfil, usuarioAtual, decidirComissaoItem, importarClientesHistorico, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
   if (sub === "painel") {
     return <AbaGerenciaPainelEstrategico clientes={clientes} docs={docs} usuarios={usuarios}
       avaliacoes={avaliacoes} prospeccao={prospeccao} prospeccaoParceiros={prospeccaoParceiros}
@@ -10725,6 +11798,12 @@ function AbaGerencia({ sub = "visao-geral", token, perfil, usuarioAtual, decidir
       painel={painel} painelCarregando={painelCarregando} carregarPainel={carregarPainel}
       patologias={painelPatologias} patologiasCarregando={painelPatologiasCarregando}
       patologiasIndisponivel={painelPatologiasIndisponivel} recarregarPatologias={carregarPainelPatologias} />;
+  }
+  if (sub === "indicadores") {
+    return <AbaGerenciaIndicadores clientes={clientes} docs={docs} precos={precos} carregando={carregando} />;
+  }
+  if (sub === "importacao") {
+    return <AbaGerenciaImportacao clientes={clientes} precos={precos} importarClientesHistorico={importarClientesHistorico} notify={notify} />;
   }
   if (sub === "acompanhamento") {
     return <TabelaRegistrosVistoriaDoc docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc}
