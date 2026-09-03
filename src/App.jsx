@@ -11325,7 +11325,7 @@ function concluidoNaPlanilha(bruto) {
   return !/cancelad|nao realizad|nao teve|desistiu|em processo|em andamento|pendente|agendad|remarcad|aguardando/.test(t);
 }
 
-function AbaGerenciaImportacao({ clientes = [], precos = [], importarClientesHistorico, notify }) {
+function AbaGerenciaImportacao({ clientes = [], precos = [], empreendimentosRef = [], importarClientesHistorico, notify }) {
   const [tipo, setTipo] = useState("vistoria"); // uma planilha de cada vez, e a tela diz qual
   const [texto, setTexto] = useState("");
   const [temCabecalho, setTemCabecalho] = useState(true);
@@ -11343,6 +11343,8 @@ function AbaGerenciaImportacao({ clientes = [], precos = [], importarClientesHis
      tem coluna de valor nenhuma, e sem isso o histórico entraria com receita zero. Preenche só
      as linhas que a planilha deixou em branco — valor escrito na planilha manda. */
   const [valoresPorGrupo, setValoresPorGrupo] = useState({});
+  /* Grafia da planilha -> { nome, construtora } com que ela vai ser gravada. Ver o passo 4. */
+  const [padronizacao, setPadronizacao] = useState({});
   const [enviando, setEnviando] = useState(false);
   const [resultado, setResultado] = useState(null);
 
@@ -11386,15 +11388,19 @@ function AbaGerenciaImportacao({ clientes = [], precos = [], importarClientesHis
     return mapaChaves;
   }, [clientes]);
 
-  const registros = useMemo(() => {
+  /* A leitura crua da planilha, sem julgamento nenhum — é dela que sai a lista de grafias do
+     passo 4. A padronização precisa acontecer ANTES da checagem de duplicata: sem isso,
+     "Mirante dos Corais" e "Mirantes dos corais" do mesmo cliente passam por dois atendimentos
+     diferentes e ninguém percebe. */
+  const linhasBrutas = useMemo(() => {
     const dados = temCabecalho ? tabela.linhas.slice(1) : tabela.linhas;
-    const vistas = new Set();
     return dados.map((colunas, i) => {
       const pegar = (chave) => {
         const idx = mapa[chave];
         return idx == null || idx < 0 ? "" : String(colunas[idx] ?? "").trim();
       };
-      const registro = {
+      return {
+        linha: i + (temCabecalho ? 2 : 1),
         nome: pegar("nome"),
         cpf: cpfDaPlanilha(pegar("cpf")),
         telefone: pegar("telefone"),
@@ -11405,17 +11411,104 @@ function AbaGerenciaImportacao({ clientes = [], precos = [], importarClientesHis
         endereco: pegar("endereco"),
         cep: pegar("cep"),
         data: dataDaPlanilha(pegar("data")),
-        /* O valor definitivo só sai depois do passo 5 (valor por empreendimento) — ver
+        /* O valor definitivo só sai depois do passo 6 (valor por empreendimento) — ver
            valorFinal. Aqui fica o que a planilha trouxe, que pode ser nada. */
         valorPlanilha: valorDaPlanilha(pegar("valor")),
         pagamento: todosPagos ? "Pago" : pagamentoDaPlanilha(pegar("pagamento")),
         servico: servicoDaPlanilha(pegar("servico"), tipo),
         observacoes: pegar("observacoes"),
+        /* Guardadas cruas só para as mensagens da prévia distinguirem "a planilha não tem data"
+           de "tem, mas não entendi o que está escrito". Não vão para o servidor. */
+        dataBruta: pegar("data"),
+        situacaoBruta: pegar("situacao"),
+      };
+    });
+  }, [tabela, mapa, temCabecalho, tipo, todosPagos]);
+
+  /* Cada grafia de empreendimento que a planilha traz, com quantas linhas usam cada uma. Nas
+     planilhas da FN são 79 grafias para pouco mais de vinte prédios — "Mirante dos Corais"
+     aparece escrito de cinco jeitos. Importado assim, cada grafia vira um empreendimento
+     diferente no indicador, no preço e na busca. */
+  const grafias = useMemo(() => {
+    const mapaG = {};
+    linhasBrutas.forEach((r) => {
+      const nome = r.empreendimento.trim();
+      if (!nome) return;
+      const g = mapaG[nome] || (mapaG[nome] = { nome, linhas: 0, construtoras: {} });
+      g.linhas += 1;
+      const c = r.construtora.trim();
+      if (c) g.construtoras[c] = (g.construtoras[c] || 0) + 1;
+    });
+    return Object.values(mapaG).sort((a, b) => b.linhas - a.linhas || a.nome.localeCompare(b.nome));
+  }, [linhasBrutas]);
+
+  const oficiais = useMemo(
+    () => [...new Set(empreendimentosRef.map((e) => e.empreendimento).filter(Boolean))].sort(),
+    [empreendimentosRef],
+  );
+  const construtorasConhecidas = useMemo(
+    () => [...new Set(empreendimentosRef.map((e) => e.construtora).filter(Boolean))].sort(),
+    [empreendimentosRef],
+  );
+  const construtoraOficial = useMemo(() => {
+    const m = {};
+    empreendimentosRef.forEach((e) => { if (e.empreendimento) m[e.empreendimento] = e.construtora || ""; });
+    return m;
+  }, [empreendimentosRef]);
+
+  /* Sugestão de padronização, uma vez por grafia nova. Quem manda é a lista oficial, pelo mesmo
+     casamento da tela de Padronização de empreendimentos (igual, contido, ou até 25% de letras
+     diferentes) — assim a planilha entra com o nome que o resto do sistema já usa. Sem oficial
+     que reconheça, ganha a grafia mais repetida do mesmo grupo: entre "Mirante dos Corais" (58)
+     e "MIRANTE DOS CORAIS" (2), a primeira. O que já foi digitado aqui nunca é sobrescrito. */
+  const assinaturaGrafias = grafias.map((g) => g.nome).join("|");
+  useEffect(() => {
+    setPadronizacao((atual) => {
+      const novo = { ...atual };
+      const campeaDoGrupo = {};
+      grafias.forEach((g) => {
+        const k = normalizarChaveEmpreendimento(g.nome);
+        if (!campeaDoGrupo[k] || g.linhas > campeaDoGrupo[k].linhas) campeaDoGrupo[k] = g;
+      });
+      grafias.forEach((g) => {
+        if (novo[g.nome]) return;
+        const oficial = sugerirOficial(g.nome, oficiais);
+        const daPlanilha = Object.entries(g.construtoras).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+        novo[g.nome] = {
+          nome: oficial || campeaDoGrupo[normalizarChaveEmpreendimento(g.nome)]?.nome || g.nome,
+          construtora: (oficial && construtoraOficial[oficial]) || daPlanilha,
+        };
+      });
+      return novo;
+    });
+  }, [assinaturaGrafias, oficiais.join("|")]);
+
+  /* Quantas grafias caem em cada nome final — é o selo "3 → 1" da tela. */
+  const grafiasPorNomeFinal = useMemo(() => {
+    const conta = {};
+    grafias.forEach((g) => {
+      const alvo = (padronizacao[g.nome]?.nome || g.nome).trim();
+      if (alvo) conta[alvo] = (conta[alvo] || 0) + 1;
+    });
+    return conta;
+  }, [grafias, padronizacao]);
+  const nomesPadronizados = Object.keys(grafiasPorNomeFinal);
+  const oficiaisNormalizados = useMemo(() => new Set(oficiais.map(normalizarChaveEmpreendimento)), [oficiais]);
+  const novosNaLista = nomesPadronizados.filter((n) => !oficiaisNormalizados.has(normalizarChaveEmpreendimento(n)));
+
+  const registros = useMemo(() => {
+    const vistas = new Set();
+    return linhasBrutas.map((bruto) => {
+      const escolha = padronizacao[bruto.empreendimento];
+      const registro = {
+        ...bruto,
+        empreendimento: escolha?.nome?.trim() || bruto.empreendimento,
+        construtora: escolha?.construtora?.trim() || bruto.construtora,
       };
       const problemas = [];
       if (!registro.nome) problemas.push("sem nome");
-      if (!registro.data) problemas.push(pegar("data") ? "data não reconhecida" : "sem data");
-      if (!concluidoNaPlanilha(pegar("situacao"))) problemas.push("não concluída");
+      if (!registro.data) problemas.push(bruto.dataBruta ? "data não reconhecida" : "sem data");
+      if (!concluidoNaPlanilha(bruto.situacaoBruta)) problemas.push("não concluída");
 
       const chaves = chavesDeCadastro(registro.nome, registro.cpf, registro.empreendimento);
       let duplicata = null, existente = null;
@@ -11426,15 +11519,15 @@ function AbaGerenciaImportacao({ clientes = [], precos = [], importarClientesHis
       }
       chaves.forEach((k) => vistas.add(k));
       /* Preço de tabela é por empreendimento e por serviço: a mesma obra cobra um valor pela
-         vistoria e outro pela ART. Por isso o grupo do passo 5 é o par, não só a obra. */
+         vistoria e outro pela ART. Por isso o grupo do passo 6 é o par, não só a obra. */
       const chaveEmp = normalizarChaveEmpreendimento(registro.empreendimento);
       return {
-        ...registro, linha: i + (temCabecalho ? 2 : 1), problemas, duplicata,
+        ...registro, problemas, duplicata,
         completarId: existente?.id ?? null,
         chaveEmp, grupo: `${chaveEmp}||${registro.servico}`,
       };
     });
-  }, [tabela, mapa, temCabecalho, cadastroPorChave, tipo, todosPagos]);
+  }, [linhasBrutas, padronizacao, cadastroPorChave]);
 
   /* Sem nome não entra de jeito nenhum: cadastro anônimo não serve para nada e ninguém acha
      depois para apagar. Serviço não concluído fica de fora por padrão (viraria receita de um
@@ -11510,7 +11603,8 @@ function AbaGerenciaImportacao({ clientes = [], precos = [], importarClientesHis
       tipo,
       seJaExistir,
       registros: paraImportar.map((r) => {
-        const { linha, problemas, duplicata, completarId, valorPlanilha, chaveEmp, grupo, ...campos } = r;
+        const { linha, problemas, duplicata, completarId, valorPlanilha, chaveEmp, grupo,
+          dataBruta, situacaoBruta, ...campos } = r;
         const base = { ...campos, valor: valorFinal(r) };
         return seJaExistir === "completar" && completarId ? { ...base, completarId } : base;
       }),
@@ -11617,8 +11711,88 @@ function AbaGerenciaImportacao({ clientes = [], precos = [], importarClientesHis
         )}
       </Card>
 
+      {grafias.length > 0 && (
+        <Card icon={Building2} titulo={`4. Empreendimentos encontrados (${grafias.length} grafias → ${nomesPadronizados.length})`}>
+          <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 6px" }}>
+            O mesmo prédio costuma aparecer escrito de vários jeitos, e cada grafia vira um
+            empreendimento diferente no indicador, no preço e na busca. Aqui você diz com que nome
+            cada uma vai ser gravada — grafias que apontam para o mesmo nome viram uma só.
+          </p>
+          <p style={{ fontSize: 12.5, color: "#8593a8", margin: "0 0 14px" }}>
+            Já vem sugerido: o nome da lista oficial quando ela reconhece a grafia; senão, a escrita
+            mais repetida da própria planilha. A construtora é gravada junto, e vale para todas as
+            linhas daquela grafia.
+          </p>
+
+          <datalist id="oficiais-importacao">
+            {oficiais.map((o) => <option key={o} value={o} />)}
+          </datalist>
+          <datalist id="construtoras-importacao">
+            {construtorasConhecidas.map((c) => <option key={c} value={c} />)}
+          </datalist>
+
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: CINZA_CLARO }}>
+                  {["Como está na planilha", "Linhas", "Vai ser gravado como", "Construtora"].map((h, i) => (
+                    <th key={h} style={{ textAlign: i === 1 ? "right" : "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}`, whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {grafias.map((g) => {
+                  const escolha = padronizacao[g.nome] || { nome: g.nome, construtora: "" };
+                  const juntas = grafiasPorNomeFinal[escolha.nome.trim()] || 1;
+                  const mudou = escolha.nome.trim() && escolha.nome.trim() !== g.nome;
+                  return (
+                    <tr key={g.nome} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                      <td style={{ padding: "8px 10px", color: mudou ? "#8593a8" : AZUL_MARINHO, textDecoration: mudou ? "line-through" : "none" }}>
+                        {g.nome}
+                      </td>
+                      <td style={{ padding: "8px 10px", textAlign: "right", whiteSpace: "nowrap" }}>{g.linhas}</td>
+                      <td style={{ padding: "8px 10px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                          <input list="oficiais-importacao" style={{ ...inp, padding: "6px 9px" }}
+                            value={escolha.nome}
+                            onChange={(e) => setPadronizacao({ ...padronizacao, [g.nome]: { ...escolha, nome: e.target.value } })} />
+                          {juntas > 1 && (
+                            <span title={`${juntas} grafias viram este nome`}
+                              style={{ fontSize: 11, fontWeight: 700, color: "#2E7D32", background: "#E6F4EA", borderRadius: 20, padding: "2px 8px", whiteSpace: "nowrap" }}>
+                              {juntas} →  1
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td style={{ padding: "8px 10px" }}>
+                        <input list="construtoras-importacao" style={{ ...inp, padding: "6px 9px", minWidth: 170 }}
+                          placeholder="(sem construtora)" value={escolha.construtora}
+                          onChange={(e) => setPadronizacao({ ...padronizacao, [g.nome]: { ...escolha, construtora: e.target.value } })} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {novosNaLista.length > 0 && (
+            /* A carga grava o nome no cadastro, mas não mexe na lista oficial de empreendimentos —
+               é ela que alimenta o que o cliente vê no cadastro público. Sem esse aviso, a obra
+               entraria no histórico e continuaria fora da lista, e o próximo cliente digitaria a
+               grafia errada de novo. */
+            <p style={{ fontSize: 12.5, color: "#B26A00", margin: "12px 0 0" }}>
+              {novosNaLista.length} destes nomes não estão na lista oficial de empreendimentos
+              ({novosNaLista.slice(0, 4).join(", ")}{novosNaLista.length > 4 ? "…" : ""}).
+              A importação grava assim mesmo, mas para o cliente ver o nome no cadastro público
+              eles precisam ser criados em <strong>Financeiro → Preços por empreendimento</strong>.
+            </p>
+          )}
+        </Card>
+      )}
+
       {registros.length > 0 && (
-        <Card icon={Eye} titulo={`4. Prévia — ${rotuloTipo}`}>
+        <Card icon={Eye} titulo={`5. Prévia — ${rotuloTipo}`}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 14 }}>
             <KpiCard label="Linhas lidas" valor={registros.length} Icon={ClipboardList} />
             <KpiCard label="Serão importadas" valor={paraImportar.length} cor="#2E7D32" Icon={Check}
@@ -11711,7 +11885,7 @@ function AbaGerenciaImportacao({ clientes = [], precos = [], importarClientesHis
       )}
 
       {grupos.length > 0 && (
-        <Card icon={DollarSign} titulo="5. Valor por empreendimento">
+        <Card icon={DollarSign} titulo="6. Valor por empreendimento">
           <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 6px" }}>
             O valor digitado aqui preenche as linhas que a planilha deixou em branco — o que estiver
             escrito na planilha continua valendo. Cada obra tem um valor para vistoria e outro para
@@ -11803,7 +11977,8 @@ function AbaGerencia({ sub = "visao-geral", token, perfil, usuarioAtual, decidir
     return <AbaGerenciaIndicadores clientes={clientes} docs={docs} precos={precos} carregando={carregando} />;
   }
   if (sub === "importacao") {
-    return <AbaGerenciaImportacao clientes={clientes} precos={precos} importarClientesHistorico={importarClientesHistorico} notify={notify} />;
+    return <AbaGerenciaImportacao clientes={clientes} precos={precos} empreendimentosRef={empreendimentosRef}
+      importarClientesHistorico={importarClientesHistorico} notify={notify} />;
   }
   if (sub === "acompanhamento") {
     return <TabelaRegistrosVistoriaDoc docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc}
