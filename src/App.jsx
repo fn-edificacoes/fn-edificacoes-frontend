@@ -31,6 +31,16 @@ const CINZA_BORDA = "#D8DEE7";
    Hoje trocar de servidor é uma mudança de DNS. Ver CLAUDE.md. */
 const API_URL = import.meta.env.VITE_API_URL || "https://sistema.fnedificacoes.com.br";
 
+/* FN PROJETOS — modulo de reforma de apartamento. Roda como servico proprio na
+   MESMA maquina e no MESMO dominio, servido pelo nginx em /reformas; a Gerencia o
+   abre embutido na aba "Reformas" e ele recebe a identidade por postMessage, sem
+   login proprio.
+
+   Ja morou na Cloudflare, num endereco de fora, e por isso o endereco vinha de
+   variavel. Hoje o padrao e o caminho local — a variavel so serve para apontar
+   para http://localhost:3000 em desenvolvimento. */
+const FN_PROJETOS_URL = (import.meta.env.VITE_FN_PROJETOS_URL || "/reformas").replace(/\/+$/, "");
+
 /* Caminho da logo montado a partir da base do site: na raiz (Netlify/Vercel) vira
    "/logo-...png" e no GitHub Pages, "/fn-edificacoes-frontend/logo-...png". Caminho
    absoluto fixo quebrava no Pages, que serve o site dentro de uma subpasta. */
@@ -3385,7 +3395,7 @@ function AppInterno({ session, onLogout }) {
         {/* Sub-navegação (somente dentro do módulo Gerência) */}
         {abaTop === "gerencia" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
-            {[["visao-geral", "Visão geral", LayoutGrid], ["painel", "Painel estratégico", BarChart3], ["acompanhamento", "Acompanhamento", ClipboardList], ["perfil-cliente", "Perfil do cliente", User], ["parceiros", "Parceiros e Afiliados", Users], ["financeiro", "Financeiro", DollarSign], ["prospeccao", "Prospecção", TrendingUp], ["patologias", "Banco de patologias", AlertTriangle]].map(([k, label, Icon]) => (
+            {[["visao-geral", "Visão geral", LayoutGrid], ["painel", "Painel estratégico", BarChart3], ["acompanhamento", "Acompanhamento", ClipboardList], ["reformas", "Reformas", Building2], ["perfil-cliente", "Perfil do cliente", User], ["parceiros", "Parceiros e Afiliados", Users], ["financeiro", "Financeiro", DollarSign], ["prospeccao", "Prospecção", TrendingUp], ["patologias", "Banco de patologias", AlertTriangle]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setAbaGerencia(k)} className="tab" style={{ borderBottomColor: abaGerencia === k ? AZUL_MEDIO : "transparent", color: abaGerencia === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
                 <Icon size={15} /> {label}
               </button>
@@ -3491,7 +3501,7 @@ function AppInterno({ session, onLogout }) {
             importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao} meuConvite={meuConvite} />
         )}
         {abaTop === "gerencia" && (
-          <AbaGerencia sub={abaGerencia} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem}
+          <AbaGerencia sub={abaGerencia} usuarioAtual={session.usuario} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem}
             prospeccaoParceiros={prospeccaoParceiros} prospeccaoParceirosCarregando={prospeccaoParceirosCarregando}
             atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
             importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao}
@@ -10584,7 +10594,130 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", token, perfil, decidirComissaoItem, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
+/* ============================================================
+   GERÊNCIA › REFORMAS  —  o FN Projetos embutido
+   ============================================================
+   O FN Projetos é um módulo separado (outro repositório, outro endereço) que
+   cuida de reforma de apartamento: levantamento a partir da planta, orçamento,
+   cronograma e acompanhamento de obra. Ele NÃO tem login próprio — quem entra
+   é quem já está autenticado aqui.
+
+   A identidade vai por postMessage, não por querystring. Endereço com
+   "?perfil=gerencia" é editável na barra do navegador: qualquer pessoa
+   promoveria a si mesma. Por postMessage a mensagem sai daqui para uma origem
+   declarada, e o módulo confere de onde ela veio.
+
+   Mesmo domínio, então a origem do postMessage é a própria janela — mas o
+   endereço continua passando por new URL() com base, para o caso de alguém
+   apontar VITE_FN_PROJETOS_URL para outro host em desenvolvimento. */
+function AbaGerenciaReformas({ usuarioAtual, perfil }) {
+  const [pronto, setPronto] = useState(false);
+  const [falhou, setFalhou] = useState(false);
+  const iframeRef = useRef(null);
+
+  const origemModulo = useMemo(() => {
+    try { return new URL(FN_PROJETOS_URL, window.location.origin).origin; } catch { return ""; }
+  }, []);
+
+  /* A identidade é reenviada sempre que o módulo pedir. Mandar só no load não
+     basta: o iframe pode recarregar sozinho (publicação nova, F5 lá dentro) e
+     ficaria sem saber quem está do outro lado. */
+  useEffect(() => {
+    if (!origemModulo) return;
+
+    const identidade = {
+      tipo: "fn-projetos:identidade",
+      userId: usuarioAtual?.id ? String(usuarioAtual.id) : "",
+      nome: usuarioAtual?.nome || "",
+      email: usuarioAtual?.email || "",
+      /* O módulo só conhece dois perfis. Quem não é da Gerência entra como
+         acompanhamento: leitura, sem lançar e sem ver custo interno. */
+      perfil: perfil === "gerencia" ? "gerencia" : "acompanhamento",
+    };
+
+    const enviar = () => iframeRef.current?.contentWindow?.postMessage(identidade, origemModulo);
+
+    const aoReceber = (e) => {
+      if (e.origin !== origemModulo) return;
+      if (e.data?.tipo === "fn-projetos:pronto") { setPronto(true); enviar(); }
+      if (e.data?.tipo === "fn-projetos:pediu-identidade") enviar();
+    };
+
+    window.addEventListener("message", aoReceber);
+    return () => window.removeEventListener("message", aoReceber);
+  }, [origemModulo, usuarioAtual, perfil]);
+
+  /* Sem resposta em 12s é serviço fora do ar ou endereço errado. O iframe não
+     avisa nada: ele fica em branco para sempre. */
+  useEffect(() => {
+    if (!origemModulo || pronto) return;
+    const t = setTimeout(() => setFalhou(true), 12000);
+    return () => clearTimeout(t);
+  }, [origemModulo, pronto]);
+
+  if (!FN_PROJETOS_URL) {
+    return (
+      <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: 20, background: "#fff" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <Building2 size={16} color={AZUL_MARINHO} />
+          <strong style={{ fontSize: 14, color: AZUL_MARINHO }}>Reformas de apartamento</strong>
+        </div>
+        <p style={{ margin: 0, fontSize: 13.5, color: "#5b6b80", lineHeight: 1.6 }}>
+          O endereço do módulo <strong>FN Projetos</strong> está vazio. Ele normalmente é
+          servido em <code>/reformas</code>, nesta mesma máquina; a aba só chega aqui se
+          <code>VITE_FN_PROJETOS_URL</code> tiver sido apagada de propósito no build.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <strong style={{ fontSize: 15, color: AZUL_MARINHO }}>Reformas de apartamento</strong>
+          <p style={{ margin: "2px 0 0", fontSize: 12.5, color: "#6b7c93" }}>
+            Levantamento pela planta, orçamento, cronograma e acompanhamento de obra.
+            {perfil !== "gerencia" && " Seu perfil é de acompanhamento: leitura apenas."}
+          </p>
+        </div>
+        <a href={FN_PROJETOS_URL} target="_blank" rel="noreferrer"
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: AZUL_MEDIO, textDecoration: "none", whiteSpace: "nowrap" }}>
+          <ExternalLink size={14} /> Abrir em outra aba
+        </a>
+      </div>
+
+      {falhou && !pronto && (
+        <div style={{ border: "1px solid #f3c9c6", background: "#fef2f2", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "#b3261e" }}>
+          O módulo não respondeu. Verifique se o FN Projetos está no ar em <strong>{FN_PROJETOS_URL}</strong>.
+        </div>
+      )}
+
+      <div style={{ position: "relative", border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, overflow: "hidden", background: "#fff" }}>
+        {!pronto && !falhou && (
+          <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", background: CINZA_CLARO, zIndex: 1 }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#6b7c93" }}>
+              <Loader2 size={16} className="spin" /> Abrindo o FN Projetos…
+            </span>
+          </div>
+        )}
+        <iframe
+          ref={iframeRef}
+          src={`${FN_PROJETOS_URL}/projetos`}
+          title="FN Projetos — reformas de apartamento"
+          onLoad={() => iframeRef.current?.contentWindow?.postMessage({ tipo: "fn-projetos:ola" }, origemModulo)}
+          /* allow-same-origin junto de allow-scripts só é aceitável porque a
+             origem é nossa e declarada; com origem de terceiro isso anularia a
+             sandbox inteira. */
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
+          style={{ width: "100%", height: "calc(100vh - 260px)", minHeight: 560, border: "none", display: "block" }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function AbaGerencia({ sub = "visao-geral", token, perfil, usuarioAtual, decidirComissaoItem, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
   if (sub === "painel") {
     return <AbaGerenciaPainelEstrategico clientes={clientes} docs={docs} usuarios={usuarios}
       avaliacoes={avaliacoes} prospeccao={prospeccao} prospeccaoParceiros={prospeccaoParceiros}
@@ -10596,6 +10729,9 @@ function AbaGerencia({ sub = "visao-geral", token, perfil, decidirComissaoItem, 
   if (sub === "acompanhamento") {
     return <TabelaRegistrosVistoriaDoc docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc}
       carregando={carregando} notify={notify} clientes={clientes} precos={precos} />;
+  }
+  if (sub === "reformas") {
+    return <AbaGerenciaReformas usuarioAtual={usuarioAtual} perfil={perfil} />;
   }
   if (sub === "perfil-cliente") {
     return <AbaPerfilCliente clientes={clientes} token={token} notify={notify}
