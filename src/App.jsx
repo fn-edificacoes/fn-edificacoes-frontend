@@ -7,7 +7,7 @@ import {
   AlertTriangle, CircleAlert, Info, Copy, Sparkles, Loader2,
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
-  ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart
+  ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle
 } from "lucide-react";
 
 /* ============================================================
@@ -556,10 +556,10 @@ const MODULOS_POR_PERFIL = {
   documentacao: ["documentacao"],
   /* Vendas saiu daqui: parceiros, cupons e comissão são assunto de quem vende e da Gerência.
      O Atendimento cuida do cliente da vistoria — cadastro, agendamento e acompanhamento. */
-  atendimento: ["clientes", "qualidade"],
+  atendimento: ["clientes", "qualidade", "faq"],
   qualidade: ["qualidade"],
   vendas: ["vendas"],
-  gerencia: ["laudos", "documentacao", "gerencia", "usuarios", "clientes", "qualidade"],
+  gerencia: ["laudos", "documentacao", "gerencia", "usuarios", "clientes", "qualidade", "faq"],
 };
 const PERFIL_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", qualidade: "Agendamento", vendas: "Vendas", gerencia: "Gerência" };
 
@@ -2509,6 +2509,42 @@ function AppInterno({ session, onLogout }) {
     } catch (e) { notify(`Não foi possível importar: ${e.message}`); return false; }
   };
 
+  /* ---- Banco de FAQ — o Atendimento escreve o que já viu de dúvida repetida de cliente,
+     pra consultar na hora de responder. Gerência acompanha e também pode editar. */
+  const [faqBanco, setFaqBanco] = useState([]);
+  const [faqBancoCarregando, setFaqBancoCarregando] = useState(false);
+  const carregarFaqBanco = async () => {
+    if (perfil !== "gerencia" && perfil !== "atendimento") return;
+    setFaqBancoCarregando(true);
+    try {
+      const r = await apiFetch("/api/faq", { token });
+      setFaqBanco(r.faq || []);
+    } catch (e) { notify(`Não foi possível carregar o FAQ: ${e.message}`); }
+    setFaqBancoCarregando(false);
+  };
+  useEffect(() => { carregarFaqBanco(); }, []);
+  const criarFaq = async (dadosFaq) => {
+    try {
+      await apiFetch("/api/faq", { method: "POST", token, body: dadosFaq });
+      await carregarFaqBanco();
+      return true;
+    } catch (e) { notify(`Não foi possível cadastrar a pergunta: ${e.message}`); return false; }
+  };
+  const atualizarFaq = async (id, patch) => {
+    try {
+      await apiFetch(`/api/faq/${id}`, { method: "PATCH", token, body: patch });
+      await carregarFaqBanco();
+      return true;
+    } catch (e) { notify(`Não foi possível salvar a pergunta: ${e.message}`); return false; }
+  };
+  const excluirFaq = async (id) => {
+    try {
+      await apiFetch(`/api/faq/${id}`, { method: "DELETE", token });
+      setFaqBanco((atual) => atual.filter((f) => f.id !== id));
+      return true;
+    } catch (e) { notify(`Não foi possível excluir a pergunta: ${e.message}`); return false; }
+  };
+
   /* ---- Vales (todos, para Gerência/Vendas acompanharem leads/conversão de Parceiros) ---- */
   const [vales, setVales] = useState([]);
   const [valesCarregando, setValesCarregando] = useState(false);
@@ -3387,7 +3423,7 @@ function AppInterno({ session, onLogout }) {
 
         {/* Navegação de módulos (filtrada pelo perfil de acesso) */}
         <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, borderTop: "1px solid rgba(255,255,255,.12)", overflowX: "auto" }}>
-          {[["laudos", "Laudos", FileText], ["documentacao", "Documentação", ClipboardCheck], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["vendas", "Vendas", Handshake], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog]]
+          {[["laudos", "Laudos", FileText], ["documentacao", "Documentação", ClipboardCheck], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["faq", "FAQ", HelpCircle], ["vendas", "Vendas", Handshake], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog]]
             .filter(([k]) => modulosPermitidos.includes(k))
             .map(([k, label, Icon]) => (
               <button key={k} onClick={() => setAbaTop(k)} className="tab" style={{ borderBottomColor: abaTop === k ? "#fff" : "transparent", color: abaTop === k ? "#fff" : "rgba(255,255,255,.55)", whiteSpace: "nowrap", flexShrink: 0 }}>
@@ -3512,6 +3548,10 @@ function AppInterno({ session, onLogout }) {
             agendarAgoraId={agendarAgoraId} setAgendarAgoraId={setAgendarAgoraId}
             perfil={perfil} precos={precos}
             podeAgir={perfil === "atendimento" || perfil === "gerencia"} ehGerencia={perfil === "gerencia"} />
+        )}
+        {abaTop === "faq" && (
+          <CardBancoFaq faq={faqBanco} carregando={faqBancoCarregando} notify={notify}
+            onCriar={criarFaq} onAtualizar={atualizarFaq} onExcluir={excluirFaq} />
         )}
         {abaTop === "vendas" && (
           <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
@@ -9769,6 +9809,128 @@ function CardBancoPatologias({ patologias = [], carregando, onCriar, onAtualizar
           </div>
         </div>
       )}
+    </Card>
+  );
+}
+
+/* ================= Banco de FAQ (perguntas frequentes) =======
+   O Atendimento escreve aqui o que já viu de dúvida repetida de cliente — sobre o site, o
+   sistema, agendamento, laudo, documentos — para consultar rápido na hora de responder.
+   Mesmo padrão de CardBancoPatologias: lista simples, busca em memória, criar/editar/excluir
+   em modal. Sem fluxo de aprovação — quem cadastra já é quem confia. */
+const FAQ_CATEGORIAS = ["Sistema", "Cadastro", "Login", "Senha", "Agendamento", "Vistoria", "Laudo", "Documentos", "ART/TRT", "Feedback", "Suporte", "Segurança", "Outro"];
+
+function CardBancoFaq({ faq = [], carregando, onCriar, onAtualizar, onExcluir, notify }) {
+  const [busca, setBusca] = useState("");
+  const [editando, setEditando] = useState(null); // objeto da pergunta, ou {} pra nova
+  const [salvando, setSalvando] = useState(false);
+  const [excluindoId, setExcluindoId] = useState(null);
+  const [confirmandoExclusao, setConfirmandoExclusao] = useState(null);
+
+  const termo = busca.trim().toLowerCase();
+  const visiveis = termo
+    ? faq.filter((f) => `${f.pergunta} ${f.resposta} ${f.categoria} ${f.palavrasChave}`.toLowerCase().includes(termo))
+    : faq;
+
+  const iniciarNova = () => setEditando({ categoria: "", pergunta: "", resposta: "", palavrasChave: "" });
+
+  const salvar = async () => {
+    if (!editando.pergunta?.trim()) { notify("Informe a pergunta."); return; }
+    if (!editando.resposta?.trim()) { notify("Informe a resposta."); return; }
+    setSalvando(true);
+    const ok = editando.id ? await onAtualizar(editando.id, editando) : await onCriar(editando);
+    setSalvando(false);
+    if (ok) { setEditando(null); notify(editando.id ? "Pergunta atualizada ✓" : "Pergunta cadastrada ✓"); }
+  };
+
+  const confirmarExclusao = async () => {
+    const f = confirmandoExclusao;
+    setConfirmandoExclusao(null);
+    setExcluindoId(f.id);
+    if (editando?.id === f.id) setEditando(null);
+    await onExcluir(f.id);
+    setExcluindoId(null);
+  };
+
+  return (
+    <Card icon={HelpCircle} titulo={`FAQ — perguntas frequentes (${faq.length})`}>
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Banco de dúvidas já vistas de clientes, com a resposta pronta para repassar. Cadastre,
+        ajuste ou remova aqui — todo mundo do Atendimento e a Gerência enxergam a mesma lista.
+      </p>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <input style={{ ...inp, flex: 1, minWidth: 200 }} value={busca} onChange={(e) => setBusca(e.target.value)}
+          placeholder={`Buscar em ${faq.length} pergunta(s)…`} />
+        <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }} onClick={iniciarNova}>
+          <Plus size={15} /> Nova pergunta
+        </button>
+      </div>
+
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && faq.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhuma pergunta cadastrada ainda.</p>}
+      {!carregando && visiveis.length === 0 && faq.length > 0 && (
+        <p style={{ color: "#8593a8", fontSize: 14 }}>Nada encontrado para "{busca}".</p>
+      )}
+
+      <div style={{ display: "grid", gap: 8 }}>
+        {visiveis.map((f) => (
+          <div key={f.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                {f.categoria && (
+                  <span style={{ fontSize: 11, fontWeight: 700, color: AZUL_MEDIO, background: CINZA_CLARO, borderRadius: 20, padding: "2px 10px" }}>
+                    {f.categoria}
+                  </span>
+                )}
+                <div style={{ fontWeight: 700, fontSize: 13.5 }}>{f.pergunta}</div>
+              </div>
+              <div style={{ fontSize: 13, color: "#4a5a70", marginTop: 4, whiteSpace: "pre-wrap" }}>{f.resposta}</div>
+            </div>
+            <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+              <button className="icon-btn" onClick={() => setEditando({ ...f })} title="Editar"><Edit3 size={15} color={AZUL_MEDIO} /></button>
+              <button className="icon-btn" onClick={() => setConfirmandoExclusao(f)} title="Excluir" disabled={excluindoId === f.id}>
+                {excluindoId === f.id ? <Loader2 size={15} className="spin" /> : <Trash2 size={15} color="#c62828" />}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {editando && (
+        <div className="no-print" style={overlay} onClick={() => setEditando(null)}>
+          <div style={{ ...modal, maxWidth: 560, maxHeight: "88vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <strong>{editando.id ? "Editar pergunta" : "Nova pergunta"}</strong>
+              <button className="icon-btn" onClick={() => setEditando(null)}><X size={16} /></button>
+            </div>
+            <Grid>
+              <Field label="Pergunta" value={editando.pergunta} onChange={(v) => setEditando((ed) => ({ ...ed, pergunta: v }))} full />
+              <div style={cell(false)}>
+                <label style={lab}>Categoria</label>
+                <select style={inp} value={editando.categoria || ""} onChange={(e) => setEditando((ed) => ({ ...ed, categoria: e.target.value }))}>
+                  <option value="">Sem categoria</option>
+                  {FAQ_CATEGORIAS.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <Field label="Palavras-chave (opcional)" value={editando.palavrasChave} onChange={(v) => setEditando((ed) => ({ ...ed, palavrasChave: v }))} placeholder="separadas por vírgula" />
+            </Grid>
+            <Area label="Resposta (o que repassar ao cliente)" value={editando.resposta} onChange={(v) => setEditando((ed) => ({ ...ed, resposta: v }))} rows={4} />
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setEditando(null)} disabled={salvando}>Cancelar</button>
+              <button className="btn-solid" onClick={salvar} disabled={salvando}>
+                {salvando ? <Loader2 size={14} className="spin" /> : <Save size={14} />} Salvar pergunta
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ConfirmModal aberto={!!confirmandoExclusao}
+        titulo="Excluir pergunta"
+        mensagem={`Tem certeza que deseja excluir "${confirmandoExclusao?.pergunta || ""}" do FAQ? Essa ação não pode ser desfeita.`}
+        onConfirm={confirmarExclusao} onCancel={() => setConfirmandoExclusao(null)} />
     </Card>
   );
 }
