@@ -3524,7 +3524,8 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "laudos" && aba === "realizados" && (
           <AbaLaudosRealizados laudos={meusLaudos} carregando={meusLaudosCarregando}
             recarregar={carregarMeusLaudos} assinatura={assinatura} ehGerencia={perfil === "gerencia"}
-            clientes={clientesAtivos} docs={docs} usuarios={usuarios} token={token} />
+            clientes={clientesAtivos} docs={docs} usuarios={usuarios} token={token}
+            devolverLaudo={devolverLaudo} notify={notify} />
         )}
         {abaTop === "laudos" && aba === "agenda" && fazVistoria({ role: perfil }) && (
           <CalendarioVistoriador agenda={agendaVistoriador} carregando={agendaVistoriadorCarregando} clientes={clientesAtivos} preencherComCliente={preencherComCliente} />
@@ -8063,9 +8064,25 @@ function EstrelasNota({ nota }) {
   );
 }
 
-function AbaLaudosRealizados({ laudos: laudosRecebidos = [], carregando, recarregar, assinatura, ehGerencia, clientes = [], docs = [], usuarios = [], token }) {
+function AbaLaudosRealizados({ laudos: laudosRecebidos = [], carregando, recarregar, assinatura, ehGerencia, clientes = [], docs = [], usuarios = [], token, devolverLaudo, notify }) {
   const [abertoId, setAbertoId] = useState(null);
   const [filtro, setFiltro] = useState("");
+  /* Laudo já entregue não tem "devolver" em nenhum outro lugar da tela: a fila de aprovação
+     (CardLaudosPendentes) só lista o que ainda não foi aprovado. O backend aceita devolver
+     de qualquer status (menos já devolvido) e cria uma versão nova — é o caminho para corrigir
+     um laudo que saiu errado por e-mail e mandar de novo depois que o técnico ajustar. */
+  const [devolvendoId, setDevolvendoId] = useState(null);
+  const [motivoDevolucao, setMotivoDevolucao] = useState("");
+  const [enviandoDevolucao, setEnviandoDevolucao] = useState(false);
+  const abrirDevolucao = (docId) => { setDevolvendoId(docId); setMotivoDevolucao(""); };
+  const confirmarDevolucao = async () => {
+    const motivo = motivoDevolucao.trim();
+    if (!motivo) { notify?.("Descreva o que precisa ser corrigido."); return; }
+    setEnviandoDevolucao(true);
+    const ok = await devolverLaudo?.(devolvendoId, motivo);
+    setEnviandoDevolucao(false);
+    if (ok) { setDevolvendoId(null); setMotivoDevolucao(""); recarregar?.(); }
+  };
 
   /* A lista chega sem o conteúdo dos laudos. Com ele, 39 laudos somavam 62 MB por abertura
      de tela — foi assim que a banda do mês da hospedagem acabou e o serviço foi suspenso.
@@ -8327,6 +8344,14 @@ function AbaLaudosRealizados({ laudos: laudosRecebidos = [], carregando, recarre
                     </div>
                   )}
 
+                  {ehGerencia && entregue && l.laudo_status !== "devolvido_correcao" && (
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+                      <button className="btn-ghost" style={{ color: "#B26A00", background: "#FFF4E0" }} onClick={() => abrirDevolucao(l.doc_id)}>
+                        <Undo2 size={14} /> Devolver para correção
+                      </button>
+                    </div>
+                  )}
+
                   {/* Mesmo documento que o cliente recebe. Só marcamos como aprovado o que já
                       foi entregue — o que está em análise continua saindo como preliminar. */}
                   {buscandoConteudo === l.doc_id && (
@@ -8349,6 +8374,41 @@ function AbaLaudosRealizados({ laudos: laudosRecebidos = [], carregando, recarre
           );
         })}
       </div>
+
+      {/* Motivo é obrigatório: é ele que o técnico vê em destaque ao reabrir o laudo,
+          mesmo este já tendo sido entregue ao cliente. */}
+      {devolvendoId && (
+        <div className="no-print" style={overlay} onClick={() => setDevolvendoId(null)}>
+          <div style={{ ...modal, maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <strong>Devolver laudo para correção</strong>
+              <button className="icon-btn" onClick={() => setDevolvendoId(null)}><X size={16} /></button>
+            </div>
+            <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 12px", lineHeight: 1.55 }}>
+              Este laudo já foi entregue ao cliente. Devolver reabre a edição para o vistoriador e volta o
+              status para "Laudo em análise" — o cliente deixa de ver o documento antigo até você aprovar
+              a versão corrigida, que é enviada por e-mail automaticamente como sempre.
+            </p>
+            <label style={{ fontSize: 12, fontWeight: 600, color: AZUL_MARINHO, display: "block", marginBottom: 5 }}>
+              O que precisa ser corrigido
+            </label>
+            <textarea
+              value={motivoDevolucao}
+              onChange={(e) => setMotivoDevolucao(e.target.value)}
+              rows={5}
+              autoFocus
+              placeholder="Ex.: O laudo foi aprovado com o endereço errado do imóvel."
+              style={{ width: "100%", padding: "10px 12px", border: `1px solid ${CINZA_BORDA}`, borderRadius: 9, fontSize: 13.5, fontFamily: "inherit", resize: "vertical" }}
+            />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setDevolvendoId(null)}>Cancelar</button>
+              <button className="btn-solid" style={{ background: "#B26A00" }} onClick={confirmarDevolucao} disabled={enviandoDevolucao || !motivoDevolucao.trim()}>
+                {enviandoDevolucao ? <Loader2 size={14} className="spin" /> : <Undo2 size={14} />} Devolver ao vistoriador
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </Card>
   );
 }
