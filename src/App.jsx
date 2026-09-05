@@ -8067,6 +8067,7 @@ function EstrelasNota({ nota }) {
 function AbaLaudosRealizados({ laudos: laudosRecebidos = [], carregando, recarregar, assinatura, ehGerencia, clientes = [], docs = [], usuarios = [], token, devolverLaudo, notify }) {
   const [abertoId, setAbertoId] = useState(null);
   const [filtro, setFiltro] = useState("");
+  const [busca, setBusca] = useState("");
   /* Laudo já entregue não tem "devolver" em nenhum outro lugar da tela: a fila de aprovação
      (CardLaudosPendentes) só lista o que ainda não foi aprovado. O backend aceita devolver
      de qualquer status (menos já devolvido) e cria uma versão nova — é o caminho para corrigir
@@ -8163,13 +8164,16 @@ function AbaLaudosRealizados({ laudos: laudosRecebidos = [], carregando, recarre
   }
   const listaPorVistoriador = Object.values(porVistoriador).sort((a, b) => b.feitos - a.feitos);
 
-  const lista = laudos.filter((l) =>
-    filtro === "entregues" ? l.status_cliente === "Laudo enviado por e-mail"
-    : filtro === "devolvidos" ? l.laudo_status === "devolvido_correcao"
-    : filtro === "analise" ? l.status_cliente === "Laudo em análise"
-    : filtro === "avaliados" ? !!l.avaliacao_nota
-    : true
-  );
+  const termoBusca = busca.trim().toLowerCase();
+  const lista = laudos
+    .filter((l) =>
+      filtro === "entregues" ? l.status_cliente === "Laudo enviado por e-mail"
+      : filtro === "devolvidos" ? l.laudo_status === "devolvido_correcao"
+      : filtro === "analise" ? l.status_cliente === "Laudo em análise"
+      : filtro === "avaliados" ? !!l.avaliacao_nota
+      : true
+    )
+    .filter((l) => !termoBusca || (l.cliente || "").toLowerCase().includes(termoBusca));
 
   /* Devolvido é a única situação desta lista que exige ação do técnico, então ganha filtro
      próprio — no status voltado ao cliente ("Laudo em análise") ela fica invisível. */
@@ -8200,6 +8204,12 @@ function AbaLaudosRealizados({ laudos: laudosRecebidos = [], carregando, recarre
           reaparece aqui enquanto ela durar.
         </div>
       )}
+
+      <div style={{ position: "relative", marginBottom: 14 }}>
+        <Search size={14} color="#8593a8" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
+        <input style={{ ...inp, width: "100%", paddingLeft: 30 }} placeholder="Buscar pelo nome do cliente…"
+          value={busca} onChange={(e) => setBusca(e.target.value)} />
+      </div>
 
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14, alignItems: "center" }}>
         {indicadores.map((i) => {
@@ -8264,7 +8274,9 @@ function AbaLaudosRealizados({ laudos: laudosRecebidos = [], carregando, recarre
 
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
       {!carregando && lista.length === 0 && (
-        <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum laudo por aqui ainda.</p>
+        <p style={{ color: "#8593a8", fontSize: 14 }}>
+          {termoBusca ? `Nenhum cliente encontrado para "${busca}".` : "Nenhum laudo por aqui ainda."}
+        </p>
       )}
 
       <div style={{ display: "grid", gap: 8 }}>
