@@ -9884,15 +9884,29 @@ const FAQ_CATEGORIAS = ["Sistema", "Cadastro", "Login", "Senha", "Agendamento", 
 
 function CardBancoFaq({ faq = [], carregando, onCriar, onAtualizar, onExcluir, notify }) {
   const [busca, setBusca] = useState("");
+  const [categoriaFiltro, setCategoriaFiltro] = useState(""); // "" = todas
   const [editando, setEditando] = useState(null); // objeto da pergunta, ou {} pra nova
   const [salvando, setSalvando] = useState(false);
   const [excluindoId, setExcluindoId] = useState(null);
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(null);
+  const [copiadoId, setCopiadoId] = useState(null);
+
+  // Só as categorias que já têm pergunta cadastrada viram chip — senão a lista de filtro
+  // cresce com opção vazia (ver FAQ_CATEGORIAS, que é o catálogo cheio, usado no cadastro).
+  const categoriasComItens = FAQ_CATEGORIAS.filter((c) => faq.some((f) => f.categoria === c));
 
   const termo = busca.trim().toLowerCase();
-  const visiveis = termo
-    ? faq.filter((f) => `${f.pergunta} ${f.resposta} ${f.categoria} ${f.palavrasChave}`.toLowerCase().includes(termo))
-    : faq;
+  const visiveis = faq
+    .filter((f) => !categoriaFiltro || f.categoria === categoriaFiltro)
+    .filter((f) => !termo || `${f.pergunta} ${f.resposta} ${f.categoria} ${f.palavrasChave}`.toLowerCase().includes(termo));
+
+  const copiarResposta = async (f) => {
+    try {
+      await navigator.clipboard.writeText(f.resposta);
+      setCopiadoId(f.id);
+      setTimeout(() => setCopiadoId((atual) => (atual === f.id ? null : atual)), 2000);
+    } catch { notify("Copie manualmente: seu navegador bloqueou a cópia automática."); }
+  };
 
   const iniciarNova = () => setEditando({ categoria: "", pergunta: "", resposta: "", palavrasChave: "" });
 
@@ -9929,10 +9943,29 @@ function CardBancoFaq({ faq = [], carregando, onCriar, onAtualizar, onExcluir, n
         </button>
       </div>
 
+      {categoriasComItens.length > 0 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+          <button onClick={() => setCategoriaFiltro("")} aria-pressed={!categoriaFiltro}
+            style={{ padding: "5px 12px", borderRadius: 20, border: `1.5px solid ${!categoriaFiltro ? AZUL_MARINHO : CINZA_BORDA}`, background: !categoriaFiltro ? AZUL_MARINHO : "#fff", color: !categoriaFiltro ? "#fff" : "#65758b", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+            Todas ({faq.length})
+          </button>
+          {categoriasComItens.map((c) => {
+            const ativo = categoriaFiltro === c;
+            const qtd = faq.filter((f) => f.categoria === c).length;
+            return (
+              <button key={c} onClick={() => setCategoriaFiltro(ativo ? "" : c)} aria-pressed={ativo}
+                style={{ padding: "5px 12px", borderRadius: 20, border: `1.5px solid ${ativo ? AZUL_MARINHO : CINZA_BORDA}`, background: ativo ? AZUL_MARINHO : "#fff", color: ativo ? "#fff" : "#65758b", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                {c} ({qtd})
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
       {!carregando && faq.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhuma pergunta cadastrada ainda.</p>}
       {!carregando && visiveis.length === 0 && faq.length > 0 && (
-        <p style={{ color: "#8593a8", fontSize: 14 }}>Nada encontrado para "{busca}".</p>
+        <p style={{ color: "#8593a8", fontSize: 14 }}>Nada encontrado{busca ? ` para "${busca}"` : ""}.</p>
       )}
 
       <div style={{ display: "grid", gap: 8 }}>
@@ -9950,6 +9983,9 @@ function CardBancoFaq({ faq = [], carregando, onCriar, onAtualizar, onExcluir, n
               <div style={{ fontSize: 13, color: "#4a5a70", marginTop: 4, whiteSpace: "pre-wrap" }}>{f.resposta}</div>
             </div>
             <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+              <button className="icon-btn" onClick={() => copiarResposta(f)} title="Copiar resposta">
+                {copiadoId === f.id ? <Check size={15} color="#2E7D32" /> : <Copy size={15} color={AZUL_MEDIO} />}
+              </button>
               <button className="icon-btn" onClick={() => setEditando({ ...f })} title="Editar"><Edit3 size={15} color={AZUL_MEDIO} /></button>
               <button className="icon-btn" onClick={() => setConfirmandoExclusao(f)} title="Excluir" disabled={excluindoId === f.id}>
                 {excluindoId === f.id ? <Loader2 size={15} className="spin" /> : <Trash2 size={15} color="#c62828" />}
