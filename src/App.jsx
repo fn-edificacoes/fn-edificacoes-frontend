@@ -7,7 +7,7 @@ import {
   AlertTriangle, CircleAlert, Info, Copy, Sparkles, Loader2,
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
-  ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle
+  ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle, Megaphone
 } from "lucide-react";
 
 /* ============================================================
@@ -538,11 +538,13 @@ const STATUS_INTERNO_OPCOES = ["Agendado", "Em vistoria", "Laudo em elaboração
 /* ---------- Perfis de acesso (agora definidos pelo backend/login, não escolhidos na tela) ----------
    vistoriador   -> só enxerga o módulo Laudos (não vê Documentação nem Gerência)
    documentacao  -> só enxerga o módulo Documentação
-   atendimento   -> enxerga Clientes (cadastro, agendamento, acompanhamento, aprovação) e Agendamento
-                    (aprova agendamento/feedback — item 3.24; substitui o antigo perfil "comercial")
-   qualidade     -> enxerga o módulo Agendamento (chave interna "qualidade"), mas só leitura (não
-                    aprova nada — isso agora é exclusivo do Atendimento; ver "podeAgir" nos
-                    componentes de Agendamento)
+   atendimento   -> perfil único do setor de atendimento. Absorveu o antigo perfil "Agendamento"
+                    (chave interna "qualidade", só leitura) — quem antes via o módulo Agendamento
+                    sem poder agir agora é Atendimento e age normalmente (ver normalização de
+                    "qualidade" -> "atendimento" logo no início de AppInterno). Enxerga Clientes
+                    (cadastro, agendamento, acompanhamento, aprovação), Agendamento (aprova
+                    agendamento/feedback — item 3.24; substitui o antigo perfil "comercial"),
+                    FAQ, Marketing e Vendas/Parceiros.
    vendas        -> só enxerga Parceiros e Afiliados: analisa/aprova cadastros, acompanha cupons
                     (vales) e cadastra parceiro manualmente. NÃO calcula nem controla comissão
                     individual de vendedor — vendedor recebe fixo, fora do sistema (ajuste de
@@ -554,14 +556,11 @@ const STATUS_INTERNO_OPCOES = ["Agendado", "Em vistoria", "Laudo em elaboração
 const MODULOS_POR_PERFIL = {
   vistoriador: ["laudos"],
   documentacao: ["documentacao"],
-  /* Vendas saiu daqui: parceiros, cupons e comissão são assunto de quem vende e da Gerência.
-     O Atendimento cuida do cliente da vistoria — cadastro, agendamento e acompanhamento. */
-  atendimento: ["clientes", "qualidade", "faq"],
-  qualidade: ["qualidade"],
+  atendimento: ["clientes", "qualidade", "faq", "marketing", "vendas"],
   vendas: ["vendas"],
   gerencia: ["laudos", "documentacao", "gerencia", "usuarios", "clientes", "qualidade", "faq"],
 };
-const PERFIL_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", qualidade: "Agendamento", vendas: "Vendas", gerencia: "Gerência" };
+const PERFIL_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", vendas: "Vendas", gerencia: "Gerência" };
 
 /* Quem pode ser escalado para uma vistoria. A Gerência também vistoria — o gerente atende
    em campo como qualquer técnico — e o Atendimento precisa poder marcá-lo no agendamento.
@@ -1238,14 +1237,12 @@ function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], ava
   const itens = [];
   const hojeISO = paraChaveISO(new Date());
 
-  /* --- Fila do Agendamento --- Atendimento e Gerência agem; o perfil Agendamento só
-     acompanha, então recebe o mesmo aviso sem a marcação de urgência. */
-  if (["atendimento", "gerencia", "qualidade"].includes(perfil)) {
-    const podeAgir = perfil !== "qualidade";
+  /* --- Fila do Agendamento --- Atendimento e Gerência agem. */
+  if (["atendimento", "gerencia"].includes(perfil)) {
     const aguardando = clientes.filter((c) => c.status === "Em análise" && !ehServicoDocumentacao(c));
     if (aguardando.length) {
       itens.push({
-        id: "aprovacao", urgente: podeAgir,
+        id: "aprovacao", urgente: true,
         texto: `${aguardando.length} cliente(s) aguardando aprovação`,
         onde: { aba: "qualidade", sub: "analise" },
       });
@@ -1255,7 +1252,7 @@ function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], ava
     const revistorias = clientes.filter((c) => c.status === "Em análise" && ehRevistoria(c));
     if (revistorias.length) {
       itens.push({
-        id: "revistorias", urgente: podeAgir,
+        id: "revistorias", urgente: true,
         texto: `${revistorias.length} pedido(s) de revistoria para analisar`,
         onde: { aba: "qualidade", sub: "analise" },
       });
@@ -2153,7 +2150,10 @@ export default function App() {
 }
 
 function AppInterno({ session, onLogout }) {
-  const perfil = session.usuario.role; // definido pelo backend/login — não é mais escolhido na tela
+  /* "qualidade" (perfil "Agendamento", só leitura) foi unificado ao Atendimento — deixou de
+     existir como opção em Usuários (ver ROLE_LABEL), mas uma conta antiga que ainda tenha
+     esse valor gravado no banco precisa continuar entrando normalmente, com acesso completo. */
+  const perfil = session.usuario.role === "qualidade" ? "atendimento" : session.usuario.role; // definido pelo backend/login — não é mais escolhido na tela
   const token = session.token;
   const [abaTop, setAbaTop] = useState("laudos"); // "laudos" | "documentacao" | "gerencia"
   // Vistoriador começa na agenda (é de lá que ele inicia a vistoria, já com os dados
@@ -2193,7 +2193,7 @@ function AppInterno({ session, onLogout }) {
   const notify = (m) => { setToast(m); setTimeout(() => setToast(""), 2200); };
 
   /* ---- Documentação/Gerência: carregar e persistir via API real ---- */
-  const podeVerDocs = perfil === "gerencia" || perfil === "documentacao" || perfil === "qualidade";
+  const podeVerDocs = perfil === "gerencia" || perfil === "documentacao" || perfil === "atendimento";
   const carregarDocs = async () => {
     if (!podeVerDocs) return;
     setDocsCarregando(true);
@@ -2228,7 +2228,7 @@ function AppInterno({ session, onLogout }) {
   /* Vendas não trabalha com o cliente da vistoria — e a rota recusa o papel dele. Sem esta
      guarda, quem entrava por Vendas era recebido por um "você não tem permissão" que não
      dizia respeito a nada do que ele veio fazer. */
-  const podeVerClientes = ["gerencia", "vistoriador", "documentacao", "atendimento", "qualidade"].includes(perfil);
+  const podeVerClientes = ["gerencia", "vistoriador", "documentacao", "atendimento"].includes(perfil);
   const carregarClientes = async () => {
     if (!podeVerClientes) return;
     setClientesCarregando(true);
@@ -2344,7 +2344,7 @@ function AppInterno({ session, onLogout }) {
   const [avaliacoes, setAvaliacoes] = useState([]);
   const [avaliacoesCarregando, setAvaliacoesCarregando] = useState(false);
   const carregarAvaliacoes = async () => {
-    if (perfil !== "qualidade" && perfil !== "gerencia" && perfil !== "atendimento") return;
+    if (perfil !== "gerencia" && perfil !== "atendimento") return;
     setAvaliacoesCarregando(true);
     try {
       const r = await apiFetch("/api/avaliacoes", { token });
@@ -2986,7 +2986,7 @@ function AppInterno({ session, onLogout }) {
   const [usuarios, setUsuarios] = useState([]);
   const [usuariosCarregando, setUsuariosCarregando] = useState(false);
   const carregarUsuarios = async () => {
-    if (perfil !== "gerencia" && perfil !== "qualidade" && perfil !== "atendimento") return;
+    if (perfil !== "gerencia" && perfil !== "atendimento") return;
     setUsuariosCarregando(true);
     try {
       const r = await apiFetch("/api/users", { token });
@@ -3423,7 +3423,7 @@ function AppInterno({ session, onLogout }) {
 
         {/* Navegação de módulos (filtrada pelo perfil de acesso) */}
         <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, borderTop: "1px solid rgba(255,255,255,.12)", overflowX: "auto" }}>
-          {[["laudos", "Laudos", FileText], ["documentacao", "Documentação", ClipboardCheck], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["faq", "FAQ", HelpCircle], ["vendas", "Vendas", Handshake], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog]]
+          {[["laudos", "Laudos", FileText], ["documentacao", "Documentação", ClipboardCheck], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Vendas", Handshake], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog]]
             .filter(([k]) => modulosPermitidos.includes(k))
             .map(([k, label, Icon]) => (
               <button key={k} onClick={() => setAbaTop(k)} className="tab" style={{ borderBottomColor: abaTop === k ? "#fff" : "transparent", color: abaTop === k ? "#fff" : "rgba(255,255,255,.55)", whiteSpace: "nowrap", flexShrink: 0 }}>
@@ -3547,13 +3547,14 @@ function AppInterno({ session, onLogout }) {
             solicitarExclusaoAvaliacao={solicitarExclusaoAvaliacao} manterAvaliacao={manterAvaliacao} excluirAvaliacao={excluirAvaliacao}
             clientes={clientesAtivos} clientesCarregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} preencherComCliente={preencherComCliente}
             agendarAgoraId={agendarAgoraId} setAgendarAgoraId={setAgendarAgoraId}
-            perfil={perfil} precos={precos}
+            precos={precos}
             podeAgir={perfil === "atendimento" || perfil === "gerencia"} ehGerencia={perfil === "gerencia"} />
         )}
         {abaTop === "faq" && (
           <CardBancoFaq faq={faqBanco} carregando={faqBancoCarregando} notify={notify}
             onCriar={criarFaq} onAtualizar={atualizarFaq} onExcluir={excluirFaq} />
         )}
+        {abaTop === "marketing" && <AbaMarketing />}
         {abaTop === "vendas" && (
           <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
             vales={vales} valesCarregando={valesCarregando} vendas={vendas} vendasCarregando={vendasCarregando} atualizarVenda={atualizarVenda}
@@ -4476,7 +4477,7 @@ function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [], f
   );
 }
 
-function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, agendarAgoraId, setAgendarAgoraId, podeAgir = false, ehGerencia = false, perfil, precos = [] }) {
+function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, agendarAgoraId, setAgendarAgoraId, podeAgir = false, ehGerencia = false, precos = [] }) {
   const [diaParaAbrir, setDiaParaAbrir] = useState(null); // data (ISO) que o calendário da Análise deve abrir já selecionada
   // Etapa escolhida nos indicadores — filtra a lista da sub-aba aberta. Fica aqui (e não em
   // cada sub-aba) pra que o filtro continue valendo ao trocar de sub-aba.
@@ -4494,13 +4495,7 @@ function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, u
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <CardIndicadoresQualidade clientes={clientes} docs={docs} avaliacoes={avaliacoes}
-        filtroEtapa={filtroEtapa} aoTrocarEtapa={setFiltroEtapa}
-        mostrarArt={perfil !== "atendimento"} mostrarAvaliacoes={perfil !== "atendimento"} />
-      {!podeAgir && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#EAF2FB", color: AZUL_MARINHO, borderRadius: 8, padding: "8px 12px", fontSize: 12.5 }}>
-          <Info size={14} /> Modo leitura — aprovar agendamento, encaminhar técnico e aprovar feedback agora é exclusivo do perfil Atendimento.
-        </div>
-      )}
+        filtroEtapa={filtroEtapa} aoTrocarEtapa={setFiltroEtapa} />
       {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} abrirAutomaticoId={agendarAgoraId} aoAbrirAutomatico={() => setAgendarAgoraId(null)} aoConfirmar={aoConfirmarVistoria} filtroEtapa={filtroEtapa} />}
       {sub === "cobranca" && <AbaQualidadeCobranca clientes={clientes} carregando={clientesCarregando} updCliente={updCliente}
         usuarios={usuarios} precos={precos} notify={notify} podeAgir={podeAgir} />}
@@ -4699,12 +4694,6 @@ function AbaQualidadeCobranca({ clientes = [], carregando, updCliente, usuarios 
           <KpiCard label="Total cobrado" valor={fmtReal(totalCobrado)} Icon={DollarSign} />
           <KpiCard label="Já recebido" valor={fmtReal(totalRecebido)} cor="#2E7D32" Icon={Check} />
         </div>
-
-        {!podeAgir && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#EAF2FB", color: AZUL_MARINHO, borderRadius: 8, padding: "8px 12px", fontSize: 12.5, marginBottom: 12 }}>
-            <Info size={14} /> Modo leitura — lançar cobrança é do perfil Atendimento.
-          </div>
-        )}
 
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
           {CHIPS.map(([chave, rotulo, qtd]) => (
@@ -9873,6 +9862,19 @@ function CardBancoPatologias({ patologias = [], carregando, onCriar, onAtualizar
   );
 }
 
+/* ================= Marketing =================
+   Aba nova, ainda sem conteúdo definido — só o espaço reservado no menu do Atendimento.
+   O que entra aqui é assunto de um próximo ajuste. */
+function AbaMarketing() {
+  return (
+    <Card icon={Megaphone} titulo="Marketing">
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: 0 }}>
+        Em construção — o conteúdo desta aba ainda vai ser definido.
+      </p>
+    </Card>
+  );
+}
+
 /* ================= Banco de FAQ (perguntas frequentes) =======
    O Atendimento escreve aqui o que já viu de dúvida repetida de cliente — sobre o site, o
    sistema, agendamento, laudo, documentos — para consultar rápido na hora de responder.
@@ -12249,12 +12251,11 @@ function AbaGerencia({ sub = "visao-geral", token, perfil, usuarioAtual, decidir
   );
 }
 
-const ROLE_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", qualidade: "Agendamento", vendas: "Vendas", gerencia: "Gerência" };
+const ROLE_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", vendas: "Vendas", gerencia: "Gerência" };
 const ROLE_DESCRICAO = {
   vistoriador: "Só acessa Laudos. Sem acesso a Documentação nem Gerência.",
   documentacao: "Só acessa Documentação/TRT. Sem acesso a Laudos nem Gerência.",
-  atendimento: "Acessa Clientes (cadastro, agendamento, aprovação e encaminhamento ao técnico) e Agendamento (aprova avaliações que entram na vitrine).",
-  qualidade: "Só acessa Agendamento, em modo leitura: acompanha avaliações e agendamentos, mas não aprova nada — isso é do Atendimento.",
+  atendimento: "Acessa Clientes (cadastro, agendamento, aprovação e encaminhamento ao técnico), Agendamento (aprova avaliações que entram na vitrine), FAQ, Marketing e Vendas/Parceiros.",
   vendas: "Só acessa Parceiros e Afiliados: analisa/aprova cadastros, cadastra parceiro manualmente e acompanha cupons. Recebe salário fixo — o sistema não calcula comissão individual.",
   gerencia: "Acesso completo: Laudos, Documentação, Clientes, Agendamento, Vendas, Gerência e financeiro.",
 };
@@ -15953,7 +15954,12 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, so
 /* ================= UI primitivos ================= */
 function Card({ icon: Icon, titulo, children }) {
   return (
-    <section style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 14, padding: 20 }}>
+    /* minWidth: 0 é necessário porque este Card quase sempre é filho direto de um
+       display:"grid" (ex.: a fila de pré-agendamento acima do Calendário de vistorias,
+       no Agendamento → Análise): sem isso, uma linha com scroll horizontal lá dentro
+       (overflowX:"auto") empurra o Card inteiro pra largura do conteúdo, que estoura o
+       max-width de <main> e quebra o layout de tudo que vem depois (calendário incluso). */
+    <section style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 14, padding: 20, minWidth: 0 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 15 }}>
         <div style={{ width: 30, height: 30, borderRadius: 8, background: CINZA_CLARO, display: "grid", placeItems: "center" }}><Icon size={16} color={AZUL_MEDIO} /></div>
         <h3 style={{ margin: 0, fontSize: 15, color: AZUL_MARINHO }}>{titulo}</h3>
