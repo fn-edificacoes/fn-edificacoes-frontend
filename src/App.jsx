@@ -558,7 +558,7 @@ const MODULOS_POR_PERFIL = {
   documentacao: ["documentacao"],
   atendimento: ["clientes", "qualidade", "faq", "marketing", "vendas"],
   vendas: ["vendas"],
-  gerencia: ["laudos", "documentacao", "gerencia", "usuarios", "clientes", "qualidade", "faq"],
+  gerencia: ["laudos", "documentacao", "gerencia", "usuarios", "clientes", "qualidade", "faq", "marketing"],
 };
 const PERFIL_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", vendas: "Vendas", gerencia: "Gerência" };
 
@@ -9865,13 +9865,60 @@ function CardBancoPatologias({ patologias = [], carregando, onCriar, onAtualizar
 /* ================= Marketing =================
    Aba nova, ainda sem conteúdo definido — só o espaço reservado no menu do Atendimento.
    O que entra aqui é assunto de um próximo ajuste. */
+/* Pasta raiz de todo o arquivo de vistorias no Drive (ano/mês/empreendimento/cliente); cada
+   cliente tem uma sub-pasta "03_FOTO_COM_CLIENTE" com as fotos certas pra usar em arte de
+   marketing — não existe uma pasta única "achatada" só com essas fotos, então o botão abre a
+   raiz e quem usa navega até o cliente. */
+const DRIVE_PASTA_VISTORIAS = "https://drive.google.com/drive/folders/1CrWWTSkv7MJ6K_2bPfCXTMLzYo8It_0Z";
+/* Conversa pessoal do Felipe no ChatGPT, onde ele já vem pedindo as artes. Só a Gerência usa
+   este botão por enquanto — daí fazer sentido apontar pra conversa dele, e não pra um chat
+   novo genérico. Se um dia mais gente for usar, trocar para "https://chatgpt.com/" (chat novo)
+   evita levar alguém pra conta errada (o link de uma conversa só abre pra quem é dono dela). */
+const CHATGPT_ARTE_MARKETING = "https://chatgpt.com/c/6a7672f2-9bd4-83e9-b673-6311d468e98c";
+
 function AbaMarketing() {
+  const [legenda, setLegenda] = useState("");
+  const [copiado, setCopiado] = useState(false);
+
+  /* Anexar a foto automaticamente não dá: nenhum site consegue colocar um arquivo dentro do
+     chat de outro por segurança do navegador. O que dá pra automatizar é o texto — copia
+     pra área de transferência e já abre o ChatGPT, prontinho pra colar. */
+  const copiarECriar = async () => {
+    try {
+      if (legenda.trim()) await navigator.clipboard.writeText(legenda.trim());
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2500);
+    } catch { /* segue mesmo sem copiar — o link abre de qualquer forma */ }
+    window.open(CHATGPT_ARTE_MARKETING, "_blank", "noopener");
+  };
+
   return (
-    <Card icon={Megaphone} titulo="Marketing">
-      <p style={{ fontSize: 13.5, color: "#65758b", margin: 0 }}>
-        Em construção — o conteúdo desta aba ainda vai ser definido.
-      </p>
-    </Card>
+    <div style={{ display: "grid", gap: 16 }}>
+      <Card icon={Megaphone} titulo="Marketing">
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+          Em construção — aos poucos vamos adicionar mais coisa aqui. Por enquanto, os atalhos que já ajudam no dia a dia.
+        </p>
+        <a className="btn-solid" style={{ width: "auto", padding: "9px 16px", textDecoration: "none" }}
+          href={DRIVE_PASTA_VISTORIAS} target="_blank" rel="noopener noreferrer">
+          <FolderOpen size={15} /> Pasta de clientes
+        </a>
+      </Card>
+
+      <Card icon={Sparkles} titulo="Criar arte no ChatGPT">
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+          Baixe a foto na Pasta de clientes acima, escreva uma legenda ou pedido (opcional) e clique em
+          criar. O texto já sai copiado — é só colar no chat. A foto precisa ser anexada na mão
+          (arraste ou use o clipe de dentro do ChatGPT).
+        </p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input style={{ ...inp, flex: 1, minWidth: 220 }} value={legenda} onChange={(e) => setLegenda(e.target.value)}
+            placeholder="Legenda ou pedido pra IA (opcional)…" />
+          <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }} onClick={copiarECriar}>
+            {copiado ? <Check size={15} /> : <Sparkles size={15} />} {copiado ? "Copiado — abrindo…" : "Copiar e abrir ChatGPT"}
+          </button>
+        </div>
+      </Card>
+    </div>
   );
 }
 
