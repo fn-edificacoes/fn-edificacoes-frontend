@@ -9052,7 +9052,36 @@ function AbaPerfilCliente({ clientes = [], token, notify, atualizarCliente, rese
    como "enviado por e-mail" e nenhum saiu. A falha do SMTP morria num log que ninguém lê, e a
    tela dizia que estava tudo certo. Agora quem está na Gerência vê o que saiu, o que falhou e
    com qual erro — e tem o botão para mandar de novo. */
-function CardEntregaEmails({ token, notify }) {
+/* Depois que o laudo sai por e-mail, o próximo passo de relacionamento é manual: alguém do
+   Atendimento abre o WhatsApp do cliente e agradece, colando o link de avaliação. O botão só
+   aparece quando dá pra achar, com segurança, todos os três pedaços que ele precisa — o
+   cliente (casando o e-mail do envio com o cadastro), o laudo (pelo mesmo docDoCliente que
+   evita confundir vistoria com revistoria) e um telefone. Sem um dos três, não aparece nada:
+   é melhor não sugerir do que sugerir errado. */
+function BotaoWhatsappAgradecimento({ envio, clientes, docs }) {
+  if (envio.tipo !== "laudo" || !envio.ok) return null;
+  const emailAlvo = String(envio.para || "").trim().toLowerCase();
+  if (!emailAlvo) return null;
+  const cliente = clientes.find((c) => (c.email || "").trim().toLowerCase() === emailAlvo);
+  if (!cliente) return null;
+  const doc = docDoCliente(cliente, docs);
+  if (!doc || doc.statusCliente !== "Laudo enviado por e-mail") return null;
+  const whats = linkWhatsapp(cliente.telefone);
+  if (!whats) return null;
+
+  const link = linkAvaliacao(doc.id, "doc", SERVICO_VISTORIA);
+  const primeiroNome = (cliente.nome || "").split(" ")[0];
+  const texto = `Olá${primeiroNome ? `, ${primeiroNome}` : ""}! Aqui é da FN Edificações. Passando para agradecer a confiança — o laudo da sua vistoria foi enviado para o seu e-mail. Se puder, avalie nosso atendimento, leva menos de um minuto: ${link}`;
+
+  return (
+    <a className="btn-ghost" style={{ padding: "3px 9px", fontSize: 11.5, textDecoration: "none", whiteSpace: "nowrap" }}
+      href={`${whats}?text=${encodeURIComponent(texto)}`} target="_blank" rel="noopener noreferrer">
+      <ExternalLink size={11} /> WhatsApp
+    </a>
+  );
+}
+
+function CardEntregaEmails({ token, notify, clientes = [], docs = [] }) {
   const [dados, setDados] = useState(null);
   const [carregando, setCarregando] = useState(false);
   const [testando, setTestando] = useState(false);
@@ -9150,6 +9179,9 @@ function CardEntregaEmails({ token, notify }) {
                   <td style={{ padding: "6px 9px", wordBreak: "break-all" }}>{e.para}</td>
                   <td style={{ padding: "6px 9px", color: e.ok ? "#2E7D32" : "#C62828", fontWeight: 600 }}>
                     {e.ok ? "enviado" : (e.erro || "falhou")}
+                  </td>
+                  <td style={{ padding: "6px 9px", textAlign: "right" }}>
+                    <BotaoWhatsappAgradecimento envio={e} clientes={clientes} docs={docs} />
                   </td>
                 </tr>
               ))}
@@ -9783,7 +9815,7 @@ function AbaGerenciaVisaoGeral({ token, docs, clientes, updCliente, padronizarEm
     <div style={{ display: "grid", gap: 16 }}>
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando indicadores…</p>}
 
-      <CardEntregaEmails token={token} notify={notify} />
+      <CardEntregaEmails token={token} notify={notify} clientes={clientes} docs={docs} />
       <CardVistoriasSemLaudo token={token} />
 
       <CardPainelLaudos painel={painel} carregando={painelCarregando} recarregar={carregarPainel} usuarios={usuarios} notify={notify} />
@@ -12897,6 +12929,17 @@ function PaginaAvaliarPublica({ id, tipo, servico }) {
     setEnviando(false);
   };
 
+  // Depois de avaliar, a página segue direto para a vitrine de parceiros e afiliados — é o
+  // convite pra virar cliente FN Clube/FN Home enquanto a boa impressão do atendimento ainda
+  // está fresca, em vez de deixar essa venda pra outro contato, em outro dia.
+  useEffect(() => {
+    if (!enviado) return;
+    const t = setTimeout(() => {
+      window.location.href = `${window.location.origin}${window.location.pathname}?pagina=fn-clube`;
+    }, 2500);
+    return () => clearTimeout(t);
+  }, [enviado]);
+
   return (
     <div style={{ minHeight: "100vh", background: CINZA_CLARO, display: "flex", justifyContent: "center", padding: "40px 16px" }}>
       <div style={{ maxWidth: 480, width: "100%" }}>
@@ -12909,6 +12952,9 @@ function PaginaAvaliarPublica({ id, tipo, servico }) {
               <Check size={36} color="#2E7D32" />
               <p style={{ fontSize: 15, color: "#2E7D32", fontWeight: 700, margin: "10px 0 4px" }}>Obrigado pela avaliação!</p>
               <p style={{ fontSize: 13, color: "#65758b", margin: 0 }}>Sua opinião ajuda a nossa equipe a melhorar o atendimento.</p>
+              <p style={{ fontSize: 12.5, color: "#8593a8", margin: "10px 0 0" }}>
+                Já te levamos para conhecer os benefícios e parceiros da FN…
+              </p>
             </div>
           ) : (
             <>
