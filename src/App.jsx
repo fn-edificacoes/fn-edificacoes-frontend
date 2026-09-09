@@ -9073,6 +9073,10 @@ function CardEntregaEmails({ token, notify }) {
 function CardVistoriasSemLaudo({ token }) {
   const [lista, setLista] = useState([]);
   const [carregando, setCarregando] = useState(true);
+  // Recolhida por padrão: com 297 casos acumulados, a lista aberta empurrava o resto da
+  // Visão geral pra fora da tela. Fechada, o alerta continua visível (o título já mostra o
+  // total) e quem quiser investigar clica para abrir.
+  const [aberta, setAberta] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -9090,25 +9094,33 @@ function CardVistoriasSemLaudo({ token }) {
         A data da vistoria já passou e nenhum laudo chegou ao servidor. Onde aparece "rascunho no
         servidor", o técnico começou o laudo e não enviou — dá para cobrar sabendo que o trabalho existe.
       </p>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-        <tbody>
-          {lista.map((v) => (
-            <tr key={v.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
-              <td style={{ padding: "8px 9px", whiteSpace: "nowrap", color: "#C62828", fontWeight: 600 }}>{fmtData(v.data_desejada)}</td>
-              <td style={{ padding: "8px 9px" }}>
-                {v.nome}
-                <div style={{ fontSize: 11.5, color: "#8593a8" }}>{[v.empreendimento, v.bloco_torre].filter(Boolean).join(" · ")}</div>
-              </td>
-              <td style={{ padding: "8px 9px", color: "#65758b" }}>{v.vistoriador_nome || "sem técnico"}</td>
-              <td style={{ padding: "8px 9px", textAlign: "right" }}>
-                {v.tem_rascunho
-                  ? <span style={{ fontSize: 11.5, background: "#FFF4E5", color: "#B26A00", padding: "3px 8px", borderRadius: 20 }}>rascunho no servidor</span>
-                  : <span style={{ fontSize: 11.5, color: "#8593a8" }}>nada enviado</span>}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <button className="btn-ghost" style={{ width: "auto", padding: "7px 12px", color: AZUL_MARINHO, background: CINZA_CLARO }}
+        onClick={() => setAberta((v) => !v)}>
+        {aberta ? <ChevronDown size={15} /> : <ChevronRight size={15} />} {aberta ? "Fechar lista" : `Ver lista (${lista.length})`}
+      </button>
+      {aberta && (
+        <div style={{ maxHeight: 420, overflowY: "auto", marginTop: 12 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <tbody>
+              {lista.map((v) => (
+                <tr key={v.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                  <td style={{ padding: "8px 9px", whiteSpace: "nowrap", color: "#C62828", fontWeight: 600 }}>{fmtData(v.data_desejada)}</td>
+                  <td style={{ padding: "8px 9px" }}>
+                    {v.nome}
+                    <div style={{ fontSize: 11.5, color: "#8593a8" }}>{[v.empreendimento, v.bloco_torre].filter(Boolean).join(" · ")}</div>
+                  </td>
+                  <td style={{ padding: "8px 9px", color: "#65758b" }}>{v.vistoriador_nome || "sem técnico"}</td>
+                  <td style={{ padding: "8px 9px", textAlign: "right" }}>
+                    {v.tem_rascunho
+                      ? <span style={{ fontSize: 11.5, background: "#FFF4E5", color: "#B26A00", padding: "3px 8px", borderRadius: 20 }}>rascunho no servidor</span>
+                      : <span style={{ fontSize: 11.5, color: "#8593a8" }}>nada enviado</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </Card>
   );
 }
