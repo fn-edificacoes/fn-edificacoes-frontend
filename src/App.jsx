@@ -4156,7 +4156,10 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
   const [cpfsRevelados, setCpfsRevelados] = useState({}); // { [clienteId]: true } — revelação é por sessão, não persiste
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(null); // cliente a excluir definitivamente
   const [resetandoSenha, setResetandoSenha] = useState(null); // cliente cuja senha do portal está sendo resetada
-  const podeVerCpfDireto = perfil === "gerencia";
+  /* Atendimento vê o CPF sem precisar clicar em "revelar": é ele quem monta a documentação
+     (ART/TRT), que pede o CPF do cliente, e ficar clicando pra revelar a cada linha só
+     atrasava o trabalho. */
+  const podeVerCpfDireto = perfil === "gerencia" || perfil === "atendimento";
   const podeExcluir = perfil === "gerencia";
   const alternarCpfRevelado = (id) => setCpfsRevelados((s) => ({ ...s, [id]: !s[id] }));
 
