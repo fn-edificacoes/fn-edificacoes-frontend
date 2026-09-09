@@ -7,7 +7,7 @@ import {
   AlertTriangle, CircleAlert, Info, Copy, Sparkles, Loader2,
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
-  ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle, Megaphone
+  ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle, Megaphone, Clock
 } from "lucide-react";
 
 /* ============================================================
@@ -3465,7 +3465,7 @@ function AppInterno({ session, onLogout }) {
         {/* Sub-navegação (somente dentro do módulo Qualidade) */}
         {abaTop === "qualidade" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
-            {[["analise", "Análise", ClipboardCheck], ["vistoria", "Vistoria", CalendarDays], ["cobranca", "Cobrança", DollarSign], ["feedback", "Feedback", Star], ["acompanhamento", "Acompanhamento", ClipboardList]].map(([k, label, Icon]) => (
+            {[["analise", "Análise", ClipboardCheck], ["fila", "Fila de espera", Clock], ["vistoria", "Vistoria", CalendarDays], ["cobranca", "Cobrança", DollarSign], ["feedback", "Feedback", Star], ["acompanhamento", "Acompanhamento", ClipboardList]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setAbaQualidade(k)} className="tab" style={{ borderBottomColor: abaQualidade === k ? AZUL_MEDIO : "transparent", color: abaQualidade === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
                 <Icon size={15} /> {label}
               </button>
@@ -4507,6 +4507,7 @@ function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, u
       {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} clientes={clientes} clientesCarregando={clientesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
         solicitarExclusaoAvaliacao={solicitarExclusaoAvaliacao} manterAvaliacao={manterAvaliacao} excluirAvaliacao={excluirAvaliacao} podeAgir={podeAgir} ehGerencia={ehGerencia} filtroEtapa={filtroEtapa} />}
       {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} onAgendarAgora={irParaAgendamento} diaParaAbrir={diaParaAbrir} aoAbrirDia={() => setDiaParaAbrir(null)} filtroEtapa={filtroEtapa} aoTrocarEtapa={setFiltroEtapa} />}
+      {sub === "fila" && <AbaQualidadeFila clientes={clientes} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} />}
     </div>
   );
 }
@@ -5057,7 +5058,9 @@ function CardClientePendente({ c, todos, podeAgir, onAprovar, onRecusar, vistori
 }
 
 function BlocoAprovacaoClientes({ clientes = [], carregando, podeAgir, onAprovar, onRecusar, clienteAprovado, onAgendarAgora, onFecharAviso, vistoriadores = [] }) {
-  const pendentes = clientes.filter((c) => c.status === "Em análise" && !ehServicoDocumentacao(c));
+  // Quem não tem data/horário definidos vai para a Fila de espera (AbaQualidadeFila) —
+  // aqui só fica quem já veio com data e horário, pronto pra aprovação direta.
+  const pendentes = clientes.filter((c) => c.status === "Em análise" && !ehServicoDocumentacao(c) && c.dataDesejada && c.horarioDesejado);
 
   if (!carregando && pendentes.length === 0 && !clienteAprovado) {
     return (
@@ -5491,12 +5494,49 @@ function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesParaAgend
   );
 }
 
+/* Aprovar/recusar cadastro em análise — compartilhado entre a sub-aba Análise (com
+   calendário) e a Fila de espera (kanban por empreendimento), que decidem sobre o mesmo
+   status "Em análise" e usavam a mesma lógica antes de ela virar duplicada nas duas telas. */
+function useAprovacaoAnalise(clientes, vistoriadores, updCliente, notify) {
+  const [clienteAprovado, setClienteAprovado] = useState(null);
+
+  const aprovar = async (c, vistoriadorId = "") => {
+    try {
+      if (!vistoriadorId) {
+        const ok = await updCliente(c.id, { status: "Agendamento aprovado" });
+        if (!ok) return;
+        setClienteAprovado(c);
+        notify("Agendamento aprovado ✓ — falta escalar o técnico");
+        return;
+      }
+      const conflito = vistoriaNoMesmoHorario(clientes, {
+        clienteId: c.id, vistoriadorId, data: c.dataDesejada, horario: c.horarioDesejado,
+      });
+      const nomeTecnico = vistoriadores.find((v) => String(v.id) === String(vistoriadorId))?.nome || "O técnico";
+      if (conflito) {
+        notify(`${nomeTecnico} já tem vistoria às ${c.horarioDesejado} nesse dia (${conflito.nome}). Escolha outro.`);
+        return;
+      }
+      const ok = await updCliente(c.id, { status: "Vistoria agendada", vistoriadorId });
+      if (!ok) return;
+      setClienteAprovado(null);
+      notify(`${ehRevistoria(c) ? "Revistoria" : "Vistoria"} agendada com ${nomeTecnico} ✓ — já entrou na agenda`);
+    } catch (e) { notify(`Erro: ${e.message}`); }
+  };
+
+  const recusar = async (c) => {
+    try { await updCliente(c.id, { status: "Cancelado" }); notify("Cadastro recusado"); }
+    catch (e) { notify(`Erro: ${e.message}`); }
+  };
+
+  return { aprovar, recusar, clienteAprovado, setClienteAprovado };
+}
+
 /* ================= Agendamento · Análise: aprovação de clientes + calendário operacional ================= */
 function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, ehGerencia = false, onAgendarAgora, diaParaAbrir, aoAbrirDia, filtroEtapa = null, aoTrocarEtapa }) {
   const [mesRef, setMesRef] = useState(() => { const h = new Date(); return new Date(h.getFullYear(), h.getMonth(), 1); });
   const [diaSelecionado, setDiaSelecionado] = useState(null);
   const [filtroTecnicos, setFiltroTecnicos] = useState(() => new Set());
-  const [clienteAprovado, setClienteAprovado] = useState(null);
   const [agendando, setAgendando] = useState(null); // { dataDesejada } quando o form "Agendar vistoria" está aberto
 
   const vistoriadores = usuarios.filter((u) => fazVistoria(u) && u.ativo);
@@ -5522,36 +5562,7 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
     }
   }, [diaParaAbrir]);
 
-  /* Aprovar já escalando o técnico: o cadastro vai direto de "Em análise" para "Vistoria
-     agendada" e entra na agenda dele na hora. Sem técnico (quando ainda não se sabe quem vai),
-     segue o caminho antigo — "Agendamento aprovado", esperando alguém escalar. */
-  const aprovar = async (c, vistoriadorId = "") => {
-    try {
-      if (!vistoriadorId) {
-        const ok = await updCliente(c.id, { status: "Agendamento aprovado" });
-        if (!ok) return;
-        setClienteAprovado(c);
-        notify("Agendamento aprovado ✓ — falta escalar o técnico");
-        return;
-      }
-      const conflito = vistoriaNoMesmoHorario(clientes, {
-        clienteId: c.id, vistoriadorId, data: c.dataDesejada, horario: c.horarioDesejado,
-      });
-      const nomeTecnico = vistoriadores.find((v) => String(v.id) === String(vistoriadorId))?.nome || "O técnico";
-      if (conflito) {
-        notify(`${nomeTecnico} já tem vistoria às ${c.horarioDesejado} nesse dia (${conflito.nome}). Escolha outro.`);
-        return;
-      }
-      const ok = await updCliente(c.id, { status: "Vistoria agendada", vistoriadorId });
-      if (!ok) return;
-      setClienteAprovado(null);
-      notify(`${ehRevistoria(c) ? "Revistoria" : "Vistoria"} agendada com ${nomeTecnico} ✓ — já entrou na agenda`);
-    } catch (e) { notify(`Erro: ${e.message}`); }
-  };
-  const recusar = async (c) => {
-    try { await updCliente(c.id, { status: "Cancelado" }); notify("Cadastro recusado"); }
-    catch (e) { notify(`Erro: ${e.message}`); }
-  };
+  const { aprovar, recusar, clienteAprovado, setClienteAprovado } = useAprovacaoAnalise(clientes, vistoriadores, updCliente, notify);
   const toggleFiltroTecnico = (id) => {
     setFiltroTecnicos((atual) => {
       const novo = new Set(atual);
@@ -5602,6 +5613,84 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
           onFechar={() => setAgendando(null)} onConfirmar={confirmarAgendamento} />
       )}
     </div>
+  );
+}
+
+/* ================= Agendamento · Fila de espera: quem ainda não tem data/horário =================
+   Antes ficava tudo misturado na aprovação (item 2 acima), numa fileira só, sem separar quem
+   já pode ser agendado de quem ainda precisa de data. Aqui fica só quem falta marcar data e
+   horário, em colunas por empreendimento — mais fácil ver o volume por obra/cliente. */
+function ColunaFilaEmpreendimento({ nome, clientes, podeAgir, onAprovar, onRecusar, vistoriadores, todos }) {
+  return (
+    <div style={{ minWidth: 290, maxWidth: 290, flexShrink: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 4px", borderBottom: `2px solid ${AZUL_MEDIO}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+          <Building2 size={14} color={AZUL_MARINHO} style={{ flexShrink: 0 }} />
+          <strong style={{ fontSize: 13, color: AZUL_MARINHO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nome}</strong>
+        </div>
+        <span style={{ background: AZUL_MARINHO, color: "#fff", borderRadius: 20, padding: "1px 8px", fontSize: 11.5, fontWeight: 700, flexShrink: 0 }}>
+          {clientes.length}
+        </span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {clientes.map((c) => (
+          <CardClientePendente key={c.id} c={c} todos={todos} podeAgir={podeAgir} onAprovar={onAprovar} onRecusar={onRecusar} vistoriadores={vistoriadores} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AbaQualidadeFila({ clientes = [], carregando, updCliente, usuarios = [], notify, podeAgir = false }) {
+  const vistoriadores = usuarios.filter((u) => fazVistoria(u) && u.ativo);
+  const { aprovar, recusar } = useAprovacaoAnalise(clientes, vistoriadores, updCliente, notify);
+
+  // Mesmo recorte da aprovação (item 2), mas só quem ainda não tem data/horário — quem já
+  // tem os dois fica na sub-aba Análise, pronto pra aprovação direta.
+  const fila = clientes.filter((c) =>
+    c.status === "Em análise" && !ehServicoDocumentacao(c) && (!c.dataDesejada || !c.horarioDesejado));
+
+  const porEmpreendimento = useMemo(() => {
+    const grupos = new Map();
+    fila.forEach((c) => {
+      const chave = c.empreendimento || "Sem empreendimento";
+      if (!grupos.has(chave)) grupos.set(chave, []);
+      grupos.get(chave).push(c);
+    });
+    return [...grupos.entries()].sort((a, b) => b[1].length - a[1].length);
+  }, [fila]);
+
+  return (
+    <Card icon={Clock} titulo={fila.length > 0 ? `${fila.length} na fila de espera` : "Fila de espera"}>
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Cadastros em análise sem data e horário definidos, separados por empreendimento. Quem já tem os dois aparece na sub-aba Análise.
+      </p>
+
+      {!carregando && fila.length > 0 && (
+        <div style={{ display: "flex", gap: 20, marginBottom: 16, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: AZUL_MARINHO }}>{fila.length}</div>
+            <div style={{ fontSize: 12, color: "#65758b" }}>cliente(s) na fila</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: AZUL_MARINHO }}>{porEmpreendimento.length}</div>
+            <div style={{ fontSize: 12, color: "#65758b" }}>empreendimento(s)</div>
+          </div>
+        </div>
+      )}
+
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && fila.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum cadastro sem data/horário na fila.</p>}
+
+      {fila.length > 0 && (
+        <div style={{ display: "flex", gap: 16, overflowX: "auto", paddingBottom: 4 }}>
+          {porEmpreendimento.map(([nome, lista]) => (
+            <ColunaFilaEmpreendimento key={nome} nome={nome} clientes={lista} todos={clientes}
+              podeAgir={podeAgir} onAprovar={aprovar} onRecusar={recusar} vistoriadores={vistoriadores} />
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }
 
