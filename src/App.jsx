@@ -2105,6 +2105,18 @@ export default function App() {
   if (paginaFn === "fn-home") return <PaginaBeneficiosFn tipo="produto" />;
   if (paginaFn === "privacidade") return <PaginaPrivacidade />;
 
+  // Link público de avaliação (?avaliar=<id>&tipo=doc|cliente&servico=…), mandado pelo
+  // Atendimento por WhatsApp/e-mail — mesmo padrão dos links acima, sem sessão nenhuma.
+  const avaliarId = new URLSearchParams(window.location.search).get("avaliar");
+  if (avaliarId) {
+    const paramsAvaliar = new URLSearchParams(window.location.search);
+    return (
+      <PaginaAvaliarPublica id={avaliarId}
+        tipo={paramsAvaliar.get("tipo") === "cliente" ? "cliente" : "doc"}
+        servico={paramsAvaliar.get("servico") || SERVICO_VISTORIA} />
+    );
+  }
+
   // Link de criação de senha do portal do cliente (?criar-senha=<token>), vindo do e-mail de
   // "primeiro acesso" — também funciona sem sessão, e tem prioridade sobre ela.
   const criarSenhaToken = new URLSearchParams(window.location.search).get("criar-senha");
@@ -4830,13 +4842,96 @@ function AbaQualidadeAcompanhamento({ clientes = [], clientesCarregando, docs = 
   );
 }
 
-function AbaQualidadeFeedback({ avaliacoes, carregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, podeAgir = false, ehGerencia = false }) {
+/* ================= Feedback · gerar link de avaliação para o cliente =================
+   Antes só dava para avaliar depois de entrar no portal. Aqui o Atendimento pega o link
+   pronto pra cada atendimento já entregue e manda por WhatsApp — quem recebe cai direto no
+   formulário público (PaginaAvaliarPublica), confirma o CPF do cadastro e avalia sem senha. */
+function linkAvaliacao(id, tipo, servico) {
+  return `${window.location.origin}${window.location.pathname}?avaliar=${id}&tipo=${tipo}&servico=${encodeURIComponent(servico)}`;
+}
+
+function BotaoCopiarLink({ link }) {
+  const [copiado, setCopiado] = useState(false);
+  const copiar = async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2000);
+    } catch { /* alguns navegadores bloqueiam sem interação direta — o link ainda pode ser selecionado à mão */ }
+  };
+  return (
+    <button className="btn-ghost" style={{ padding: "5px 10px", fontSize: 12.5 }} onClick={copiar}>
+      {copiado ? <Check size={13} /> : <Copy size={13} />} {copiado ? "Copiado" : "Copiar link"}
+    </button>
+  );
+}
+
+function CardLinkAvaliacao({ clientes = [], clientesCarregando, docs = [], docsCarregando, avaliacoes = [] }) {
+  const jaAvaliadoDoc = new Set(avaliacoes.filter((a) => a.doc_id).map((a) => a.doc_id));
+  const jaAvaliadoCliente = new Set(avaliacoes.filter((a) => a.cliente_id).map((a) => a.cliente_id));
+
+  // Vistoria: laudo já entregue por e-mail e ainda sem avaliação.
+  const pendentesVistoria = docs
+    .filter((d) => d.statusCliente === "Laudo enviado por e-mail" && !jaAvaliadoDoc.has(d.id))
+    .map((d) => ({ id: d.id, tipo: "doc", servico: SERVICO_VISTORIA, nome: d.cliente, empreendimento: d.empreendimento, telefone: null }));
+
+  // Documentação (ART/TRT): pronta e ainda sem avaliação — não passa por "docs", vive no cadastro.
+  const pendentesDoc = clientes
+    .filter((c) => c.servico === SERVICO_DOCUMENTACAO && c.status === STATUS_DOC_CONCLUIDA && !jaAvaliadoCliente.has(c.id))
+    .map((c) => ({ id: c.id, tipo: "cliente", servico: SERVICO_DOCUMENTACAO, nome: c.nome, empreendimento: c.empreendimento, telefone: c.telefone }));
+
+  const pendentes = [...pendentesVistoria, ...pendentesDoc];
+  const carregando = clientesCarregando || docsCarregando;
+
+  return (
+    <Card icon={Send} titulo={pendentes.length > 0 ? `${pendentes.length} podem avaliar pelo link` : "Link de avaliação"}>
+      <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 12px" }}>
+        Copie o link e mande por WhatsApp — o cliente abre, confirma o CPF do cadastro e avalia
+        direto, sem precisar de senha nem entrar no portal.
+      </p>
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && pendentes.length === 0 && (
+        <p style={{ color: "#8593a8", fontSize: 13.5 }}>Nenhum atendimento entregue esperando avaliação agora.</p>
+      )}
+      {pendentes.length > 0 && (
+        <div style={{ display: "grid", gap: 8 }}>
+          {pendentes.map((p) => {
+            const link = linkAvaliacao(p.id, p.tipo, p.servico);
+            const whats = linkWhatsapp(p.telefone);
+            const textoWhats = `Olá${p.nome ? `, ${p.nome.split(" ")[0]}` : ""}! Aqui é da FN Edificações. Poderia avaliar nosso atendimento? Leva menos de um minuto: ${link}`;
+            return (
+              <div key={`${p.tipo}-${p.id}`} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, padding: "8px 10px" }}>
+                <div style={{ minWidth: 160 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>{p.nome || "Cliente"}</div>
+                  <div style={{ fontSize: 11.5, color: "#8593a8" }}>{[p.servico, p.empreendimento].filter(Boolean).join(" · ")}</div>
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <BotaoCopiarLink link={link} />
+                  <a className="btn-ghost" style={{ padding: "5px 10px", fontSize: 12.5, textDecoration: "none" }}
+                    href={whats ? `${whats}?text=${encodeURIComponent(textoWhats)}` : `https://wa.me/?text=${encodeURIComponent(textoWhats)}`}
+                    target="_blank" rel="noopener noreferrer">
+                    <ExternalLink size={13} /> WhatsApp
+                  </a>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function AbaQualidadeFeedback({ avaliacoes, carregando, clientes = [], clientesCarregando, docs = [], docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, podeAgir = false, ehGerencia = false }) {
   const total = avaliacoes.length;
   const media = total ? (avaliacoes.reduce((s, a) => s + a.nota, 0) / total) : 0;
   const contagemPorNota = [5, 4, 3, 2, 1].map((n) => ({ n, qtd: avaliacoes.filter((a) => a.nota === n).length }));
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
+      {podeAgir && (
+        <CardLinkAvaliacao clientes={clientes} clientesCarregando={clientesCarregando} docs={docs} docsCarregando={docsCarregando} avaliacoes={avaliacoes} />
+      )}
       <Card icon={Star} titulo="Avaliações dos clientes">
         {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
         {!carregando && total === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhuma avaliação recebida ainda. Elas aparecem aqui assim que o cliente avalia o atendimento pelo portal público.</p>}
@@ -8957,7 +9052,36 @@ function AbaPerfilCliente({ clientes = [], token, notify, atualizarCliente, rese
    como "enviado por e-mail" e nenhum saiu. A falha do SMTP morria num log que ninguém lê, e a
    tela dizia que estava tudo certo. Agora quem está na Gerência vê o que saiu, o que falhou e
    com qual erro — e tem o botão para mandar de novo. */
-function CardEntregaEmails({ token, notify }) {
+/* Depois que o laudo sai por e-mail, o próximo passo de relacionamento é manual: alguém do
+   Atendimento abre o WhatsApp do cliente e agradece, colando o link de avaliação. O botão só
+   aparece quando dá pra achar, com segurança, todos os três pedaços que ele precisa — o
+   cliente (casando o e-mail do envio com o cadastro), o laudo (pelo mesmo docDoCliente que
+   evita confundir vistoria com revistoria) e um telefone. Sem um dos três, não aparece nada:
+   é melhor não sugerir do que sugerir errado. */
+function BotaoWhatsappAgradecimento({ envio, clientes, docs }) {
+  if (envio.tipo !== "laudo" || !envio.ok) return null;
+  const emailAlvo = String(envio.para || "").trim().toLowerCase();
+  if (!emailAlvo) return null;
+  const cliente = clientes.find((c) => (c.email || "").trim().toLowerCase() === emailAlvo);
+  if (!cliente) return null;
+  const doc = docDoCliente(cliente, docs);
+  if (!doc || doc.statusCliente !== "Laudo enviado por e-mail") return null;
+  const whats = linkWhatsapp(cliente.telefone);
+  if (!whats) return null;
+
+  const link = linkAvaliacao(doc.id, "doc", SERVICO_VISTORIA);
+  const primeiroNome = (cliente.nome || "").split(" ")[0];
+  const texto = `Olá${primeiroNome ? `, ${primeiroNome}` : ""}! Aqui é da FN Edificações. Passando para agradecer a confiança — o laudo da sua vistoria foi enviado para o seu e-mail. Se puder, avalie nosso atendimento, leva menos de um minuto: ${link}`;
+
+  return (
+    <a className="btn-ghost" style={{ padding: "3px 9px", fontSize: 11.5, textDecoration: "none", whiteSpace: "nowrap" }}
+      href={`${whats}?text=${encodeURIComponent(texto)}`} target="_blank" rel="noopener noreferrer">
+      <ExternalLink size={11} /> WhatsApp
+    </a>
+  );
+}
+
+function CardEntregaEmails({ token, notify, clientes = [], docs = [] }) {
   const [dados, setDados] = useState(null);
   const [carregando, setCarregando] = useState(false);
   const [testando, setTestando] = useState(false);
@@ -9055,6 +9179,9 @@ function CardEntregaEmails({ token, notify }) {
                   <td style={{ padding: "6px 9px", wordBreak: "break-all" }}>{e.para}</td>
                   <td style={{ padding: "6px 9px", color: e.ok ? "#2E7D32" : "#C62828", fontWeight: 600 }}>
                     {e.ok ? "enviado" : (e.erro || "falhou")}
+                  </td>
+                  <td style={{ padding: "6px 9px", textAlign: "right" }}>
+                    <BotaoWhatsappAgradecimento envio={e} clientes={clientes} docs={docs} />
                   </td>
                 </tr>
               ))}
@@ -9688,7 +9815,7 @@ function AbaGerenciaVisaoGeral({ token, docs, clientes, updCliente, padronizarEm
     <div style={{ display: "grid", gap: 16 }}>
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando indicadores…</p>}
 
-      <CardEntregaEmails token={token} notify={notify} />
+      <CardEntregaEmails token={token} notify={notify} clientes={clientes} docs={docs} />
       <CardVistoriasSemLaudo token={token} />
 
       <CardPainelLaudos painel={painel} carregando={painelCarregando} recarregar={carregarPainel} usuarios={usuarios} notify={notify} />
@@ -12768,6 +12895,103 @@ const CRITERIOS_AVALIACAO = {
     ["clareza", "Clareza da documentação"],
   ],
 };
+
+/* ================= Página pública de avaliação (?avaliar=<id>&tipo=doc|cliente&servico=…) =================
+   Link que o Atendimento manda por WhatsApp ou e-mail depois que o laudo chega ou a
+   documentação fica pronta — abre direto no formulário de avaliação, sem precisar de login
+   nem senha. A segurança é a mesma que já valia para o portal: o servidor só grava a nota se
+   o CPF digitado conferir com o CPF do atendimento (POST /api/avaliacoes, que já era aberto,
+   sem exigir sessão — só faltava uma tela pra chegar nele sem passar pelo portal). */
+function PaginaAvaliarPublica({ id, tipo, servico }) {
+  const [cpf, setCpf] = useState("");
+  const [notas, setNotas] = useState({});
+  const [comentario, setComentario] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [enviado, setEnviado] = useState(false);
+  const [erro, setErro] = useState("");
+
+  const criterios = CRITERIOS_AVALIACAO[servico] || CRITERIOS_AVALIACAO[SERVICO_VISTORIA];
+  const respondidos = criterios.filter(([chave]) => notas[chave]).length;
+
+  const enviar = async () => {
+    const cpfLimpo = cpf.replace(/\D/g, "");
+    if (cpfLimpo.length !== 11) { setErro("Digite o CPF usado no cadastro."); return; }
+    if (respondidos < criterios.length) { setErro("Dê uma nota para cada item."); return; }
+    setErro("");
+    setEnviando(true);
+    try {
+      await apiFetch("/api/avaliacoes", {
+        method: "POST",
+        body: { ...(tipo === "cliente" ? { clienteId: id } : { docId: id }), cpf: cpfLimpo, notas, comentario },
+      });
+      setEnviado(true);
+    } catch (e) { setErro(e.message); }
+    setEnviando(false);
+  };
+
+  // Depois de avaliar, a página segue direto para a vitrine de parceiros e afiliados — é o
+  // convite pra virar cliente FN Clube/FN Home enquanto a boa impressão do atendimento ainda
+  // está fresca, em vez de deixar essa venda pra outro contato, em outro dia.
+  useEffect(() => {
+    if (!enviado) return;
+    const t = setTimeout(() => {
+      window.location.href = `${window.location.origin}${window.location.pathname}?pagina=fn-clube`;
+    }, 2500);
+    return () => clearTimeout(t);
+  }, [enviado]);
+
+  return (
+    <div style={{ minHeight: "100vh", background: CINZA_CLARO, display: "flex", justifyContent: "center", padding: "40px 16px" }}>
+      <div style={{ maxWidth: 480, width: "100%" }}>
+        <div style={{ textAlign: "center", marginBottom: 20, fontWeight: 800, fontSize: 20, color: AZUL_MARINHO }}>
+          FN Edificações
+        </div>
+        <div style={{ background: "#fff", borderRadius: 14, padding: 24, border: `1px solid ${CINZA_BORDA}` }}>
+          {enviado ? (
+            <div style={{ textAlign: "center", padding: "16px 0" }}>
+              <Check size={36} color="#2E7D32" />
+              <p style={{ fontSize: 15, color: "#2E7D32", fontWeight: 700, margin: "10px 0 4px" }}>Obrigado pela avaliação!</p>
+              <p style={{ fontSize: 13, color: "#65758b", margin: 0 }}>Sua opinião ajuda a nossa equipe a melhorar o atendimento.</p>
+              <p style={{ fontSize: 12.5, color: "#8593a8", margin: "10px 0 0" }}>
+                Já te levamos para conhecer os benefícios e parceiros da FN…
+              </p>
+            </div>
+          ) : (
+            <>
+              <h2 style={{ fontSize: 17, color: AZUL_MARINHO, margin: "0 0 4px" }}>Como foi o seu atendimento?</h2>
+              <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 16px" }}>
+                Leva menos de um minuto e ajuda muito a nossa equipe.
+              </p>
+              <div style={cell(true)}>
+                <label style={lab}>CPF usado no cadastro</label>
+                <input style={inp} value={cpf} onChange={(e) => setCpf(e.target.value)} placeholder="Só números" maxLength={14} />
+              </div>
+              <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
+                {criterios.map(([chave, rotulo]) => (
+                  <div key={chave} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 13.5, color: "#4a5a70" }}>{rotulo}</span>
+                    <Estrelas valor={notas[chave] || 0} tamanho={24} onChange={(n) => setNotas((v) => ({ ...v, [chave]: n }))} />
+                  </div>
+                ))}
+              </div>
+              <textarea style={{ ...inp, marginTop: 14, resize: "vertical" }} rows={3}
+                placeholder="Quer contar mais alguma coisa? (opcional)"
+                value={comentario} onChange={(e) => setComentario(e.target.value)} />
+              {erro && (
+                <div style={{ background: "#FCEAEA", color: "#C62828", padding: "8px 10px", borderRadius: 8, fontSize: 12.5, marginTop: 10 }}>
+                  {erro}
+                </div>
+              )}
+              <button className="btn-solid" style={{ width: "100%", marginTop: 14, justifyContent: "center" }} onClick={enviar} disabled={enviando}>
+                {enviando ? "Enviando…" : "Enviar avaliação"}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function AvaliarServico({ doc, notify, fotoCliente, cpf }) {
   const [aberto, setAberto] = useState(false);
