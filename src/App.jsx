@@ -7,7 +7,7 @@ import {
   AlertTriangle, CircleAlert, Info, Copy, Sparkles, Loader2,
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
-  ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle, Megaphone
+  ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle, Megaphone, Clock
 } from "lucide-react";
 
 /* ============================================================
@@ -558,7 +558,7 @@ const MODULOS_POR_PERFIL = {
   documentacao: ["documentacao"],
   atendimento: ["clientes", "qualidade", "faq", "marketing", "vendas"],
   vendas: ["vendas"],
-  gerencia: ["laudos", "documentacao", "gerencia", "usuarios", "clientes", "qualidade", "faq"],
+  gerencia: ["laudos", "documentacao", "gerencia", "usuarios", "clientes", "qualidade", "faq", "marketing"],
 };
 const PERFIL_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", vendas: "Vendas", gerencia: "Gerência" };
 
@@ -3465,7 +3465,7 @@ function AppInterno({ session, onLogout }) {
         {/* Sub-navegação (somente dentro do módulo Qualidade) */}
         {abaTop === "qualidade" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
-            {[["analise", "Análise", ClipboardCheck], ["vistoria", "Vistoria", CalendarDays], ["cobranca", "Cobrança", DollarSign], ["feedback", "Feedback", Star], ["acompanhamento", "Acompanhamento", ClipboardList]].map(([k, label, Icon]) => (
+            {[["analise", "Análise", ClipboardCheck], ["fila", "Fila de espera", Clock], ["vistoria", "Vistoria", CalendarDays], ["cobranca", "Cobrança", DollarSign], ["feedback", "Feedback", Star], ["acompanhamento", "Acompanhamento", ClipboardList]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setAbaQualidade(k)} className="tab" style={{ borderBottomColor: abaQualidade === k ? AZUL_MEDIO : "transparent", color: abaQualidade === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
                 <Icon size={15} /> {label}
               </button>
@@ -4507,6 +4507,7 @@ function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, u
       {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} clientes={clientes} clientesCarregando={clientesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
         solicitarExclusaoAvaliacao={solicitarExclusaoAvaliacao} manterAvaliacao={manterAvaliacao} excluirAvaliacao={excluirAvaliacao} podeAgir={podeAgir} ehGerencia={ehGerencia} filtroEtapa={filtroEtapa} />}
       {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} onAgendarAgora={irParaAgendamento} diaParaAbrir={diaParaAbrir} aoAbrirDia={() => setDiaParaAbrir(null)} filtroEtapa={filtroEtapa} aoTrocarEtapa={setFiltroEtapa} />}
+      {sub === "fila" && <AbaQualidadeFila clientes={clientes} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} />}
     </div>
   );
 }
@@ -5057,7 +5058,9 @@ function CardClientePendente({ c, todos, podeAgir, onAprovar, onRecusar, vistori
 }
 
 function BlocoAprovacaoClientes({ clientes = [], carregando, podeAgir, onAprovar, onRecusar, clienteAprovado, onAgendarAgora, onFecharAviso, vistoriadores = [] }) {
-  const pendentes = clientes.filter((c) => c.status === "Em análise" && !ehServicoDocumentacao(c));
+  // Quem não tem data/horário definidos vai para a Fila de espera (AbaQualidadeFila) —
+  // aqui só fica quem já veio com data e horário, pronto pra aprovação direta.
+  const pendentes = clientes.filter((c) => c.status === "Em análise" && !ehServicoDocumentacao(c) && c.dataDesejada && c.horarioDesejado);
 
   if (!carregando && pendentes.length === 0 && !clienteAprovado) {
     return (
@@ -5491,12 +5494,49 @@ function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesParaAgend
   );
 }
 
+/* Aprovar/recusar cadastro em análise — compartilhado entre a sub-aba Análise (com
+   calendário) e a Fila de espera (kanban por empreendimento), que decidem sobre o mesmo
+   status "Em análise" e usavam a mesma lógica antes de ela virar duplicada nas duas telas. */
+function useAprovacaoAnalise(clientes, vistoriadores, updCliente, notify) {
+  const [clienteAprovado, setClienteAprovado] = useState(null);
+
+  const aprovar = async (c, vistoriadorId = "") => {
+    try {
+      if (!vistoriadorId) {
+        const ok = await updCliente(c.id, { status: "Agendamento aprovado" });
+        if (!ok) return;
+        setClienteAprovado(c);
+        notify("Agendamento aprovado ✓ — falta escalar o técnico");
+        return;
+      }
+      const conflito = vistoriaNoMesmoHorario(clientes, {
+        clienteId: c.id, vistoriadorId, data: c.dataDesejada, horario: c.horarioDesejado,
+      });
+      const nomeTecnico = vistoriadores.find((v) => String(v.id) === String(vistoriadorId))?.nome || "O técnico";
+      if (conflito) {
+        notify(`${nomeTecnico} já tem vistoria às ${c.horarioDesejado} nesse dia (${conflito.nome}). Escolha outro.`);
+        return;
+      }
+      const ok = await updCliente(c.id, { status: "Vistoria agendada", vistoriadorId });
+      if (!ok) return;
+      setClienteAprovado(null);
+      notify(`${ehRevistoria(c) ? "Revistoria" : "Vistoria"} agendada com ${nomeTecnico} ✓ — já entrou na agenda`);
+    } catch (e) { notify(`Erro: ${e.message}`); }
+  };
+
+  const recusar = async (c) => {
+    try { await updCliente(c.id, { status: "Cancelado" }); notify("Cadastro recusado"); }
+    catch (e) { notify(`Erro: ${e.message}`); }
+  };
+
+  return { aprovar, recusar, clienteAprovado, setClienteAprovado };
+}
+
 /* ================= Agendamento · Análise: aprovação de clientes + calendário operacional ================= */
 function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, ehGerencia = false, onAgendarAgora, diaParaAbrir, aoAbrirDia, filtroEtapa = null, aoTrocarEtapa }) {
   const [mesRef, setMesRef] = useState(() => { const h = new Date(); return new Date(h.getFullYear(), h.getMonth(), 1); });
   const [diaSelecionado, setDiaSelecionado] = useState(null);
   const [filtroTecnicos, setFiltroTecnicos] = useState(() => new Set());
-  const [clienteAprovado, setClienteAprovado] = useState(null);
   const [agendando, setAgendando] = useState(null); // { dataDesejada } quando o form "Agendar vistoria" está aberto
 
   const vistoriadores = usuarios.filter((u) => fazVistoria(u) && u.ativo);
@@ -5522,36 +5562,7 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
     }
   }, [diaParaAbrir]);
 
-  /* Aprovar já escalando o técnico: o cadastro vai direto de "Em análise" para "Vistoria
-     agendada" e entra na agenda dele na hora. Sem técnico (quando ainda não se sabe quem vai),
-     segue o caminho antigo — "Agendamento aprovado", esperando alguém escalar. */
-  const aprovar = async (c, vistoriadorId = "") => {
-    try {
-      if (!vistoriadorId) {
-        const ok = await updCliente(c.id, { status: "Agendamento aprovado" });
-        if (!ok) return;
-        setClienteAprovado(c);
-        notify("Agendamento aprovado ✓ — falta escalar o técnico");
-        return;
-      }
-      const conflito = vistoriaNoMesmoHorario(clientes, {
-        clienteId: c.id, vistoriadorId, data: c.dataDesejada, horario: c.horarioDesejado,
-      });
-      const nomeTecnico = vistoriadores.find((v) => String(v.id) === String(vistoriadorId))?.nome || "O técnico";
-      if (conflito) {
-        notify(`${nomeTecnico} já tem vistoria às ${c.horarioDesejado} nesse dia (${conflito.nome}). Escolha outro.`);
-        return;
-      }
-      const ok = await updCliente(c.id, { status: "Vistoria agendada", vistoriadorId });
-      if (!ok) return;
-      setClienteAprovado(null);
-      notify(`${ehRevistoria(c) ? "Revistoria" : "Vistoria"} agendada com ${nomeTecnico} ✓ — já entrou na agenda`);
-    } catch (e) { notify(`Erro: ${e.message}`); }
-  };
-  const recusar = async (c) => {
-    try { await updCliente(c.id, { status: "Cancelado" }); notify("Cadastro recusado"); }
-    catch (e) { notify(`Erro: ${e.message}`); }
-  };
+  const { aprovar, recusar, clienteAprovado, setClienteAprovado } = useAprovacaoAnalise(clientes, vistoriadores, updCliente, notify);
   const toggleFiltroTecnico = (id) => {
     setFiltroTecnicos((atual) => {
       const novo = new Set(atual);
@@ -5602,6 +5613,84 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
           onFechar={() => setAgendando(null)} onConfirmar={confirmarAgendamento} />
       )}
     </div>
+  );
+}
+
+/* ================= Agendamento · Fila de espera: quem ainda não tem data/horário =================
+   Antes ficava tudo misturado na aprovação (item 2 acima), numa fileira só, sem separar quem
+   já pode ser agendado de quem ainda precisa de data. Aqui fica só quem falta marcar data e
+   horário, em colunas por empreendimento — mais fácil ver o volume por obra/cliente. */
+function ColunaFilaEmpreendimento({ nome, clientes, podeAgir, onAprovar, onRecusar, vistoriadores, todos }) {
+  return (
+    <div style={{ minWidth: 290, maxWidth: 290, flexShrink: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 4px", borderBottom: `2px solid ${AZUL_MEDIO}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+          <Building2 size={14} color={AZUL_MARINHO} style={{ flexShrink: 0 }} />
+          <strong style={{ fontSize: 13, color: AZUL_MARINHO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nome}</strong>
+        </div>
+        <span style={{ background: AZUL_MARINHO, color: "#fff", borderRadius: 20, padding: "1px 8px", fontSize: 11.5, fontWeight: 700, flexShrink: 0 }}>
+          {clientes.length}
+        </span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {clientes.map((c) => (
+          <CardClientePendente key={c.id} c={c} todos={todos} podeAgir={podeAgir} onAprovar={onAprovar} onRecusar={onRecusar} vistoriadores={vistoriadores} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AbaQualidadeFila({ clientes = [], carregando, updCliente, usuarios = [], notify, podeAgir = false }) {
+  const vistoriadores = usuarios.filter((u) => fazVistoria(u) && u.ativo);
+  const { aprovar, recusar } = useAprovacaoAnalise(clientes, vistoriadores, updCliente, notify);
+
+  // Mesmo recorte da aprovação (item 2), mas só quem ainda não tem data/horário — quem já
+  // tem os dois fica na sub-aba Análise, pronto pra aprovação direta.
+  const fila = clientes.filter((c) =>
+    c.status === "Em análise" && !ehServicoDocumentacao(c) && (!c.dataDesejada || !c.horarioDesejado));
+
+  const porEmpreendimento = useMemo(() => {
+    const grupos = new Map();
+    fila.forEach((c) => {
+      const chave = c.empreendimento || "Sem empreendimento";
+      if (!grupos.has(chave)) grupos.set(chave, []);
+      grupos.get(chave).push(c);
+    });
+    return [...grupos.entries()].sort((a, b) => b[1].length - a[1].length);
+  }, [fila]);
+
+  return (
+    <Card icon={Clock} titulo={fila.length > 0 ? `${fila.length} na fila de espera` : "Fila de espera"}>
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Cadastros em análise sem data e horário definidos, separados por empreendimento. Quem já tem os dois aparece na sub-aba Análise.
+      </p>
+
+      {!carregando && fila.length > 0 && (
+        <div style={{ display: "flex", gap: 20, marginBottom: 16, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: AZUL_MARINHO }}>{fila.length}</div>
+            <div style={{ fontSize: 12, color: "#65758b" }}>cliente(s) na fila</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: AZUL_MARINHO }}>{porEmpreendimento.length}</div>
+            <div style={{ fontSize: 12, color: "#65758b" }}>empreendimento(s)</div>
+          </div>
+        </div>
+      )}
+
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && fila.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum cadastro sem data/horário na fila.</p>}
+
+      {fila.length > 0 && (
+        <div style={{ display: "flex", gap: 16, overflowX: "auto", paddingBottom: 4 }}>
+          {porEmpreendimento.map(([nome, lista]) => (
+            <ColunaFilaEmpreendimento key={nome} nome={nome} clientes={lista} todos={clientes}
+              podeAgir={podeAgir} onAprovar={aprovar} onRecusar={recusar} vistoriadores={vistoriadores} />
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -8984,6 +9073,10 @@ function CardEntregaEmails({ token, notify }) {
 function CardVistoriasSemLaudo({ token }) {
   const [lista, setLista] = useState([]);
   const [carregando, setCarregando] = useState(true);
+  // Recolhida por padrão: com 297 casos acumulados, a lista aberta empurrava o resto da
+  // Visão geral pra fora da tela. Fechada, o alerta continua visível (o título já mostra o
+  // total) e quem quiser investigar clica para abrir.
+  const [aberta, setAberta] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -9001,25 +9094,33 @@ function CardVistoriasSemLaudo({ token }) {
         A data da vistoria já passou e nenhum laudo chegou ao servidor. Onde aparece "rascunho no
         servidor", o técnico começou o laudo e não enviou — dá para cobrar sabendo que o trabalho existe.
       </p>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-        <tbody>
-          {lista.map((v) => (
-            <tr key={v.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
-              <td style={{ padding: "8px 9px", whiteSpace: "nowrap", color: "#C62828", fontWeight: 600 }}>{fmtData(v.data_desejada)}</td>
-              <td style={{ padding: "8px 9px" }}>
-                {v.nome}
-                <div style={{ fontSize: 11.5, color: "#8593a8" }}>{[v.empreendimento, v.bloco_torre].filter(Boolean).join(" · ")}</div>
-              </td>
-              <td style={{ padding: "8px 9px", color: "#65758b" }}>{v.vistoriador_nome || "sem técnico"}</td>
-              <td style={{ padding: "8px 9px", textAlign: "right" }}>
-                {v.tem_rascunho
-                  ? <span style={{ fontSize: 11.5, background: "#FFF4E5", color: "#B26A00", padding: "3px 8px", borderRadius: 20 }}>rascunho no servidor</span>
-                  : <span style={{ fontSize: 11.5, color: "#8593a8" }}>nada enviado</span>}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <button className="btn-ghost" style={{ width: "auto", padding: "7px 12px", color: AZUL_MARINHO, background: CINZA_CLARO }}
+        onClick={() => setAberta((v) => !v)}>
+        {aberta ? <ChevronDown size={15} /> : <ChevronRight size={15} />} {aberta ? "Fechar lista" : `Ver lista (${lista.length})`}
+      </button>
+      {aberta && (
+        <div style={{ maxHeight: 420, overflowY: "auto", marginTop: 12 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <tbody>
+              {lista.map((v) => (
+                <tr key={v.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                  <td style={{ padding: "8px 9px", whiteSpace: "nowrap", color: "#C62828", fontWeight: 600 }}>{fmtData(v.data_desejada)}</td>
+                  <td style={{ padding: "8px 9px" }}>
+                    {v.nome}
+                    <div style={{ fontSize: 11.5, color: "#8593a8" }}>{[v.empreendimento, v.bloco_torre].filter(Boolean).join(" · ")}</div>
+                  </td>
+                  <td style={{ padding: "8px 9px", color: "#65758b" }}>{v.vistoriador_nome || "sem técnico"}</td>
+                  <td style={{ padding: "8px 9px", textAlign: "right" }}>
+                    {v.tem_rascunho
+                      ? <span style={{ fontSize: 11.5, background: "#FFF4E5", color: "#B26A00", padding: "3px 8px", borderRadius: 20 }}>rascunho no servidor</span>
+                      : <span style={{ fontSize: 11.5, color: "#8593a8" }}>nada enviado</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </Card>
   );
 }
@@ -9868,13 +9969,60 @@ function CardBancoPatologias({ patologias = [], carregando, onCriar, onAtualizar
 /* ================= Marketing =================
    Aba nova, ainda sem conteúdo definido — só o espaço reservado no menu do Atendimento.
    O que entra aqui é assunto de um próximo ajuste. */
+/* Pasta raiz de todo o arquivo de vistorias no Drive (ano/mês/empreendimento/cliente); cada
+   cliente tem uma sub-pasta "03_FOTO_COM_CLIENTE" com as fotos certas pra usar em arte de
+   marketing — não existe uma pasta única "achatada" só com essas fotos, então o botão abre a
+   raiz e quem usa navega até o cliente. */
+const DRIVE_PASTA_VISTORIAS = "https://drive.google.com/drive/folders/1CrWWTSkv7MJ6K_2bPfCXTMLzYo8It_0Z";
+/* Conversa pessoal do Felipe no ChatGPT, onde ele já vem pedindo as artes. Só a Gerência usa
+   este botão por enquanto — daí fazer sentido apontar pra conversa dele, e não pra um chat
+   novo genérico. Se um dia mais gente for usar, trocar para "https://chatgpt.com/" (chat novo)
+   evita levar alguém pra conta errada (o link de uma conversa só abre pra quem é dono dela). */
+const CHATGPT_ARTE_MARKETING = "https://chatgpt.com/c/6a7672f2-9bd4-83e9-b673-6311d468e98c";
+
 function AbaMarketing() {
+  const [legenda, setLegenda] = useState("");
+  const [copiado, setCopiado] = useState(false);
+
+  /* Anexar a foto automaticamente não dá: nenhum site consegue colocar um arquivo dentro do
+     chat de outro por segurança do navegador. O que dá pra automatizar é o texto — copia
+     pra área de transferência e já abre o ChatGPT, prontinho pra colar. */
+  const copiarECriar = async () => {
+    try {
+      if (legenda.trim()) await navigator.clipboard.writeText(legenda.trim());
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2500);
+    } catch { /* segue mesmo sem copiar — o link abre de qualquer forma */ }
+    window.open(CHATGPT_ARTE_MARKETING, "_blank", "noopener");
+  };
+
   return (
-    <Card icon={Megaphone} titulo="Marketing">
-      <p style={{ fontSize: 13.5, color: "#65758b", margin: 0 }}>
-        Em construção — o conteúdo desta aba ainda vai ser definido.
-      </p>
-    </Card>
+    <div style={{ display: "grid", gap: 16 }}>
+      <Card icon={Megaphone} titulo="Marketing">
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+          Em construção — aos poucos vamos adicionar mais coisa aqui. Por enquanto, os atalhos que já ajudam no dia a dia.
+        </p>
+        <a className="btn-solid" style={{ width: "auto", padding: "9px 16px", textDecoration: "none" }}
+          href={DRIVE_PASTA_VISTORIAS} target="_blank" rel="noopener noreferrer">
+          <FolderOpen size={15} /> Pasta de clientes
+        </a>
+      </Card>
+
+      <Card icon={Sparkles} titulo="Criar arte no ChatGPT">
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+          Baixe a foto na Pasta de clientes acima, escreva uma legenda ou pedido (opcional) e clique em
+          criar. O texto já sai copiado — é só colar no chat. A foto precisa ser anexada na mão
+          (arraste ou use o clipe de dentro do ChatGPT).
+        </p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input style={{ ...inp, flex: 1, minWidth: 220 }} value={legenda} onChange={(e) => setLegenda(e.target.value)}
+            placeholder="Legenda ou pedido pra IA (opcional)…" />
+          <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }} onClick={copiarECriar}>
+            {copiado ? <Check size={15} /> : <Sparkles size={15} />} {copiado ? "Copiado — abrindo…" : "Copiar e abrir ChatGPT"}
+          </button>
+        </div>
+      </Card>
+    </div>
   );
 }
 
