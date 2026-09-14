@@ -7,7 +7,8 @@ import {
   AlertTriangle, CircleAlert, Info, Copy, Sparkles, Loader2,
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
-  ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle, Megaphone, Clock
+  ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle, Megaphone, Clock,
+  Package, Wrench
 } from "lucide-react";
 
 /* ============================================================
@@ -3466,7 +3467,7 @@ function AppInterno({ session, onLogout }) {
         {/* Sub-navegação (somente dentro do módulo Gerência) */}
         {abaTop === "gerencia" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
-            {[["visao-geral", "Visão geral", LayoutGrid], ["indicadores", "Indicadores", PieChart], ["painel", "Painel estratégico", BarChart3], ["acompanhamento", "Acompanhamento", ClipboardList], ["reformas", "Reformas", Building2], ["perfil-cliente", "Perfil do cliente", User], ["parceiros", "Parceiros e Afiliados", Users], ["financeiro", "Financeiro", DollarSign], ["prospeccao", "Prospecção", TrendingUp], ["patologias", "Banco de patologias", AlertTriangle], ["importacao", "Importar base", Upload]].map(([k, label, Icon]) => (
+            {[["visao-geral", "Visão geral", LayoutGrid], ["indicadores", "Indicadores", PieChart], ["painel", "Painel estratégico", BarChart3], ["acompanhamento", "Acompanhamento", ClipboardList], ["reformas", "Reformas", Building2], ["casa-pronta", "FN Casa Pronta", Package], ["perfil-cliente", "Perfil do cliente", User], ["parceiros", "Parceiros e Afiliados", Users], ["financeiro", "Financeiro", DollarSign], ["prospeccao", "Prospecção", TrendingUp], ["patologias", "Banco de patologias", AlertTriangle], ["importacao", "Importar base", Upload]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setAbaGerencia(k)} className="tab" style={{ borderBottomColor: abaGerencia === k ? AZUL_MEDIO : "transparent", color: abaGerencia === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
                 <Icon size={15} /> {label}
               </button>
@@ -8589,11 +8590,91 @@ function AbaLaudosRealizados({ laudos: laudosRecebidos = [], carregando, recarre
   );
 }
 
+// Ordem geográfica norte→sul da carteira "Litoral PE/PB": Cabedelo e João Pessoa (PB) ficam
+// ao norte de Ipojuca e Tamandaré/Carneiros/Campas (PE) — é essa ordem que dá o "mapa" visual
+// de cima pra baixo no indicador, sem precisar de biblioteca de mapa nenhuma.
+const ESTADO_LABEL = { PE: "Pernambuco", PB: "Paraíba" };
+const ORDEM_GEOGRAFICA = [
+  { estado: "PB", regiao: "Cabedelo" },
+  { estado: "PB", regiao: "João Pessoa" },
+  { estado: "PE", regiao: "Ipojuca" },
+  { estado: "PE", regiao: "Tamandaré, Carneiros e Campas" },
+];
+const SEM_REGIAO = "Outras / sem região definida";
+
+function IndicadorMapaProspeccao({ prospeccao, regiaoAtiva, onEscolherRegiao, estadoFiltro }) {
+  const base = estadoFiltro ? prospeccao.filter((p) => p.estado === estadoFiltro) : prospeccao;
+  const porRegiao = {};
+  base.forEach((p) => {
+    const chave = p.estado && p.regiao ? `${p.estado}||${p.regiao}` : "outras";
+    if (!porRegiao[chave]) porRegiao[chave] = { estado: p.estado || "", regiao: p.regiao || SEM_REGIAO, itens: [] };
+    porRegiao[chave].itens.push(p);
+  });
+
+  const ordemChaves = [
+    ...ORDEM_GEOGRAFICA.map((o) => `${o.estado}||${o.regiao}`).filter((k) => porRegiao[k]),
+    ...Object.keys(porRegiao).filter((k) => !ORDEM_GEOGRAFICA.some((o) => `${o.estado}||${o.regiao}` === k)),
+  ];
+  if (ordemChaves.length === 0) return null;
+
+  let estadoAnterior = null;
+
+  return (
+    <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: "14px 16px", marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <LayoutGrid size={15} color={AZUL_MARINHO} />
+        <strong style={{ fontSize: 13, color: AZUL_MARINHO }}>Onde vamos entrar (norte → sul do litoral)</strong>
+      </div>
+      <div style={{ display: "grid", gap: 8 }}>
+        {ordemChaves.map((chave) => {
+          const g = porRegiao[chave];
+          const total = g.itens.length;
+          const porPrioridade = {};
+          g.itens.forEach((p) => { porPrioridade[p.prioridade] = (porPrioridade[p.prioridade] || 0) + 1; });
+          const ativo = regiaoAtiva === chave;
+          const mudouEstado = g.estado && g.estado !== estadoAnterior;
+          estadoAnterior = g.estado || estadoAnterior;
+          return (
+            <div key={chave}>
+              {mudouEstado && (
+                <div style={{ fontSize: 10.5, fontWeight: 800, color: "#8593a8", letterSpacing: 0.5, margin: "6px 0 4px", textTransform: "uppercase" }}>
+                  {ESTADO_LABEL[g.estado] || g.estado}
+                </div>
+              )}
+              <button onClick={() => onEscolherRegiao(chave)}
+                style={{
+                  width: "100%", textAlign: "left", cursor: "pointer", borderRadius: 10, padding: "9px 12px",
+                  border: `1.5px solid ${ativo ? AZUL_MEDIO : CINZA_BORDA}`, background: ativo ? "#EAF2FC" : "#fff",
+                  display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+                }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: AZUL_MEDIO, flexShrink: 0 }} />
+                <strong style={{ fontSize: 13, color: "#1a2330", flex: 1, minWidth: 140 }}>{g.regiao}</strong>
+                <span style={{ fontSize: 11.5, color: "#65758b", fontWeight: 600 }}>{total} empreendimento(s)</span>
+                <div style={{ display: "flex", height: 8, width: 110, borderRadius: 6, overflow: "hidden", background: CINZA_CLARO, flexShrink: 0 }}>
+                  {PRIORIDADES_PROSPECCAO.filter((pr) => porPrioridade[pr]).map((pr) => (
+                    <div key={pr} title={`${pr}: ${porPrioridade[pr]}`}
+                      style={{ width: `${(porPrioridade[pr] / total) * 100}%`, background: (COR_PRIORIDADE[pr] || COR_PRIORIDADE["A confirmar"]).cor }} />
+                  ))}
+                </div>
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function CardProspeccao({ prospeccao = [], carregando, atualizar, publicarNoDrive, clientes = [], notify, token }) {
   const [busca, setBusca] = useState("");
   const [publicando, setPublicando] = useState(false);
   const [linkPlanilha, setLinkPlanilha] = useState(null);
   const [carregandoCsv, setCarregandoCsv] = useState(false);
+  const [estadoFiltro, setEstadoFiltro] = useState(""); // "" = todos, "PE", "PB"
+  const [regiaoAtiva, setRegiaoAtiva] = useState(null); // "PE||Ipojuca" etc., ou null = todas do estado
+
+  const escolherEstado = (uf) => { setEstadoFiltro(uf); setRegiaoAtiva(null); };
+  const escolherRegiao = (chave) => setRegiaoAtiva((atual) => (atual === chave ? null : chave));
 
   /* CSV direto do sistema, sem depender de publicar no Drive antes — abre numa aba nova
      pra visualizar rápido. Precisa de fetch com o token (não dá pra usar <a href> puro,
@@ -8633,9 +8714,17 @@ function CardProspeccao({ prospeccao = [], carregando, atualizar, publicarNoDriv
   const termo = busca.trim().toLowerCase();
   const lista = prospeccao
     .filter((p) => !filtro || p.prioridade === filtro)
-    .filter((p) => !termo || `${p.empreendimento} ${p.acao} ${p.observacoes}`.toLowerCase().includes(termo))
+    .filter((p) => !estadoFiltro || p.estado === estadoFiltro)
+    .filter((p) => {
+      if (!regiaoAtiva) return true;
+      const chave = p.estado && p.regiao ? `${p.estado}||${p.regiao}` : "outras";
+      return chave === regiaoAtiva;
+    })
+    .filter((p) => !termo || `${p.empreendimento} ${p.acao} ${p.observacoes} ${p.local} ${p.construtora}`.toLowerCase().includes(termo))
     .sort((a, b) => PRIORIDADES_PROSPECCAO.indexOf(a.prioridade) - PRIORIDADES_PROSPECCAO.indexOf(b.prioridade)
       || a.empreendimento.localeCompare(b.empreendimento, "pt-BR"));
+
+  const estadosDisponiveis = [...new Set(prospeccao.map((p) => p.estado).filter(Boolean))].sort();
 
   return (
     <Card icon={TrendingUp} titulo={`Prospecção — carteira de empreendimentos (${prospeccao.length})`}>
@@ -8643,6 +8732,26 @@ function CardProspeccao({ prospeccao = [], carregando, atualizar, publicarNoDriv
         Base do planejamento comercial. Clique num empreendimento para ver a situação da obra e
         ajustar a prioridade — as datas das construtoras mudam, então a carteira precisa acompanhar.
       </p>
+
+      {estadosDisponiveis.length > 0 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+          <button onClick={() => escolherEstado("")} aria-pressed={!estadoFiltro}
+            style={{ padding: "6px 13px", borderRadius: 20, border: `1.5px solid ${!estadoFiltro ? AZUL_MARINHO : CINZA_BORDA}`, background: !estadoFiltro ? AZUL_MARINHO : "#fff", color: !estadoFiltro ? "#fff" : "#65758b", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+            Todos os estados
+          </button>
+          {estadosDisponiveis.map((uf) => {
+            const ativo = estadoFiltro === uf;
+            return (
+              <button key={uf} onClick={() => escolherEstado(ativo ? "" : uf)} aria-pressed={ativo}
+                style={{ padding: "6px 13px", borderRadius: 20, border: `1.5px solid ${ativo ? AZUL_MARINHO : CINZA_BORDA}`, background: ativo ? AZUL_MARINHO : "#fff", color: ativo ? "#fff" : "#65758b", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+                {ESTADO_LABEL[uf] || uf}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <IndicadorMapaProspeccao prospeccao={prospeccao} regiaoAtiva={regiaoAtiva} onEscolherRegiao={escolherRegiao} estadoFiltro={estadoFiltro} />
 
       {/* Ligação com o Drive: esta tela é a carteira de verdade; a planilha é uma cópia
           publicada, para consultar no celular ou mandar para alguém. Por isso o botão
@@ -8705,7 +8814,14 @@ function CardProspeccao({ prospeccao = [], carregando, atualizar, publicarNoDriv
                 <span style={{ background: c.bg, color: c.cor, borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 800, whiteSpace: "nowrap" }}>
                   {p.prioridade}
                 </span>
-                <strong style={{ fontSize: 13.5, flex: 1, minWidth: 150 }}>{p.empreendimento}</strong>
+                <span style={{ flex: 1, minWidth: 150 }}>
+                  <strong style={{ fontSize: 13.5, display: "block" }}>{p.empreendimento}</strong>
+                  {(p.local || p.previsaoEntrega) && (
+                    <span style={{ fontSize: 11.5, color: "#8593a8" }}>
+                      {p.local}{p.local && p.previsaoEntrega ? " · " : ""}{p.previsaoEntrega}
+                    </span>
+                  )}
+                </span>
                 {convertido && (
                   <span style={{ fontSize: 11, color: "#2E7D32", fontWeight: 700, whiteSpace: "nowrap" }}>✓ já é cliente</span>
                 )}
@@ -8719,6 +8835,18 @@ function CardProspeccao({ prospeccao = [], carregando, atualizar, publicarNoDriv
                       <strong style={{ color: "#65758b" }}>Obra: </strong>{p.estrutura}
                     </div>
                   )}
+                  <Grid>
+                    <Field label="Estado" value={p.estado} placeholder="PE, PB…"
+                      onChange={(v) => atualizar(p.id, { estado: v }, { silencioso: true })} />
+                    <Field label="Região" value={p.regiao} placeholder="Ex.: Ipojuca"
+                      onChange={(v) => atualizar(p.id, { regiao: v }, { silencioso: true })} />
+                    <Field label="Local / bairro" value={p.local} full
+                      onChange={(v) => atualizar(p.id, { local: v }, { silencioso: true })} />
+                    <Field label="Construtora" value={p.construtora}
+                      onChange={(v) => atualizar(p.id, { construtora: v }, { silencioso: true })} />
+                    <Field label="Previsão de entrega" value={p.previsaoEntrega} placeholder="Ex.: 06/2026"
+                      onChange={(v) => atualizar(p.id, { previsaoEntrega: v }, { silencioso: true })} />
+                  </Grid>
                   <div style={cell(true)}>
                     <label style={lab}>Prioridade</label>
                     <select style={inp} value={p.prioridade}
@@ -11458,6 +11586,339 @@ function AbaGerenciaReformas({ usuarioAtual, perfil }) {
 }
 
 /* ============================================================
+   GERÊNCIA · FN CASA PRONTA (rascunho)
+   Primeira versão do braço de pós-chaves descrito no documento "Projeto FN Casa
+   Pronta" (set/2026): cadastro de fornecedores homologados por categoria e ficha
+   técnica/comercial por empreendimento — a base sobre a qual os pacotes (Essencial,
+   Conforto, Casa Pronta) serão montados depois.
+
+   Sem tabela no backend ainda: os dados ficam neste navegador (localStorage), igual
+   ao carrinho de compras do marketplace. Quando o back-end ganhar as rotas certas,
+   isso migra para apiFetch como o resto do sistema — até lá, não é dado de verdade
+   compartilhado entre quem usa o sistema, só um rascunho local de quem cadastrou.
+   ============================================================ */
+const CASA_PRONTA_CATEGORIAS = [
+  "Box / vidraçaria", "Espelhos", "Telas de proteção", "Limpeza pós-serviço",
+  "Pintura", "Mármore / granito", "Elétrica / iluminação", "Gesso / drywall",
+  "Ar-condicionado", "Marcenaria", "Obras maiores", "Outro",
+];
+const CASA_PRONTA_STATUS = ["Em teste", "Homologado", "Preferencial", "Suspenso"];
+const CASA_PRONTA_STATUS_COR = {
+  "Em teste": { cor: "#8a6d00", bg: "#FFF4D6" },
+  "Homologado": { cor: "#1b6e3c", bg: "#E4F5E9" },
+  "Preferencial": { cor: "#12335B", bg: "#DCE7F5" },
+  "Suspenso": { cor: "#b3261e", bg: "#FBE7E6" },
+};
+const CHAVE_CASA_PRONTA_FORNECEDORES = "fn_casa_pronta_fornecedores";
+const CHAVE_CASA_PRONTA_FICHAS = "fn_casa_pronta_fichas";
+
+function lerCasaProntaLista(chave) {
+  try {
+    const bruto = window.localStorage.getItem(chave);
+    const lista = bruto ? JSON.parse(bruto) : [];
+    return Array.isArray(lista) ? lista : [];
+  } catch { return []; }
+}
+function gravarCasaProntaLista(chave, lista) {
+  try { window.localStorage.setItem(chave, JSON.stringify(lista)); } catch { /* sem storage, some ao fechar a aba */ }
+}
+
+function AbaGerenciaCasaPronta({ notify }) {
+  const [sub, setSub] = useState("fornecedores"); // "fornecedores" | "fichas"
+  const [fornecedores, setFornecedores] = useState(() => lerCasaProntaLista(CHAVE_CASA_PRONTA_FORNECEDORES));
+  const [fichas, setFichas] = useState(() => lerCasaProntaLista(CHAVE_CASA_PRONTA_FICHAS));
+
+  useEffect(() => gravarCasaProntaLista(CHAVE_CASA_PRONTA_FORNECEDORES, fornecedores), [fornecedores]);
+  useEffect(() => gravarCasaProntaLista(CHAVE_CASA_PRONTA_FICHAS, fichas), [fichas]);
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <div style={{ background: "#EAF2FB", border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "10px 14px", fontSize: 12.5, color: "#2C4A6E", display: "flex", gap: 8, alignItems: "flex-start" }}>
+        <Info size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+        <span>
+          Primeira versão do <strong>FN Casa Pronta</strong> (pós-chaves): fornecedores homologados e ficha técnica por empreendimento.
+          Os dados ficam só neste navegador por enquanto — ainda não há tabela no servidor para isso.
+        </span>
+      </div>
+
+      <div style={{ display: "flex", gap: 8 }}>
+        {[["fornecedores", "Fornecedores", Wrench], ["fichas", "Fichas técnicas", Building2]].map(([k, label, Icon]) => (
+          <button key={k} type="button" onClick={() => setSub(k)}
+            style={{
+              display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, cursor: "pointer",
+              border: `1.5px solid ${sub === k ? AZUL_MARINHO : CINZA_BORDA}`,
+              background: sub === k ? AZUL_MARINHO : "#fff", color: sub === k ? "#fff" : "#4a5a70", fontSize: 13, fontWeight: 600,
+            }}>
+            <Icon size={14} /> {label}
+          </button>
+        ))}
+      </div>
+
+      {sub === "fornecedores"
+        ? <CardFornecedoresCasaPronta fornecedores={fornecedores} setFornecedores={setFornecedores} notify={notify} />
+        : <CardFichasTecnicasCasaPronta fichas={fichas} setFichas={setFichas} fornecedores={fornecedores} notify={notify} />}
+    </div>
+  );
+}
+
+function CardFornecedoresCasaPronta({ fornecedores, setFornecedores, notify }) {
+  const [busca, setBusca] = useState("");
+  const [filtroCategoria, setFiltroCategoria] = useState("");
+  const [editando, setEditando] = useState(null); // fornecedor sendo editado, ou {} pra novo
+
+  const termo = busca.trim().toLowerCase();
+  const visiveis = fornecedores.filter((f) => {
+    if (filtroCategoria && f.categoria !== filtroCategoria) return false;
+    if (termo && !`${f.nome} ${f.categoria}`.toLowerCase().includes(termo)) return false;
+    return true;
+  });
+
+  const iniciarNovo = () => setEditando({
+    nome: "", categoria: CASA_PRONTA_CATEGORIAS[0], status: "Em teste",
+    contato: "", areaAtendida: "", precoPublico: "", precoFn1a4: "", precoFn5a9: "", precoFn10mais: "",
+    prazo: "", garantia: "", retrabalho: "", capacidade: "", pagamento: "", observacoes: "",
+  });
+
+  const salvar = () => {
+    if (!editando.nome?.trim()) { notify("Informe o nome do fornecedor."); return; }
+    setFornecedores((lista) => (
+      editando.id ? lista.map((f) => (f.id === editando.id ? editando : f)) : [...lista, { ...editando, id: `fp_${Date.now()}` }]
+    ));
+    setEditando(null);
+  };
+
+  const excluir = (id) => setFornecedores((lista) => lista.filter((f) => f.id !== id));
+
+  return (
+    <Card icon={Wrench} titulo={`Fornecedores homologados (${fornecedores.length})`}>
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Base de prestadores por categoria, com preço por faixa de volume e status de homologação — o insumo pra montar os pacotes por empreendimento.
+      </p>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <input style={{ ...inp, flex: 1, minWidth: 200 }} value={busca} onChange={(e) => setBusca(e.target.value)}
+          placeholder={`Buscar em ${fornecedores.length} fornecedor(es)…`} />
+        <select style={{ ...inp, width: "auto" }} value={filtroCategoria} onChange={(e) => setFiltroCategoria(e.target.value)}>
+          <option value="">Todas as categorias</option>
+          {CASA_PRONTA_CATEGORIAS.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }} onClick={iniciarNovo}>
+          <Plus size={15} /> Novo fornecedor
+        </button>
+      </div>
+
+      {visiveis.length === 0 && (
+        <p style={{ color: "#8593a8", fontSize: 14 }}>
+          {fornecedores.length === 0 ? "Nenhum fornecedor cadastrado ainda." : "Nada encontrado com esse filtro."}
+        </p>
+      )}
+
+      <div style={{ display: "grid", gap: 8 }}>
+        {visiveis.map((f) => (
+          <div key={f.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <div style={{ fontWeight: 700, fontSize: 13.5 }}>{f.nome}</div>
+              <div style={{ fontSize: 12, color: "#65758b" }}>
+                {f.categoria}{f.contato && ` · ${f.contato}`}{f.prazo && ` · prazo ${f.prazo}`}
+              </div>
+            </div>
+            {(f.precoFn1a4 || f.precoFn5a9 || f.precoFn10mais) && (
+              <div style={{ fontSize: 11.5, color: "#4a5a70", textAlign: "right", lineHeight: 1.5 }}>
+                {f.precoFn1a4 && <div>1-4un: {f.precoFn1a4}</div>}
+                {f.precoFn5a9 && <div>5-9un: {f.precoFn5a9}</div>}
+                {f.precoFn10mais && <div>10+un: {f.precoFn10mais}</div>}
+              </div>
+            )}
+            <span style={{ fontSize: 11, fontWeight: 700, color: CASA_PRONTA_STATUS_COR[f.status]?.cor, background: CASA_PRONTA_STATUS_COR[f.status]?.bg, borderRadius: 20, padding: "2px 10px", whiteSpace: "nowrap" }}>
+              {f.status}
+            </span>
+            <button className="icon-btn" onClick={() => setEditando({ ...f })} title="Editar"><Edit3 size={15} color={AZUL_MEDIO} /></button>
+            <button className="icon-btn" onClick={() => excluir(f.id)} title="Excluir"><Trash2 size={15} color="#c62828" /></button>
+          </div>
+        ))}
+      </div>
+
+      {editando && (
+        <div className="no-print" style={overlay} onClick={() => setEditando(null)}>
+          <div style={{ ...modal, maxWidth: 640, maxHeight: "88vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <strong>{editando.id ? "Editar fornecedor" : "Novo fornecedor"}</strong>
+              <button className="icon-btn" onClick={() => setEditando(null)}><X size={16} /></button>
+            </div>
+            <Grid>
+              <Field label="Nome" value={editando.nome} onChange={(v) => setEditando((ed) => ({ ...ed, nome: v }))} full />
+              <div style={cell(false)}>
+                <label style={lab}>Categoria</label>
+                <select style={inp} value={editando.categoria} onChange={(e) => setEditando((ed) => ({ ...ed, categoria: e.target.value }))}>
+                  {CASA_PRONTA_CATEGORIAS.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div style={cell(false)}>
+                <label style={lab}>Status</label>
+                <select style={inp} value={editando.status} onChange={(e) => setEditando((ed) => ({ ...ed, status: e.target.value }))}>
+                  {CASA_PRONTA_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <Field label="Contato" value={editando.contato} onChange={(v) => setEditando((ed) => ({ ...ed, contato: v }))} placeholder="WhatsApp / e-mail" />
+              <Field label="Área atendida" value={editando.areaAtendida} onChange={(v) => setEditando((ed) => ({ ...ed, areaAtendida: v }))} />
+              <Field label="Preço público" value={editando.precoPublico} onChange={(v) => setEditando((ed) => ({ ...ed, precoPublico: v }))} placeholder="R$" />
+              <Field label="Preço FN — 1 a 4 unidades" value={editando.precoFn1a4} onChange={(v) => setEditando((ed) => ({ ...ed, precoFn1a4: v }))} placeholder="R$" />
+              <Field label="Preço FN — 5 a 9 unidades" value={editando.precoFn5a9} onChange={(v) => setEditando((ed) => ({ ...ed, precoFn5a9: v }))} placeholder="R$" />
+              <Field label="Preço FN — 10+ unidades" value={editando.precoFn10mais} onChange={(v) => setEditando((ed) => ({ ...ed, precoFn10mais: v }))} placeholder="R$" />
+              <Field label="Prazo" value={editando.prazo} onChange={(v) => setEditando((ed) => ({ ...ed, prazo: v }))} placeholder="após medição/aprovação" />
+              <Field label="Garantia" value={editando.garantia} onChange={(v) => setEditando((ed) => ({ ...ed, garantia: v }))} />
+              <Field label="Prazo de retrabalho" value={editando.retrabalho} onChange={(v) => setEditando((ed) => ({ ...ed, retrabalho: v }))} />
+              <Field label="Capacidade" value={editando.capacidade} onChange={(v) => setEditando((ed) => ({ ...ed, capacidade: v }))} placeholder="por semana/mês" />
+              <Field label="Pagamento" value={editando.pagamento} onChange={(v) => setEditando((ed) => ({ ...ed, pagamento: v }))} placeholder="PIX, cartão, sinal..." />
+            </Grid>
+            <Area label="Observações" value={editando.observacoes} onChange={(v) => setEditando((ed) => ({ ...ed, observacoes: v }))} rows={2} />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setEditando(null)}>Cancelar</button>
+              <button className="btn-solid" style={{ width: "auto", padding: "9px 18px" }} onClick={salvar}><Save size={14} /> Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function CardFichasTecnicasCasaPronta({ fichas, setFichas, fornecedores, notify }) {
+  const [busca, setBusca] = useState("");
+  const [editando, setEditando] = useState(null); // ficha sendo editada, ou {} pra nova
+
+  const termo = busca.trim().toLowerCase();
+  const visiveis = termo
+    ? fichas.filter((f) => `${f.nome} ${f.construtora}`.toLowerCase().includes(termo))
+    : fichas;
+
+  const iniciarNova = () => setEditando({
+    nome: "", construtora: "", tiposPlanta: "", metragem: "", banheiros: "",
+    itensPadronizaveis: "", prazoMedioServico: "", pacotesAprovados: "", margensMinimas: "",
+    historico: "", vinculos: [],
+  });
+
+  const salvar = () => {
+    if (!editando.nome?.trim()) { notify("Informe o nome do empreendimento."); return; }
+    setFichas((lista) => (
+      editando.id ? lista.map((f) => (f.id === editando.id ? editando : f)) : [...lista, { ...editando, id: `ft_${Date.now()}` }]
+    ));
+    setEditando(null);
+  };
+
+  const excluir = (id) => setFichas((lista) => lista.filter((f) => f.id !== id));
+
+  const adicionarVinculo = () => setEditando((ed) => ({
+    ...ed,
+    vinculos: [...(ed.vinculos || []), { id: `v_${Date.now()}`, categoria: CASA_PRONTA_CATEGORIAS[0], fornecedorId: "", precoNegociado: "", faixaVolume: "1 a 4", prazo: "" }],
+  }));
+  const atualizarVinculo = (id, campo, valor) => setEditando((ed) => ({
+    ...ed,
+    vinculos: ed.vinculos.map((v) => (v.id === id ? { ...v, [campo]: valor, ...(campo === "categoria" ? { fornecedorId: "" } : {}) } : v)),
+  }));
+  const removerVinculo = (id) => setEditando((ed) => ({ ...ed, vinculos: ed.vinculos.filter((v) => v.id !== id) }));
+
+  return (
+    <Card icon={Building2} titulo={`Fichas técnicas por empreendimento (${fichas.length})`}>
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Uma ficha por condomínio: dados da planta, preços já negociados por fornecedor e condições — a base pra padronizar por empreendimento, e não por cliente.
+      </p>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <input style={{ ...inp, flex: 1, minWidth: 200 }} value={busca} onChange={(e) => setBusca(e.target.value)}
+          placeholder={`Buscar em ${fichas.length} ficha(s)…`} />
+        <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }} onClick={iniciarNova}>
+          <Plus size={15} /> Nova ficha
+        </button>
+      </div>
+
+      {visiveis.length === 0 && (
+        <p style={{ color: "#8593a8", fontSize: 14 }}>
+          {fichas.length === 0 ? "Nenhuma ficha cadastrada ainda." : "Nada encontrado com esse filtro."}
+        </p>
+      )}
+
+      <div style={{ display: "grid", gap: 8 }}>
+        {visiveis.map((f) => (
+          <div key={f.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <div style={{ fontWeight: 700, fontSize: 13.5 }}>{f.nome}</div>
+              <div style={{ fontSize: 12, color: "#65758b" }}>
+                {f.construtora && `${f.construtora} · `}{f.tiposPlanta || "sem plantas cadastradas"}
+                {(f.vinculos || []).length > 0 && ` · ${f.vinculos.length} fornecedor(es) vinculado(s)`}
+              </div>
+            </div>
+            <button className="icon-btn" onClick={() => setEditando({ ...f, vinculos: f.vinculos || [] })} title="Editar"><Edit3 size={15} color={AZUL_MEDIO} /></button>
+            <button className="icon-btn" onClick={() => excluir(f.id)} title="Excluir"><Trash2 size={15} color="#c62828" /></button>
+          </div>
+        ))}
+      </div>
+
+      {editando && (
+        <div className="no-print" style={overlay} onClick={() => setEditando(null)}>
+          <div style={{ ...modal, maxWidth: 760, maxHeight: "88vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <strong>{editando.id ? "Editar ficha técnica" : "Nova ficha técnica"}</strong>
+              <button className="icon-btn" onClick={() => setEditando(null)}><X size={16} /></button>
+            </div>
+            <Grid>
+              <Field label="Empreendimento" value={editando.nome} onChange={(v) => setEditando((ed) => ({ ...ed, nome: v }))} full />
+              <Field label="Construtora/incorporadora" value={editando.construtora} onChange={(v) => setEditando((ed) => ({ ...ed, construtora: v }))} />
+              <Field label="Tipos de planta e metragem" value={editando.tiposPlanta} onChange={(v) => setEditando((ed) => ({ ...ed, tiposPlanta: v }))} placeholder="2 e 3 quartos, 55 a 78 m²" />
+              <Field label="Banheiros / janelas / varanda" value={editando.banheiros} onChange={(v) => setEditando((ed) => ({ ...ed, banheiros: v }))} />
+              <Field label="Prazo médio por serviço" value={editando.prazoMedioServico} onChange={(v) => setEditando((ed) => ({ ...ed, prazoMedioServico: v }))} />
+              <Field label="Margens mínimas" value={editando.margensMinimas} onChange={(v) => setEditando((ed) => ({ ...ed, margensMinimas: v }))} />
+            </Grid>
+            <Area label="Itens passíveis de padronização por planta" value={editando.itensPadronizaveis} onChange={(v) => setEditando((ed) => ({ ...ed, itensPadronizaveis: v }))} rows={2} />
+            <Area label="Pacotes aprovados" value={editando.pacotesAprovados} onChange={(v) => setEditando((ed) => ({ ...ed, pacotesAprovados: v }))} rows={2} />
+            <Area label="Histórico de alterações, ocorrências e desempenho dos fornecedores" value={editando.historico} onChange={(v) => setEditando((ed) => ({ ...ed, historico: v }))} rows={2} />
+
+            <div style={{ marginTop: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <label style={lab}>Fornecedores vinculados e preço negociado</label>
+                <button type="button" className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO, padding: "5px 10px", fontSize: 12.5 }} onClick={adicionarVinculo}>
+                  <Plus size={13} /> Vincular fornecedor
+                </button>
+              </div>
+              {(editando.vinculos || []).length === 0 && (
+                <p style={{ color: "#8593a8", fontSize: 13, margin: 0 }}>Nenhum fornecedor vinculado ainda.</p>
+              )}
+              <div style={{ display: "grid", gap: 8 }}>
+                {(editando.vinculos || []).map((v) => {
+                  const opcoes = fornecedores.filter((f) => f.categoria === v.categoria);
+                  return (
+                    <div key={v.id} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, padding: 8 }}>
+                      <select style={{ ...inp, width: "auto" }} value={v.categoria} onChange={(e) => atualizarVinculo(v.id, "categoria", e.target.value)}>
+                        {CASA_PRONTA_CATEGORIAS.map((c) => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                      <select style={{ ...inp, width: "auto", flex: 1, minWidth: 160 }} value={v.fornecedorId} onChange={(e) => atualizarVinculo(v.id, "fornecedorId", e.target.value)}>
+                        <option value="">{opcoes.length ? "Selecione o fornecedor" : "Sem fornecedor dessa categoria"}</option>
+                        {opcoes.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                      </select>
+                      <select style={{ ...inp, width: "auto" }} value={v.faixaVolume} onChange={(e) => atualizarVinculo(v.id, "faixaVolume", e.target.value)}>
+                        {["1 a 4", "5 a 9", "10+"].map((f) => <option key={f} value={f}>{f} un.</option>)}
+                      </select>
+                      <input style={{ ...inp, width: 110 }} value={v.precoNegociado} onChange={(e) => atualizarVinculo(v.id, "precoNegociado", e.target.value)} placeholder="R$ negociado" />
+                      <input style={{ ...inp, width: 110 }} value={v.prazo} onChange={(e) => atualizarVinculo(v.id, "prazo", e.target.value)} placeholder="Prazo" />
+                      <button className="icon-btn" onClick={() => removerVinculo(v.id)} title="Remover"><Trash2 size={14} color="#c62828" /></button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setEditando(null)}>Cancelar</button>
+              <button className="btn-solid" style={{ width: "auto", padding: "9px 18px" }} onClick={salvar}><Save size={14} /> Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/* ============================================================
    GERÊNCIA · INDICADORES
    Os mesmos números que a Visão geral já mostrava, agora separados nos três eixos que antes
    ficavam somados num total só: histórico importado × operação de hoje, vistoria × ART/TRT, e
@@ -12525,6 +12986,9 @@ function AbaGerencia({ sub = "visao-geral", token, perfil, usuarioAtual, decidir
   }
   if (sub === "reformas") {
     return <AbaGerenciaReformas usuarioAtual={usuarioAtual} perfil={perfil} />;
+  }
+  if (sub === "casa-pronta") {
+    return <AbaGerenciaCasaPronta notify={notify} />;
   }
   if (sub === "perfil-cliente") {
     return <AbaPerfilCliente clientes={clientes} token={token} notify={notify}
