@@ -11612,6 +11612,15 @@ const CASA_PRONTA_STATUS_COR = {
 };
 const CHAVE_CASA_PRONTA_FORNECEDORES = "fn_casa_pronta_fornecedores";
 const CHAVE_CASA_PRONTA_FICHAS = "fn_casa_pronta_fichas";
+const CHAVE_CASA_PRONTA_VENDAS = "fn_casa_pronta_vendas";
+const PACOTES_BASE_SUGESTOES = ["FN Essencial", "FN Conforto", "FN Casa Pronta", "Personalize"];
+/* Jornada do cliente, seção 7 do documento — usada como o "fluxograma" de acompanhamento
+   de cada pacote vendido. Fixa de propósito: mudar a ordem aqui muda o passo a passo de
+   toda obra em andamento, e o documento já validou essa sequência. */
+const ETAPAS_JORNADA_CASA_PRONTA = [
+  "Entrada", "Diagnóstico", "Conferência", "Proposta", "Contratação",
+  "Cronograma", "Execução", "Checklist", "Aceite", "Encerramento",
+];
 
 function lerCasaProntaLista(chave) {
   try {
@@ -11625,12 +11634,14 @@ function gravarCasaProntaLista(chave, lista) {
 }
 
 function AbaGerenciaCasaPronta({ notify }) {
-  const [sub, setSub] = useState("fornecedores"); // "fornecedores" | "fichas" | "indicadores"
+  const [sub, setSub] = useState("fornecedores"); // "fornecedores" | "fichas" | "vendas" | "indicadores"
   const [fornecedores, setFornecedores] = useState(() => lerCasaProntaLista(CHAVE_CASA_PRONTA_FORNECEDORES));
   const [fichas, setFichas] = useState(() => lerCasaProntaLista(CHAVE_CASA_PRONTA_FICHAS));
+  const [vendas, setVendas] = useState(() => lerCasaProntaLista(CHAVE_CASA_PRONTA_VENDAS));
 
   useEffect(() => gravarCasaProntaLista(CHAVE_CASA_PRONTA_FORNECEDORES, fornecedores), [fornecedores]);
   useEffect(() => gravarCasaProntaLista(CHAVE_CASA_PRONTA_FICHAS, fichas), [fichas]);
+  useEffect(() => gravarCasaProntaLista(CHAVE_CASA_PRONTA_VENDAS, vendas), [vendas]);
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -11643,7 +11654,7 @@ function AbaGerenciaCasaPronta({ notify }) {
       </div>
 
       <div style={{ display: "flex", gap: 8 }}>
-        {[["fornecedores", "Fornecedores", Wrench], ["fichas", "Fichas técnicas", Building2], ["indicadores", "Indicadores", PieChart]].map(([k, label, Icon]) => (
+        {[["fornecedores", "Fornecedores", Wrench], ["fichas", "Fichas técnicas", Building2], ["vendas", "Pacotes vendidos", ClipboardList], ["indicadores", "Indicadores", PieChart]].map(([k, label, Icon]) => (
           <button key={k} type="button" onClick={() => setSub(k)}
             style={{
               display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, cursor: "pointer",
@@ -11657,7 +11668,8 @@ function AbaGerenciaCasaPronta({ notify }) {
 
       {sub === "fornecedores" && <CardFornecedoresCasaPronta fornecedores={fornecedores} setFornecedores={setFornecedores} notify={notify} />}
       {sub === "fichas" && <CardFichasTecnicasCasaPronta fichas={fichas} setFichas={setFichas} fornecedores={fornecedores} notify={notify} />}
-      {sub === "indicadores" && <CardIndicadoresCasaPronta fornecedores={fornecedores} fichas={fichas} />}
+      {sub === "vendas" && <CardAcompanhamentoCasaPronta fichas={fichas} fornecedores={fornecedores} vendas={vendas} setVendas={setVendas} notify={notify} />}
+      {sub === "indicadores" && <CardIndicadoresCasaPronta fornecedores={fornecedores} fichas={fichas} vendas={vendas} />}
     </div>
   );
 }
@@ -11892,8 +11904,8 @@ function CardFichasTecnicasCasaPronta({ fichas, setFichas, fornecedores, notify 
 
   const iniciarNova = () => setEditando({
     nome: "", construtora: "", tiposPlanta: "", metragem: "", banheiros: "",
-    itensPadronizaveis: "", prazoMedioServico: "", pacotesAprovados: "", margensMinimas: "",
-    historico: "", vinculos: [],
+    itensPadronizaveis: "", prazoMedioServico: "", margensMinimas: "",
+    historico: "", vinculos: [], pacotes: [],
   });
 
   const salvar = () => {
@@ -11915,6 +11927,15 @@ function CardFichasTecnicasCasaPronta({ fichas, setFichas, fornecedores, notify 
     vinculos: ed.vinculos.map((v) => (v.id === id ? { ...v, [campo]: valor, ...(campo === "categoria" ? { fornecedorId: "" } : {}) } : v)),
   }));
   const removerVinculo = (id) => setEditando((ed) => ({ ...ed, vinculos: ed.vinculos.filter((v) => v.id !== id) }));
+
+  const adicionarPacote = (nomeSugerido) => setEditando((ed) => ({
+    ...ed,
+    pacotes: [...(ed.pacotes || []), { id: `pc_${Date.now()}`, nome: nomeSugerido || "", conteudo: "", preco: "" }],
+  }));
+  const atualizarPacote = (id, campo, valor) => setEditando((ed) => ({
+    ...ed, pacotes: ed.pacotes.map((p) => (p.id === id ? { ...p, [campo]: valor } : p)),
+  }));
+  const removerPacote = (id) => setEditando((ed) => ({ ...ed, pacotes: ed.pacotes.filter((p) => p.id !== id) }));
 
   return (
     <Card icon={Building2} titulo={`Fichas técnicas por empreendimento (${fichas.length})`}>
@@ -11944,9 +11965,10 @@ function CardFichasTecnicasCasaPronta({ fichas, setFichas, fornecedores, notify 
               <div style={{ fontSize: 12, color: "#65758b" }}>
                 {f.construtora && `${f.construtora} · `}{f.tiposPlanta || "sem plantas cadastradas"}
                 {(f.vinculos || []).length > 0 && ` · ${f.vinculos.length} fornecedor(es) vinculado(s)`}
+                {(f.pacotes || []).length > 0 && ` · ${f.pacotes.length} pacote(s)`}
               </div>
             </div>
-            <button className="icon-btn" onClick={() => setEditando({ ...f, vinculos: f.vinculos || [] })} title="Editar"><Edit3 size={15} color={AZUL_MEDIO} /></button>
+            <button className="icon-btn" onClick={() => setEditando({ ...f, vinculos: f.vinculos || [], pacotes: f.pacotes || [] })} title="Editar"><Edit3 size={15} color={AZUL_MEDIO} /></button>
             <button className="icon-btn" onClick={() => excluir(f.id)} title="Excluir"><Trash2 size={15} color="#c62828" /></button>
           </div>
         ))}
@@ -11968,8 +11990,39 @@ function CardFichasTecnicasCasaPronta({ fichas, setFichas, fornecedores, notify 
               <Field label="Margens mínimas" value={editando.margensMinimas} onChange={(v) => setEditando((ed) => ({ ...ed, margensMinimas: v }))} />
             </Grid>
             <Area label="Itens passíveis de padronização por planta" value={editando.itensPadronizaveis} onChange={(v) => setEditando((ed) => ({ ...ed, itensPadronizaveis: v }))} rows={2} />
-            <Area label="Pacotes aprovados" value={editando.pacotesAprovados} onChange={(v) => setEditando((ed) => ({ ...ed, pacotesAprovados: v }))} rows={2} />
             <Area label="Histórico de alterações, ocorrências e desempenho dos fornecedores" value={editando.historico} onChange={(v) => setEditando((ed) => ({ ...ed, historico: v }))} rows={2} />
+
+            <div style={{ marginTop: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+                <label style={lab}>Catálogo de pacotes deste empreendimento</label>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {PACOTES_BASE_SUGESTOES.map((nome) => (
+                    <button key={nome} type="button" className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO, padding: "5px 10px", fontSize: 12 }}
+                      onClick={() => adicionarPacote(nome)}>
+                      <Plus size={12} /> {nome}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {(editando.pacotes || []).length === 0 && (
+                <p style={{ color: "#8593a8", fontSize: 13, margin: 0 }}>
+                  Nenhum pacote ainda — use os botões acima pra começar do padrão do documento (Essencial → Conforto → Casa Pronta → Personalize), ou monte o seu.
+                </p>
+              )}
+              <div style={{ display: "grid", gap: 8 }}>
+                {(editando.pacotes || []).map((p) => (
+                  <div key={p.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, padding: 10 }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                      <input style={{ ...inp, flex: 1 }} value={p.nome} onChange={(e) => atualizarPacote(p.id, "nome", e.target.value)} placeholder="Nome do pacote" />
+                      <input style={{ ...inp, width: 120 }} value={p.preco} onChange={(e) => atualizarPacote(p.id, "preco", e.target.value)} placeholder="R$" />
+                      <button className="icon-btn" onClick={() => removerPacote(p.id)} title="Remover"><Trash2 size={14} color="#c62828" /></button>
+                    </div>
+                    <textarea style={{ ...inp, width: "100%", resize: "vertical", fontFamily: "inherit" }} rows={2} value={p.conteudo}
+                      onChange={(e) => atualizarPacote(p.id, "conteudo", e.target.value)} placeholder="O que está incluso (itens, serviços, módulos)" />
+                  </div>
+                ))}
+              </div>
+            </div>
 
             <div style={{ marginTop: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
@@ -12016,6 +12069,213 @@ function CardFichasTecnicasCasaPronta({ fichas, setFichas, fornecedores, notify 
   );
 }
 
+const CRONOGRAMA_STATUS_CASA_PRONTA = ["Planejado", "Em andamento", "Concluído", "Atrasado"];
+const CRONOGRAMA_STATUS_COR = {
+  "Planejado": { cor: "#5a6a80", bg: "#F1F4F8" },
+  "Em andamento": { cor: "#8a6d00", bg: "#FFF4D6" },
+  "Concluído": { cor: "#1b6e3c", bg: "#E4F5E9" },
+  "Atrasado": { cor: "#b3261e", bg: "#FBE7E6" },
+};
+
+/* Acompanhamento de cada pacote vendido: a jornada do cliente (seção 7 do documento) como
+   fluxograma de etapas, o cronograma por serviço/fornecedor (seção 8, "painel mínimo por
+   apartamento") e as pendências em aberto. É o que fecha o ciclo depois que a ficha técnica
+   e o catálogo de pacotes por empreendimento já existem. */
+function CardAcompanhamentoCasaPronta({ fichas, fornecedores, vendas, setVendas, notify }) {
+  const [busca, setBusca] = useState("");
+  const [editando, setEditando] = useState(null);
+
+  const fichaPorId = Object.fromEntries(fichas.map((f) => [f.id, f]));
+  const termo = busca.trim().toLowerCase();
+  const visiveis = termo
+    ? vendas.filter((v) => `${v.cliente} ${fichaPorId[v.fichaId]?.nome || ""}`.toLowerCase().includes(termo))
+    : vendas;
+
+  const iniciarNova = () => setEditando({
+    fichaId: fichas[0]?.id || "", cliente: "", unidade: "", pacoteNome: "", valor: "", dataVenda: "",
+    etapaIndex: 0, cronograma: [], pendencias: [],
+  });
+
+  const salvar = () => {
+    if (!editando.cliente?.trim()) { notify("Informe o cliente."); return; }
+    if (!editando.fichaId) { notify("Selecione o empreendimento."); return; }
+    setVendas((lista) => (
+      editando.id ? lista.map((v) => (v.id === editando.id ? editando : v)) : [...lista, { ...editando, id: `vd_${Date.now()}` }]
+    ));
+    setEditando(null);
+  };
+  const excluir = (id) => setVendas((lista) => lista.filter((v) => v.id !== id));
+
+  const add = (campo, item) => setEditando((ed) => ({ ...ed, [campo]: [...(ed[campo] || []), item] }));
+  const upd = (campo, id, patch) => setEditando((ed) => ({ ...ed, [campo]: ed[campo].map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
+  const rem = (campo, id) => setEditando((ed) => ({ ...ed, [campo]: ed[campo].filter((x) => x.id !== id) }));
+
+  const pacotesDaFicha = fichaPorId[editando?.fichaId]?.pacotes || [];
+
+  return (
+    <Card icon={ClipboardList} titulo={`Pacotes vendidos e acompanhamento (${vendas.length})`}>
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Cada pacote vendido a um cliente, com a jornada de pós-chaves (fluxograma), o cronograma por serviço e as pendências em aberto.
+      </p>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <input style={{ ...inp, flex: 1, minWidth: 200 }} value={busca} onChange={(e) => setBusca(e.target.value)}
+          placeholder={`Buscar em ${vendas.length} pacote(s) vendido(s)…`} />
+        <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }} onClick={iniciarNova} disabled={fichas.length === 0}>
+          <Plus size={15} /> Novo pacote vendido
+        </button>
+      </div>
+      {fichas.length === 0 && <p style={{ color: "#8593a8", fontSize: 13 }}>Cadastre uma ficha técnica de empreendimento antes de registrar uma venda.</p>}
+
+      {fichas.length > 0 && visiveis.length === 0 && (
+        <p style={{ color: "#8593a8", fontSize: 14 }}>
+          {vendas.length === 0 ? "Nenhum pacote vendido ainda." : "Nada encontrado com esse filtro."}
+        </p>
+      )}
+
+      <div style={{ display: "grid", gap: 8 }}>
+        {visiveis.map((v) => {
+          const etapa = ETAPAS_JORNADA_CASA_PRONTA[v.etapaIndex] || ETAPAS_JORNADA_CASA_PRONTA[0];
+          const pendentes = (v.pendencias || []).filter((p) => !p.resolvida).length;
+          return (
+            <div key={v.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: 220 }}>
+                <div style={{ fontWeight: 700, fontSize: 13.5 }}>{v.cliente}{v.unidade && ` · ${v.unidade}`}</div>
+                <div style={{ fontSize: 12, color: "#65758b" }}>
+                  {fichaPorId[v.fichaId]?.nome || "(empreendimento removido)"}{v.pacoteNome && ` · ${v.pacoteNome}`}{v.valor && ` · ${v.valor}`}
+                </div>
+              </div>
+              {pendentes > 0 && (
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#b3261e", background: "#FBE7E6", borderRadius: 20, padding: "2px 10px", whiteSpace: "nowrap" }}>
+                  {pendentes} pendência(s)
+                </span>
+              )}
+              <span style={{ fontSize: 11, fontWeight: 700, color: AZUL_MARINHO, background: CINZA_CLARO, borderRadius: 20, padding: "2px 10px", whiteSpace: "nowrap" }}>
+                {etapa}
+              </span>
+              <button className="icon-btn" onClick={() => setEditando({ ...v, cronograma: v.cronograma || [], pendencias: v.pendencias || [] })} title="Editar"><Edit3 size={15} color={AZUL_MEDIO} /></button>
+              <button className="icon-btn" onClick={() => excluir(v.id)} title="Excluir"><Trash2 size={15} color="#c62828" /></button>
+            </div>
+          );
+        })}
+      </div>
+
+      {editando && (
+        <div className="no-print" style={overlay} onClick={() => setEditando(null)}>
+          <div style={{ ...modal, maxWidth: 780, maxHeight: "88vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <strong>{editando.id ? "Editar pacote vendido" : "Novo pacote vendido"}</strong>
+              <button className="icon-btn" onClick={() => setEditando(null)}><X size={16} /></button>
+            </div>
+            <Grid>
+              <Field label="Cliente" value={editando.cliente} onChange={(v) => setEditando((ed) => ({ ...ed, cliente: v }))} />
+              <Field label="Unidade" value={editando.unidade} onChange={(v) => setEditando((ed) => ({ ...ed, unidade: v }))} placeholder="Bloco / apto" />
+              <div style={cell(false)}>
+                <label style={lab}>Empreendimento</label>
+                <select style={inp} value={editando.fichaId} onChange={(e) => setEditando((ed) => ({ ...ed, fichaId: e.target.value, pacoteNome: "" }))}>
+                  {fichas.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                </select>
+              </div>
+              <div style={cell(false)}>
+                <label style={lab}>Pacote</label>
+                {pacotesDaFicha.length > 0 ? (
+                  <select style={inp} value={editando.pacoteNome} onChange={(e) => setEditando((ed) => ({ ...ed, pacoteNome: e.target.value }))}>
+                    <option value="">Selecione…</option>
+                    {pacotesDaFicha.map((p) => <option key={p.id} value={p.nome}>{p.nome}{p.preco ? ` — ${p.preco}` : ""}</option>)}
+                  </select>
+                ) : (
+                  <input style={inp} value={editando.pacoteNome} onChange={(e) => setEditando((ed) => ({ ...ed, pacoteNome: e.target.value }))} placeholder="Sem catálogo nesta ficha — digite o pacote" />
+                )}
+              </div>
+              <Field label="Valor" value={editando.valor} onChange={(v) => setEditando((ed) => ({ ...ed, valor: v }))} placeholder="R$" />
+              <Field label="Data da venda" value={editando.dataVenda} onChange={(v) => setEditando((ed) => ({ ...ed, dataVenda: v }))} type="date" />
+            </Grid>
+
+            <div style={{ marginTop: 18 }}>
+              <label style={lab}>Fluxograma — jornada do cliente</label>
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 8 }}>
+                {ETAPAS_JORNADA_CASA_PRONTA.map((etapa, i) => {
+                  const concluida = i < editando.etapaIndex;
+                  const atual = i === editando.etapaIndex;
+                  return (
+                    <button key={etapa} type="button" onClick={() => setEditando((ed) => ({ ...ed, etapaIndex: i }))}
+                      title={`Marcar etapa atual: ${etapa}`}
+                      style={{
+                        padding: "5px 11px", borderRadius: 20, cursor: "pointer", fontSize: 12, fontWeight: 600,
+                        border: `1.5px solid ${atual ? AZUL_MARINHO : concluida ? "#1b6e3c" : CINZA_BORDA}`,
+                        background: atual ? AZUL_MARINHO : concluida ? "#E4F5E9" : "#fff",
+                        color: atual ? "#fff" : concluida ? "#1b6e3c" : "#4a5a70",
+                      }}>
+                      {i + 1}. {etapa}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 18 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <label style={lab}>Cronograma por serviço</label>
+                <button type="button" className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO, padding: "5px 10px", fontSize: 12.5 }}
+                  onClick={() => add("cronograma", { id: `cr_${Date.now()}`, servico: "", fornecedorId: "", dataPlanejada: "", dataRealizada: "", status: "Planejado" })}>
+                  <Plus size={13} /> Adicionar serviço
+                </button>
+              </div>
+              {(editando.cronograma || []).length === 0 && <p style={{ color: "#8593a8", fontSize: 13, margin: 0 }}>Nenhum serviço lançado ainda.</p>}
+              <div style={{ display: "grid", gap: 8 }}>
+                {(editando.cronograma || []).map((c) => (
+                  <div key={c.id} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, padding: 8 }}>
+                    <input style={{ ...inp, flex: 1, minWidth: 140 }} value={c.servico} onChange={(e) => upd("cronograma", c.id, { servico: e.target.value })} placeholder="Serviço" />
+                    <select style={{ ...inp, width: "auto", minWidth: 140 }} value={c.fornecedorId} onChange={(e) => upd("cronograma", c.id, { fornecedorId: e.target.value })}>
+                      <option value="">Fornecedor…</option>
+                      {fornecedores.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                    </select>
+                    <input style={{ ...inp, width: 130 }} type="date" value={c.dataPlanejada} onChange={(e) => upd("cronograma", c.id, { dataPlanejada: e.target.value })} title="Data planejada" />
+                    <input style={{ ...inp, width: 130 }} type="date" value={c.dataRealizada} onChange={(e) => upd("cronograma", c.id, { dataRealizada: e.target.value })} title="Data realizada" />
+                    <select style={{ ...inp, width: "auto" }} value={c.status} onChange={(e) => upd("cronograma", c.id, { status: e.target.value })}>
+                      {CRONOGRAMA_STATUS_CASA_PRONTA.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                    <button className="icon-btn" onClick={() => rem("cronograma", c.id)} title="Remover"><Trash2 size={14} color="#c62828" /></button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 18 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <label style={lab}>Pendências</label>
+                <button type="button" className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO, padding: "5px 10px", fontSize: 12.5 }}
+                  onClick={() => add("pendencias", { id: `pd_${Date.now()}`, descricao: "", responsavel: "", prazo: "", resolvida: false })}>
+                  <Plus size={13} /> Adicionar pendência
+                </button>
+              </div>
+              {(editando.pendencias || []).length === 0 && <p style={{ color: "#8593a8", fontSize: 13, margin: 0 }}>Nenhuma pendência registrada.</p>}
+              <div style={{ display: "grid", gap: 8 }}>
+                {(editando.pendencias || []).map((p) => (
+                  <div key={p.id} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, padding: 8, opacity: p.resolvida ? 0.55 : 1 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                      <input type="checkbox" checked={p.resolvida} onChange={(e) => upd("pendencias", p.id, { resolvida: e.target.checked })} />
+                    </label>
+                    <input style={{ ...inp, flex: 1, minWidth: 160, textDecoration: p.resolvida ? "line-through" : "none" }} value={p.descricao} onChange={(e) => upd("pendencias", p.id, { descricao: e.target.value })} placeholder="Descrição" />
+                    <input style={{ ...inp, width: 140 }} value={p.responsavel} onChange={(e) => upd("pendencias", p.id, { responsavel: e.target.value })} placeholder="Responsável" />
+                    <input style={{ ...inp, width: 130 }} type="date" value={p.prazo} onChange={(e) => upd("pendencias", p.id, { prazo: e.target.value })} />
+                    <button className="icon-btn" onClick={() => rem("pendencias", p.id)} title="Remover"><Trash2 size={14} color="#c62828" /></button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setEditando(null)}>Cancelar</button>
+              <button className="btn-solid" style={{ width: "auto", padding: "9px 18px" }} onClick={salvar}><Save size={14} /> Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 /* Converte "R$ 1.100,50" (ou variações soltas do mesmo formato) num número — os campos de
    preço do FN Casa Pronta são texto livre (o documento trata isso como negociação, não como
    uma planilha fechada), então os indicadores só conseguem somar o que consegue entender. */
@@ -12023,13 +12283,30 @@ function paraNumeroBR(texto) {
   if (!texto) return null;
   let limpo = String(texto).replace(/[^\d.,]/g, "");
   if (!limpo) return null;
-  limpo = limpo.includes(",") ? limpo.replace(/\./g, "").replace(",", ".") : limpo;
+  if (limpo.includes(",")) {
+    limpo = limpo.replace(/\./g, "").replace(",", ".");
+  } else {
+    // Sem vírgula: "5.000" é 5 mil (separador de milhar), mas "10.5" é 10,5 (decimal) —
+    // o sinal é o tamanho do último grupo. Três dígitos depois do último ponto é milhar.
+    const partes = limpo.split(".");
+    if (partes.length > 1 && partes[partes.length - 1].length === 3) limpo = partes.join("");
+  }
   const n = parseFloat(limpo);
   return Number.isFinite(n) ? n : null;
 }
 const META_FORNECEDORES_POR_CATEGORIA = 2; // "dois fornecedores por categoria" — ver seção 9 do documento
 
-function CardIndicadoresCasaPronta({ fornecedores, fichas }) {
+function CardIndicadoresCasaPronta({ fornecedores, fichas, vendas }) {
+  const totalVendido = useMemo(() => vendas.reduce((soma, v) => soma + (paraNumeroBR(v.valor) || 0), 0), [vendas]);
+  const vendasComValor = vendas.filter((v) => paraNumeroBR(v.valor) != null).length;
+  const ticketMedio = vendasComValor ? totalVendido / vendasComValor : null;
+  const pendenciasAbertas = useMemo(() => vendas.reduce((soma, v) => soma + (v.pendencias || []).filter((p) => !p.resolvida).length, 0), [vendas]);
+  const porEtapa = useMemo(() => {
+    const mapa = Object.fromEntries(ETAPAS_JORNADA_CASA_PRONTA.map((e) => [e, 0]));
+    vendas.forEach((v) => { const e = ETAPAS_JORNADA_CASA_PRONTA[v.etapaIndex]; if (e) mapa[e] += 1; });
+    return mapa;
+  }, [vendas]);
+
   const porStatus = useMemo(() => {
     const mapa = Object.fromEntries(CASA_PRONTA_STATUS.map((s) => [s, 0]));
     fornecedores.forEach((f) => { if (mapa[f.status] !== undefined) mapa[f.status] += 1; });
@@ -12084,7 +12361,26 @@ function CardIndicadoresCasaPronta({ fornecedores, fichas }) {
         {cartao("Fichas sem fornecedor vinculado", fichasSemVinculo, fichasSemVinculo > 0 ? "#8a6d00" : "#1b6e3c")}
         {cartao("Economia média negociada", economiaMedia != null ? `${(economiaMedia * 100).toFixed(0)}%` : "—",
           economiaMedia != null ? "#1b6e3c" : undefined)}
+        {cartao("Pacotes vendidos", vendas.length)}
+        {cartao("Ticket médio", ticketMedio != null ? ticketMedio.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "—")}
+        {cartao("Pendências em aberto", pendenciasAbertas, pendenciasAbertas > 0 ? "#8a6d00" : "#1b6e3c")}
       </Grid>
+
+      {vendas.length > 0 && (
+        <div style={{ marginTop: 20 }}>
+          <label style={lab}>Pacotes vendidos por etapa da jornada</label>
+          <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+            {ETAPAS_JORNADA_CASA_PRONTA.map((etapa) => porEtapa[etapa] > 0 && (
+              <div key={etapa} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+                <span style={{ flex: 1, minWidth: 160 }}>{etapa}</span>
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: AZUL_MARINHO, background: CINZA_CLARO, borderRadius: 20, padding: "2px 10px", whiteSpace: "nowrap" }}>
+                  {porEtapa[etapa]}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div style={{ marginTop: 20 }}>
         <label style={lab}>Cobertura por categoria (meta: {META_FORNECEDORES_POR_CATEGORIA}+ fornecedores ativos)</label>
