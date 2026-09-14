@@ -7,7 +7,8 @@ import {
   AlertTriangle, CircleAlert, Info, Copy, Sparkles, Loader2,
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
-  ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle, Megaphone, Clock
+  ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle, Megaphone, Clock,
+  Home, Package, Wrench
 } from "lucide-react";
 
 /* ============================================================
@@ -3466,7 +3467,7 @@ function AppInterno({ session, onLogout }) {
         {/* Sub-navegação (somente dentro do módulo Gerência) */}
         {abaTop === "gerencia" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
-            {[["visao-geral", "Visão geral", LayoutGrid], ["indicadores", "Indicadores", PieChart], ["painel", "Painel estratégico", BarChart3], ["acompanhamento", "Acompanhamento", ClipboardList], ["reformas", "Reformas", Building2], ["perfil-cliente", "Perfil do cliente", User], ["parceiros", "Parceiros e Afiliados", Users], ["financeiro", "Financeiro", DollarSign], ["prospeccao", "Prospecção", TrendingUp], ["patologias", "Banco de patologias", AlertTriangle], ["importacao", "Importar base", Upload]].map(([k, label, Icon]) => (
+            {[["visao-geral", "Visão geral", LayoutGrid], ["indicadores", "Indicadores", PieChart], ["painel", "Painel estratégico", BarChart3], ["acompanhamento", "Acompanhamento", ClipboardList], ["reformas", "Reformas", Building2], ["perfil-cliente", "Perfil do cliente", User], ["parceiros", "Parceiros e Afiliados", Users], ["financeiro", "Financeiro", DollarSign], ["fn-home", "FN Home", Home], ["prospeccao", "Prospecção", TrendingUp], ["patologias", "Banco de patologias", AlertTriangle], ["importacao", "Importar base", Upload]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setAbaGerencia(k)} className="tab" style={{ borderBottomColor: abaGerencia === k ? AZUL_MEDIO : "transparent", color: abaGerencia === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
                 <Icon size={15} /> {label}
               </button>
@@ -12503,6 +12504,842 @@ function AbaGerenciaImportacao({ clientes = [], precos = [], empreendimentosRef 
   );
 }
 
+/* ============================================================
+   GERÊNCIA · FN HOME
+   Braço de pós-chaves: fornecedores homologados, pacotes por empreendimento e acompanhamento
+   da execução até o aceite do cliente. Protótipo local — as rotas fh_* (Prompt 1 da
+   especificação) ainda não existem no backend, então esta tela roda inteira em memória, com
+   dados fictícios semeados abaixo. Nada aqui é gravado no servidor nem chega à Área do
+   Cliente: é 100% interno (só quem enxerga a aba Gerência chega até aqui).
+   ============================================================ */
+const FH_CATEGORIAS = [
+  { id: 1, nome: "Box / Vidraçaria", modelo: "margem", metaMin: 15, metaMax: 25 },
+  { id: 2, nome: "Espelhos", modelo: "margem", metaMin: 15, metaMax: 25 },
+  { id: 3, nome: "Telas de Proteção", modelo: "margem", metaMin: 15, metaMax: 25 },
+  { id: 4, nome: "Limpeza Pós-Serviço", modelo: "margem", metaMin: 15, metaMax: 25 },
+  { id: 5, nome: "Pintura", modelo: "margem_gestao", metaMin: 15, metaMax: 25 },
+  { id: 6, nome: "Mármore / Granito", modelo: "margem_gestao", metaMin: 12, metaMax: 20 },
+  { id: 7, nome: "Elétrica / Iluminação", modelo: "margem_gestao", metaMin: 10, metaMax: 20 },
+  { id: 8, nome: "Gesso / Drywall", modelo: "margem_gestao", metaMin: 12, metaMax: 20 },
+  { id: 9, nome: "Ar-condicionado", modelo: "comissao", metaMin: 10, metaMax: 15 },
+  { id: 10, nome: "Marcenaria", modelo: "comissao", metaMin: 10, metaMax: 18 },
+  { id: 11, nome: "Obras Maiores", modelo: "fora_pacote", metaMin: null, metaMax: null },
+];
+const FH_MODELO_LABEL = { margem: "Margem", margem_gestao: "Margem + gestão", comissao: "Comissão", fora_pacote: "Fora do pacote" };
+const FH_STATUS_FORNECEDOR = ["em_teste", "homologado", "preferencial", "suspenso"];
+const FH_STATUS_LABEL = { em_teste: "Em teste", homologado: "Homologado", preferencial: "Preferencial", suspenso: "Suspenso" };
+const FH_STATUS_COR = { em_teste: "#8593a8", homologado: "#2E7D32", preferencial: AZUL_MEDIO, suspenso: "#C62828" };
+const FH_ETAPAS_JORNADA = ["entrada", "diagnostico", "conferencia", "proposta", "contratacao", "cronograma", "execucao", "checklist", "aceite", "encerramento"];
+const FH_ETAPA_LABEL = { entrada: "Entrada", diagnostico: "Diagnóstico", conferencia: "Conferência", proposta: "Proposta", contratacao: "Contratação", cronograma: "Cronograma", execucao: "Execução", checklist: "Checklist", aceite: "Aceite", encerramento: "Encerramento" };
+const FH_MODALIDADES = [{ v: "parceiro_fn", l: "Parceiro FN" }, { v: "fn_gerencia", l: "FN Gerência" }, { v: "fn_casa_pronta", l: "FN Casa Pronta" }];
+const FH_TIPOS_PACOTE = [{ v: "essencial", l: "Essencial" }, { v: "conforto", l: "Conforto" }, { v: "casa_pronta", l: "FN Casa Pronta" }, { v: "personalizado", l: "Personalizado" }];
+const FH_STATUS_SERVICO_LABEL = { planejado: "Planejado", em_execucao: "Em execução", concluido: "Concluído", com_pendencia: "Com pendência", cancelado: "Cancelado" };
+const FH_PESOS_SCORE = [
+  ["scoreQualidade", "Qualidade", 0.25], ["scorePrazo", "Prazo", 0.20], ["scorePreco", "Preço", 0.20],
+  ["scorePosVenda", "Pós-venda", 0.15], ["scoreAtendimento", "Atendimento", 0.10], ["scoreDocumentacao", "Documentação", 0.10],
+];
+
+function fhScoreFinal(f) {
+  const total = FH_PESOS_SCORE.reduce((soma, [campo, , peso]) => soma + (Number(f[campo]) || 0) * peso, 0);
+  return Math.round(total * 10) / 10;
+}
+function fhNomeCategoria(id) { return FH_CATEGORIAS.find((c) => c.id === Number(id))?.nome || "—"; }
+function fhFornecedorHomologavel(status) { return status === "homologado" || status === "preferencial"; }
+
+function novoFornecedorFh(categoriaId) {
+  return {
+    id: null, nome: "", categoriaId: categoriaId || FH_CATEGORIAS[0].id, whatsapp: "", email: "",
+    precoPublico: "", preco1a4: "", preco5a9: "", preco10mais: "", prazoDias: "", escopo: "",
+    garantiaDias: "", retrabalhoDias: "", capacidadeMensal: "", formasPagamento: "", areaAtendida: "",
+    comissaoIndicacao: "", exclusividade: "", status: "em_teste",
+    scoreQualidade: "", scorePrazo: "", scorePreco: "", scorePosVenda: "", scoreAtendimento: "", scoreDocumentacao: "",
+    observacoes: "",
+  };
+}
+let FH_SEQ_FORNECEDOR = 100;
+let FH_SEQ_PACOTE = 100;
+let FH_SEQ_ITEM = 1000;
+
+const FH_FORNECEDORES_SEED = [
+  { ...novoFornecedorFh(1), id: 1, nome: "Vidro Box Blindex SP", whatsapp: "11988887777", precoPublico: 1500, preco1a4: 1350, preco5a9: 1280, preco10mais: 1200, prazoDias: 7, garantiaDias: 365, retrabalhoDias: 15, capacidadeMensal: 20, status: "preferencial", scoreQualidade: 9, scorePrazo: 8.5, scorePreco: 8, scorePosVenda: 9, scoreAtendimento: 9, scoreDocumentacao: 8 },
+  { ...novoFornecedorFh(1), id: 2, nome: "Cristal Vidraçaria", whatsapp: "11977776666", precoPublico: 1450, preco1a4: 1300, preco5a9: 1250, preco10mais: 1180, prazoDias: 10, garantiaDias: 180, retrabalhoDias: 20, capacidadeMensal: 12, status: "homologado", scoreQualidade: 8, scorePrazo: 7.5, scorePreco: 8.5, scorePosVenda: 7, scoreAtendimento: 8, scoreDocumentacao: 7 },
+  { ...novoFornecedorFh(2), id: 3, nome: "Espelhos & Cia", whatsapp: "11966665555", precoPublico: 800, preco1a4: 700, preco5a9: 650, preco10mais: 600, prazoDias: 5, garantiaDias: 365, retrabalhoDias: 10, capacidadeMensal: 25, status: "preferencial", scoreQualidade: 9, scorePrazo: 9, scorePreco: 8, scorePosVenda: 8.5, scoreAtendimento: 9, scoreDocumentacao: 8.5 },
+  { ...novoFornecedorFh(5), id: 4, nome: "Pintores Unidos ME", whatsapp: "11955554444", precoPublico: 3200, preco1a4: 2900, preco5a9: 2700, preco10mais: 2500, prazoDias: 12, garantiaDias: 90, retrabalhoDias: 30, capacidadeMensal: 8, status: "em_teste", scoreQualidade: 7, scorePrazo: 6.5, scorePreco: 8, scorePosVenda: 6, scoreAtendimento: 7, scoreDocumentacao: 6 },
+  { ...novoFornecedorFh(9), id: 5, nome: "Clima Frio Ar-condicionado", whatsapp: "11944443333", precoPublico: 2200, preco1a4: 2000, preco5a9: 1900, preco10mais: 1800, prazoDias: 5, garantiaDias: 365, retrabalhoDias: 15, capacidadeMensal: 15, status: "homologado", scoreQualidade: 8.5, scorePrazo: 8, scorePreco: 7.5, scorePosVenda: 8, scoreAtendimento: 8, scoreDocumentacao: 7.5 },
+];
+
+const FH_FICHAS_SEED = [
+  {
+    id: 1, empreendimento: "Residencial Vista Verde", construtora: "Construtora Horizonte",
+    tiposPlanta: "2 quartos (58m², 1 banheiro, 2 janelas, sem varanda); 3 quartos (78m², 2 banheiros, 3 janelas, com varanda)",
+    itensPadronizaveis: "Box do banheiro social, espelho do banheiro social, tela de proteção da varanda (unidades com varanda)",
+    prazosPorServico: "Box: 7 dias · Pintura: 12 dias · Elétrica: 5 dias",
+    margensMinimas: "Box/Espelho: 15% · Pintura/Elétrica: 15%",
+    observacoes: "Empreendimento piloto do módulo — entrega de chaves prevista para o próximo trimestre.",
+    pacotes: [
+      {
+        id: 1, tipo: "essencial", descricao: "Box + espelho do social", ativo: true,
+        itens: [
+          { id: 1, categoriaId: 1, fornecedorId: 1, precoParceiro: 1350, precoNoPacote: 1590 },
+          { id: 2, categoriaId: 2, fornecedorId: 3, precoParceiro: 700, precoNoPacote: 840 },
+        ],
+      },
+      {
+        id: 2, tipo: "conforto", descricao: "Essencial + pintura completa + telas", ativo: true,
+        itens: [
+          { id: 3, categoriaId: 1, fornecedorId: 1, precoParceiro: 1350, precoNoPacote: 1590 },
+          { id: 4, categoriaId: 2, fornecedorId: 3, precoParceiro: 700, precoNoPacote: 840 },
+          { id: 5, categoriaId: 5, fornecedorId: 4, precoParceiro: 2900, precoNoPacote: 3480 },
+        ],
+      },
+    ],
+  },
+];
+
+function fhProximoIdFicha(fichas) { return (fichas.reduce((m, f) => Math.max(m, f.id), 0) || 0) + 1; }
+function fhProximoIdPacote(fichas) { return (fichas.flatMap((f) => f.pacotes).reduce((m, p) => Math.max(m, p.id), 0) || 0) + 1; }
+function fhProximoIdItem(fichas) { return (fichas.flatMap((f) => f.pacotes).flatMap((p) => p.itens).reduce((m, i) => Math.max(m, i.id), 0) || 0) + 1; }
+
+function fhPrecoTotalPacote(pacote) { return (pacote.itens || []).reduce((s, i) => s + (Number(i.precoNoPacote) || 0), 0); }
+function fhCustoTotalPacote(pacote) { return (pacote.itens || []).reduce((s, i) => s + (Number(i.precoParceiro) || 0), 0); }
+function fhMargemPercentual(pacote) {
+  const preco = fhPrecoTotalPacote(pacote), custo = fhCustoTotalPacote(pacote);
+  return preco > 0 ? Math.round(((preco - custo) / preco) * 1000) / 10 : 0;
+}
+
+const FH_UNIDADES_SEED = [
+  {
+    id: 1, clienteNome: "Marina Salgado Torres", empreendimento: "Residencial Vista Verde", construtora: "Construtora Horizonte",
+    blocoTorre: "Torre B", apartamento: "1204", pacoteNome: "Conforto", modalidade: "fn_gerencia",
+    etapa: "execucao", valorCliente: 5910, valorFornecedor: 4950, margemPrevista: 960, margemRealizada: 720,
+    dataAceite: null, statusAceite: "pendente",
+    servicos: [
+      { id: 1, categoriaId: 1, fornecedorId: 1, status: "concluido", planejadoInicio: "2026-08-10", planejadoFim: "2026-08-17", realizadoInicio: "2026-08-10", realizadoFim: "2026-08-16", valorFornecedor: 1350, valorCliente: 1590, fotos: [] },
+      { id: 2, categoriaId: 2, fornecedorId: 3, status: "concluido", planejadoInicio: "2026-08-12", planejadoFim: "2026-08-17", realizadoInicio: "2026-08-13", realizadoFim: "2026-08-17", valorFornecedor: 700, valorCliente: 840, fotos: [] },
+      { id: 3, categoriaId: 5, fornecedorId: 4, status: "com_pendencia", planejadoInicio: "2026-08-14", planejadoFim: "2026-08-26", realizadoInicio: "2026-08-15", realizadoFim: null, valorFornecedor: 2900, valorCliente: 3480, fotos: [] },
+    ],
+    pendencias: [
+      { id: 1, servicoId: 3, descricao: "Retoque de pintura no teto do quarto 2 — respingo aparente", responsavel: "Pintores Unidos ME", prazo: "2026-09-20", status: "aberta", dataResolucao: null },
+    ],
+  },
+  {
+    id: 2, clienteNome: "Eduardo Nakamura", empreendimento: "Residencial Vista Verde", construtora: "Construtora Horizonte",
+    blocoTorre: "Torre A", apartamento: "807", pacoteNome: "Essencial", modalidade: "parceiro_fn",
+    etapa: "checklist", valorCliente: 2430, valorFornecedor: 2050, margemPrevista: 380, margemRealizada: 380,
+    dataAceite: null, statusAceite: "pendente",
+    servicos: [
+      { id: 4, categoriaId: 1, fornecedorId: 1, status: "concluido", planejadoInicio: "2026-08-01", planejadoFim: "2026-08-08", realizadoInicio: "2026-08-01", realizadoFim: "2026-08-07", valorFornecedor: 1350, valorCliente: 1590, fotos: [] },
+      { id: 5, categoriaId: 2, fornecedorId: 3, status: "concluido", planejadoInicio: "2026-08-05", planejadoFim: "2026-08-08", realizadoInicio: "2026-08-05", realizadoFim: "2026-08-08", valorFornecedor: 700, valorCliente: 840, fotos: [] },
+    ],
+    pendencias: [],
+  },
+  {
+    id: 3, clienteNome: "Beatriz Andrade Lima", empreendimento: "Residencial Vista Verde", construtora: "Construtora Horizonte",
+    blocoTorre: "Torre B", apartamento: "302", pacoteNome: "Conforto", modalidade: "fn_casa_pronta",
+    etapa: "diagnostico", valorCliente: null, valorFornecedor: null, margemPrevista: null, margemRealizada: null,
+    dataAceite: null, statusAceite: "pendente",
+    servicos: [], pendencias: [],
+  },
+];
+
+const FH_OFERTAS_SEED = [
+  { id: 1, clienteNome: "Marina Salgado Torres", empreendimento: "Residencial Vista Verde", data: "2026-07-28", convertida: true },
+  { id: 2, clienteNome: "Eduardo Nakamura", empreendimento: "Residencial Vista Verde", data: "2026-07-30", convertida: true },
+  { id: 3, clienteNome: "Beatriz Andrade Lima", empreendimento: "Residencial Vista Verde", data: "2026-08-02", convertida: true },
+  { id: 4, clienteNome: "Rogério Fontes", empreendimento: "Residencial Vista Verde", data: "2026-08-05", convertida: false },
+  { id: 5, clienteNome: "Priscila Guedes", empreendimento: "Residencial Vista Verde", data: "2026-08-11", convertida: false },
+];
+
+function AbaGerenciaFnHome({ empreendimentosRef = [] }) {
+  const [subFh, setSubFh] = useState("visao-geral");
+  const [fornecedores, setFornecedores] = useState(FH_FORNECEDORES_SEED);
+  const [fichas, setFichas] = useState(FH_FICHAS_SEED);
+  const [unidades, setUnidades] = useState(FH_UNIDADES_SEED);
+  const [ofertas] = useState(FH_OFERTAS_SEED);
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <div style={{ background: "#EAF2FB", border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "10px 14px", fontSize: 12.5, color: "#3a5578", display: "flex", gap: 8, alignItems: "flex-start" }}>
+        <Info size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+        <span>
+          <strong>Protótipo local do FN Home.</strong> As rotas de API (<code>fh_*</code>) ainda não existem no
+          backend — tudo nesta tela roda em memória, com dados fictícios, e some ao recarregar a página. Nada
+          é gravado no servidor nem aparece na Área do Cliente.
+        </span>
+      </div>
+
+      <nav style={{ display: "flex", gap: 4, overflowX: "auto", borderBottom: `1px solid ${CINZA_BORDA}` }}>
+        {[["visao-geral", "Visão Geral", LayoutGrid], ["fornecedores", "Fornecedores", Wrench], ["pacotes", "Empreendimentos & Pacotes", Package], ["gestor", "Painel do Gestor", ClipboardList]].map(([k, label, Icon]) => (
+          <button key={k} onClick={() => setSubFh(k)} className="tab"
+            style={{ borderBottomColor: subFh === k ? AZUL_MEDIO : "transparent", color: subFh === k ? AZUL_MARINHO : "#8593a8", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0, background: "none" }}>
+            <Icon size={15} /> {label}
+          </button>
+        ))}
+      </nav>
+
+      {subFh === "visao-geral" && <FhVisaoGeral ofertas={ofertas} unidades={unidades} fornecedores={fornecedores} />}
+      {subFh === "fornecedores" && <FhFornecedores fornecedores={fornecedores} setFornecedores={setFornecedores} />}
+      {subFh === "pacotes" && <FhPacotes fichas={fichas} setFichas={setFichas} fornecedores={fornecedores} empreendimentosRef={empreendimentosRef} />}
+      {subFh === "gestor" && <FhPainelGestor unidades={unidades} setUnidades={setUnidades} fornecedores={fornecedores} />}
+    </div>
+  );
+}
+
+/* ---- FN Home · Visão Geral (Prompt 5) ---- */
+function FhVisaoGeral({ ofertas, unidades, fornecedores }) {
+  const bloco = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 };
+  const duasColunas = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 };
+  const totalOfertas = ofertas.length;
+  const convertidas = ofertas.filter((o) => o.convertida).length;
+  const taxaConversao = totalOfertas ? Math.round((convertidas / totalOfertas) * 100) : 0;
+  const unidadesComValor = unidades.filter((u) => u.valorCliente);
+  const ticketMedio = unidadesComValor.length ? unidadesComValor.reduce((s, u) => s + u.valorCliente, 0) / unidadesComValor.length : 0;
+  const margemPeriodo = unidades.reduce((s, u) => s + (u.margemRealizada || 0), 0);
+  const totalServicos = unidades.flatMap((u) => u.servicos);
+  const pendenciasAbertas = unidades.flatMap((u) => u.pendencias).filter((p) => p.status === "aberta").length;
+  const taxaRetrabalho = totalServicos.length ? Math.round((pendenciasAbertas / totalServicos.length) * 100) : 0;
+
+  const porCategoria = FH_CATEGORIAS.map((c) => {
+    const servicos = totalServicos.filter((s) => s.categoriaId === c.id);
+    return { categoria: c.nome, qtd: servicos.length, valor: servicos.reduce((s, x) => s + (x.valorCliente || 0), 0) };
+  }).filter((c) => c.qtd > 0).sort((a, b) => b.qtd - a.qtd);
+
+  const desempenhoFornecedor = fornecedores.map((f) => ({
+    nome: f.nome, categoria: fhNomeCategoria(f.categoriaId), nota: fhScoreFinal(f),
+    volume: totalServicos.filter((s) => s.fornecedorId === f.id).length,
+  })).sort((a, b) => b.nota - a.nota);
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <Card icon={LayoutGrid} titulo="Indicadores do mês">
+        <div style={bloco}>
+          <KpiCard label="Clientes ofertados" valor={totalOfertas} Icon={Users} />
+          <KpiCard label="Taxa de conversão" valor={`${taxaConversao}%`} cor={taxaConversao >= 50 ? "#2E7D32" : "#B26A00"} Icon={Percent} />
+          <KpiCard label="Ticket médio" valor={fmtReal(ticketMedio)} cor={AZUL_MEDIO} Icon={DollarSign} />
+          <KpiCard label="Margem FN do período" valor={fmtReal(margemPeriodo)} cor={AZUL_MARINHO} Icon={TrendingUp} />
+          <KpiCard label="Taxa de retrabalho" valor={`${taxaRetrabalho}%`} cor={taxaRetrabalho > 15 ? "#C62828" : "#2E7D32"} Icon={AlertTriangle} />
+        </div>
+      </Card>
+
+      <div style={duasColunas}>
+        <Card icon={Package} titulo="Conversão por categoria de serviço">
+          {porCategoria.length === 0 && <p style={{ color: "#8593a8", fontSize: 13.5 }}>Nenhum serviço contratado ainda.</p>}
+          {porCategoria.length > 0 && (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead><tr style={{ background: CINZA_CLARO }}>
+                <th style={{ textAlign: "left", padding: "8px 10px", color: AZUL_MARINHO }}>Categoria</th>
+                <th style={{ textAlign: "right", padding: "8px 10px", color: AZUL_MARINHO }}>Serviços</th>
+                <th style={{ textAlign: "right", padding: "8px 10px", color: AZUL_MARINHO }}>Valor</th>
+              </tr></thead>
+              <tbody>
+                {porCategoria.map((c) => (
+                  <tr key={c.categoria} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                    <td style={{ padding: "8px 10px" }}>{c.categoria}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right" }}>{c.qtd}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right" }}>{fmtReal(c.valor)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Card>
+
+        <Card icon={Star} titulo="Desempenho por fornecedor">
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead><tr style={{ background: CINZA_CLARO }}>
+              <th style={{ textAlign: "left", padding: "8px 10px", color: AZUL_MARINHO }}>Fornecedor</th>
+              <th style={{ textAlign: "right", padding: "8px 10px", color: AZUL_MARINHO }}>Nota</th>
+              <th style={{ textAlign: "right", padding: "8px 10px", color: AZUL_MARINHO }}>Volume</th>
+            </tr></thead>
+            <tbody>
+              {desempenhoFornecedor.map((f) => (
+                <tr key={f.nome} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                  <td style={{ padding: "8px 10px" }}>{f.nome}<div style={{ fontSize: 11, color: "#8593a8" }}>{f.categoria}</div></td>
+                  <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700 }}>{f.nota}</td>
+                  <td style={{ padding: "8px 10px", textAlign: "right" }}>{f.volume}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+/* ---- FN Home · Fornecedores (Prompt 2) ---- */
+function FhFornecedores({ fornecedores, setFornecedores }) {
+  const [filtroCategoria, setFiltroCategoria] = useState("");
+  const [filtroStatus, setFiltroStatus] = useState("");
+  const [editando, setEditando] = useState(null); // fornecedor sendo cadastrado/editado, ou null
+  const [suspenderAlvo, setSuspenderAlvo] = useState(null);
+
+  const lista = fornecedores.filter((f) =>
+    (!filtroCategoria || f.categoriaId === Number(filtroCategoria)) &&
+    (!filtroStatus || f.status === filtroStatus)
+  );
+
+  const contagemPorCategoria = FH_CATEGORIAS.map((c) => ({
+    categoria: c,
+    total: fornecedores.filter((f) => f.categoriaId === c.id && fhFornecedorHomologavel(f.status)).length,
+  }));
+  const categoriasAbaixoDoMinimo = contagemPorCategoria.filter((c) => c.categoria.modelo !== "fora_pacote" && c.total < 2);
+
+  const salvar = (dados) => {
+    setFornecedores((prev) => {
+      if (dados.id) return prev.map((f) => (f.id === dados.id ? dados : f));
+      const id = ++FH_SEQ_FORNECEDOR;
+      return [...prev, { ...dados, id }];
+    });
+    setEditando(null);
+  };
+  const mudarStatus = (fornecedor, novoStatus) => setFornecedores((prev) => prev.map((f) => (f.id === fornecedor.id ? { ...f, status: novoStatus } : f)));
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      {categoriasAbaixoDoMinimo.length > 0 && (
+        <div style={{ background: "#FFF4E5", border: "1px solid #F0C48A", borderRadius: 10, padding: "10px 14px", fontSize: 12.5, color: "#7a5320" }}>
+          <strong>Menos de 2 fornecedores homologados</strong> em: {categoriasAbaixoDoMinimo.map((c) => `${c.categoria.nome} (${c.total})`).join(", ")}.
+          A estratégia pede no mínimo 2 por categoria antes de fechar pacote nela.
+        </div>
+      )}
+
+      <Card icon={Wrench} titulo={`Fornecedores (${lista.length})`}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14, alignItems: "flex-end" }}>
+          <div style={cell()}>
+            <label style={lab}>Categoria</label>
+            <select style={inp} value={filtroCategoria} onChange={(e) => setFiltroCategoria(e.target.value)}>
+              <option value="">Todas</option>
+              {FH_CATEGORIAS.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+            </select>
+          </div>
+          <div style={cell()}>
+            <label style={lab}>Status</label>
+            <select style={inp} value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value)}>
+              <option value="">Todos</option>
+              {FH_STATUS_FORNECEDOR.map((s) => <option key={s} value={s}>{FH_STATUS_LABEL[s]}</option>)}
+            </select>
+          </div>
+          <button className="btn-solid" style={{ width: "auto", marginLeft: "auto" }} onClick={() => setEditando(novoFornecedorFh(filtroCategoria ? Number(filtroCategoria) : null))}>
+            <Plus size={15} /> Novo fornecedor
+          </button>
+        </div>
+
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead><tr style={{ background: CINZA_CLARO }}>
+              {["Fornecedor", "Categoria", "Preço público", "Prazo", "Nota", "Status", ""].map((h, i) => (
+                <th key={h} style={{ textAlign: i === 0 ? "left" : "right", padding: "8px 10px", color: AZUL_MARINHO, whiteSpace: "nowrap" }}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {lista.map((f) => (
+                <tr key={f.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                  <td style={{ padding: "8px 10px", fontWeight: 600 }}>{f.nome}</td>
+                  <td style={{ padding: "8px 10px", textAlign: "right" }}>{fhNomeCategoria(f.categoriaId)}</td>
+                  <td style={{ padding: "8px 10px", textAlign: "right" }}>{f.precoPublico ? fmtReal(f.precoPublico) : "—"}</td>
+                  <td style={{ padding: "8px 10px", textAlign: "right" }}>{f.prazoDias ? `${f.prazoDias}d` : "—"}</td>
+                  <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700 }}>{fhScoreFinal(f)}</td>
+                  <td style={{ padding: "8px 10px", textAlign: "right" }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: FH_STATUS_COR[f.status] }}>{FH_STATUS_LABEL[f.status]}</span>
+                  </td>
+                  <td style={{ padding: "8px 10px", textAlign: "right", whiteSpace: "nowrap" }}>
+                    <button className="icon-btn" title="Editar" onClick={() => setEditando(f)}><Edit3 size={14} /></button>
+                    {f.status === "em_teste" && <button className="icon-btn" title="Homologar" onClick={() => mudarStatus(f, "homologado")}><Check size={14} color="#2E7D32" /></button>}
+                    {f.status === "homologado" && <button className="icon-btn" title="Tornar preferencial" onClick={() => mudarStatus(f, "preferencial")}><Star size={14} color={AZUL_MEDIO} /></button>}
+                    {f.status !== "suspenso" && <button className="icon-btn" title="Suspender" onClick={() => setSuspenderAlvo(f)}><UserX size={14} color="#C62828" /></button>}
+                  </td>
+                </tr>
+              ))}
+              {lista.length === 0 && <tr><td colSpan={7} style={{ padding: 16, textAlign: "center", color: "#8593a8" }}>Nenhum fornecedor com esse filtro.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {editando && <ModalFornecedorFh fornecedor={editando} onSalvar={salvar} onFechar={() => setEditando(null)} />}
+
+      {suspenderAlvo && (
+        <div className="no-print" style={overlay} onClick={() => setSuspenderAlvo(null)}>
+          <div style={{ ...modal, maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              <AlertTriangle size={20} color="#c62828" /><strong>Suspender fornecedor</strong>
+            </div>
+            <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 18px" }}>
+              Suspender "{suspenderAlvo.nome}"? Ele deixa de ser sugerido em novos pacotes até voltar de status.
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setSuspenderAlvo(null)}>Cancelar</button>
+              <button className="btn-solid" style={{ background: "#c62828" }} onClick={() => { mudarStatus(suspenderAlvo, "suspenso"); setSuspenderAlvo(null); }}>Suspender</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ModalFornecedorFh({ fornecedor, onSalvar, onFechar }) {
+  const [form, setForm] = useState(fornecedor);
+  const setF = (campo, v) => setForm((f) => ({ ...f, [campo]: v }));
+  const notaFinal = fhScoreFinal(form);
+
+  return (
+    <div className="no-print" style={overlay} onClick={onFechar}>
+      <div style={{ ...modal, maxWidth: 640, maxHeight: "88vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <strong>{form.id ? "Editar fornecedor" : "Novo fornecedor"}</strong>
+          <button className="icon-btn" onClick={onFechar}><X size={16} /></button>
+        </div>
+
+        <Grid>
+          <Field label="Nome" value={form.nome} onChange={(v) => setF("nome", v)} full />
+          <div style={cell()}>
+            <label style={lab}>Categoria</label>
+            <select style={inp} value={form.categoriaId} onChange={(e) => setF("categoriaId", Number(e.target.value))}>
+              {FH_CATEGORIAS.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+            </select>
+          </div>
+          <Field label="WhatsApp" value={form.whatsapp} onChange={(v) => setF("whatsapp", v)} />
+          <Field label="E-mail" value={form.email} onChange={(v) => setF("email", v)} />
+          <Field label="Preço público" type="number" value={form.precoPublico} onChange={(v) => setF("precoPublico", v)} />
+          <Field label="Preço 1 a 4 unid." type="number" value={form.preco1a4} onChange={(v) => setF("preco1a4", v)} />
+          <Field label="Preço 5 a 9 unid." type="number" value={form.preco5a9} onChange={(v) => setF("preco5a9", v)} />
+          <Field label="Preço 10+ unid." type="number" value={form.preco10mais} onChange={(v) => setF("preco10mais", v)} />
+          <Field label="Prazo (dias)" type="number" value={form.prazoDias} onChange={(v) => setF("prazoDias", v)} />
+          <Field label="Garantia (dias)" type="number" value={form.garantiaDias} onChange={(v) => setF("garantiaDias", v)} />
+          <Field label="Prazo de retrabalho (dias)" type="number" value={form.retrabalhoDias} onChange={(v) => setF("retrabalhoDias", v)} />
+          <Field label="Capacidade mensal" type="number" value={form.capacidadeMensal} onChange={(v) => setF("capacidadeMensal", v)} />
+          <Field label="Formas de pagamento" value={form.formasPagamento} onChange={(v) => setF("formasPagamento", v)} />
+          <Field label="Área atendida" value={form.areaAtendida} onChange={(v) => setF("areaAtendida", v)} />
+          <Field label="Comissão de indicação (%)" type="number" value={form.comissaoIndicacao} onChange={(v) => setF("comissaoIndicacao", v)} />
+          <Field label="Contrapartida de exclusividade" value={form.exclusividade} onChange={(v) => setF("exclusividade", v)} full />
+        </Grid>
+        <Area label="Escopo do serviço" value={form.escopo} onChange={(v) => setF("escopo", v)} rows={2} />
+        <Area label="Observações" value={form.observacoes} onChange={(v) => setF("observacoes", v)} rows={2} />
+
+        <div style={{ marginTop: 16 }}>
+          <label style={lab}>Avaliação ponderada</label>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginTop: 8 }}>
+            {FH_PESOS_SCORE.map(([campo, label, peso]) => (
+              <div key={campo} style={cell()}>
+                <label style={lab}>{label} ({Math.round(peso * 100)}%)</label>
+                <input style={inp} type="number" min={0} max={10} step={0.1} value={form[campo]} onChange={(e) => setF(campo, e.target.value)} />
+              </div>
+            ))}
+          </div>
+          <p style={{ fontSize: 13, marginTop: 10 }}>Nota final ponderada: <strong style={{ color: AZUL_MARINHO }}>{notaFinal}</strong> / 10</p>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={onFechar}>Cancelar</button>
+          <button className="btn-solid" onClick={() => onSalvar(form)}><Check size={15} /> Salvar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---- FN Home · Empreendimentos & Pacotes (Prompt 3) ---- */
+function FhPacotes({ fichas, setFichas, fornecedores, empreendimentosRef }) {
+  const empreendimentosDisponiveis = [...new Set(empreendimentosRef.map((e) => e.empreendimento).filter(Boolean))].sort();
+  const nomesComFicha = fichas.map((f) => f.empreendimento);
+  const [empreendimentoSel, setEmpreendimentoSel] = useState(fichas[0]?.empreendimento || "");
+  const [wizardAberto, setWizardAberto] = useState(false);
+
+  const ficha = fichas.find((f) => f.empreendimento === empreendimentoSel);
+
+  const criarFicha = (nomeEmpreendimento) => {
+    const referencia = empreendimentosRef.find((e) => e.empreendimento === nomeEmpreendimento);
+    const nova = {
+      id: fhProximoIdFicha(fichas), empreendimento: nomeEmpreendimento, construtora: referencia?.construtora || "",
+      tiposPlanta: "", itensPadronizaveis: "", prazosPorServico: "", margensMinimas: "", observacoes: "", pacotes: [],
+    };
+    setFichas((prev) => [...prev, nova]);
+    setEmpreendimentoSel(nomeEmpreendimento);
+  };
+
+  const salvarFicha = (patch) => setFichas((prev) => prev.map((f) => (f.id === ficha.id ? { ...f, ...patch } : f)));
+  const salvarPacote = (pacote) => setFichas((prev) => prev.map((f) => (f.id !== ficha.id ? f : {
+    ...f, pacotes: pacote.id && f.pacotes.some((p) => p.id === pacote.id)
+      ? f.pacotes.map((p) => (p.id === pacote.id ? pacote : p))
+      : [...f.pacotes, { ...pacote, id: fhProximoIdPacote(fichas) }],
+  })));
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <Card icon={Building2} titulo="Empreendimento">
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div style={cell()}>
+            <label style={lab}>Selecionar empreendimento</label>
+            <select style={inp} value={empreendimentoSel} onChange={(e) => setEmpreendimentoSel(e.target.value)}>
+              <option value="">selecionar…</option>
+              {empreendimentosDisponiveis.map((e) => <option key={e} value={e}>{e}{nomesComFicha.includes(e) ? "" : " (sem ficha técnica)"}</option>)}
+            </select>
+          </div>
+          {empreendimentoSel && !ficha && (
+            <button className="btn-solid" style={{ width: "auto" }} onClick={() => criarFicha(empreendimentoSel)}>
+              <Plus size={15} /> Criar ficha técnica
+            </button>
+          )}
+        </div>
+        {empreendimentosDisponiveis.length === 0 && (
+          <p style={{ fontSize: 12.5, color: "#8593a8", marginTop: 10 }}>
+            Nenhum empreendimento cadastrado ainda no Comercial — cadastre um em Gerência → Financeiro → Preços por empreendimento primeiro.
+          </p>
+        )}
+      </Card>
+
+      {ficha && (
+        <>
+          <Card icon={ClipboardList} titulo="Ficha técnica">
+            <FhFichaTecnicaForm ficha={ficha} onSalvar={salvarFicha} />
+          </Card>
+
+          <Card icon={Package} titulo={`Pacotes (${ficha.pacotes.length})`}>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+              <button className="btn-solid" style={{ width: "auto" }} onClick={() => setWizardAberto(true)}><Plus size={15} /> Novo pacote</button>
+            </div>
+            {ficha.pacotes.length === 0 && <p style={{ color: "#8593a8", fontSize: 13.5 }}>Nenhum pacote montado ainda.</p>}
+            <div style={{ display: "grid", gap: 12 }}>
+              {ficha.pacotes.map((p) => (
+                <div key={p.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                    <div>
+                      <strong style={{ color: AZUL_MARINHO }}>{FH_TIPOS_PACOTE.find((t) => t.v === p.tipo)?.l}</strong>
+                      {!p.ativo && <span style={{ marginLeft: 8, fontSize: 11, color: "#C62828", fontWeight: 700 }}>inativo</span>}
+                      <p style={{ margin: "2px 0 0", fontSize: 12.5, color: "#65758b" }}>{p.descricao}</p>
+                    </div>
+                    <div style={{ textAlign: "right", fontSize: 13 }}>
+                      <div>Preço total: <strong>{fmtReal(fhPrecoTotalPacote(p))}</strong></div>
+                      <div style={{ fontSize: 12, color: "#65758b" }}>Margem: {fhMargemPercentual(p)}%</div>
+                    </div>
+                  </div>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, marginTop: 10 }}>
+                    <thead><tr style={{ background: CINZA_CLARO }}>
+                      <th style={{ textAlign: "left", padding: "6px 8px" }}>Categoria</th>
+                      <th style={{ textAlign: "left", padding: "6px 8px" }}>Fornecedor</th>
+                      <th style={{ textAlign: "right", padding: "6px 8px" }}>Preço parceiro</th>
+                      <th style={{ textAlign: "right", padding: "6px 8px" }}>Preço no pacote</th>
+                    </tr></thead>
+                    <tbody>
+                      {p.itens.map((i) => (
+                        <tr key={i.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                          <td style={{ padding: "6px 8px" }}>{fhNomeCategoria(i.categoriaId)}</td>
+                          <td style={{ padding: "6px 8px" }}>{fornecedores.find((f) => f.id === i.fornecedorId)?.nome || "—"}</td>
+                          <td style={{ padding: "6px 8px", textAlign: "right" }}>{fmtReal(i.precoParceiro)}</td>
+                          <td style={{ padding: "6px 8px", textAlign: "right" }}>{fmtReal(i.precoNoPacote)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </>
+      )}
+
+      {wizardAberto && ficha && (
+        <WizardNovoPacote ficha={ficha} fornecedores={fornecedores} onSalvar={(p) => { salvarPacote(p); setWizardAberto(false); }} onFechar={() => setWizardAberto(false)} />
+      )}
+    </div>
+  );
+}
+
+function FhFichaTecnicaForm({ ficha, onSalvar }) {
+  const [form, setForm] = useState(ficha);
+  const setF = (campo, v) => setForm((f) => ({ ...f, [campo]: v }));
+  useEffect(() => setForm(ficha), [ficha.id]);
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      <Grid>
+        <Field label="Construtora" value={form.construtora} onChange={(v) => setF("construtora", v)} />
+      </Grid>
+      <Area label="Tipos de planta (nome, metragem, banheiros, janelas, varanda)" value={form.tiposPlanta} onChange={(v) => setF("tiposPlanta", v)} rows={2} />
+      <Area label="Itens padronizáveis por planta" value={form.itensPadronizaveis} onChange={(v) => setF("itensPadronizaveis", v)} rows={2} />
+      <Area label="Prazo médio por serviço" value={form.prazosPorServico} onChange={(v) => setF("prazosPorServico", v)} rows={2} />
+      <Area label="Margens mínimas por categoria" value={form.margensMinimas} onChange={(v) => setF("margensMinimas", v)} rows={2} />
+      <Area label="Observações" value={form.observacoes} onChange={(v) => setF("observacoes", v)} rows={2} />
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button className="btn-solid" style={{ width: "auto" }} onClick={() => onSalvar(form)}><Save size={15} /> Salvar ficha técnica</button>
+      </div>
+    </div>
+  );
+}
+
+function WizardNovoPacote({ ficha, fornecedores, onSalvar, onFechar }) {
+  const [passo, setPasso] = useState(1);
+  const [tipo, setTipo] = useState("essencial");
+  const [descricao, setDescricao] = useState("");
+  const [itens, setItens] = useState([]);
+
+  const preferencialDaCategoria = (categoriaId) => fornecedores.find((f) => f.categoriaId === categoriaId && f.status === "preferencial");
+
+  const addItem = () => {
+    const categoriaId = FH_CATEGORIAS[0].id;
+    const sugerido = preferencialDaCategoria(categoriaId);
+    setItens((prev) => [...prev, { id: `novo-${prev.length}`, categoriaId, fornecedorId: sugerido?.id || "", precoParceiro: sugerido?.preco1a4 || "", precoNoPacote: "" }]);
+  };
+  const setItem = (idx, patch) => setItens((prev) => prev.map((it, i) => {
+    if (i !== idx) return it;
+    const atualizado = { ...it, ...patch };
+    // Ao trocar a categoria, sugere de novo o fornecedor preferencial dela, se existir.
+    if (patch.categoriaId !== undefined) {
+      const sugerido = preferencialDaCategoria(patch.categoriaId);
+      if (sugerido) { atualizado.fornecedorId = sugerido.id; atualizado.precoParceiro = sugerido.preco1a4 || ""; }
+    }
+    return atualizado;
+  }));
+  const removerItem = (idx) => setItens((prev) => prev.filter((_, i) => i !== idx));
+
+  const precoTotal = itens.reduce((s, i) => s + (Number(i.precoNoPacote) || 0), 0);
+  const custoTotal = itens.reduce((s, i) => s + (Number(i.precoParceiro) || 0), 0);
+  const margem = precoTotal > 0 ? Math.round(((precoTotal - custoTotal) / precoTotal) * 1000) / 10 : 0;
+
+  return (
+    <div className="no-print" style={overlay} onClick={onFechar}>
+      <div style={{ ...modal, maxWidth: 620, maxHeight: "88vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <strong>Novo pacote — {ficha.empreendimento}</strong>
+          <button className="icon-btn" onClick={onFechar}><X size={16} /></button>
+        </div>
+        <p style={{ fontSize: 12, color: "#8593a8", margin: "0 0 16px" }}>Passo {passo} de 3</p>
+
+        {passo === 1 && (
+          <div style={{ display: "grid", gap: 10 }}>
+            <div style={cell()}>
+              <label style={lab}>Tipo de pacote</label>
+              <select style={inp} value={tipo} onChange={(e) => setTipo(e.target.value)}>
+                {FH_TIPOS_PACOTE.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}
+              </select>
+            </div>
+            <Field label="Descrição" value={descricao} onChange={setDescricao} full />
+          </div>
+        )}
+
+        {passo === 2 && (
+          <div style={{ display: "grid", gap: 10 }}>
+            {itens.map((it, idx) => (
+              <div key={it.id} style={{ display: "grid", gridTemplateColumns: "1.4fr 1.4fr 1fr 1fr auto", gap: 8, alignItems: "end" }}>
+                <div style={cell()}>
+                  <label style={lab}>Categoria</label>
+                  <select style={inp} value={it.categoriaId} onChange={(e) => setItem(idx, { categoriaId: Number(e.target.value) })}>
+                    {FH_CATEGORIAS.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                  </select>
+                </div>
+                <div style={cell()}>
+                  <label style={lab}>Fornecedor</label>
+                  <select style={inp} value={it.fornecedorId} onChange={(e) => setItem(idx, { fornecedorId: Number(e.target.value) })}>
+                    <option value="">selecionar…</option>
+                    {fornecedores.filter((f) => f.categoriaId === it.categoriaId).map((f) => (
+                      <option key={f.id} value={f.id}>{f.nome}{f.status === "preferencial" ? " ★" : ""}</option>
+                    ))}
+                  </select>
+                </div>
+                <Field label="Preço parceiro" type="number" value={it.precoParceiro} onChange={(v) => setItem(idx, { precoParceiro: v })} />
+                <Field label="Preço no pacote" type="number" value={it.precoNoPacote} onChange={(v) => setItem(idx, { precoNoPacote: v })} />
+                <button className="icon-btn" onClick={() => removerItem(idx)}><Trash2 size={15} color="#C62828" /></button>
+              </div>
+            ))}
+            <button className="btn-ghost" style={{ width: "auto", color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={addItem}><Plus size={14} /> Adicionar item</button>
+          </div>
+        )}
+
+        {passo === 3 && (
+          <div style={{ display: "grid", gap: 10 }}>
+            <p style={{ fontSize: 13.5 }}><strong>{FH_TIPOS_PACOTE.find((t) => t.v === tipo)?.l}</strong> — {descricao || "sem descrição"}</p>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead><tr style={{ background: CINZA_CLARO }}>
+                <th style={{ textAlign: "left", padding: "6px 8px" }}>Categoria</th>
+                <th style={{ textAlign: "left", padding: "6px 8px" }}>Fornecedor</th>
+                <th style={{ textAlign: "right", padding: "6px 8px" }}>Preço no pacote</th>
+              </tr></thead>
+              <tbody>
+                {itens.map((i) => (
+                  <tr key={i.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
+                    <td style={{ padding: "6px 8px" }}>{fhNomeCategoria(i.categoriaId)}</td>
+                    <td style={{ padding: "6px 8px" }}>{fornecedores.find((f) => f.id === Number(i.fornecedorId))?.nome || "—"}</td>
+                    <td style={{ padding: "6px 8px", textAlign: "right" }}>{fmtReal(i.precoNoPacote)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p style={{ fontSize: 13.5 }}>Preço total: <strong>{fmtReal(precoTotal)}</strong> · Margem: <strong style={{ color: margem >= (ficha.margensMinimas ? 0 : 0) ? AZUL_MARINHO : "#C62828" }}>{margem}%</strong></p>
+          </div>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 18 }}>
+          <button className="btn-ghost" style={{ width: "auto", color: AZUL_MARINHO, background: CINZA_CLARO }}
+            onClick={() => (passo === 1 ? onFechar() : setPasso(passo - 1))}>
+            <ChevronLeft size={15} /> {passo === 1 ? "Cancelar" : "Voltar"}
+          </button>
+          {passo < 3 && (
+            <button className="btn-solid" style={{ width: "auto" }} disabled={passo === 2 && itens.length === 0} onClick={() => setPasso(passo + 1)}>
+              Avançar <ChevronRight size={15} />
+            </button>
+          )}
+          {passo === 3 && (
+            <button className="btn-solid" style={{ width: "auto" }} onClick={() => onSalvar({ id: null, tipo, descricao, ativo: true, itens: itens.map((i) => ({ ...i, id: fhProximoIdItem([{ pacotes: [{ itens }] }]) })) })}>
+              <Check size={15} /> Ativar pacote
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---- FN Home · Painel do Gestor (Prompt 4) ---- */
+function FhPainelGestor({ unidades, setUnidades, fornecedores }) {
+  const [filtroEtapa, setFiltroEtapa] = useState("");
+  const [filtroPendencia, setFiltroPendencia] = useState("");
+  const [selecionada, setSelecionada] = useState(null);
+
+  const lista = unidades.filter((u) =>
+    (!filtroEtapa || u.etapa === filtroEtapa) &&
+    (!filtroPendencia || (u.pendencias.some((p) => p.status === "aberta") ? "com" : "sem") === filtroPendencia)
+  );
+
+  const atualizarUnidade = (id, patch) => setUnidades((prev) => prev.map((u) => (u.id === id ? { ...u, ...patch } : u)));
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <Card icon={ClipboardList} titulo={`Unidades em atendimento (${lista.length})`}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+          <div style={cell()}>
+            <label style={lab}>Etapa</label>
+            <select style={inp} value={filtroEtapa} onChange={(e) => setFiltroEtapa(e.target.value)}>
+              <option value="">Todas</option>
+              {FH_ETAPAS_JORNADA.map((e) => <option key={e} value={e}>{FH_ETAPA_LABEL[e]}</option>)}
+            </select>
+          </div>
+          <div style={cell()}>
+            <label style={lab}>Pendência</label>
+            <select style={inp} value={filtroPendencia} onChange={(e) => setFiltroPendencia(e.target.value)}>
+              <option value="">Todas</option>
+              <option value="com">Com pendência aberta</option>
+              <option value="sem">Sem pendência</option>
+            </select>
+          </div>
+        </div>
+
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead><tr style={{ background: CINZA_CLARO }}>
+              {["Cliente", "Empreendimento", "Unidade", "Pacote", "Etapa", "Margem prev. x real.", ""].map((h, i) => (
+                <th key={h} style={{ textAlign: i === 0 ? "left" : "right", padding: "8px 10px", color: AZUL_MARINHO, whiteSpace: "nowrap" }}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {lista.map((u) => {
+                const abertas = u.pendencias.filter((p) => p.status === "aberta").length;
+                return (
+                  <tr key={u.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}`, cursor: "pointer" }} onClick={() => setSelecionada(u)}>
+                    <td style={{ padding: "8px 10px", fontWeight: 600 }}>
+                      {u.clienteNome} {abertas > 0 && <AlertTriangle size={13} color="#C62828" style={{ verticalAlign: "middle", marginLeft: 4 }} title={`${abertas} pendência(s) aberta(s)`} />}
+                    </td>
+                    <td style={{ padding: "8px 10px", textAlign: "right" }}>{u.empreendimento}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right" }}>{u.blocoTorre} / {u.apartamento}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right" }}>{u.pacoteNome}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right" }}>{FH_ETAPA_LABEL[u.etapa]}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right" }}>{fmtReal(u.margemPrevista)} / {fmtReal(u.margemRealizada)}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right" }}><ChevronRight size={15} color="#8593a8" /></td>
+                  </tr>
+                );
+              })}
+              {lista.length === 0 && <tr><td colSpan={7} style={{ padding: 16, textAlign: "center", color: "#8593a8" }}>Nenhuma unidade com esse filtro.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {selecionada && (
+        <FhDetalheUnidade unidade={unidades.find((u) => u.id === selecionada.id) || selecionada} fornecedores={fornecedores}
+          onSalvar={(patch) => atualizarUnidade(selecionada.id, patch)} onFechar={() => setSelecionada(null)} />
+      )}
+    </div>
+  );
+}
+
+function FhDetalheUnidade({ unidade, fornecedores, onSalvar, onFechar }) {
+  const [margemPrevista, setMargemPrevista] = useState(unidade.margemPrevista ?? "");
+  const [margemRealizada, setMargemRealizada] = useState(unidade.margemRealizada ?? "");
+
+  const registrarAceite = () => onSalvar({ dataAceite: new Date().toISOString().slice(0, 10), statusAceite: "aceito", etapa: "encerramento" });
+
+  return (
+    <div className="no-print" style={overlay} onClick={onFechar}>
+      <div style={{ ...modal, maxWidth: 680, maxHeight: "88vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          <strong>{unidade.clienteNome}</strong>
+          <button className="icon-btn" onClick={onFechar}><X size={16} /></button>
+        </div>
+        <p style={{ fontSize: 12.5, color: "#65758b", margin: "0 0 14px" }}>
+          {unidade.empreendimento} · {unidade.blocoTorre} / {unidade.apartamento} · {FH_MODALIDADES.find((m) => m.v === unidade.modalidade)?.l} · Etapa: {FH_ETAPA_LABEL[unidade.etapa]}
+        </p>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+          <Field label="Margem prevista" type="number" value={margemPrevista} onChange={setMargemPrevista} />
+          <Field label="Margem realizada" type="number" value={margemRealizada} onChange={setMargemRealizada} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 18 }}>
+          <button className="btn-ghost" style={{ width: "auto", color: AZUL_MARINHO, background: CINZA_CLARO }}
+            onClick={() => onSalvar({ margemPrevista: Number(margemPrevista) || 0, margemRealizada: Number(margemRealizada) || 0 })}>
+            <Save size={14} /> Atualizar margens
+          </button>
+        </div>
+
+        <strong style={{ fontSize: 13.5, color: AZUL_MARINHO }}>Serviços contratados</strong>
+        {unidade.servicos.length === 0 && <p style={{ color: "#8593a8", fontSize: 13, marginTop: 6 }}>Nenhum serviço contratado ainda.</p>}
+        <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
+          {unidade.servicos.map((s) => {
+            const pendenciasDoServico = unidade.pendencias.filter((p) => p.servicoId === s.id);
+            return (
+              <div key={s.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
+                  <div>
+                    <strong>{fhNomeCategoria(s.categoriaId)}</strong>
+                    <div style={{ fontSize: 12, color: "#65758b" }}>{fornecedores.find((f) => f.id === s.fornecedorId)?.nome || "—"}</div>
+                  </div>
+                  <div style={{ textAlign: "right", fontSize: 12.5 }}>
+                    <div>{FH_STATUS_SERVICO_LABEL[s.status]}</div>
+                    <div style={{ color: "#8593a8" }}>{s.planejadoInicio} → {s.planejadoFim}</div>
+                  </div>
+                  <div style={{ textAlign: "right", fontSize: 12.5 }}>
+                    <div>Fornecedor: {fmtReal(s.valorFornecedor)}</div>
+                    <div>Cliente: {fmtReal(s.valorCliente)}</div>
+                  </div>
+                </div>
+                {pendenciasDoServico.length > 0 && (
+                  <div style={{ marginTop: 8, borderTop: `1px dashed ${CINZA_BORDA}`, paddingTop: 8 }}>
+                    {pendenciasDoServico.map((p) => (
+                      <div key={p.id} style={{ fontSize: 12.5, color: p.status === "aberta" ? "#C62828" : "#2E7D32", display: "flex", justifyContent: "space-between", gap: 8 }}>
+                        <span>{p.descricao} — {p.responsavel}</span>
+                        <span>{p.status === "aberta" ? `prazo ${p.prazo}` : "resolvida"}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
+          {unidade.statusAceite === "aceito" ? (
+            <span style={{ fontSize: 12.5, color: "#2E7D32", fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
+              <Check size={15} /> Aceito em {unidade.dataAceite}
+            </span>
+          ) : (
+            <button className="btn-solid" style={{ width: "auto" }} onClick={registrarAceite}><Check size={15} /> Registrar aceite final</button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AbaGerencia({ sub = "visao-geral", token, perfil, usuarioAtual, decidirComissaoItem, importarClientesHistorico, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
   if (sub === "painel") {
     return <AbaGerenciaPainelEstrategico clientes={clientes} docs={docs} usuarios={usuarios}
@@ -12553,6 +13390,9 @@ function AbaGerencia({ sub = "visao-geral", token, perfil, usuarioAtual, decidir
   if (sub === "financeiro") {
     return <AbaGerenciaFinanceiro docs={docs} clientes={clientes} precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
       adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento} notify={notify} usuarios={usuarios} />;
+  }
+  if (sub === "fn-home") {
+    return <AbaGerenciaFnHome clientes={clientes} empreendimentosRef={empreendimentosRef} notify={notify} />;
   }
   return (
     <AbaGerenciaVisaoGeral token={token} docs={docs} clientes={clientes} updCliente={updCliente} carregando={carregando}
