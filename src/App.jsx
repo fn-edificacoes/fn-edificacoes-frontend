@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import * as Rascunho from "./rascunho-local.js";
+import * as CasaProntaArquivos from "./casa-pronta-arquivos.js";
 import { listarAmbientes, paraItemDeLaudo, todasParaImportacao } from "./patologias-consulta.js";
 import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
@@ -8,7 +9,7 @@ import {
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
   ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle, Megaphone, Clock,
-  Package, Wrench
+  Package, Wrench, Paperclip
 } from "lucide-react";
 
 /* ============================================================
@@ -11624,7 +11625,7 @@ function gravarCasaProntaLista(chave, lista) {
 }
 
 function AbaGerenciaCasaPronta({ notify }) {
-  const [sub, setSub] = useState("fornecedores"); // "fornecedores" | "fichas"
+  const [sub, setSub] = useState("fornecedores"); // "fornecedores" | "fichas" | "indicadores"
   const [fornecedores, setFornecedores] = useState(() => lerCasaProntaLista(CHAVE_CASA_PRONTA_FORNECEDORES));
   const [fichas, setFichas] = useState(() => lerCasaProntaLista(CHAVE_CASA_PRONTA_FICHAS));
 
@@ -11642,7 +11643,7 @@ function AbaGerenciaCasaPronta({ notify }) {
       </div>
 
       <div style={{ display: "flex", gap: 8 }}>
-        {[["fornecedores", "Fornecedores", Wrench], ["fichas", "Fichas técnicas", Building2]].map(([k, label, Icon]) => (
+        {[["fornecedores", "Fornecedores", Wrench], ["fichas", "Fichas técnicas", Building2], ["indicadores", "Indicadores", PieChart]].map(([k, label, Icon]) => (
           <button key={k} type="button" onClick={() => setSub(k)}
             style={{
               display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, cursor: "pointer",
@@ -11654,9 +11655,9 @@ function AbaGerenciaCasaPronta({ notify }) {
         ))}
       </div>
 
-      {sub === "fornecedores"
-        ? <CardFornecedoresCasaPronta fornecedores={fornecedores} setFornecedores={setFornecedores} notify={notify} />
-        : <CardFichasTecnicasCasaPronta fichas={fichas} setFichas={setFichas} fornecedores={fornecedores} notify={notify} />}
+      {sub === "fornecedores" && <CardFornecedoresCasaPronta fornecedores={fornecedores} setFornecedores={setFornecedores} notify={notify} />}
+      {sub === "fichas" && <CardFichasTecnicasCasaPronta fichas={fichas} setFichas={setFichas} fornecedores={fornecedores} notify={notify} />}
+      {sub === "indicadores" && <CardIndicadoresCasaPronta fornecedores={fornecedores} fichas={fichas} />}
     </div>
   );
 }
@@ -11665,6 +11666,7 @@ function CardFornecedoresCasaPronta({ fornecedores, setFornecedores, notify }) {
   const [busca, setBusca] = useState("");
   const [filtroCategoria, setFiltroCategoria] = useState("");
   const [editando, setEditando] = useState(null); // fornecedor sendo editado, ou {} pra novo
+  const [contratosDe, setContratosDe] = useState(null); // fornecedor cujo painel de contratos está aberto
 
   const termo = busca.trim().toLowerCase();
   const visiveis = fornecedores.filter((f) => {
@@ -11687,7 +11689,11 @@ function CardFornecedoresCasaPronta({ fornecedores, setFornecedores, notify }) {
     setEditando(null);
   };
 
-  const excluir = (id) => setFornecedores((lista) => lista.filter((f) => f.id !== id));
+  const excluir = (id) => {
+    setFornecedores((lista) => lista.filter((f) => f.id !== id));
+    // Sem isso, os contratos ficam presos no IndexedDB sem nenhuma tela que os alcance.
+    CasaProntaArquivos.excluirContratosDoFornecedor(id).catch(() => {});
+  };
 
   return (
     <Card icon={Wrench} titulo={`Fornecedores homologados (${fornecedores.length})`}>
@@ -11732,11 +11738,14 @@ function CardFornecedoresCasaPronta({ fornecedores, setFornecedores, notify }) {
             <span style={{ fontSize: 11, fontWeight: 700, color: CASA_PRONTA_STATUS_COR[f.status]?.cor, background: CASA_PRONTA_STATUS_COR[f.status]?.bg, borderRadius: 20, padding: "2px 10px", whiteSpace: "nowrap" }}>
               {f.status}
             </span>
+            <button className="icon-btn" onClick={() => setContratosDe(f)} title="Contratos anexados"><Paperclip size={15} color={AZUL_MEDIO} /></button>
             <button className="icon-btn" onClick={() => setEditando({ ...f })} title="Editar"><Edit3 size={15} color={AZUL_MEDIO} /></button>
             <button className="icon-btn" onClick={() => excluir(f.id)} title="Excluir"><Trash2 size={15} color="#c62828" /></button>
           </div>
         ))}
       </div>
+
+      {contratosDe && <ModalContratosFornecedor fornecedor={contratosDe} onFechar={() => setContratosDe(null)} notify={notify} />}
 
       {editando && (
         <div className="no-print" style={overlay} onClick={() => setEditando(null)}>
@@ -11780,6 +11789,95 @@ function CardFornecedoresCasaPronta({ fornecedores, setFornecedores, notify }) {
         </div>
       )}
     </Card>
+  );
+}
+
+/* Contratos assinados com um fornecedor (o "Termo de parceria FN x fornecedor" do
+   documento) — um ou mais arquivos por fornecedor, guardados no IndexedDB deste
+   navegador (ver casa-pronta-arquivos.js). Ainda não sobe pro servidor: é anexo local,
+   igual o resto do FN Casa Pronta por enquanto. */
+function ModalContratosFornecedor({ fornecedor, onFechar, notify }) {
+  const [contratos, setContratos] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+  const [enviando, setEnviando] = useState(false);
+  const [excluindoId, setExcluindoId] = useState(null);
+
+  const recarregar = () => {
+    setCarregando(true);
+    CasaProntaArquivos.listarContratos(fornecedor.id)
+      .then(setContratos)
+      .catch(() => notify("Não deu para carregar os contratos."))
+      .finally(() => setCarregando(false));
+  };
+  useEffect(recarregar, [fornecedor.id]);
+
+  const anexar = async (e) => {
+    const arquivos = [...(e.target.files || [])];
+    e.target.value = ""; // permite escolher o mesmo arquivo de novo depois de excluir
+    if (arquivos.length === 0) return;
+    setEnviando(true);
+    try {
+      for (const arquivo of arquivos) await CasaProntaArquivos.salvarContrato(fornecedor.id, arquivo);
+      recarregar();
+    } catch { notify("Não deu para anexar o arquivo."); }
+    setEnviando(false);
+  };
+
+  const abrir = async (id) => {
+    try {
+      const r = await CasaProntaArquivos.abrirContrato(id);
+      const url = URL.createObjectURL(r.blob);
+      window.open(url, "_blank");
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch { notify("Não deu para abrir o arquivo."); }
+  };
+
+  const excluir = async (id) => {
+    setExcluindoId(id);
+    await CasaProntaArquivos.excluirContrato(id);
+    setContratos((lista) => lista.filter((c) => c.id !== id));
+    setExcluindoId(null);
+  };
+
+  const tamanhoLegivel = (bytes) => (bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB`);
+
+  return (
+    <div className="no-print" style={overlay} onClick={onFechar}>
+      <div style={{ ...modal, maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          <strong>Contratos — {fornecedor.nome}</strong>
+          <button className="icon-btn" onClick={onFechar}><X size={16} /></button>
+        </div>
+        <p style={{ margin: "0 0 14px", fontSize: 12.5, color: "#65758b" }}>
+          O termo de parceria assinado e qualquer aditivo. Fica só neste navegador, como o resto do FN Casa Pronta por enquanto.
+        </p>
+
+        <label className="btn-solid" style={{ width: "auto", padding: "9px 16px", cursor: enviando ? "wait" : "pointer", display: "inline-flex" }}>
+          {enviando ? <Loader2 size={14} className="spin" /> : <Paperclip size={14} />} Anexar contrato
+          <input type="file" accept="application/pdf,image/*" multiple onChange={anexar} disabled={enviando} style={{ display: "none" }} />
+        </label>
+
+        <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
+          {carregando && <p style={{ color: "#8593a8", fontSize: 13.5 }}>Carregando…</p>}
+          {!carregando && contratos.length === 0 && (
+            <p style={{ color: "#8593a8", fontSize: 13.5 }}>Nenhum contrato anexado ainda.</p>
+          )}
+          {contratos.map((c) => (
+            <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, padding: "8px 10px" }}>
+              <FileText size={16} color={AZUL_MEDIO} style={{ flexShrink: 0 }} />
+              <button type="button" onClick={() => abrir(c.id)} title="Abrir"
+                style={{ flex: 1, minWidth: 0, textAlign: "left", background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: AZUL_MARINHO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.nome}</div>
+                <div style={{ fontSize: 11.5, color: "#8593a8" }}>{tamanhoLegivel(c.tamanho)} · {new Date(c.adicionadoEm).toLocaleDateString("pt-BR")}</div>
+              </button>
+              <button className="icon-btn" onClick={() => excluir(c.id)} title="Excluir" disabled={excluindoId === c.id}>
+                {excluindoId === c.id ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} color="#c62828" />}
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -11914,6 +12012,97 @@ function CardFichasTecnicasCasaPronta({ fichas, setFichas, fornecedores, notify 
           </div>
         </div>
       )}
+    </Card>
+  );
+}
+
+/* Converte "R$ 1.100,50" (ou variações soltas do mesmo formato) num número — os campos de
+   preço do FN Casa Pronta são texto livre (o documento trata isso como negociação, não como
+   uma planilha fechada), então os indicadores só conseguem somar o que consegue entender. */
+function paraNumeroBR(texto) {
+  if (!texto) return null;
+  let limpo = String(texto).replace(/[^\d.,]/g, "");
+  if (!limpo) return null;
+  limpo = limpo.includes(",") ? limpo.replace(/\./g, "").replace(",", ".") : limpo;
+  const n = parseFloat(limpo);
+  return Number.isFinite(n) ? n : null;
+}
+const META_FORNECEDORES_POR_CATEGORIA = 2; // "dois fornecedores por categoria" — ver seção 9 do documento
+
+function CardIndicadoresCasaPronta({ fornecedores, fichas }) {
+  const porStatus = useMemo(() => {
+    const mapa = Object.fromEntries(CASA_PRONTA_STATUS.map((s) => [s, 0]));
+    fornecedores.forEach((f) => { if (mapa[f.status] !== undefined) mapa[f.status] += 1; });
+    return mapa;
+  }, [fornecedores]);
+
+  const cobertura = useMemo(() => CASA_PRONTA_CATEGORIAS.filter((c) => c !== "Outro").map((categoria) => {
+    const doGrupo = fornecedores.filter((f) => f.categoria === categoria);
+    const ativos = doGrupo.filter((f) => f.status !== "Suspenso");
+    return { categoria, total: doGrupo.length, ativos: ativos.length };
+  }), [fornecedores]);
+  const semCobertura = cobertura.filter((c) => c.ativos === 0).length;
+  const abaixoDaMeta = cobertura.filter((c) => c.ativos > 0 && c.ativos < META_FORNECEDORES_POR_CATEGORIA).length;
+
+  const totalVinculos = useMemo(() => fichas.reduce((soma, f) => soma + (f.vinculos || []).length, 0), [fichas]);
+  const fichasSemVinculo = fichas.filter((f) => (f.vinculos || []).length === 0).length;
+
+  const economiaPorVinculo = useMemo(() => {
+    const fornecedorPorId = Object.fromEntries(fornecedores.map((f) => [f.id, f]));
+    const linhas = [];
+    fichas.forEach((ficha) => (ficha.vinculos || []).forEach((v) => {
+      const negociado = paraNumeroBR(v.precoNegociado);
+      const publico = paraNumeroBR(fornecedorPorId[v.fornecedorId]?.precoPublico);
+      if (negociado != null && publico > 0) linhas.push({ economia: (publico - negociado) / publico });
+    }));
+    return linhas;
+  }, [fichas, fornecedores]);
+  const economiaMedia = economiaPorVinculo.length
+    ? economiaPorVinculo.reduce((s, l) => s + l.economia, 0) / economiaPorVinculo.length
+    : null;
+
+  const cartao = (titulo, valor, cor) => (
+    <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "12px 14px", background: "#fff" }}>
+      <div style={{ fontSize: 11.5, color: "#65758b", fontWeight: 600 }}>{titulo}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: cor || AZUL_MARINHO, marginTop: 2 }}>{valor}</div>
+    </div>
+  );
+
+  return (
+    <Card icon={PieChart} titulo="Indicadores do FN Casa Pronta">
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Calculados em cima do que já está cadastrado neste navegador — fornecedores, status de homologação e fichas técnicas. Sem venda ainda, o painel de conversão/ticket do documento fica pra quando houver pedido de verdade.
+      </p>
+
+      <Grid>
+        {cartao("Fornecedores cadastrados", fornecedores.length)}
+        {cartao("Homologados/preferenciais", porStatus["Homologado"] + porStatus["Preferencial"], "#1b6e3c")}
+        {cartao("Categorias sem cobertura", semCobertura, semCobertura > 0 ? "#b3261e" : "#1b6e3c")}
+        {cartao("Categorias abaixo da meta", abaixoDaMeta, abaixoDaMeta > 0 ? "#8a6d00" : "#1b6e3c")}
+        {cartao("Fichas técnicas", fichas.length)}
+        {cartao("Fornecedores vinculados a fichas", totalVinculos)}
+        {cartao("Fichas sem fornecedor vinculado", fichasSemVinculo, fichasSemVinculo > 0 ? "#8a6d00" : "#1b6e3c")}
+        {cartao("Economia média negociada", economiaMedia != null ? `${(economiaMedia * 100).toFixed(0)}%` : "—",
+          economiaMedia != null ? "#1b6e3c" : undefined)}
+      </Grid>
+
+      <div style={{ marginTop: 20 }}>
+        <label style={lab}>Cobertura por categoria (meta: {META_FORNECEDORES_POR_CATEGORIA}+ fornecedores ativos)</label>
+        <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+          {cobertura.map((c) => {
+            const cor = c.ativos === 0 ? "#b3261e" : c.ativos < META_FORNECEDORES_POR_CATEGORIA ? "#8a6d00" : "#1b6e3c";
+            const bg = c.ativos === 0 ? "#FBE7E6" : c.ativos < META_FORNECEDORES_POR_CATEGORIA ? "#FFF4D6" : "#E4F5E9";
+            return (
+              <div key={c.categoria} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+                <span style={{ flex: 1, minWidth: 160 }}>{c.categoria}</span>
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: cor, background: bg, borderRadius: 20, padding: "2px 10px", whiteSpace: "nowrap" }}>
+                  {c.ativos} ativo(s){c.total !== c.ativos ? ` · ${c.total} no total` : ""}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </Card>
   );
 }
