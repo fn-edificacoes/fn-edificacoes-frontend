@@ -2165,6 +2165,48 @@ export default function App() {
   return <AppInterno session={session} onLogout={() => { setSession(null); setMostrarLogin(false); }} />;
 }
 
+/* Menu lateral só da Gerência — é quem acumula os 8 módulos do topo + os 11 itens de dentro
+   de "Gerência" numa única barra horizontal apertada (o resto dos perfis já tem poucas abas,
+   sem essa mistura). Cada perfil (vistoriador, documentação, atendimento...) já delimitava
+   naturalmente um pedaço disso — os grupos abaixo só tornam essa mesma divisão visível pra
+   quem vê tudo. "sub" só existe quando o destino mora dentro do módulo "gerencia"
+   (AbaGerencia, controlado por abaGerencia); sem "sub" o destino é o próprio módulo de topo. */
+const GERENCIA_MENU_LATERAL = [
+  { titulo: "Vistoria", itens: [
+    { aba: "laudos", label: "Laudos", Icon: FileText },
+    { aba: "gerencia", sub: "patologias", label: "Banco de patologias", Icon: AlertTriangle },
+  ] },
+  { titulo: "Documentação", itens: [
+    { aba: "documentacao", label: "Documentação", Icon: ClipboardCheck },
+  ] },
+  { titulo: "Atendimento", itens: [
+    { aba: "clientes", label: "Clientes", Icon: Users },
+    { aba: "qualidade", label: "Agendamento", Icon: Star },
+    { aba: "faq", label: "FAQ", Icon: HelpCircle },
+    { aba: "marketing", label: "Marketing", Icon: Megaphone },
+    { aba: "gerencia", sub: "perfil-cliente", label: "Perfil do cliente", Icon: User },
+    { aba: "gerencia", sub: "prospeccao", label: "Prospecção", Icon: TrendingUp },
+  ] },
+  { titulo: "FN Casa Pronta", itens: [
+    { aba: "gerencia", sub: "casa-pronta", label: "FN Casa Pronta", Icon: Package },
+  ] },
+  { titulo: "Visão geral & Indicadores", itens: [
+    { aba: "gerencia", sub: "visao-geral", label: "Visão geral", Icon: LayoutGrid },
+    { aba: "gerencia", sub: "indicadores", label: "Indicadores", Icon: PieChart },
+    { aba: "gerencia", sub: "painel", label: "Painel estratégico", Icon: BarChart3 },
+    { aba: "gerencia", sub: "acompanhamento", label: "Acompanhamento", Icon: ClipboardList },
+  ] },
+  { titulo: "Financeiro", itens: [
+    { aba: "gerencia", sub: "financeiro", label: "Financeiro", Icon: DollarSign },
+  ] },
+  { titulo: "Sistema", itens: [
+    { aba: "gerencia", sub: "reformas", label: "Reformas", Icon: Building2 },
+    { aba: "gerencia", sub: "importacao", label: "Importar base", Icon: Upload },
+    { aba: "usuarios", label: "Usuários", Icon: UserCog },
+  ] },
+];
+const LARGURA_MENU_LATERAL_GERENCIA = 232;
+
 function AppInterno({ session, onLogout }) {
   /* "qualidade" (perfil "Agendamento", só leitura) foi unificado ao Atendimento — deixou de
      existir como opção em Usuários (ver ROLE_LABEL), mas uma conta antiga que ainda tenha
@@ -3374,8 +3416,47 @@ function AppInterno({ session, onLogout }) {
   const imprimir = () => window.print();
 
   return (
-    <div style={{ fontFamily: "'Inter', system-ui, sans-serif", color: "#1a2330", background: CINZA_CLARO, minHeight: "100vh" }}>
+    <div style={{ fontFamily: "'Inter', system-ui, sans-serif", color: "#1a2330", background: CINZA_CLARO, minHeight: "100vh", ...(perfil === "gerencia" ? { paddingLeft: LARGURA_MENU_LATERAL_GERENCIA } : {}) }}>
       <style>{estilos}</style>
+
+      {/* Menu lateral — só a Gerência vê (é quem acumula todos os módulos); os demais
+          perfis continuam com a barra de abas horizontal de sempre, mais abaixo. */}
+      {perfil === "gerencia" && (
+        <aside className="no-print" style={{
+          position: "fixed", top: 0, left: 0, bottom: 0, width: LARGURA_MENU_LATERAL_GERENCIA, overflowY: "auto",
+          background: AZUL_MARINHO, color: "#fff", zIndex: 25, padding: "16px 10px 24px",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 8px 18px" }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
+              <img src={LOGO_URL} alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+            </div>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>FN Edificações</div>
+          </div>
+          {GERENCIA_MENU_LATERAL.map((grupo) => (
+            <div key={grupo.titulo} style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, color: "rgba(255,255,255,.5)", padding: "0 10px 6px" }}>
+                {grupo.titulo}
+              </div>
+              <div style={{ display: "grid", gap: 2 }}>
+                {grupo.itens.map((item) => {
+                  const ativo = abaTop === item.aba && (!item.sub || abaGerencia === item.sub);
+                  return (
+                    <button key={item.label} onClick={() => { setAbaTop(item.aba); if (item.sub) setAbaGerencia(item.sub); }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 9, textAlign: "left", padding: "8px 10px", borderRadius: 8,
+                        border: "none", cursor: "pointer", fontSize: 13, fontWeight: ativo ? 700 : 500,
+                        background: ativo ? "rgba(255,255,255,.16)" : "transparent",
+                        color: ativo ? "#fff" : "rgba(255,255,255,.75)",
+                      }}>
+                      <item.Icon size={15} style={{ flexShrink: 0 }} /> {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </aside>
+      )}
 
       {/* ---------------- Barra superior ---------------- */}
       <header className="no-print" style={{ background: AZUL_MARINHO, color: "#fff", position: "sticky", top: 0, zIndex: 20 }}>
@@ -3441,16 +3522,19 @@ function AppInterno({ session, onLogout }) {
           )}
         </div>
 
-        {/* Navegação de módulos (filtrada pelo perfil de acesso) */}
-        <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, borderTop: "1px solid rgba(255,255,255,.12)", overflowX: "auto" }}>
-          {[["laudos", "Laudos", FileText], ["documentacao", "Documentação", ClipboardCheck], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Fornecedores", Wrench], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog]]
-            .filter(([k]) => modulosPermitidos.includes(k))
-            .map(([k, label, Icon]) => (
-              <button key={k} onClick={() => setAbaTop(k)} className="tab" style={{ borderBottomColor: abaTop === k ? "#fff" : "transparent", color: abaTop === k ? "#fff" : "rgba(255,255,255,.55)", whiteSpace: "nowrap", flexShrink: 0 }}>
-                <Icon size={15} /> {label}
-              </button>
-            ))}
-        </nav>
+        {/* Navegação de módulos (filtrada pelo perfil de acesso) — a Gerência não usa mais
+            esta barra, ela tem o menu lateral com tudo já agrupado. */}
+        {perfil !== "gerencia" && (
+          <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, borderTop: "1px solid rgba(255,255,255,.12)", overflowX: "auto" }}>
+            {[["laudos", "Laudos", FileText], ["documentacao", "Documentação", ClipboardCheck], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Fornecedores", Wrench], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog]]
+              .filter(([k]) => modulosPermitidos.includes(k))
+              .map(([k, label, Icon]) => (
+                <button key={k} onClick={() => setAbaTop(k)} className="tab" style={{ borderBottomColor: abaTop === k ? "#fff" : "transparent", color: abaTop === k ? "#fff" : "rgba(255,255,255,.55)", whiteSpace: "nowrap", flexShrink: 0 }}>
+                  <Icon size={15} /> {label}
+                </button>
+              ))}
+          </nav>
+        )}
 
         {/* Sub-navegação (somente dentro do módulo Laudos) */}
         {abaTop === "laudos" && (
@@ -3468,17 +3552,6 @@ function AppInterno({ session, onLogout }) {
                   <Icon size={15} /> {label}
                 </button>
               ))}
-          </nav>
-        )}
-
-        {/* Sub-navegação (somente dentro do módulo Gerência) */}
-        {abaTop === "gerencia" && (
-          <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
-            {[["visao-geral", "Visão geral", LayoutGrid], ["indicadores", "Indicadores", PieChart], ["painel", "Painel estratégico", BarChart3], ["acompanhamento", "Acompanhamento", ClipboardList], ["reformas", "Reformas", Building2], ["casa-pronta", "FN Casa Pronta", Package], ["perfil-cliente", "Perfil do cliente", User], ["financeiro", "Financeiro", DollarSign], ["prospeccao", "Prospecção", TrendingUp], ["patologias", "Banco de patologias", AlertTriangle], ["importacao", "Importar base", Upload]].map(([k, label, Icon]) => (
-              <button key={k} onClick={() => setAbaGerencia(k)} className="tab" style={{ borderBottomColor: abaGerencia === k ? AZUL_MEDIO : "transparent", color: abaGerencia === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
-                <Icon size={15} /> {label}
-              </button>
-            ))}
           </nav>
         )}
 
