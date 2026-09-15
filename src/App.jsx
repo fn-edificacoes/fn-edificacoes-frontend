@@ -3666,6 +3666,7 @@ function AppInterno({ session, onLogout }) {
             atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
             importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao}
             meuConvite={meuConvite}
+            extrasFornecedorCasaPronta={extrasFornecedorCasaPronta} salvarExtraFornecedorCasaPronta={salvarExtraFornecedorCasaPronta}
             docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} clientes={clientes} updCliente={updCliente} resetarSenhaCliente={resetarSenhaCliente} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
             usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} salvarPerfilTecnico={salvarPerfilTecnico} usuarioAtualId={session.usuario.id}
             avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
@@ -11766,11 +11767,16 @@ function AbaGerenciaCasaPronta({ notify, parceiros, parceirosCarregando, atualiz
   podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando,
   vendas = [], vendasCarregando, atualizarVenda, token, perfil, decidirComissaoItem,
   prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro,
-  adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite }) {
+  adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite,
+  extrasFornecedorCasaPronta, salvarExtraFornecedorCasaPronta }) {
   const [sub, setSub] = useState("fornecedores"); // "fornecedores" | "fichas" | "vendas" | "indicadores"
   const [fichas, setFichas] = useState(() => lerCasaProntaLista(CHAVE_CASA_PRONTA_FICHAS));
   const [vendasCasaPronta, setVendasCasaPronta] = useState(() => lerCasaProntaLista(CHAVE_CASA_PRONTA_VENDAS));
-  const [extrasFornecedorCasaPronta, salvarExtraFornecedorCasaPronta] = useCasaProntaFornecedorExtras();
+  /* extrasFornecedorCasaPronta vem de fora (AppInterno) — é a MESMA instância usada por
+     excluirParceiro e pela aba "Vendas". Duas instâncias independentes do hook (uma aqui,
+     outra em AppInterno) liam/gravavam a mesma chave do localStorage sem se enxergar: salvar
+     uma Ficha Casa Pronta aqui não aparecia pra quem exclui o parceiro em AppInterno, e a
+     limpeza ao excluir não encontrava o registro. */
 
   useEffect(() => gravarCasaProntaLista(CHAVE_CASA_PRONTA_FICHAS, fichas), [fichas]);
   useEffect(() => gravarCasaProntaLista(CHAVE_CASA_PRONTA_VENDAS, vendasCasaPronta), [vendasCasaPronta]);
@@ -13540,7 +13546,7 @@ function AbaGerenciaImportacao({ clientes = [], precos = [], empreendimentosRef 
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", token, perfil, usuarioAtual, decidirComissaoItem, importarClientesHistorico, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
+function AbaGerencia({ sub = "visao-geral", token, perfil, usuarioAtual, decidirComissaoItem, importarClientesHistorico, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas, extrasFornecedorCasaPronta, salvarExtraFornecedorCasaPronta }) {
   if (sub === "painel") {
     return <AbaGerenciaPainelEstrategico clientes={clientes} docs={docs} usuarios={usuarios}
       avaliacoes={avaliacoes} prospeccao={prospeccao} prospeccaoParceiros={prospeccaoParceiros}
@@ -13572,7 +13578,8 @@ function AbaGerencia({ sub = "visao-geral", token, perfil, usuarioAtual, decidir
       podeExcluir excluirParceiro={excluirParceiro}
       prospeccaoParceiros={prospeccaoParceiros} prospeccaoParceirosCarregando={prospeccaoParceirosCarregando}
       atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
-      importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao} meuConvite={meuConvite} />;
+      importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao} meuConvite={meuConvite}
+      extrasFornecedorCasaPronta={extrasFornecedorCasaPronta} salvarExtraFornecedorCasaPronta={salvarExtraFornecedorCasaPronta} />;
   }
   if (sub === "perfil-cliente") {
     return <AbaPerfilCliente clientes={clientes} token={token} notify={notify}
