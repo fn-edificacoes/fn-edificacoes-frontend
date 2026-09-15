@@ -3107,7 +3107,15 @@ function AppInterno({ session, onLogout }) {
       }
     } else if (trocouDeCliente) {
       setItens([novoItem()]);
-      setDados((d) => ({ ...d, fotoCliente: null }));
+      /* Tipologia e ambientes vistoriados iam pro laudo do cliente novo com o valor do
+         cliente anterior — nenhum outro ponto os reseta, e os dois entram no laudo final
+         e no cálculo do ICC (montarLaudoModelo, calcularIndicadoresLaudo). */
+      setDados((d) => ({
+        ...d,
+        fotoCliente: null,
+        imovel: { ...d.imovel, tipologia: "" },
+        vistoria: { ...d.vistoria, ambientesVistoriados: "" },
+      }));
     }
     setDados((d) => ({
       ...d,
@@ -8351,17 +8359,21 @@ function AbaLaudosRealizados({ laudos: laudosRecebidos = [], carregando, recarre
   const abrir = async (docId) => {
     if (abertoId === docId) { setAbertoId(null); return; }
     setAbertoId(docId);
-    if (conteudos[docId] || !token) return;
+    const laudoAtual = laudosRecebidos.find((l) => l.doc_id === docId);
+    const versaoAtual = laudoAtual?.laudo_versao;
+    /* O cache é por doc_id, mas o mesmo doc_id ganha uma versão nova quando a gerência devolve
+       e o laudo é corrigido e reenviado — sem comparar a versão, quem já tinha aberto a linha
+       antes da correção continuava vendo o conteúdo velho guardado em memória ao reabrir. */
+    if ((conteudos[docId] && conteudos[docId].versao === versaoAtual) || !token) return;
 
     /* Enquanto a API antiga estiver no ar, o conteúdo ainda vem dentro da lista. Usar o que
        já está na mão evita uma ida ao servidor — e evita que a tela fique sem o laudo caso a
        rota nova ainda não exista lá. Some sozinho quando as duas pontas estiverem na mesma
        versão: aí a lista chega sem conteúdo e a busca acontece. */
-    const naLista = laudosRecebidos.find((l) => l.doc_id === docId);
-    if (naLista?.itens) {
+    if (laudoAtual?.itens) {
       setConteudos((c) => ({
         ...c,
-        [docId]: { dados: naLista.dados, itens: naLista.itens, vistoriadorAssinatura: naLista.vistoriador_assinatura || null },
+        [docId]: { dados: laudoAtual.dados, itens: laudoAtual.itens, vistoriadorAssinatura: laudoAtual.vistoriador_assinatura || null, versao: versaoAtual },
       }));
       return;
     }
@@ -8369,7 +8381,7 @@ function AbaLaudosRealizados({ laudos: laudosRecebidos = [], carregando, recarre
     setBuscandoConteudo(docId);
     try {
       const r = await apiFetch(`/api/laudos/${docId}/conteudo`, { token });
-      setConteudos((c) => ({ ...c, [docId]: r }));
+      setConteudos((c) => ({ ...c, [docId]: { ...r, versao: versaoAtual } }));
     } catch { /* sem conteúdo: a linha mostra o aviso abaixo */ }
     setBuscandoConteudo(null);
   };
@@ -9477,6 +9489,11 @@ function CardPedidosExclusao({ token, notify }) {
   useEffect(() => { carregar(); }, []);
 
   const decidir = async (id, status) => {
+    // Recusar exige motivo \u2014 \u00e9 o que o texto da tela j\u00e1 promete, mas nada impedia o envio em branco.
+    if (status === "recusado" && !(resposta[id] || "").trim()) {
+      notify("Escreva o motivo da recusa antes de enviar.");
+      return;
+    }
     try {
       await apiFetch(`/api/pedidos-exclusao/${id}`, { method: "PATCH", token, body: { status, resposta: resposta[id] || "" } });
       notify(status === "atendido" ? "Pedido marcado como atendido \u2713" : "Pedido respondido \u2713");
@@ -9516,7 +9533,8 @@ function CardPedidosExclusao({ token, notify }) {
                   <button className="btn-solid" style={{ width: "auto", padding: "7px 12px" }} onClick={() => decidir(p.id, "atendido")}>
                     <Check size={14} /> Dados excluídos
                   </button>
-                  <button className="btn-ghost" style={{ width: "auto", padding: "7px 12px" }} onClick={() => decidir(p.id, "recusado")}>
+                  <button className="btn-ghost" style={{ width: "auto", padding: "7px 12px" }} onClick={() => decidir(p.id, "recusado")}
+                    disabled={!(resposta[p.id] || "").trim()} title={!(resposta[p.id] || "").trim() ? "Escreva o motivo da recusa" : ""}>
                     <X size={14} /> Não é possível excluir
                   </button>
                 </div>
@@ -10021,8 +10039,24 @@ function AbaGerenciaVisaoGeral({ token, docs, clientes, updCliente, padronizarEm
   }, {});
   const rankingEmpreendimentos = Object.entries(porEmpreendimento).sort((a, b) => b[1] - a[1]).slice(0, 6);
 
+  // Os 4 números que decidem o dia — o resto da tela é apoio, isto é o que puxa atenção
+  // primeiro. Só métricas já calculadas em outro lugar da tela (mesma fonte, sem duplicar
+  // a lógica de faturamento/comissão, que mora no Financeiro e no marketplace de parceiros).
+  const emVistoriaAgora = clientes.filter((c) => c.status === "Em vistoria").length;
+  const cancelamentosPendentes = clientes.filter((c) => c.status === "Cancelamento solicitado").length;
+  const mediaAvaliacoes = avaliacoes.length ? avaliacoes.reduce((s, a) => s + a.nota, 0) / avaliacoes.length : null;
+
   return (
     <div style={{ display: "grid", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+        <KpiCard label="Laudos aguardando aprovação" valor={laudosPendentes.length} Icon={FileText}
+          cor={laudosPendentes.length > 0 ? "#C62828" : AZUL_MARINHO} />
+        <KpiCard label="Vistorias em andamento agora" valor={emVistoriaAgora} Icon={Camera} />
+        <KpiCard label="Cancelamentos para decidir" valor={cancelamentosPendentes} Icon={AlertTriangle}
+          cor={cancelamentosPendentes > 0 ? "#B26A00" : AZUL_MARINHO} />
+        <KpiCard label="Avaliação média dos clientes" valor={mediaAvaliacoes != null ? mediaAvaliacoes.toFixed(1) : "—"} Icon={Star} />
+      </div>
+
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando indicadores…</p>}
 
       <CardEntregaEmails token={token} notify={notify} clientes={clientes} docs={docs} />
@@ -12119,6 +12153,30 @@ function CardFichasTecnicasCasaPronta({ fichas, setFichas, fornecedores, notify 
                   </div>
                 ))}
               </div>
+              {/* Prévia comparativa: o que os pacotes editados acima parecem lado a lado pro
+                  cliente — cada linha do "conteúdo" vira um item da lista. Só aparece com 2+
+                  pacotes, porque comparar um só não ajuda ninguém a decidir. */}
+              {(editando.pacotes || []).length > 1 && (
+                <div style={{ marginTop: 14 }}>
+                  <label style={lab}>Prévia: como fica a comparação pro cliente</label>
+                  <div style={{ display: "flex", gap: 10, marginTop: 8, overflowX: "auto", paddingBottom: 4 }}>
+                    {editando.pacotes.map((p) => (
+                      <div key={p.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, background: "#fff", minWidth: 150, flex: "1 0 150px" }}>
+                        <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 4 }}>{p.nome || "Pacote sem nome"}</div>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: AZUL_MARINHO, marginBottom: 8 }}>{p.preco || "sob consulta"}</div>
+                        <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 5 }}>
+                          {(p.conteudo || "").split("\n").map((l) => l.trim()).filter(Boolean).map((linha, idx) => (
+                            <li key={idx} style={{ fontSize: 12, color: "#4a5a70", paddingLeft: 14, position: "relative" }}>
+                              <span style={{ position: "absolute", left: 0, color: "#1b6e3c", fontWeight: 700 }}>✓</span>{linha}
+                            </li>
+                          ))}
+                          {!(p.conteudo || "").trim() && <li style={{ fontSize: 12, color: "#8593a8" }}>Descreva o que está incluso acima.</li>}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div style={{ marginTop: 16 }}>
@@ -16094,6 +16152,28 @@ function ModalPedirRevistoria({ atendimento, onFechar, onEnviar }) {
   );
 }
 
+/* Fluxograma visual do atendimento no portal do cliente — mesma ideia de LinhaDoTempo (uso
+   interno da equipe, sobre ETAPAS_VISTORIA), mas com o vocabulário mais simples que o cliente
+   já recebe em STATUS_ATENDIMENTO_INFO. Documentação ART/TRT tem fluxo próprio de 2 passos
+   (Elaborando/Documentação pronta) e não entra aqui — o texto explicativo já dá conta disso;
+   status fora da lista (ex.: "Cancelado") também não mostra a linha, só o texto de sempre. */
+const ETAPAS_ATENDIMENTO_CLIENTE = ["Em análise", "Agendado", "Vistoria realizada", "Laudo enviado por e-mail"];
+function FluxogramaAtendimentoCliente({ status }) {
+  const indiceAtual = ETAPAS_ATENDIMENTO_CLIENTE.indexOf(status);
+  if (indiceAtual < 0) return null;
+  const etapas = ETAPAS_ATENDIMENTO_CLIENTE.map((label, i) => ({ label, cor: AZUL_MEDIO, ativa: i <= indiceAtual }));
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 0, marginBottom: 10 }}>
+      {etapas.map((e, i) => (
+        <React.Fragment key={e.label}>
+          <EtapaTempo {...e} />
+          {i < etapas.length - 1 && <div style={{ height: 2, background: "#D8DEE7", flex: 0.6, marginTop: 6 }} />}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
 /* ================= Portal do cliente (área logada, papel "cliente") =================
    Reaproveita ao máximo o que já existia na consulta pública: CartaoAtendimentoCliente
    (laudo/documentação/avaliação) e a vitrine de parceiros — só troca "CPF digitado" por
@@ -16334,6 +16414,7 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
                         {d.empreendimento}{d.blocoTorre ? ` · ${d.blocoTorre}` : ""}
                       </div>
                     )}
+                    {!ehServicoDocumentacao(d) && <FluxogramaAtendimentoCliente status={d.status} />}
                     {statusInfo && (
                       <div style={{ fontSize: 13.5, color: "#334", background: CINZA_CLARO, borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
                         {statusInfo}
@@ -17345,6 +17426,28 @@ function SecaoMeusCupons({ notify }) {
   );
 }
 
+/* Card de produto (FN Home) com o benefício já visível na grade — hoje o preço de cada item
+   do catálogo só existe por parceiro (GET /api/parceiros/:id/servicos), buscado quando o
+   modal abre; trazer isso pra grade inteira exigiria uma chamada por card. O "beneficio"
+   (ex.: "10% OFF"), esse sim já vem na lista da vitrine — mostrar ele aqui dá o mesmo "ver
+   sem clicar" com dado que já existe, sem sobrecarregar a tela com uma chamada por produto.
+   FN Clube (serviço) continua só com o logo, que é o que o usuário pediu pra não mexer. */
+function CardProdutoVitrine({ p, onClick }) {
+  return (
+    <button onClick={onClick} style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: 14, display: "flex", flexDirection: "column", alignItems: "center", gap: 8, cursor: "pointer", textAlign: "center" }}>
+      <div style={{ width: 56, height: 56, borderRadius: 10, background: CINZA_CLARO, display: "grid", placeItems: "center", overflow: "hidden" }}>
+        {p.logo ? <img src={p.logo} alt={p.empresa} style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <Building2 size={22} color={AZUL_MEDIO} />}
+      </div>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: AZUL_MARINHO }}>{p.empresa}</div>
+      {p.beneficio && (
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#1b6e3c", background: "#E4F5E9", borderRadius: 20, padding: "3px 9px" }}>
+          {p.beneficio}
+        </div>
+      )}
+    </button>
+  );
+}
+
 function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, somenteLogos = false, tipoInicial = "servico" }) {
   const [parceiros, setParceiros] = useState([]);
   const [carregando, setCarregando] = useState(false);
@@ -17396,7 +17499,11 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, so
 
       {filtrados.length > 0 && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 12 }}>
-          {filtrados.map((p) => <LogoParceiro key={p.id} p={p} onClick={() => setSelecionado(p)} />)}
+          {filtrados.map((p) => (
+            !somenteLogos && abaTipo === "produto"
+              ? <CardProdutoVitrine key={p.id} p={p} onClick={() => setSelecionado(p)} />
+              : <LogoParceiro key={p.id} p={p} onClick={() => setSelecionado(p)} />
+          ))}
         </div>
       )}
 
