@@ -5181,7 +5181,12 @@ function CardClientePendente({ c, todos, podeAgir, onAprovar, onRecusar, vistori
         {ehRevistoria(c) && <SeloRevistoria seq={c.revistoriaSeq} />}
       </div>
       <div style={{ fontSize: 12, color: "#65758b" }}>{mascararCpf(c.cpf)}</div>
-      <div style={{ fontSize: 12, color: "#65758b" }}>{c.endereco || c.empreendimento || "Endereço não informado"}</div>
+      {c.empreendimento && (
+        <div style={{ fontSize: 12, fontWeight: 700, color: AZUL_MARINHO }}>
+          {c.empreendimento}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}
+        </div>
+      )}
+      <div style={{ fontSize: 12, color: "#65758b" }}>{c.endereco || "Endereço não informado"}</div>
       <div style={{ fontSize: 12, color: AZUL_MARINHO, fontWeight: 700 }}>{c.servico}</div>
       {/* No pedido de revistoria, o motivo é o que a pessoa do Atendimento precisa ler antes
           de aprovar: é ele que diz se o caso é retorno mesmo ou outra coisa. */}
@@ -5501,7 +5506,12 @@ function PainelDiaAgendamento({ diaISO, clientes = [], todosClientes = [], visto
                       <div style={{ fontSize: 13.5, fontWeight: 700 }}>{c.nome}</div>
                       {ehRevistoria(c) && <SeloRevistoria seq={c.revistoriaSeq} />}
                     </div>
-                    <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.endereco || c.empreendimento || "—"}</div>
+                    {c.empreendimento && (
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: AZUL_MARINHO }}>
+                        {c.empreendimento}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}
+                      </div>
+                    )}
+                    <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.endereco || "—"}</div>
                     <div style={{ fontSize: 12.5, color: "#65758b" }}>{c.servico}</div>
                     {linkWhatsapp(c.telefone) && (
                       <a href={linkWhatsapp(c.telefone)} target="_blank" rel="noopener noreferrer"
