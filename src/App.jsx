@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import * as Rascunho from "./rascunho-local.js";
 import * as CasaProntaArquivos from "./casa-pronta-arquivos.js";
 import { listarAmbientes, paraItemDeLaudo, todasParaImportacao } from "./patologias-consulta.js";
+import { CASOS_DETETIVE } from "./detetive-patologias-casos.js";
+import * as JogoDetetive from "./detetive-patologias-progresso.js";
 import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
   Building2, User, ClipboardList, ChevronDown, ChevronRight, ChevronLeft, Check,
@@ -9,7 +11,7 @@ import {
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
   ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle, Megaphone, Clock,
-  Package, Wrench, Paperclip
+  Package, Wrench, Paperclip, Trophy, Award, Target
 } from "lucide-react";
 
 /* ============================================================
@@ -47,6 +49,16 @@ const FN_PROJETOS_URL = (import.meta.env.VITE_FN_PROJETOS_URL || "/reformas").re
    "/logo-...png" e no GitHub Pages, "/fn-edificacoes-frontend/logo-...png". Caminho
    absoluto fixo quebrava no Pages, que serve o site dentro de uma subpasta. */
 const LOGO_URL = `${import.meta.env.BASE_URL}logo-fn-transparente.png`;
+
+/* Personagens da equipe FN (ilustração própria da marca) usados na etapa de "nova
+   evidência" do Detetive das Patologias. Os arquivos ainda não existem no projeto —
+   PlacarCenaPlaceholder cai sozinho no quadro genérico via onError enquanto isso, então
+   basta salvar os PNGs em public/personagens/ (mesmo nome) para o jogo passar a usá-los,
+   sem mexer em código nenhum. */
+const PERSONAGENS_URL = {
+  vistoriador: `${import.meta.env.BASE_URL}personagens/vistoriador.png`,
+  vistoriadora: `${import.meta.env.BASE_URL}personagens/vistoriadora.png`,
+};
 
 /* Quanto esperar pela API antes de desistir. O plano free do Render hiberna o serviço e a
    primeira chamada do dia pode levar quase um minuto para acordar — daí o valor alto. Sem
@@ -16257,6 +16269,13 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
   const [toast, setToast] = useState("");
   const notify = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
 
+  /* FN Arquivo Técnico — Detetive das Patologias: game educativo do portal do
+     cliente. Progresso (XP, nível, badges) mora só no navegador (ver
+     detetive-patologias-progresso.js), sem chamada ao servidor — por isso o
+     estado aqui só recarrega do localStorage quando o jogo fecha. */
+  const [jogoAberto, setJogoAberto] = useState(false);
+  const [progressoJogo, setProgressoJogo] = useState(() => JogoDetetive.carregarProgresso());
+
   /* Quem entrou com senha provisória não vê o portal antes de trocá-la. A senha atual é
      digitada pela pessoa: enquanto existiu uma senha padrão única, a tela a mandava sozinha —
      e bastava ela divergir da do backend para o cliente ficar preso aqui. Hoje a provisória é
@@ -16460,6 +16479,8 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
           )}
         </Card>
 
+        <CardDetetivePatologias progresso={progressoJogo} onIniciar={() => setJogoAberto(true)} />
+
         {!leadsCarregando && leads.length > 0 && (
           <Card icon={FileText} titulo="Meus orçamentos">
             <div style={{ display: "grid", gap: 10 }}>
@@ -16577,9 +16598,509 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
           onFechar={() => setPedindoRevistoria(null)} onEnviar={pedirRevistoria} />
       )}
 
+      {jogoAberto && (
+        <ModalDetetiveJogo session={session}
+          onFechar={() => { setJogoAberto(false); setProgressoJogo(JogoDetetive.carregarProgresso()); }} />
+      )}
+
       {session.usuario.senhaProvisoria && (
         <ModalTrocarSenhaObrigatoria onTrocar={trocarSenhaObrigatoria} />
       )}
+    </div>
+  );
+}
+
+/* ================= FN Arquivo Técnico — Detetive das Patologias =================
+   Game educativo do Portal do Cliente. Progresso mora só no navegador (ver
+   detetive-patologias-progresso.js) — não há ranking entre clientes nem admin de
+   casos nesta primeira versão; os 5 casos vêm de detetive-patologias-casos.js. */
+
+/* Teaser dentro da pilha de Cards do portal: mostra nível/XP de relance, sem depender
+   de nenhuma chamada de API (o jogo é conteúdo do próprio front). */
+function CardDetetivePatologias({ progresso, onIniciar }) {
+  const { nivel, nome, xpMin, proximo } = JogoDetetive.nivelAtual(progresso.xpTotal);
+  const faixa = proximo ? proximo.xpMin - xpMin : 1;
+  const andamento = proximo ? Math.min(100, Math.round(((progresso.xpTotal - xpMin) / faixa) * 100)) : 100;
+  const { concluidos } = JogoDetetive.estatisticas(progresso);
+
+  return (
+    <Card icon={Search} titulo="FN Arquivo Técnico — Detetive das Patologias">
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Todo imóvel deixa pistas. Investigue casos reais de vistoria, aprenda a reconhecer
+        ocorrências como a equipe da FN e ganhe XP no caminho.
+      </p>
+      <div style={{ background: AZUL_MARINHO, borderRadius: 12, padding: 14, color: "#fff" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 700 }}><Trophy size={14} /> Nível {nivel} — {nome}</span>
+          <span style={{ opacity: .8 }}>{progresso.xpTotal} XP{proximo ? ` · faltam ${proximo.xpMin - progresso.xpTotal} p/ o próximo` : " · nível máximo"}</span>
+        </div>
+        <div style={{ height: 7, borderRadius: 6, background: "rgba(255,255,255,.18)", overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${andamento}%`, background: "#F2A93B", borderRadius: 6 }} />
+        </div>
+      </div>
+      <button className="btn-solid" style={{ marginTop: 14 }} onClick={onIniciar}>
+        <Search size={15} /> {concluidos > 0 ? "Continuar investigação" : "Iniciar investigação"}
+      </button>
+    </Card>
+  );
+}
+
+/* CTA comercial discreto — só aparece depois de pelo menos um caso concluído, e nunca
+   interrompe o jogo (fica no fim da tela de casos e no fim da pontuação). Os dois botões
+   abrem o WhatsApp da FN com uma mensagem pronta, o mesmo canal já usado no resto do site. */
+function CtaVistoriaFn() {
+  const linkConhecer = `https://wa.me/5581983061305?text=${encodeURIComponent("Olá! Joguei o Detetive das Patologias e quero conhecer a vistoria técnica da FN.")}`;
+  const linkAgendar = `https://wa.me/5581983061305?text=${encodeURIComponent("Olá! Quero agendar uma vistoria com a FN Edificações.")}`;
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: 14 }}>
+      <p style={{ margin: "0 0 10px", fontSize: 13, color: "#4a5a70" }}>
+        Mandou bem investigando. Mas na entrega das chaves, uma vistoria técnica vai muito além do que os olhos conseguem perceber.
+      </p>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <a href={linkConhecer} target="_blank" rel="noopener noreferrer" className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }}>
+          Conheça a vistoria FN
+        </a>
+        <a href={linkAgendar} target="_blank" rel="noopener noreferrer" className="btn-solid">
+          <CalendarDays size={14} /> Agendar vistoria
+        </a>
+      </div>
+    </div>
+  );
+}
+
+/* Onde entraria a fotografia/vídeo real da vistoria. Fica marcado como demonstrativo de
+   propósito — nunca finge ser um registro real (ver CLAUDE.md sobre dados fictícios). Basta
+   trocar por <img src={caso.imagemCena}> quando o acervo real de fotos/vídeos existir.
+
+   Na etapa de evidência, se `personagemUrl` carregar (ver PERSONAGENS_URL), mostra o
+   ilustrador/a da equipe FN apresentando o achado; se o arquivo ainda não existir (404),
+   onError troca sozinho para o quadro genérico abaixo — sem quebrar a tela. */
+function PlacarCenaPlaceholder({ categoria, evidencia, personagemUrl }) {
+  const [imagemFalhou, setImagemFalhou] = useState(false);
+
+  if (evidencia && personagemUrl && !imagemFalhou) {
+    return (
+      <div style={{ background: AZUL_MARINHO, borderRadius: 12, padding: "16px", textAlign: "center", color: "#fff", display: "grid", gap: 8, placeItems: "center" }}>
+        <img src={personagemUrl} alt="Equipe FN em campo" onError={() => setImagemFalhou(true)}
+          style={{ maxHeight: 190, maxWidth: "100%", borderRadius: 10, objectFit: "contain" }} />
+        <div style={{ fontSize: 11, opacity: .65 }}>Registro da nova evidência — equipe FN em campo</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: AZUL_MARINHO, borderRadius: 12, padding: "34px 16px", textAlign: "center", color: "#fff", display: "grid", gap: 8, placeItems: "center" }}>
+      {evidencia ? <Target size={26} color="#F2A93B" /> : <Camera size={26} color="#F2A93B" />}
+      <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: .5 }}>{categoria.toUpperCase()}</div>
+      <div style={{ fontSize: 11, opacity: .65 }}>
+        {evidencia ? "Registro da nova evidência — versão demonstrativa" : "Fotografia/vídeo da vistoria — versão demonstrativa"}
+      </div>
+    </div>
+  );
+}
+
+function LinhaXp({ texto, valor }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: valor > 0 ? "#1a2330" : "#8593a8" }}>
+      <span>{texto}</span>
+      <span style={{ fontWeight: 700, color: valor > 0 ? "#2E7D32" : "#8593a8" }}>{valor > 0 ? `+${valor}` : "+0"} XP</span>
+    </div>
+  );
+}
+
+function EstatDossie({ rotulo, valor }) {
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, textAlign: "center" }}>
+      <div style={{ fontSize: 19, fontWeight: 800, color: AZUL_MARINHO }}>{valor}</div>
+      <div style={{ fontSize: 11, color: "#8593a8" }}>{rotulo}</div>
+    </div>
+  );
+}
+
+/* Home do jogo: nível/XP, atalho pro dossiê e a grade dos 5 casos disponíveis — é também o
+   "Arquivo de Casos" desta primeira versão (sem filtro por categoria ainda). */
+function TelaHomeJogo({ progresso, onAbrirCaso, onAbrirDossie }) {
+  const { nivel, nome, xpMin, proximo } = JogoDetetive.nivelAtual(progresso.xpTotal);
+  const faixa = proximo ? proximo.xpMin - xpMin : 1;
+  const andamento = proximo ? Math.min(100, Math.round(((progresso.xpTotal - xpMin) / faixa) * 100)) : 100;
+  const { concluidos } = JogoDetetive.estatisticas(progresso);
+
+  return (
+    <div style={{ display: "grid", gap: 18 }}>
+      <div style={{ textAlign: "center", padding: "10px 4px" }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, color: AZUL_MEDIO }}>FN ARQUIVO TÉCNICO</div>
+        <h2 style={{ margin: "4px 0 6px", fontSize: 21, color: AZUL_MARINHO }}>Detetive das Patologias</h2>
+        <p style={{ margin: 0, fontSize: 13, color: "#65758b", fontStyle: "italic" }}>
+          "Todo imóvel deixa pistas. A FN sabe onde procurar."
+        </p>
+      </div>
+
+      <div style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 700, color: AZUL_MARINHO }}><Trophy size={15} color={AZUL_MEDIO} /> Nível {nivel} — {nome}</span>
+          <span style={{ color: "#65758b" }}>{progresso.xpTotal} XP</span>
+        </div>
+        <div style={{ height: 8, borderRadius: 6, background: CINZA_CLARO, overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${andamento}%`, background: AZUL_MEDIO, borderRadius: 6 }} />
+        </div>
+        {proximo && <div style={{ fontSize: 11.5, color: "#8593a8", marginTop: 6 }}>Faltam {proximo.xpMin - progresso.xpTotal} XP para {proximo.nome}</div>}
+        <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, marginTop: 10 }} onClick={onAbrirDossie}>
+          <ClipboardList size={13} /> Meu dossiê {concluidos > 0 ? `· ${concluidos}/${CASOS_DETETIVE.length} casos` : ""}
+        </button>
+      </div>
+
+      <div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#5a6a80", letterSpacing: .5, marginBottom: 10 }}>CASOS DISPONÍVEIS</div>
+        <div style={{ display: "grid", gap: 10 }}>
+          {CASOS_DETETIVE.map((c) => {
+            const resultado = progresso.resultados[c.id];
+            return (
+              <button key={c.id} onClick={() => onAbrirCaso(c.id)}
+                style={{ textAlign: "left", background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: 14, cursor: "pointer", display: "grid", gap: 6 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: AZUL_MEDIO }}>CASO #{String(c.numero).padStart(3, "0")}</span>
+                  {resultado
+                    ? <span style={{ fontSize: 10.5, fontWeight: 700, color: "#2E7D32", background: "#E6F4EA", borderRadius: 20, padding: "2px 8px" }}>CONCLUÍDO</span>
+                    : <span style={{ fontSize: 10.5, fontWeight: 700, color: "#65758b", background: CINZA_CLARO, borderRadius: 20, padding: "2px 8px" }}>NÃO INICIADO</span>}
+                </div>
+                <strong style={{ fontSize: 14.5, color: AZUL_MARINHO }}>{c.titulo}</strong>
+                <div style={{ display: "flex", gap: 10, fontSize: 11.5, color: "#8593a8", flexWrap: "wrap" }}>
+                  <span>{c.categoria}</span>
+                  <span>· {c.dificuldade}</span>
+                  <span>· até {c.xpMaximo} XP</span>
+                </div>
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: AZUL_MEDIO, display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+                  <Search size={13} /> {resultado ? "Revisar caso" : "Investigar"}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {concluidos > 0 && <CtaVistoriaFn />}
+    </div>
+  );
+}
+
+/* A investigação de um único caso, do dossiê ao veredito. `key={caso.id}` no componente pai
+   garante que cada caso começa do zero (registrouRef incluso) quando o jogador troca de caso. */
+function TelaCasoDetetive({ caso, jaConcluido, onConcluir, onProximoCaso, onVoltarInicio, onVerDossie }) {
+  /* Congela em quem o caso já estava concluído ANTES desta jogada: `jaConcluido` (prop) é
+     recalculado no componente pai a cada render, e vira true assim que `onConcluir` registra
+     o resultado — ou seja, também na primeira vez que o caso é concluído. Sem essa foto do
+     início, a mensagem "já tinha sido concluído" aparecia logo na primeira conclusão. */
+  const [jaConcluidoAntes] = useState(jaConcluido);
+  const [etapa, setEtapa] = useState("abertura");
+  const [segundosRestantes, setSegundosRestantes] = useState(caso.segundosObservacao);
+  const [pistaUsada, setPistaUsada] = useState(false);
+  const [pistaVisivel, setPistaVisivel] = useState(false);
+  const [hipoteseEscolhida, setHipoteseEscolhida] = useState(null);
+  const [respostaTecnicaIndice, setRespostaTecnicaIndice] = useState(null);
+  const registrouRef = useRef(false);
+
+  useEffect(() => {
+    if (etapa !== "cena" || segundosRestantes <= 0) return;
+    const t = setTimeout(() => setSegundosRestantes((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [etapa, segundosRestantes]);
+
+  const acertouHipotese = hipoteseEscolhida === caso.respostaCorreta;
+  const perguntaTecnicaCorreta = respostaTecnicaIndice === caso.perguntaTecnica.respostaCorreta;
+
+  const xpIdentificacao = acertouHipotese ? 10 : 0;
+  const xpSemPista = acertouHipotese && !pistaUsada ? 5 : 0;
+  const xpPergunta = perguntaTecnicaCorreta ? 5 : 0;
+  const xpConclusao = 10;
+  const xpGanho = xpIdentificacao + xpSemPista + xpPergunta + xpConclusao;
+
+  useEffect(() => {
+    if (etapa !== "pontuacao" || registrouRef.current) return;
+    registrouRef.current = true;
+    onConcluir({ casoId: caso.id, categoria: caso.categoria, acertouHipotese, pistaUsada, perguntaTecnicaCorreta, xpGanho });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [etapa]);
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      {etapa === "abertura" && (
+        <div style={{ display: "grid", gap: 14 }}>
+          <div style={{ background: AZUL_MARINHO, color: "#fff", borderRadius: 12, padding: 16 }}>
+            <div style={{ fontSize: 10.5, letterSpacing: 1, opacity: .75 }}>ARQUIVO FN · CASO #{String(caso.numero).padStart(3, "0")}</div>
+            <h3 style={{ margin: "6px 0 8px", fontSize: 18 }}>{caso.titulo}</h3>
+            <span style={{ fontSize: 10.5, fontWeight: 700, background: "rgba(255,255,255,.15)", borderRadius: 20, padding: "3px 9px" }}>
+              {jaConcluidoAntes ? "REVISANDO ARQUIVO" : "EM INVESTIGAÇÃO"}
+            </span>
+          </div>
+          <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: "#334" }}>{caso.textoAbertura}</p>
+          <button className="btn-solid" onClick={() => setEtapa("cena")}><Search size={15} /> Analisar cena</button>
+        </div>
+      )}
+
+      {etapa === "cena" && (
+        <div style={{ display: "grid", gap: 14 }}>
+          <PlacarCenaPlaceholder categoria={caso.categoria} />
+          {segundosRestantes > 0 ? (
+            <div style={{ textAlign: "center" }}>
+              <p style={{ margin: "0 0 6px", fontSize: 13, color: "#65758b" }}>Observe cuidadosamente.</p>
+              <div style={{ fontSize: 36, fontWeight: 800, color: AZUL_MARINHO }}>{segundosRestantes}</div>
+            </div>
+          ) : (
+            <div style={{ display: "grid", gap: 10 }}>
+              <p style={{ textAlign: "center", margin: 0, fontSize: 14, fontWeight: 700, color: AZUL_MARINHO }}>Encontrou alguma pista?</p>
+              {pistaVisivel && (
+                <div style={{ background: "#FFF4E0", color: "#B26A00", borderRadius: 10, padding: "10px 12px", fontSize: 13, display: "flex", gap: 8, alignItems: "flex-start" }}>
+                  <HelpCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <span>{caso.pistaExtra}</span>
+                </div>
+              )}
+              <div style={{ display: "grid", gap: 8 }}>
+                <button className="btn-solid" onClick={() => setEtapa("hipotese")}>Sim, tenho uma hipótese</button>
+                {!pistaVisivel && (
+                  <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }}
+                    onClick={() => { setPistaUsada(true); setPistaVisivel(true); }}>
+                    Preciso de uma pista
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {etapa === "hipotese" && (
+        <div style={{ display: "grid", gap: 12 }}>
+          <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: AZUL_MARINHO, textAlign: "center" }}>Qual é sua hipótese?</p>
+          <div style={{ display: "grid", gap: 8 }}>
+            {caso.hipoteses.map((h) => (
+              <button key={h.letra} onClick={() => setHipoteseEscolhida(h.letra)}
+                style={{
+                  textAlign: "left", padding: "11px 13px", borderRadius: 10, cursor: "pointer", fontSize: 13.5,
+                  border: `1.5px solid ${hipoteseEscolhida === h.letra ? AZUL_MEDIO : CINZA_BORDA}`,
+                  background: hipoteseEscolhida === h.letra ? "#EAF2FB" : "#fff",
+                  color: "#1a2330", display: "flex", gap: 8,
+                }}>
+                <strong style={{ color: AZUL_MEDIO }}>{h.letra}</strong> {h.texto}
+              </button>
+            ))}
+          </div>
+          <button className="btn-solid" disabled={!hipoteseEscolhida} style={!hipoteseEscolhida ? { opacity: .5, cursor: "default" } : {}}
+            onClick={() => setEtapa("evidencia")}>
+            Confirmar hipótese
+          </button>
+        </div>
+      )}
+
+      {etapa === "evidencia" && (
+        <div style={{ display: "grid", gap: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: AZUL_MEDIO, textAlign: "center", letterSpacing: .5 }}>NOVA EVIDÊNCIA RECEBIDA</div>
+          <PlacarCenaPlaceholder categoria={caso.categoria} evidencia
+            personagemUrl={caso.numero % 2 === 0 ? PERSONAGENS_URL.vistoriadora : PERSONAGENS_URL.vistoriador} />
+          <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: "#334" }}>{caso.textoNovaEvidencia}</p>
+          <p style={{ margin: 0, fontSize: 13.5, fontWeight: 700, color: AZUL_MARINHO, textAlign: "center" }}>Deseja manter sua hipótese?</p>
+          <div style={{ display: "grid", gap: 8 }}>
+            <button className="btn-solid" onClick={() => setEtapa("veredito")}>Manter resposta</button>
+            <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setEtapa("hipotese")}>Alterar hipótese</button>
+          </div>
+        </div>
+      )}
+
+      {etapa === "veredito" && (
+        <div style={{ display: "grid", gap: 14 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: "#8593a8", textAlign: "center", letterSpacing: 1 }}>
+            ANÁLISE CONCLUÍDA · ARQUIVO PROCESSADO · VEREDITO FN
+          </div>
+          <div style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: 16, display: "grid", gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#8593a8" }}>OCORRÊNCIA IDENTIFICADA</div>
+              <p style={{ margin: "4px 0 0", fontSize: 14.5, fontWeight: 700, color: AZUL_MARINHO }}>{caso.veredito.resumo}</p>
+            </div>
+            <span style={{ justifySelf: "start", fontSize: 11, fontWeight: 700, color: "#B26A00", background: "#FFF4E0", borderRadius: 20, padding: "3px 10px", textTransform: "uppercase" }}>
+              {caso.veredito.classificacao}
+            </span>
+            <div style={{ borderTop: `1px solid ${CINZA_BORDA}`, paddingTop: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#8593a8" }}>POR QUE ISSO IMPORTA?</div>
+              <p style={{ margin: "4px 0 0", fontSize: 13.5, lineHeight: 1.6, color: "#4a5a70" }}>{caso.veredito.explicacao}</p>
+            </div>
+            <div style={{ fontSize: 12, color: "#65758b" }}>
+              {acertouHipotese ? "✓ Sua hipótese bateu com o veredito FN." : "Sua hipótese não foi essa — mas o registro é o que importa."}
+            </div>
+          </div>
+
+          <div style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: 16, display: "grid", gap: 10 }}>
+            <p style={{ margin: 0, fontSize: 13.5, fontWeight: 700, color: AZUL_MARINHO }}>{caso.perguntaTecnica.pergunta}</p>
+            <div style={{ display: "grid", gap: 8 }}>
+              {caso.perguntaTecnica.alternativas.map((alt, i) => {
+                const respondida = respostaTecnicaIndice !== null;
+                const ehCorreta = i === caso.perguntaTecnica.respostaCorreta;
+                const ehEscolhida = i === respostaTecnicaIndice;
+                let cor = { border: CINZA_BORDA, bg: "#fff", texto: "#1a2330" };
+                if (respondida && ehCorreta) cor = { border: "#2E7D32", bg: "#E6F4EA", texto: "#2E7D32" };
+                else if (respondida && ehEscolhida) cor = { border: "#C62828", bg: "#FCEAEA", texto: "#C62828" };
+                return (
+                  <button key={i} disabled={respondida} onClick={() => setRespostaTecnicaIndice(i)}
+                    style={{ textAlign: "left", padding: "10px 12px", borderRadius: 10, fontSize: 13, cursor: respondida ? "default" : "pointer",
+                      border: `1.5px solid ${cor.border}`, background: cor.bg, color: cor.texto }}>
+                    {alt}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <button className="btn-solid" disabled={respostaTecnicaIndice === null}
+            style={respostaTecnicaIndice === null ? { opacity: .5, cursor: "default" } : {}}
+            onClick={() => setEtapa("pontuacao")}>
+            Continuar
+          </button>
+        </div>
+      )}
+
+      {etapa === "pontuacao" && (
+        <div style={{ display: "grid", gap: 16 }}>
+          <div style={{ textAlign: "center" }}>
+            <Sparkles size={26} color={AZUL_MEDIO} />
+            <h3 style={{ margin: "8px 0 0", fontSize: 17, color: AZUL_MARINHO }}>Caso concluído</h3>
+          </div>
+          <div style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: 16, display: "grid", gap: 8 }}>
+            {xpIdentificacao > 0 ? <LinhaXp texto="Ocorrência identificada" valor={xpIdentificacao} /> : <LinhaXp texto="Ocorrência não identificada" valor={0} />}
+            {xpSemPista > 0 && <LinhaXp texto="Resolveu sem pedir pista" valor={xpSemPista} />}
+            {xpPergunta > 0 && <LinhaXp texto="Resposta técnica correta" valor={xpPergunta} />}
+            <LinhaXp texto="Caso concluído" valor={xpConclusao} />
+            <div style={{ borderTop: `1px solid ${CINZA_BORDA}`, paddingTop: 8, display: "flex", justifyContent: "space-between", fontWeight: 800, color: AZUL_MARINHO }}>
+              <span>TOTAL</span><span>{xpGanho} XP</span>
+            </div>
+            {jaConcluidoAntes && <p style={{ margin: 0, fontSize: 11.5, color: "#8593a8" }}>Esse caso já tinha sido concluído — o XP não é somado de novo.</p>}
+          </div>
+
+          <div style={{ display: "grid", gap: 8 }}>
+            {onProximoCaso && <button className="btn-solid" onClick={onProximoCaso}><ChevronRight size={15} /> Próximo caso</button>}
+            <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={onVerDossie}>Ver meu dossiê</button>
+            <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={onVoltarInicio}>Voltar aos casos</button>
+          </div>
+
+          <CtaVistoriaFn />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Perfil do investigador: XP, taxa de acerto, badges e especialidades por categoria —
+   tudo calculado em cima do que já está salvo em progresso.resultados. */
+function TelaDossieJogo({ session, progresso, onVoltar }) {
+  const { nivel, nome } = JogoDetetive.nivelAtual(progresso.xpTotal);
+  const { concluidos, taxaAcerto, semPista } = JogoDetetive.estatisticas(progresso);
+  const badges = JogoDetetive.calcularBadges(progresso, CASOS_DETETIVE.length);
+  const especialidades = JogoDetetive.especialidades(progresso);
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <div style={{ background: AZUL_MARINHO, color: "#fff", borderRadius: 12, padding: 16 }}>
+        <div style={{ fontSize: 10.5, opacity: .7, letterSpacing: .5 }}>MEU DOSSIÊ</div>
+        <h3 style={{ margin: "4px 0 2px", fontSize: 17 }}>{session.usuario.nome}</h3>
+        <div style={{ fontSize: 12.5, opacity: .85, display: "flex", alignItems: "center", gap: 5 }}><Trophy size={13} /> Nível {nivel} — {nome}</div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
+        <EstatDossie rotulo="XP total" valor={progresso.xpTotal} />
+        <EstatDossie rotulo="Casos concluídos" valor={`${concluidos}/${CASOS_DETETIVE.length}`} />
+        <EstatDossie rotulo="Taxa de acerto" valor={`${taxaAcerto}%`} />
+        <EstatDossie rotulo="Sem pedir pista" valor={semPista} />
+      </div>
+
+      <div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#5a6a80", marginBottom: 8 }}>CONQUISTAS</div>
+        <div style={{ display: "grid", gap: 8 }}>
+          {badges.map((b) => (
+            <div key={b.chave} style={{ display: "flex", alignItems: "center", gap: 10, background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "10px 12px", opacity: b.conquistada ? 1 : .5 }}>
+              {b.conquistada ? <Award size={18} color="#B26A00" /> : <Lock size={18} color="#8593a8" />}
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO }}>{b.nome}</div>
+                <div style={{ fontSize: 11.5, color: "#8593a8" }}>{b.descricao}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {especialidades.length > 0 && (
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#5a6a80", marginBottom: 8 }}>ÁREAS DE DESTAQUE</div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {especialidades.map((e) => (
+              <div key={e.categoria}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 3 }}>
+                  <span style={{ color: "#334" }}>{e.categoria}</span>
+                  <span style={{ fontWeight: 700, color: AZUL_MARINHO }}>{e.percentual}%</span>
+                </div>
+                <div style={{ height: 6, borderRadius: 6, background: CINZA_CLARO, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${e.percentual}%`, background: AZUL_MEDIO }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={onVoltar}><ChevronLeft size={14} /> Voltar aos casos</button>
+    </div>
+  );
+}
+
+/* Casca em tela cheia do jogo: header fixo + as três telas (home, caso, dossiê). Fundo mais
+   escuro que o `overlay` padrão do resto do app, de propósito — aqui é "sala de investigação",
+   não um formulário comum. */
+function ModalDetetiveJogo({ session, onFechar }) {
+  const [progresso, setProgresso] = useState(() => JogoDetetive.carregarProgresso());
+  const [tela, setTela] = useState("home"); // "home" | "caso" | "dossie"
+  const [casoAtivoId, setCasoAtivoId] = useState(null);
+  const casoAtivo = CASOS_DETETIVE.find((c) => c.id === casoAtivoId) || null;
+
+  const abrirCaso = (id) => { setCasoAtivoId(id); setTela("caso"); };
+  const registrarConclusao = (resultado) => setProgresso((p) => JogoDetetive.registrarCasoConcluido(p, resultado));
+
+  const indiceAtivo = casoAtivo ? CASOS_DETETIVE.findIndex((c) => c.id === casoAtivo.id) : -1;
+  const proximoCaso = indiceAtivo >= 0 ? CASOS_DETETIVE[indiceAtivo + 1] : null;
+
+  return (
+    <div className="no-print" style={{ position: "fixed", inset: 0, background: "rgba(6,16,30,.92)", zIndex: 200, display: "grid", placeItems: "center" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onFechar(); }}>
+      <div className="painel-lateral" style={{ width: "100%", maxWidth: 480, height: "100%", maxHeight: "100dvh", background: CINZA_CLARO, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <header style={{ background: AZUL_MARINHO, color: "#fff", padding: "14px 18px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+          <div style={{ width: 34, height: 34, borderRadius: 8, background: "rgba(255,255,255,.12)", display: "grid", placeItems: "center", flexShrink: 0 }}>
+            <Search size={17} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, opacity: .7, letterSpacing: .5 }}>FN ARQUIVO TÉCNICO</div>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>Detetive das Patologias</div>
+          </div>
+          {tela !== "home" && (
+            <button className="btn-ghost" onClick={() => setTela("home")} title="Voltar ao início"><ChevronLeft size={14} /> Casos</button>
+          )}
+          <button className="btn-ghost" onClick={onFechar} title="Fechar"><X size={14} /></button>
+        </header>
+
+        <div style={{ flex: 1, overflowY: "auto", padding: 18 }}>
+          {tela === "home" && (
+            <TelaHomeJogo progresso={progresso} onAbrirCaso={abrirCaso} onAbrirDossie={() => setTela("dossie")} />
+          )}
+          {tela === "caso" && casoAtivo && (
+            <TelaCasoDetetive
+              key={casoAtivo.id}
+              caso={casoAtivo}
+              jaConcluido={!!progresso.resultados[casoAtivo.id]}
+              onConcluir={registrarConclusao}
+              onProximoCaso={proximoCaso ? () => abrirCaso(proximoCaso.id) : null}
+              onVoltarInicio={() => setTela("home")}
+              onVerDossie={() => setTela("dossie")}
+            />
+          )}
+          {tela === "dossie" && (
+            <TelaDossieJogo session={session} progresso={progresso} onVoltar={() => setTela("home")} />
+          )}
+        </div>
+      </div>
     </div>
   );
 }
