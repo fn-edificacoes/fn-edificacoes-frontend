@@ -9,7 +9,7 @@ import {
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
   ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle, Megaphone, Clock,
-  Package, Wrench, Paperclip
+  Package, Wrench, Paperclip, Menu
 } from "lucide-react";
 
 /* ============================================================
@@ -2207,12 +2207,34 @@ const GERENCIA_MENU_LATERAL = [
 ];
 const LARGURA_MENU_LATERAL_GERENCIA = 232;
 
+/* O menu lateral da Gerência nasceu fixo, sem versão para celular: numa tela estreita ele
+   ficava sempre aberto por cima do conteúdo, ocupando boa parte da largura e tirando o
+   espaço que os cards e tabelas precisam para rolar de lado. Abaixo de 880px ele agora
+   nasce fechado e vira uma gaveta (some da tela, abre por cima ao tocar no atalho do
+   cabeçalho) em vez de empurrar o conteúdo. */
+const LARGURA_TELA_ESTREITA = 880;
+function useTelaEstreita() {
+  const [estreita, setEstreita] = useState(() => typeof window !== "undefined" && window.innerWidth < LARGURA_TELA_ESTREITA);
+  useEffect(() => {
+    const aoRedimensionar = () => setEstreita(window.innerWidth < LARGURA_TELA_ESTREITA);
+    window.addEventListener("resize", aoRedimensionar);
+    return () => window.removeEventListener("resize", aoRedimensionar);
+  }, []);
+  return estreita;
+}
+
 function AppInterno({ session, onLogout }) {
   /* "qualidade" (perfil "Agendamento", só leitura) foi unificado ao Atendimento — deixou de
      existir como opção em Usuários (ver ROLE_LABEL), mas uma conta antiga que ainda tenha
      esse valor gravado no banco precisa continuar entrando normalmente, com acesso completo. */
   const perfil = session.usuario.role === "qualidade" ? "atendimento" : session.usuario.role; // definido pelo backend/login — não é mais escolhido na tela
   const token = session.token;
+  const telaEstreita = useTelaEstreita();
+  const [menuLateralAberto, setMenuLateralAberto] = useState(false);
+  // O menu lateral só existe (e só precisa estar "aberto") na tela estreita — no desktop ele
+  // é sempre visível. Ao passar de estreita para larga, ou trocar de aba pelo próprio menu,
+  // a gaveta tem que voltar a fechar sozinha, senão fica por cima do conteúdo na volta.
+  useEffect(() => { if (!telaEstreita) setMenuLateralAberto(false); }, [telaEstreita]);
   const [abaTop, setAbaTop] = useState("laudos"); // "laudos" | "documentacao" | "gerencia"
   // Vistoriador começa na agenda (é de lá que ele inicia a vistoria, já com os dados
   // preenchidos); os demais caem direto na vistoria.
@@ -3424,15 +3446,28 @@ function AppInterno({ session, onLogout }) {
   const imprimir = () => window.print();
 
   return (
-    <div style={{ fontFamily: "'Inter', system-ui, sans-serif", color: "#1a2330", background: CINZA_CLARO, minHeight: "100vh", ...(perfil === "gerencia" ? { paddingLeft: LARGURA_MENU_LATERAL_GERENCIA } : {}) }}>
+    <div style={{ fontFamily: "'Inter', system-ui, sans-serif", color: "#1a2330", background: CINZA_CLARO, minHeight: "100vh", ...(perfil === "gerencia" && !telaEstreita ? { paddingLeft: LARGURA_MENU_LATERAL_GERENCIA } : {}) }}>
       <style>{estilos}</style>
 
+      {/* Fundo escurecido atrás da gaveta, só na tela estreita — toca fora do menu pra
+          fechar, do mesmo jeito que um menu de celular qualquer. */}
+      {perfil === "gerencia" && telaEstreita && menuLateralAberto && (
+        <div className="no-print" onClick={() => setMenuLateralAberto(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 24 }} />
+      )}
+
       {/* Menu lateral — só a Gerência vê (é quem acumula todos os módulos); os demais
-          perfis continuam com a barra de abas horizontal de sempre, mais abaixo. */}
+          perfis continuam com a barra de abas horizontal de sempre, mais abaixo. Na tela
+          estreita ele nasce fechado e vira gaveta (desliza por cima em vez de empurrar o
+          conteúdo, que é o que quebrava a rolagem e espremia o resto da tela no celular). */}
       {perfil === "gerencia" && (
         <aside className="no-print" style={{
           position: "fixed", top: 0, left: 0, bottom: 0, width: LARGURA_MENU_LATERAL_GERENCIA, overflowY: "auto",
           background: AZUL_MARINHO, color: "#fff", zIndex: 25, padding: "16px 10px 24px",
+          ...(telaEstreita ? {
+            transform: menuLateralAberto ? "translateX(0)" : "translateX(-100%)",
+            transition: "transform .2s ease", boxShadow: menuLateralAberto ? "2px 0 12px rgba(0,0,0,.25)" : "none",
+          } : {}),
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 8px 18px" }}>
             <div style={{ width: 32, height: 32, borderRadius: 8, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
@@ -3449,7 +3484,7 @@ function AppInterno({ session, onLogout }) {
                 {grupo.itens.map((item) => {
                   const ativo = abaTop === item.aba && (!item.sub || abaGerencia === item.sub);
                   return (
-                    <button key={item.label} onClick={() => { setAbaTop(item.aba); if (item.sub) setAbaGerencia(item.sub); }}
+                    <button key={item.label} onClick={() => { setAbaTop(item.aba); if (item.sub) setAbaGerencia(item.sub); setMenuLateralAberto(false); }}
                       style={{
                         display: "flex", alignItems: "center", gap: 9, textAlign: "left", padding: "8px 10px", borderRadius: 8,
                         border: "none", cursor: "pointer", fontSize: 13, fontWeight: ativo ? 700 : 500,
@@ -3470,6 +3505,13 @@ function AppInterno({ session, onLogout }) {
       <header className="no-print" style={{ background: AZUL_MARINHO, color: "#fff", position: "sticky", top: 0, zIndex: 20 }}>
         <div style={{ maxWidth: 1080, margin: "0 auto", padding: "12px 18px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {/* Abre a gaveta do menu lateral — só existe na tela estreita, onde o menu some
+                da tela por padrão (ver useTelaEstreita). */}
+            {perfil === "gerencia" && telaEstreita && (
+              <button className="btn-ghost" onClick={() => setMenuLateralAberto(true)} title="Abrir menu" style={{ padding: 8 }}>
+                <Menu size={18} />
+              </button>
+            )}
             <div style={{ width: "clamp(36px, 9vw, 44px)", height: "clamp(36px, 9vw, 44px)", borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
               <img src={LOGO_URL} alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
             </div>
