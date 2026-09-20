@@ -2235,6 +2235,16 @@ function AppInterno({ session, onLogout }) {
   // é sempre visível. Ao passar de estreita para larga, ou trocar de aba pelo próprio menu,
   // a gaveta tem que voltar a fechar sozinha, senão fica por cima do conteúdo na volta.
   useEffect(() => { if (!telaEstreita) setMenuLateralAberto(false); }, [telaEstreita]);
+  /* Com a gaveta aberta no celular, a página de trás continuava rolando por baixo do fundo
+     escurecido — o toque passava para o conteúdo, que se movia escondido atrás do overlay e
+     "pulava" de lugar quando a gaveta fechava. É isso que os usuários sentiam como a tela
+     principal "bugando". Travar a rolagem do body enquanto a gaveta está aberta resolve. */
+  useEffect(() => {
+    if (!telaEstreita || !menuLateralAberto) return;
+    const anterior = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = anterior; };
+  }, [telaEstreita, menuLateralAberto]);
   const [abaTop, setAbaTop] = useState("laudos"); // "laudos" | "documentacao" | "gerencia"
   // Vistoriador começa na agenda (é de lá que ele inicia a vistoria, já com os dados
   // preenchidos); os demais caem direto na vistoria.
@@ -3469,7 +3479,12 @@ function AppInterno({ session, onLogout }) {
             transition: "transform .2s ease", boxShadow: menuLateralAberto ? "2px 0 12px rgba(0,0,0,.25)" : "none",
           } : {}),
         }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 8px 18px" }}>
+          {/* Na tela estreita, tocar na logo também minimiza a gaveta — mesmo gesto de fechar
+              que tocar fora dela, só que sem precisar mirar no fundo escurecido. No desktop o
+              menu é fixo (não existe "fechar"), então o clique aqui não faz nada. */}
+          <div onClick={() => { if (telaEstreita) setMenuLateralAberto(false); }}
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 8px 18px", cursor: telaEstreita ? "pointer" : "default" }}
+            title={telaEstreita ? "Minimizar menu" : undefined}>
             <div style={{ width: 32, height: 32, borderRadius: 8, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
               <img src={LOGO_URL} alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
             </div>
@@ -11189,7 +11204,7 @@ const CUSTO_UNITARIO_DOCUMENTACAO = 69;
 // Pagamento ao vistoriador por vistoria entregue: varia por empreendimento — definido em
 // "Preços por empreendimento" (custoVistoria). Sem valor cadastrado ali, entra como zero.
 
-function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
+function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [], periodo = PERIODO_TUDO }) {
   const [busca, setBusca] = useState("");
   const [ordem, setOrdem] = useState({ chave: "total", dir: "desc" });
   const [metricaGrafico, setMetricaGrafico] = useState("total");
@@ -11284,8 +11299,16 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
   const vistoriasPorTecnicoEmp = {};
 
   let foraDoRelatorio = 0;
+  /* Mesmo recorte de período do resto da Gerência (ver FiltroPeriodo/dentroDoPeriodo): a data
+     que vale é a do serviço prestado, não a do cadastro. Quem fica de fora por não ter essa
+     data é dito na tela — sumir calado é o que fazia o total de um recorte não bater com o
+     total de "Todo o período". */
+  const semData = periodo.granularidade !== "tudo"
+    ? clientes.filter((c) => c.status !== "Cancelado" && !partesDaData(dataDeReferencia(c, docs))).length
+    : 0;
   clientes.forEach((c) => {
     if (c.status === "Cancelado") return;
+    if (!dentroDoPeriodo(dataDeReferencia(c, docs), periodo)) return;
     if (ehServicoDocumentacao(c)) {
       if (c.status === STATUS_DOC_CONCLUIDA) {
         registrar(c, "documentacao", { pago: servicoPago(c, docDoCliente(c, docs)) });
@@ -11415,7 +11438,7 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
 
   return (
     <>
-    <Card icon={TrendingUp} titulo="Receita por empreendimento e serviço">
+    <Card icon={TrendingUp} titulo={`Receita por empreendimento e serviço — ${rotuloPeriodo(periodo)}`}>
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
         Uma linha por empreendimento e tipo de serviço, com o valor unitário cadastrado acima.
         Entram só os serviços entregues: vistorias com <strong>laudo já enviado ao cliente</strong> e
@@ -11430,7 +11453,17 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
         soma o que está como Pago (valor cheio) e o que está como Parcial (só o que já entrou).
       </p>
 
-      {linhas.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum serviço concluído ainda.</p>}
+      {semData > 0 && (
+        <p style={{ fontSize: 12.5, color: "#B26A00", margin: "0 0 14px" }}>
+          {semData} cadastro(s) sem data de referência ficam fora deste recorte — visíveis só em "Todo o período".
+        </p>
+      )}
+
+      {linhas.length === 0 && (
+        <p style={{ color: "#8593a8", fontSize: 14 }}>
+          {periodo.granularidade === "tudo" ? "Nenhum serviço concluído ainda." : "Nenhum serviço concluído neste período."}
+        </p>
+      )}
 
       {linhas.length > 0 && (
         <>
@@ -11559,7 +11592,7 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
     </Card>
 
     {pagamentosTecnicos.length > 0 && (
-      <Card icon={Users} titulo="Pagamento aos vistoriadores">
+      <Card icon={Users} titulo={`Pagamento aos vistoriadores — ${rotuloPeriodo(periodo)}`}>
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
           Por vistoria entregue (laudo já enviado ao cliente), no valor de custo fixado por empreendimento
           em "Preços por empreendimento". Quem recebe o crédito é <strong>quem assinou o laudo</strong>, não
@@ -11621,9 +11654,33 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [] }) {
 }
 
 function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salvarPreco, empreendimentosRef = [], adicionarEmpreendimento, removerEmpreendimento, notify, usuarios = [] }) {
+  /* Mesmo recorte de período do resto da Gerência (ver FiltroPeriodo, na aba Indicadores): sem
+     ele a receita, o custo e os pagamentos somavam a base inteira desde o primeiro cadastro, e
+     "fechar o mês" virava separar a planilha na mão. Os anos saem do que existe na base, não de
+     uma lista fixa — o histórico importado começa bem antes de o sistema existir. */
+  const [periodo, setPeriodo] = useState(PERIODO_TUDO);
+  const anos = useMemo(() => {
+    const encontrados = new Set();
+    clientes.forEach((c) => {
+      if (c.status === "Cancelado") return;
+      const p = partesDaData(dataDeReferencia(c, docs));
+      if (p) encontrados.add(p.ano);
+    });
+    encontrados.add(new Date().getFullYear());
+    return [...encontrados].sort((a, b) => b - a);
+  }, [clientes, docs]);
+
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <CardReceitaEstimada precos={precos} clientes={clientes} docs={docs} usuarios={usuarios} />
+      <Card icon={CalendarDays} titulo="Recorte por período">
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
+          Escolha o período e a receita, o custo e o pagamento aos vistoriadores abaixo passam a
+          falar só dele — a data que vale é a do serviço prestado, a mesma usada em Indicadores.
+        </p>
+        <FiltroPeriodo periodo={periodo} aoMudar={setPeriodo} anos={anos} />
+      </Card>
+
+      <CardReceitaEstimada precos={precos} clientes={clientes} docs={docs} usuarios={usuarios} periodo={periodo} />
 
       <CardPrecoEmpreendimento precos={precos} carregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef} clientes={clientes}
         adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento} notify={notify} />
