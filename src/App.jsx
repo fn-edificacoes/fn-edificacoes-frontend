@@ -2109,6 +2109,10 @@ export default function App() {
   if (paginaFn === "fn-home") return <PaginaBeneficiosFn tipo="produto" />;
   if (paginaFn === "privacidade") return <PaginaPrivacidade />;
 
+  // Proposta pública de fornecedor do FN Casa Pronta (?pagina=casa-pronta-fornecedor) —
+  // mesmo padrão dos links acima, sem sessão nenhuma. Ver PaginaCasaProntaFornecedor.
+  if (paginaFn === "casa-pronta-fornecedor") return <PaginaCasaProntaFornecedor />;
+
   // Link público de avaliação (?avaliar=<id>&tipo=doc|cliente&servico=…), mandado pelo
   // Atendimento por WhatsApp/e-mail — mesmo padrão dos links acima, sem sessão nenhuma.
   const avaliarId = new URLSearchParams(window.location.search).get("avaliar");
@@ -11906,13 +11910,176 @@ function fornecedoresCasaProntaDeParceiros(parceiros, extras) {
   return parceiros.filter((p) => extras[p.id]).map((p) => mapParceiroParaFornecedorCasaPronta(p, extras[p.id]));
 }
 
+const CASA_PRONTA_PROPOSTA_STATUS_LABEL = { em_analise: "Em análise", aprovada: "Aprovada", recusada: "Recusada" };
+STATUS_COR["Em análise"] = STATUS_COR["Em análise"] || { cor: "#B26A00", bg: "#FFF4E0" };
+STATUS_COR["Aprovada"] = STATUS_COR["Aprovada"] || { cor: "#2E7D32", bg: "#E6F4EA" };
+STATUS_COR["Recusada"] = STATUS_COR["Recusada"] || { cor: "#C62828", bg: "#FCEAEA" };
+
+/* Fila de propostas de fornecedor recebidas pelo formulário público (ver
+   PaginaCasaProntaFornecedor, ?pagina=casa-pronta-fornecedor). Aprovar aqui não homologa o
+   fornecedor sozinho — só marca a decisão; quem dá o login é o convite de parceiro de sempre. */
+function CardPropostasCasaPronta({ token, notify }) {
+  const [propostas, setPropostas] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+  const [aberta, setAberta] = useState(null); // proposta selecionada para detalhe
+  const [notas, setNotas] = useState("");
+  const [salvando, setSalvando] = useState(false);
+
+  const linkPublico = `${window.location.origin}${window.location.pathname}?pagina=casa-pronta-fornecedor`;
+
+  const carregar = () => {
+    setCarregando(true);
+    apiFetch("/api/casa-pronta/propostas", { token })
+      .then((r) => setPropostas(r.propostas || []))
+      .catch((e) => notify(e.message))
+      .finally(() => setCarregando(false));
+  };
+  useEffect(carregar, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const abrir = (p) => { setAberta(p); setNotas(p.notas_internas || ""); };
+
+  const decidir = async (status) => {
+    setSalvando(true);
+    try {
+      await apiFetch(`/api/casa-pronta/propostas/${aberta.id}`, { method: "PATCH", token, body: { status, notasInternas: notas } });
+      notify(status === "aprovada" ? "Proposta aprovada ✓" : "Proposta recusada");
+      setAberta(null);
+      carregar();
+    } catch (e) {
+      notify(e.message);
+    }
+    setSalvando(false);
+  };
+
+  const salvarNotas = async () => {
+    setSalvando(true);
+    try {
+      await apiFetch(`/api/casa-pronta/propostas/${aberta.id}`, { method: "PATCH", token, body: { notasInternas: notas } });
+      notify("Notas salvas ✓");
+      carregar();
+    } catch (e) {
+      notify(e.message);
+    }
+    setSalvando(false);
+  };
+
+  return (
+    <Card icon={Handshake} titulo="Propostas de fornecedor recebidas">
+      <div style={{ display: "flex", alignItems: "center", gap: 8, background: CINZA_CLARO, borderRadius: 8, padding: "8px 12px", marginBottom: 14, fontSize: 12.5, color: "#4a5a70" }}>
+        <span style={{ flex: 1 }}>Link do formulário para divulgar com possíveis fornecedores: <strong>{linkPublico}</strong></span>
+        <button type="button" className="btn-ghost" onClick={() => { navigator.clipboard.writeText(linkPublico); notify("Link copiado ✓"); }}>
+          <Copy size={13} /> Copiar
+        </button>
+      </div>
+
+      {carregando ? (
+        <p style={{ fontSize: 13, color: "#65758b" }}>Carregando…</p>
+      ) : propostas.length === 0 ? (
+        <p style={{ fontSize: 13, color: "#65758b" }}>Nenhuma proposta recebida ainda.</p>
+      ) : (
+        <div style={{ display: "grid", gap: 8 }}>
+          {propostas.map((p) => (
+            <button key={p.id} type="button" onClick={() => abrir(p)}
+              style={{ display: "flex", alignItems: "center", gap: 10, textAlign: "left", padding: "10px 12px", borderRadius: 10, border: `1px solid ${CINZA_BORDA}`, background: "#fff", cursor: "pointer" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 13.5, color: AZUL_MARINHO }}>{p.empresa}</div>
+                <div style={{ fontSize: 12, color: "#65758b" }}>
+                  {p.responsavel} · {p.cidade} · {(p.servicos || []).length} serviço(s) · {new Date(p.criado_em).toLocaleDateString("pt-BR")}
+                </div>
+              </div>
+              <Selo valor={CASA_PRONTA_PROPOSTA_STATUS_LABEL[p.status] || p.status} />
+              <ChevronRight size={16} color="#8593a8" />
+            </button>
+          ))}
+        </div>
+      )}
+
+      {aberta && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(18,51,91,.45)", display: "grid", placeItems: "center", zIndex: 50, padding: 18 }} onClick={() => setAberta(null)}>
+          <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 640, maxHeight: "88vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+              <h3 style={{ margin: 0, color: AZUL_MARINHO, fontSize: 17, flex: 1 }}>{aberta.empresa}</h3>
+              <Selo valor={CASA_PRONTA_PROPOSTA_STATUS_LABEL[aberta.status] || aberta.status} />
+              <button type="button" onClick={() => setAberta(null)} style={{ background: "none", border: "none", cursor: "pointer" }}><X size={18} color="#8593a8" /></button>
+            </div>
+            <p style={{ fontSize: 12.5, color: "#65758b", margin: "0 0 14px" }}>
+              {aberta.responsavel} · {aberta.whatsapp} · {aberta.email} {aberta.cnpj && <>· CNPJ {aberta.cnpj}</>}
+            </p>
+
+            <div style={{ display: "grid", gap: 4, fontSize: 13, marginBottom: 14 }}>
+              <div><strong>Cidade:</strong> {aberta.cidade}</div>
+              <div><strong>Regiões atendidas:</strong> {aberta.regioes_atendidas || "—"}</div>
+              <div><strong>Condições de pagamento:</strong> {aberta.condicoes_pagamento || "—"}</div>
+              <div><strong>Capacidade mensal:</strong> {aberta.capacidade_mensal ?? "—"} imóveis/mês</div>
+              <div><strong>Preços válidos até:</strong> {aberta.precos_validos_ate ? new Date(aberta.precos_validos_ate).toLocaleDateString("pt-BR") : "—"}</div>
+              {aberta.visita_frete && <div><strong>Visita/frete:</strong> {aberta.visita_frete}</div>}
+              {aberta.website && <div><strong>Website:</strong> {aberta.website}</div>}
+            </div>
+
+            <h4 style={{ color: AZUL_MARINHO, fontSize: 14, margin: "16px 0 8px" }}>Serviços propostos</h4>
+            <div style={{ display: "grid", gap: 10 }}>
+              {(aberta.servicos || []).map((s, i) => (
+                <div key={i} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "10px 12px" }}>
+                  <div style={{ fontWeight: 700, fontSize: 13.5 }}>{s.nome}</div>
+                  <div style={{ fontSize: 12, color: "#65758b", margin: "2px 0 6px" }}>
+                    {s.categoria} · {s.unidadeCobranca} · {s.precoInclui} · normal R$ {s.precoNormal || "—"}
+                  </div>
+                  {s.especificacao && <div style={{ fontSize: 12.5, marginBottom: 6 }}>{s.especificacao}</div>}
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ textAlign: "left", color: "#8593a8" }}>
+                          {CASA_PRONTA_FAIXAS.map(([chave, titulo]) => <th key={chave} style={{ padding: "3px 6px" }}>{titulo}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          {CASA_PRONTA_FAIXAS.map(([chave]) => (
+                            <td key={chave} style={{ padding: "3px 6px" }}>
+                              {s.faixas?.[chave]?.preco || "sob consulta"}{s.faixas?.[chave]?.prazoDias ? ` · ${s.faixas[chave].prazoDias}d` : ""}
+                            </td>
+                          ))}
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{ fontSize: 12, color: "#65758b", marginTop: 6 }}>
+                    Garantia: {s.garantiaMeses || 0} meses {s.coberturaGarantia && <>— {s.coberturaGarantia}</>}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ ...cell(true), marginTop: 16 }}>
+              <label style={lab}>Notas internas</label>
+              <textarea style={{ ...inp, minHeight: 60, resize: "vertical" }} value={notas} onChange={(e) => setNotas(e.target.value)} />
+            </div>
+
+            <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+              <button type="button" className="btn-solid" disabled={salvando} onClick={() => decidir("aprovada")}>
+                <Check size={14} /> Aprovar
+              </button>
+              <button type="button" className="btn-ghost" style={{ color: "#C62828" }} disabled={salvando} onClick={() => decidir("recusada")}>
+                <X size={14} /> Recusar
+              </button>
+              <button type="button" className="btn-ghost" disabled={salvando} onClick={salvarNotas}>
+                <Save size={14} /> Salvar notas
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function AbaGerenciaCasaPronta({ notify, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual,
   podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando,
   vendas = [], vendasCarregando, atualizarVenda, token, perfil, decidirComissaoItem,
   prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro,
   adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite,
   extrasFornecedorCasaPronta, salvarExtraFornecedorCasaPronta }) {
-  const [sub, setSub] = useState("fornecedores"); // "fornecedores" | "fichas" | "vendas" | "indicadores"
+  const [sub, setSub] = useState("fornecedores"); // "propostas" | "fornecedores" | "fichas" | "vendas" | "indicadores"
   const [fichas, setFichas] = useState(() => lerCasaProntaLista(CHAVE_CASA_PRONTA_FICHAS));
   const [vendasCasaPronta, setVendasCasaPronta] = useState(() => lerCasaProntaLista(CHAVE_CASA_PRONTA_VENDAS));
   /* extrasFornecedorCasaPronta vem de fora (AppInterno) — é a MESMA instância usada por
@@ -11939,8 +12106,8 @@ function AbaGerenciaCasaPronta({ notify, parceiros, parceirosCarregando, atualiz
         </span>
       </div>
 
-      <div style={{ display: "flex", gap: 8 }}>
-        {[["fornecedores", "Fornecedores", Wrench], ["fichas", "Fichas técnicas", Building2], ["vendas", "Pacotes vendidos", ClipboardList], ["indicadores", "Indicadores", PieChart]].map(([k, label, Icon]) => (
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {[["propostas", "Propostas", Handshake], ["fornecedores", "Fornecedores", Wrench], ["fichas", "Fichas técnicas", Building2], ["vendas", "Pacotes vendidos", ClipboardList], ["indicadores", "Indicadores", PieChart]].map(([k, label, Icon]) => (
           <button key={k} type="button" onClick={() => setSub(k)}
             style={{
               display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, cursor: "pointer",
@@ -11952,6 +12119,7 @@ function AbaGerenciaCasaPronta({ notify, parceiros, parceirosCarregando, atualiz
         ))}
       </div>
 
+      {sub === "propostas" && <CardPropostasCasaPronta token={token} notify={notify} />}
       {sub === "fornecedores" && (
         <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
           criarParceiroManual={criarParceiroManual} podeExcluir={podeExcluir} excluirParceiro={excluirParceiro}
@@ -15402,6 +15570,283 @@ function PaginaBeneficiosFn({ tipo }) {
           {toast}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ---- Página pública: proposta de fornecedor do FN Casa Pronta (?pagina=casa-pronta-fornecedor) ----
+   Empresa que quer virar fornecedor homologado (marmoraria, pintura, elétrica etc.) se
+   apresenta aqui, serviço por serviço, com preço e prazo por faixa de volume de imóveis.
+   Não cria login nenhum: vira uma proposta "em_analise" (POST /api/casa-pronta/propostas)
+   que a Gerência avalia em Gerência → FN Casa Pronta → Propostas. Aprovar não homologa
+   sozinho — quem faz o fornecedor logar é o convite de parceiro de sempre. */
+const PROPOSTA_FORNECEDOR_CATEGORIAS = [
+  "Box e vidros", "Marmoraria", "Marcenaria", "Pintura", "Elétrica e iluminação", "Hidráulica",
+  "Gesso e forro", "Pisos e revestimentos", "Climatização", "Cortinas e persianas",
+  "Redes e telas", "Limpeza pós-obra", "Gás", "Outros",
+];
+const CASA_PRONTA_UNIDADES = ["unidade", "m²", "metro linear", "ambiente", "apartamento", "serviço"];
+const CASA_PRONTA_INCLUI = ["Material e instalação", "Somente mão de obra", "Somente material"];
+const CASA_PRONTA_FAIXAS = [
+  ["avulso", "FN avulso", "1 a 4 imóveis"],
+  ["de5", "A partir de 5", "5 a 9 imóveis"],
+  ["de10", "A partir de 10", "10 a 14 imóveis"],
+  ["de15", "A partir de 15", "15 a 20 imóveis"],
+  ["de20", "Acima de 20", "21 ou mais imóveis"],
+];
+
+function novaPropostaCasaProntaEmpresa() {
+  return {
+    empresa: "", responsavel: "", whatsapp: "", email: "", cnpj: "", cidade: "",
+    regioesAtendidas: "", condicoesPagamento: "", capacidadeMensal: "", precosValidosAte: "",
+    visitaFrete: "", website: "",
+  };
+}
+function novoServicoCasaPronta() {
+  return {
+    nome: "", categoria: PROPOSTA_FORNECEDOR_CATEGORIAS[0], unidadeCobranca: CASA_PRONTA_UNIDADES[0],
+    precoInclui: CASA_PRONTA_INCLUI[0], especificacao: "", precoNormal: "",
+    faixas: Object.fromEntries(CASA_PRONTA_FAIXAS.map(([k]) => [k, { preco: "", prazoDias: "" }])),
+    inicioContagemPrazo: "", garantiaMeses: "", coberturaGarantia: "", exclusoes: "",
+  };
+}
+
+function PaginaCasaProntaFornecedor() {
+  const [etapa, setEtapa] = useState(1);
+  const [empresaForm, setEmpresaForm] = useState(novaPropostaCasaProntaEmpresa());
+  const [servicos, setServicos] = useState([novoServicoCasaPronta()]);
+  const [erro, setErro] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [resultado, setResultado] = useState(false);
+
+  const setE = (campo, v) => setEmpresaForm((f) => ({ ...f, [campo]: v }));
+  const setServico = (idx, patch) => setServicos((lista) => lista.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
+  const setFaixa = (idx, chave, patch) => setServicos((lista) => lista.map((s, i) => (
+    i === idx ? { ...s, faixas: { ...s.faixas, [chave]: { ...s.faixas[chave], ...patch } } } : s
+  )));
+  const addServico = () => setServicos((lista) => [...lista, novoServicoCasaPronta()]);
+  const removerServico = (idx) => setServicos((lista) => lista.filter((_, i) => i !== idx));
+
+  const validarEtapa1 = () => {
+    if (!empresaForm.empresa.trim() || !empresaForm.responsavel.trim() || !empresaForm.whatsapp.trim()
+      || !empresaForm.email.trim() || !empresaForm.cidade.trim()) {
+      setErro("Preencha empresa, responsável, WhatsApp, e-mail e cidade.");
+      return false;
+    }
+    setErro("");
+    return true;
+  };
+  const validarEtapa2 = () => {
+    if (servicos.some((s) => !s.nome.trim())) { setErro("Dê um nome para cada serviço cadastrado."); return false; }
+    setErro("");
+    return true;
+  };
+
+  const avancar = () => {
+    if (etapa === 1 && !validarEtapa1()) return;
+    if (etapa === 2 && !validarEtapa2()) return;
+    setEtapa((e) => Math.min(3, e + 1));
+  };
+  const voltarEtapa = () => setEtapa((e) => Math.max(1, e - 1));
+
+  const enviar = async () => {
+    if (!validarEtapa1() || !validarEtapa2()) return;
+    setEnviando(true);
+    setErro("");
+    try {
+      await apiFetch("/api/casa-pronta/propostas", {
+        method: "POST",
+        body: {
+          ...empresaForm,
+          capacidadeMensal: empresaForm.capacidadeMensal ? Number(empresaForm.capacidadeMensal) : null,
+          servicos: servicos.map((s) => ({ ...s, garantiaMeses: s.garantiaMeses ? Number(s.garantiaMeses) : null })),
+        },
+      });
+      setResultado(true);
+    } catch (e) {
+      setErro(e.message);
+    }
+    setEnviando(false);
+  };
+
+  if (resultado) {
+    return (
+      <div style={{ minHeight: "100vh", background: CINZA_CLARO, display: "grid", placeItems: "center", padding: 18, fontFamily: "'Inter', system-ui, sans-serif" }}>
+        <div style={{ background: "#fff", borderRadius: 16, padding: "36px 30px", width: "100%", maxWidth: 440, boxShadow: "0 10px 30px rgba(18,51,91,.12)", textAlign: "center" }}>
+          <div style={{ width: 56, height: 56, borderRadius: "50%", background: "#E6F4EA", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
+            <Check size={28} color="#2E7D32" />
+          </div>
+          <h2 style={{ color: AZUL_MARINHO, fontSize: 19, margin: "0 0 8px" }}>Proposta enviada!</h2>
+          <p style={{ color: "#65758b", fontSize: 13.5, margin: "0 0 6px" }}>
+            Recebemos a proposta da <strong>{empresaForm.empresa}</strong>. Nossa equipe analisa os serviços,
+            preços e condições e entra em contato pelo WhatsApp informado.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: CINZA_CLARO, fontFamily: "'Inter', system-ui, sans-serif" }}>
+      <header style={{ background: AZUL_MARINHO, color: "#fff" }}>
+        <div style={{ maxWidth: 820, margin: "0 auto", padding: "16px 18px", display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: "clamp(36px, 9vw, 44px)", height: "clamp(36px, 9vw, 44px)", borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
+            <img src={LOGO_URL} alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+          </div>
+          <div style={{ lineHeight: 1.1, flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: 15 }}>FN Casa Pronta</div>
+            <div style={{ fontSize: 11, opacity: 0.7 }}>Rede de fornecedores</div>
+          </div>
+        </div>
+      </header>
+      <main style={{ maxWidth: 820, margin: "0 auto", padding: "22px 18px 80px" }}>
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 18px" }}>
+          Apresente seus serviços e as condições especiais para os clientes da FN Casa Pronta.
+        </p>
+
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          {["Sua empresa", "Serviços e condições", "Revisão"].map((label, i) => (
+            <div key={label} style={{
+              flex: 1, textAlign: "center", padding: "8px 6px", borderRadius: 8, fontSize: 12.5, fontWeight: 700,
+              background: etapa === i + 1 ? AZUL_MARINHO : "#fff", color: etapa === i + 1 ? "#fff" : "#8593a8",
+              border: `1.5px solid ${etapa === i + 1 ? AZUL_MARINHO : CINZA_BORDA}`,
+            }}>
+              {i + 1}. {label}
+            </div>
+          ))}
+        </div>
+
+        {etapa === 1 && (
+          <Card icon={Building2} titulo="Vamos conhecer sua empresa">
+            <p style={{ fontSize: 12, color: "#8593a8", margin: "0 0 14px" }}>Campos com * são obrigatórios.</p>
+            <Grid>
+              <Field label="Empresa ou nome profissional *" value={empresaForm.empresa} onChange={(v) => setE("empresa", v)} full />
+              <Field label="Responsável pela proposta *" value={empresaForm.responsavel} onChange={(v) => setE("responsavel", v)} />
+              <Field label="WhatsApp com DDD *" value={empresaForm.whatsapp} onChange={(v) => setE("whatsapp", v)} placeholder="(81) 99999-9999" />
+              <Field label="E-mail *" type="email" value={empresaForm.email} onChange={(v) => setE("email", v)} />
+              <Field label="CNPJ (opcional)" value={empresaForm.cnpj} onChange={(v) => setE("cnpj", v)} />
+              <Field label="Cidade / UF *" value={empresaForm.cidade} onChange={(v) => setE("cidade", v)} placeholder="Ex.: Recife / PE" />
+              <Field label="Cidades e regiões atendidas *" value={empresaForm.regioesAtendidas} onChange={(v) => setE("regioesAtendidas", v)} full placeholder="Informe onde consegue atender." />
+              <Field label="Condições de pagamento *" value={empresaForm.condicoesPagamento} onChange={(v) => setE("condicoesPagamento", v)} full placeholder="Entrada, parcelas, Pix e momento de cada pagamento." />
+              <Field label="Capacidade de atendimento por mês *" type="number" value={empresaForm.capacidadeMensal} onChange={(v) => setE("capacidadeMensal", v)} />
+              <Field label="Preços válidos até *" type="date" value={empresaForm.precosValidosAte} onChange={(v) => setE("precosValidosAte", v)} />
+              <Field label="Visita, frete e deslocamento" value={empresaForm.visitaFrete} onChange={(v) => setE("visitaFrete", v)} full placeholder="Ex.: visita para medição, frete por região ou requisitos de acesso." />
+              <Field label="Website" value={empresaForm.website} onChange={(v) => setE("website", v)} full />
+            </Grid>
+          </Card>
+        )}
+
+        {etapa === 2 && (
+          <div style={{ display: "grid", gap: 14 }}>
+            {servicos.map((s, idx) => (
+              <Card key={idx} icon={Wrench} titulo={`Serviço ${String(idx + 1).padStart(2, "0")}`}>
+                <Grid>
+                  <Field label="Nome do serviço *" value={s.nome} onChange={(v) => setServico(idx, { nome: v })} full placeholder="Ex.: box de vidro temperado 8 mm" />
+                  <div style={cell()}>
+                    <label style={lab}>Categoria *</label>
+                    <select style={inp} value={s.categoria} onChange={(e) => setServico(idx, { categoria: e.target.value })}>
+                      {PROPOSTA_FORNECEDOR_CATEGORIAS.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div style={cell()}>
+                    <label style={lab}>Unidade de cobrança *</label>
+                    <select style={inp} value={s.unidadeCobranca} onChange={(e) => setServico(idx, { unidadeCobranca: e.target.value })}>
+                      {CASA_PRONTA_UNIDADES.map((u) => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                  </div>
+                  <div style={cell()}>
+                    <label style={lab}>O preço inclui *</label>
+                    <select style={inp} value={s.precoInclui} onChange={(e) => setServico(idx, { precoInclui: e.target.value })}>
+                      {CASA_PRONTA_INCLUI.map((o) => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                  </div>
+                  <Field label="Preço normal por unidade (R$) *" value={s.precoNormal} onChange={(v) => setServico(idx, { precoNormal: v })} placeholder="0,00" />
+                  <Field label="Especificação e o que será entregue *" value={s.especificacao} onChange={(v) => setServico(idx, { especificacao: v })} full placeholder="Medidas, marca, espessura, acabamento, preparação e instalação incluídos." />
+                </Grid>
+
+                <div style={{ marginTop: 14, overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                    <thead>
+                      <tr style={{ textAlign: "left", color: "#5a6a80" }}>
+                        <th style={{ padding: "4px 6px" }}>Condição FN</th>
+                        <th style={{ padding: "4px 6px" }}>Preço por unidade (R$)</th>
+                        <th style={{ padding: "4px 6px" }}>Prazo em dias corridos</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {CASA_PRONTA_FAIXAS.map(([chave, titulo, subtitulo]) => (
+                        <tr key={chave} style={{ borderTop: `1px solid ${CINZA_BORDA}` }}>
+                          <td style={{ padding: "6px" }}>{titulo}<div style={{ fontSize: 11, color: "#8593a8" }}>{subtitulo}</div></td>
+                          <td style={{ padding: "6px" }}>
+                            <input style={{ ...inp, width: "100%" }} placeholder="0,00" value={s.faixas[chave].preco}
+                              onChange={(e) => setFaixa(idx, chave, { preco: e.target.value })} />
+                          </td>
+                          <td style={{ padding: "6px" }}>
+                            <input style={{ ...inp, width: "100%" }} type="number" placeholder="Dias" value={s.faixas[chave].prazoDias}
+                              onChange={(e) => setFaixa(idx, chave, { prazoDias: e.target.value })} />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <Grid>
+                  <Field label="Quando começa a contagem do prazo? *" value={s.inicioContagemPrazo} onChange={(v) => setServico(idx, { inicioContagemPrazo: v })} full placeholder="Ex.: após medição, aprovação do projeto e pagamento do sinal." />
+                  <Field label="Garantia contratual oferecida (meses) *" type="number" value={s.garantiaMeses} onChange={(v) => setServico(idx, { garantiaMeses: v })} />
+                  <Field label="Cobertura e condições da garantia *" value={s.coberturaGarantia} onChange={(v) => setServico(idx, { coberturaGarantia: v })} full placeholder="O que cobre, quando começa e como solicitar atendimento." />
+                  <Field label="O que não está incluído e condições do desconto" value={s.exclusoes} onChange={(v) => setServico(idx, { exclusoes: v })} full placeholder="Custos extras, medidas fora do padrão, mesma região ou agendamento conjunto." />
+                </Grid>
+
+                {servicos.length > 1 && (
+                  <button type="button" onClick={() => removerServico(idx)}
+                    style={{ marginTop: 12, background: "none", border: "none", color: "#C62828", fontSize: 12.5, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}>
+                    <Trash2 size={13} /> Remover este serviço
+                  </button>
+                )}
+              </Card>
+            ))}
+            <button type="button" className="btn-ghost" onClick={addServico} style={{ justifySelf: "start" }}>
+              <Plus size={14} /> Adicionar outro serviço
+            </button>
+          </div>
+        )}
+
+        {etapa === 3 && (
+          <Card icon={ClipboardCheck} titulo="Revisão">
+            <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 14px" }}>
+              Confira os dados antes de enviar. Depois de enviada, a proposta segue para análise da FN.
+            </p>
+            <div style={{ display: "grid", gap: 4, fontSize: 13.5, marginBottom: 16 }}>
+              <div><strong>{empresaForm.empresa}</strong> — {empresaForm.responsavel}</div>
+              <div style={{ color: "#65758b" }}>{empresaForm.whatsapp} · {empresaForm.email} · {empresaForm.cidade}</div>
+            </div>
+            <div style={{ display: "grid", gap: 10 }}>
+              {servicos.map((s, idx) => (
+                <div key={idx} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "10px 12px" }}>
+                  <div style={{ fontWeight: 700, fontSize: 13.5, color: AZUL_MARINHO }}>{s.nome || `Serviço ${idx + 1}`}</div>
+                  <div style={{ fontSize: 12.5, color: "#65758b" }}>{s.categoria} · {s.unidadeCobranca} · {s.precoInclui}</div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+
+        {erro && <div style={{ marginTop: 14, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>{erro}</div>}
+
+        <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+          {etapa > 1 && <button type="button" className="btn-ghost" onClick={voltarEtapa}>← Voltar</button>}
+          {etapa < 3 && <button type="button" className="btn-solid" onClick={avancar}>Continuar</button>}
+          {etapa === 3 && (
+            <button type="button" className="btn-solid" onClick={enviar} disabled={enviando}>
+              {enviando ? <><Loader2 size={15} className="spin" /> Enviando…</> : <><Send size={14} /> Enviar proposta</>}
+            </button>
+          )}
+        </div>
+      </main>
+      <footer style={{ textAlign: "center", fontSize: 11.5, color: "#8593a8", padding: "20px 18px" }}>
+        FN Edificações · FN Casa Pronta
+      </footer>
     </div>
   );
 }
