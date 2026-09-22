@@ -5915,13 +5915,16 @@ function ColunaFilaEmpreendimento({ nome, clientes, podeAgir, onAprovar, onRecus
 const ALTURA_CARD_FILA = 300;
 
 function AbaQualidadeFila({ clientes = [], carregando, updCliente, usuarios = [], notify, podeAgir = false }) {
+  const [busca, setBusca] = useState("");
   const vistoriadores = usuarios.filter((u) => fazVistoria(u) && u.ativo);
   const { aprovar, recusar } = useAprovacaoAnalise(clientes, vistoriadores, updCliente, notify);
 
   // Mesmo recorte da aprovação (item 2), mas só quem ainda não tem data/horário — quem já
   // tem os dois fica na sub-aba Análise, pronto pra aprovação direta.
+  const termo = busca.trim().toLowerCase();
   const fila = clientes.filter((c) =>
-    c.status === "Em análise" && !ehServicoDocumentacao(c) && (!c.dataDesejada || !c.horarioDesejado));
+    c.status === "Em análise" && !ehServicoDocumentacao(c) && (!c.dataDesejada || !c.horarioDesejado) &&
+    (!termo || `${c.nome} ${c.empreendimento}`.toLowerCase().includes(termo)));
 
   const porEmpreendimento = useMemo(() => {
     const grupos = new Map();
@@ -5938,6 +5941,8 @@ function AbaQualidadeFila({ clientes = [], carregando, updCliente, usuarios = []
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
         Cadastros em análise sem data e horário definidos, separados por empreendimento. Quem já tem os dois aparece na sub-aba Análise.
       </p>
+
+      <input style={{ ...inp, marginBottom: 14 }} placeholder="Buscar por cliente ou empreendimento…" value={busca} onChange={(e) => setBusca(e.target.value)} />
 
       {!carregando && fila.length > 0 && (
         <div style={{ display: "flex", gap: 20, marginBottom: 16, flexWrap: "wrap" }}>
