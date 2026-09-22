@@ -3610,6 +3610,9 @@ function AppInterno({ session, onLogout }) {
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
             {[...(fazVistoria({ role: perfil }) ? [["agenda", "Minha agenda", CalendarDays]] : []),
               ["itens", `Vistoria (${totalItens})`, Camera],
+              /* Para quem fotografa tudo em campo e só monta o laudo depois: anexa as fotos
+                 em lote e já cria um item por foto, faltando só ambiente e patologia. */
+              ...(fazVistoria({ role: perfil }) ? [["elaboracao", "Elaboração de laudo", Upload]] : []),
               /* Só existe quando o cadastro aberto é uma revistoria: é o laudo da visita
                  anterior, para consultar enquanto preenche o novo. */
               ...(laudoAnterior ? [["laudo-anterior", "Laudo anterior", History]] : []),
@@ -3640,7 +3643,7 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "laudos" && <NotificacoesClientes clientes={clientesAtivos} preencherComCliente={preencherComCliente} usuarioAtualId={session.usuario.id} style={{ marginBottom: 18 }} />}
         {/* Fica nas duas telas de onde se começa uma vistoria (a agenda e a própria vistoria);
             no laudo final e nos laudos realizados só atrapalharia. */}
-        {abaTop === "laudos" && (aba === "itens" || aba === "agenda") && fazVistoria({ role: perfil }) && (
+        {abaTop === "laudos" && (aba === "itens" || aba === "agenda" || aba === "elaboracao") && fazVistoria({ role: perfil }) && (
           <CardPuxarCliente clientes={clientesAtivos} usuarios={usuarios} usuarioAtualId={session.usuario.id}
             ehGerencia={perfil === "gerencia"} preencherComCliente={preencherComCliente} style={{ marginBottom: 18 }} />
         )}
@@ -3678,6 +3681,11 @@ function AppInterno({ session, onLogout }) {
             statusLaudo={laudoNoServidor?.laudoStatusLabel} devolvido={laudoDevolvido}
             motivoDevolucao={laudoNoServidor?.motivo_devolucao} patologiasBanco={patologiasBanco}
             minhaAssinatura={minhaAssinatura} salvarMinhaAssinatura={salvarMinhaAssinatura} removerMinhaAssinatura={removerMinhaAssinatura} />
+        )}
+        {abaTop === "laudos" && aba === "elaboracao" && (
+          <AbaElaboracaoLaudo itens={itens} setItens={setItens} updItem={updItem} escolherPatologia={escolherPatologia}
+            patologiasBanco={patologiasBanco} cliente={clienteEmEdicao} dados={dados} notify={notify} setAba={setAba}
+            bloqueado={laudoBloqueado} />
         )}
         {abaTop === "laudos" && aba === "laudo-anterior" && (
           <AbaLaudoAnterior laudo={laudoAnterior} carregando={laudoAnteriorCarregando} cliente={clienteEmEdicao} assinatura={assinatura} />
@@ -6314,6 +6322,198 @@ function SeletorAmbientePatologias({ onFechar, onAdicionar, patologiasBanco = []
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ================= Elaboração de laudo: fluxo em lote, para quem fotografou tudo em campo
+   (às vezes até sem sinal) e só volta ao sistema depois para montar o laudo. Anexa todas as
+   fotos de uma vez — cada foto já vira um item do laudo, com o catálogo de patologias pronto
+   pra usar — e o técnico só precisa dizer o ambiente e a patologia de cada uma. Os demais
+   campos (título, descrição, recomendação, severidade) continuam preenchidos automaticamente
+   pelo catálogo e editáveis na aba Vistoria de sempre — este fluxo não duplica o ItemCard,
+   só acelera a primeira passada. */
+function AbaElaboracaoLaudo({ itens, setItens, updItem, escolherPatologia, patologiasBanco = [], cliente, dados, notify, setAba, bloqueado }) {
+  const fileRef = useRef();     // câmera (capture="environment")
+  const galeriaRef = useRef();  // galeria do aparelho ou arquivos do computador
+  const [carregando, setCarregando] = useState(false);
+  const ambientes = useMemo(() => listarAmbientes(), []);
+
+  const handleArquivos = async (fileList) => {
+    const arquivos = Array.from(fileList || []).filter((f) => f.type.startsWith("image/"));
+    if (!arquivos.length) return;
+    setCarregando(true);
+    const lidas = await Promise.all(
+      arquivos.map((f) => new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(f);
+      }))
+    );
+    // Redimensiona já na entrada — um lote de fotos de celular em tamanho original pesa
+    // demais para ficar tudo em memória/rascunho antes do envio final.
+    const fotos = (await Promise.all(lidas.filter(Boolean).map((src) => redimensionar(src)))).filter(Boolean);
+    setCarregando(false);
+    if (!fotos.length) { notify("Não foi possível carregar as fotos. Tente novamente."); return; }
+
+    setItens((l) => {
+      // O item vazio que nasce junto com o formulário não deve virar uma linha em branco
+      // no laudo — mesma regra do "Conferir por ambiente".
+      const soVazio = l.length === 1 && !l[0].patologia && !l[0].local && !l[0].descricao && !l[0].fotos?.length;
+      const base = soVazio ? [] : l;
+      const novos = fotos.map((src) => ({ ...novoItem(), fotos: [src] }));
+      return [...base, ...novos];
+    });
+    notify(`${fotos.length} foto(s) anexada(s) ✓ — agora é só dizer o ambiente e a patologia de cada uma`);
+  };
+
+  const pendentes = itens.filter((i) => i.fotos?.length && (!i.local || !i.patologia));
+  const prontos = itens.filter((i) => i.fotos?.length && i.local && i.patologia).length;
+
+  return (
+    <div>
+      {bloqueado && (
+        <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 10, background: "#FFF4E0", border: "1px solid #f0c987", borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
+          <Lock size={16} color="#B26A00" />
+          <span style={{ fontSize: 13, color: "#7a4e00" }}>Este laudo está com a gerência e não pode mais ser editado aqui.</span>
+        </div>
+      )}
+      <div style={{ pointerEvents: bloqueado ? "none" : "auto", opacity: bloqueado ? 0.55 : 1 }}>
+        <div style={{ marginBottom: 16 }}>
+          <Card icon={User} titulo="Cliente">
+            {cliente ? (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 11.5, color: "#8593a8", marginBottom: 2 }}>Nome</div>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>{dados?.contratante?.nome || cliente.nome || "—"}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11.5, color: "#8593a8", marginBottom: 2 }}>Empreendimento</div>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>{dados?.imovel?.empreendimento || "—"}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11.5, color: "#8593a8", marginBottom: 2 }}>Unidade</div>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>{dados?.imovel?.unidade || "—"}</div>
+                </div>
+              </div>
+            ) : (
+              <p style={{ fontSize: 13, color: "#8593a8", margin: 0 }}>
+                Nenhum cliente puxado ainda — volte para a aba Vistoria e use "Puxar cliente" antes de anexar as fotos.
+              </p>
+            )}
+          </Card>
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          <Card icon={Upload} titulo="Anexar fotos em lote">
+            <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 12px" }}>
+              Selecione de uma vez todas as fotos tiradas na vistoria, do celular ou do computador. Cada foto
+              já vira um item do laudo — depois é só escolher o ambiente e a patologia de cada uma, aqui embaixo.
+            </p>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+              <button className="btn-add" style={{ flex: 1, minWidth: 200 }} disabled={carregando} onClick={() => fileRef.current?.click()}>
+                <Camera size={17} /> Tirar fotos agora
+              </button>
+              <button className="btn-add" style={{ flex: 1, minWidth: 200 }} disabled={carregando} onClick={() => galeriaRef.current?.click()}>
+                <Images size={17} /> {carregando ? "Carregando…" : "Escolher da galeria ou do computador"}
+              </button>
+            </div>
+            <input ref={fileRef} type="file" accept="image/*" capture="environment" multiple style={{ display: "none" }}
+              onChange={(e) => { handleArquivos(e.target.files); e.target.value = ""; }} />
+            <input ref={galeriaRef} type="file" accept="image/*" multiple style={{ display: "none" }}
+              onChange={(e) => { handleArquivos(e.target.files); e.target.value = ""; }} />
+          </Card>
+        </div>
+
+        {(pendentes.length > 0 || prontos > 0) && (
+          <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ background: "#E6F4EA", color: "#2E7D32", padding: "7px 13px", borderRadius: 9, fontSize: 13, fontWeight: 600 }}>
+              {prontos} já preenchido(s)
+            </div>
+            {pendentes.length > 0 && (
+              <div style={{ background: "#FFF4E0", color: "#B26A00", padding: "7px 13px", borderRadius: 9, fontSize: 13, fontWeight: 600 }}>
+                {pendentes.length} falta(m) ambiente/patologia
+              </div>
+            )}
+            {setAba && (
+              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, marginLeft: "auto" }} onClick={() => setAba("itens")}>
+                Ir para a Vistoria (ajustar detalhes)
+              </button>
+            )}
+          </div>
+        )}
+
+        {pendentes.map((item) => (
+          <ItemRapido key={item.id} item={item} patologiasBanco={patologiasBanco} ambientes={ambientes}
+            onLocal={(local) => updItem(item.id, { local })}
+            onPatologia={(tipo) => escolherPatologia(item.id, tipo)}
+            onRemover={() => setItens((l) => l.filter((x) => x.id !== item.id))} />
+        ))}
+
+        {pendentes.length === 0 && prontos === 0 && (
+          <p style={{ color: "#8593a8", fontSize: 13.5, textAlign: "center", padding: "24px 0" }}>
+            Nenhuma foto anexada ainda.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* Card compacto de triagem: a foto já está anexada, falta só o ambiente e a patologia — os
+   demais campos do item (título, descrição, severidade...) continuam editáveis na aba
+   Vistoria de sempre, igual a qualquer item criado por lá. Mesma lógica de casamento
+   ambiente→patologia do ItemCard, só que num layout mais rápido de percorrer em lote. */
+function ItemRapido({ item, patologiasBanco, ambientes, onLocal, onPatologia, onRemover }) {
+  const ambienteSlug = useMemo(() => {
+    const termo = (item.local || "").trim().toLowerCase();
+    if (!termo) return "";
+    return ambientes.find((a) => a.nome.toLowerCase() === termo)?.slug || "";
+  }, [item.local, ambientes]);
+  const opcoesPatologia = useMemo(() => patologiasPorAmbiente(patologiasBanco, ambienteSlug), [patologiasBanco, ambienteSlug]);
+  const especificas = opcoesPatologia.filter((p) => p.especificaDoAmbiente);
+  const genericas = opcoesPatologia.filter((p) => !p.especificaDoAmbiente);
+
+  return (
+    <div style={{ display: "flex", gap: 12, alignItems: "flex-start", border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, marginBottom: 10, background: "#fff" }}>
+      <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+        {item.fotos.slice(0, 2).map((f, i) => (
+          <img key={i} src={f} alt="" style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8, border: `1px solid ${CINZA_BORDA}` }} />
+        ))}
+      </div>
+      <div style={{ flex: 1, minWidth: 0, display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+        <div>
+          <label style={{ fontSize: 11.5, color: "#8593a8", marginBottom: 3, display: "block" }}>Ambiente</label>
+          <select value={item.local} onChange={(e) => onLocal(e.target.value)}
+            style={{ width: "100%", padding: "7px 9px", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, fontSize: 13, fontFamily: "inherit" }}>
+            <option value="">selecionar ambiente…</option>
+            {ambientes.map((a) => <option key={a.slug} value={a.nome}>{a.nome}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{ fontSize: 11.5, color: "#8593a8", marginBottom: 3, display: "block" }}>Patologia</label>
+          <select value={item.tipo} onChange={(e) => onPatologia(e.target.value)} disabled={!item.local}
+            style={{ width: "100%", padding: "7px 9px", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, fontSize: 13, fontFamily: "inherit" }}>
+            <option value="">{item.local ? "selecionar patologia…" : "escolha o ambiente primeiro"}</option>
+            {especificas.length > 0 && (
+              <optgroup label={`Específicas de ${item.local}`}>
+                {especificas.map((p) => <option key={`bp-${p.id}`} value={`bp-${p.id}`}>{p.nome}</option>)}
+              </optgroup>
+            )}
+            {genericas.length > 0 && (
+              <optgroup label="Aplicam-se a qualquer ambiente">
+                {genericas.map((p) => <option key={`bp-${p.id}`} value={`bp-${p.id}`}>{p.nome}</option>)}
+              </optgroup>
+            )}
+            <optgroup label="Modelos rápidos">
+              {Object.entries(BANCO).filter(([k]) => k !== "outro").map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </optgroup>
+            <option value="outro">Outro (personalizado)</option>
+          </select>
+        </div>
+      </div>
+      <button className="icon-btn" onClick={onRemover} title="Remover este item"><Trash2 size={15} /></button>
     </div>
   );
 }
