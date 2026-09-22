@@ -3680,7 +3680,8 @@ function AppInterno({ session, onLogout }) {
             enviadoAindaEditavel={laudoEnviadoAindaEditavel}
             statusLaudo={laudoNoServidor?.laudoStatusLabel} devolvido={laudoDevolvido}
             motivoDevolucao={laudoNoServidor?.motivo_devolucao} patologiasBanco={patologiasBanco}
-            minhaAssinatura={minhaAssinatura} salvarMinhaAssinatura={salvarMinhaAssinatura} removerMinhaAssinatura={removerMinhaAssinatura} />
+            minhaAssinatura={minhaAssinatura} salvarMinhaAssinatura={salvarMinhaAssinatura} removerMinhaAssinatura={removerMinhaAssinatura}
+            token={token} clienteId={clienteAtualId} />
         )}
         {abaTop === "laudos" && aba === "elaboracao" && (
           <AbaElaboracaoLaudo itens={itens} setItens={setItens} updItem={updItem} escolherPatologia={escolherPatologia}
@@ -5897,7 +5898,10 @@ function ColunaFilaEmpreendimento({ nome, clientes, podeAgir, onAprovar, onRecus
           {clientes.length}
         </span>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {/* Mostra só os 5 primeiros de cada vez — com todos abertos a coluna ficava do
+          tamanho da fila inteira e a página esticava junto. Quem quiser ver mais rola
+          por dentro da própria coluna. */}
+      <div className="scroll-y-fila" style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 5 * ALTURA_CARD_FILA, overflowY: "auto", paddingRight: 4 }}>
         {clientes.map((c) => (
           <CardClientePendente key={c.id} c={c} todos={todos} podeAgir={podeAgir} onAprovar={onAprovar} onRecusar={onRecusar} vistoriadores={vistoriadores} />
         ))}
@@ -5905,6 +5909,10 @@ function ColunaFilaEmpreendimento({ nome, clientes, podeAgir, onAprovar, onRecus
     </div>
   );
 }
+
+// Altura aproximada de um CardClientePendente (com botões de aprovar/recusar) — usada só
+// para calcular quantos cabem nos "5 primeiros" visíveis de cada coluna da fila.
+const ALTURA_CARD_FILA = 300;
 
 function AbaQualidadeFila({ clientes = [], carregando, updCliente, usuarios = [], notify, podeAgir = false }) {
   const vistoriadores = usuarios.filter((u) => fazVistoria(u) && u.ativo);
@@ -5948,7 +5956,7 @@ function AbaQualidadeFila({ clientes = [], carregando, updCliente, usuarios = []
       {!carregando && fila.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum cadastro sem data/horário na fila.</p>}
 
       {fila.length > 0 && (
-        <div style={{ display: "flex", gap: 16, overflowX: "auto", paddingBottom: 4 }}>
+        <div className="scroll-x-fila" style={{ display: "flex", gap: 16, overflowX: "auto", paddingBottom: 10 }}>
           {porEmpreendimento.map(([nome, lista]) => (
             <ColunaFilaEmpreendimento key={nome} nome={nome} clientes={lista} todos={clientes}
               podeAgir={podeAgir} onAprovar={aprovar} onRecusar={recusar} vistoriadores={vistoriadores} />
@@ -6568,7 +6576,7 @@ function AbaLaudoAnterior({ laudo, carregando, cliente, assinatura }) {
   );
 }
 
-function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, dados, setD, fotoCliente, setFotoCliente, fotoClienteObrigatoria = true, notify, setAba, bloqueado, onPedirDesbloqueio, enviadoAindaEditavel = false, statusLaudo, devolvido, motivoDevolucao, patologiasBanco = [], minhaAssinatura, salvarMinhaAssinatura, removerMinhaAssinatura }) {
+function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, dados, setD, fotoCliente, setFotoCliente, fotoClienteObrigatoria = true, notify, setAba, bloqueado, onPedirDesbloqueio, enviadoAindaEditavel = false, statusLaudo, devolvido, motivoDevolucao, patologiasBanco = [], minhaAssinatura, salvarMinhaAssinatura, removerMinhaAssinatura, token, clienteId }) {
   const fotoClienteRef = useRef();        // câmera (capture="environment")
   const fotoClienteGaleriaRef = useRef(); // galeria do aparelho
   const [seletorAberto, setSeletorAberto] = useState(false);
@@ -6762,7 +6770,7 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
           onFotos={(fl) => addFotos(item.id, fl)}
           onRemoveFoto={(i) => removerFoto(item.id, i)}
           onDelete={() => setItens((l) => l.filter((x) => x.id !== item.id))}
-          patologiasBanco={patologiasBanco} />
+          patologiasBanco={patologiasBanco} token={token} clienteId={clienteId} notify={notify} />
       ))}
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -6801,20 +6809,73 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
   );
 }
 
-function ItemCard({ item, num, onChange, onPatologia, onFotos, onRemoveFoto, onDelete, patologiasBanco = [] }) {
+function ItemCard({ item, num, onChange, onPatologia, onFotos, onRemoveFoto, onDelete, patologiasBanco = [], token, clienteId, notify }) {
   const fileRef = useRef();     // câmera (capture="environment")
   const galeriaRef = useRef();  // galeria do aparelho
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
   const m = sevMeta[item.severidade] || sevMeta.Média;
 
+  /* ---- Sugestão de descrição/recomendação com IA (ver POST /api/laudos/itens/sugestao-ia
+     no backend) ----
+     O relato fica só no estado do componente: não é salvo no item, não é enviado junto com
+     o laudo, e some se o técnico trocar de item ou recarregar a página. Isso é de propósito
+     — só o texto revisado que vira "Descrição"/"Recomendação" do item é que fica registrado.
+     "pedidoAtual" identifica cada chamada; se o técnico trocar de item/relato antes da IA
+     responder, a resposta atrasada é descartada em vez de pintar o item errado. */
+  const [relatoIA, setRelatoIA] = useState("");
+  const [gerandoIA, setGerandoIA] = useState(false);
+  const [sugestaoIA, setSugestaoIA] = useState(null); // { status, patologia, descricao, recomendacao, referencia, informacoesFaltantes }
+  const [descricaoSugerida, setDescricaoSugerida] = useState("");
+  const [recomendacaoSugerida, setRecomendacaoSugerida] = useState("");
+  const pedidoAtualRef = useRef(0);
+
   /* Casa o "Local" digitado (texto livre, com sugestão da datalist) com um ambiente do
      banco de patologias — quando bate, o dropdown abaixo já entra filtrado para aquele
-     cômodo, na frente das que valem em qualquer lugar. */
+     cômodo, na frente das que valem em qualquer lugar. Também é o que a sugestão de IA
+     manda como ambiente da busca. */
   const ambienteSlug = useMemo(() => {
     const termo = (item.local || "").trim().toLowerCase();
     if (!termo) return "";
     return listarAmbientes().find((a) => a.nome.toLowerCase() === termo)?.slug || "";
   }, [item.local]);
+
+  const gerarSugestaoIA = async () => {
+    if (gerandoIA) return; // trava clique duplo — cada clique é uma chamada cobrada
+    const relato = relatoIA.trim();
+    if (relato.length < 8) { notify?.("Descreva o defeito com mais detalhes antes de gerar a sugestão."); return; }
+
+    const meuPedido = ++pedidoAtualRef.current;
+    setGerandoIA(true);
+    setSugestaoIA(null);
+    try {
+      const r = await apiFetch("/api/laudos/itens/sugestao-ia", {
+        method: "POST", token,
+        body: {
+          clienteId, relato,
+          ambienteSlug, ambienteNome: item.local || "",
+          patologiaSelecionadaId: item.tipo?.startsWith("bp-") ? item.tipo.slice(3) : null,
+        },
+      });
+      if (meuPedido !== pedidoAtualRef.current) return; // item/relato mudou enquanto a IA respondia
+      setSugestaoIA(r);
+      setDescricaoSugerida(r.descricao || "");
+      setRecomendacaoSugerida(r.recomendacao || "");
+    } catch (e) {
+      if (meuPedido !== pedidoAtualRef.current) return;
+      notify?.(e.message || "Não foi possível gerar a sugestão agora.");
+    } finally {
+      if (meuPedido === pedidoAtualRef.current) setGerandoIA(false);
+    }
+  };
+
+  const aplicarSugestaoIA = () => {
+    // Revisão do técnico primeiro, sempre: aplicar só copia o que está nos campos editáveis
+    // da sugestão para o item — nunca sobrescreve nada sozinho antes desse clique.
+    onChange({ descricao: descricaoSugerida.trim(), recomendacao: recomendacaoSugerida.trim() });
+    notify?.("Sugestão aplicada ao item — confira antes de salvar.");
+    setSugestaoIA(null);
+  };
+
   const opcoesPatologia = useMemo(() => patologiasPorAmbiente(patologiasBanco, ambienteSlug), [patologiasBanco, ambienteSlug]);
   const especificasDoAmbiente = opcoesPatologia.filter((p) => p.especificaDoAmbiente);
   const genericasQualquerAmbiente = opcoesPatologia.filter((p) => !p.especificaDoAmbiente);
@@ -6869,7 +6930,6 @@ function ItemCard({ item, num, onChange, onPatologia, onFotos, onRemoveFoto, onD
         <input ref={galeriaRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={(e) => { onFotos(e.target.files); e.target.value = ""; }} />
       </div>
 
-      {/* Bloco IA */}
       {/* Escolher a patologia preenche sozinho severidade, categoria, norma, descrição e
           recomendação — tudo continua editável depois. */}
       <div style={{ marginTop: 14, background: "#f4f8fd", border: `1px solid #dbe7f4`, borderRadius: 11, padding: 13 }}>
@@ -6895,6 +6955,65 @@ function ItemCard({ item, num, onChange, onPatologia, onFotos, onRemoveFoto, onD
               {item.categoria}
             </span>
             {item.norma && <span style={{ alignSelf: "center" }}>{item.norma}</span>}
+          </div>
+        )}
+      </div>
+
+      {/* Sugestão de descrição/recomendação com IA — só a partir do relato do técnico, nunca
+          das fotos. Gerar não altera o item; só "Aplicar ao item", depois da revisão. */}
+      <div style={{ marginTop: 14, background: "#f6f5fd", border: "1px solid #e2ddf4", borderRadius: 11, padding: 13 }}>
+        <label style={{ ...lab, display: "block", marginBottom: 6 }}>Descreva o defeito observado</label>
+        <textarea
+          style={{ ...inp, width: "100%", minHeight: 54, resize: "vertical", fontFamily: "inherit" }}
+          value={relatoIA}
+          onChange={(e) => setRelatoIA(e.target.value)}
+          placeholder="Ex.: Rejunte faltando no piso do banheiro, perto do ralo"
+          maxLength={500}
+        />
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
+          <button type="button" className="btn-ghost" style={{ width: "auto", padding: "7px 14px", color: "#5B3FB0" }}
+            disabled={gerandoIA || relatoIA.trim().length < 8} onClick={gerarSugestaoIA}>
+            {gerandoIA ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />}
+            {gerandoIA ? "Gerando…" : "Gerar sugestão com IA"}
+          </button>
+          <span style={{ fontSize: 11.5, color: "#8593a8" }}>Usa o relato, o ambiente e a patologia já selecionada — as fotos não são enviadas.</span>
+        </div>
+
+        {sugestaoIA && sugestaoIA.status === "sugestao_disponivel" && (
+          <div style={{ marginTop: 12, background: "#fff", border: "1px solid #d8d0f0", borderRadius: 9, padding: 12 }}>
+            {sugestaoIA.patologia && (
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 8 }}>
+                Patologia relacionada: {sugestaoIA.patologia.nome}
+              </div>
+            )}
+            {sugestaoIA.referencia && (
+              <div style={{ fontSize: 11.5, color: "#65758b", marginBottom: 10 }}>
+                {sugestaoIA.referencia.texto && <div>{sugestaoIA.referencia.texto}</div>}
+                <div style={{ fontWeight: 600, color: sugestaoIA.referencia.texto ? "#B26A00" : "#c62828" }}>{sugestaoIA.referencia.status}</div>
+              </div>
+            )}
+            <Area label="Descrição sugerida (revise antes de aplicar)" value={descricaoSugerida} onChange={setDescricaoSugerida} rows={3} />
+            <Area label="Recomendação sugerida (revise antes de aplicar)" value={recomendacaoSugerida} onChange={setRecomendacaoSugerida} rows={2} />
+            <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+              <button type="button" className="btn-add" style={{ width: "auto", padding: "8px 16px" }} onClick={aplicarSugestaoIA}>
+                <Check size={14} /> Aplicar ao item
+              </button>
+              <button type="button" className="btn-ghost" style={{ width: "auto", padding: "8px 16px" }} onClick={() => setSugestaoIA(null)}>
+                Descartar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {sugestaoIA && sugestaoIA.status === "precisa_informacao" && (
+          <div style={{ marginTop: 12, fontSize: 12.5, color: "#7a4e00", background: "#FFF4E0", border: "1px solid #f0c987", borderRadius: 9, padding: 10 }}>
+            <strong>Preciso de mais detalhe:</strong> {sugestaoIA.informacoesFaltantes || "Complete o relato do defeito observado."}
+          </div>
+        )}
+
+        {sugestaoIA && sugestaoIA.status === "sem_correspondencia" && (
+          <div style={{ marginTop: 12, fontSize: 12.5, color: "#65758b", background: "#f4f4f4", border: `1px solid ${CINZA_BORDA}`, borderRadius: 9, padding: 10 }}>
+            {sugestaoIA.informacoesFaltantes || "Não encontrei patologia cadastrada parecida — selecione manualmente."}
           </div>
         )}
       </div>
