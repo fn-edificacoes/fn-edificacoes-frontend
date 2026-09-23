@@ -1095,23 +1095,23 @@ function LaudoModelo({ laudo, assinatura, assinaturaVistoriador, aprovado = true
 
           <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 9 }}>{i.titulo}</div>
 
+          {/* As fotos são a principal evidência da vistoria: entram inteiras (contain, nunca
+              cover) e grandes — uma sozinha ocupa a largura toda; duas ou mais vão em pares,
+              cada uma num quadro de mesmo tamanho, para foto em pé e foto deitada não parecerem
+              uma maior que a outra. Antes eram cortadas numa caixa de 170 px e da terceira em
+              diante viravam miniaturas de 104×78. Espelha as fichas do PDF (laudo-pdf.js, no backend). */}
           {(i.fotos || []).length > 0 && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-              {(i.fotos || []).slice(0, 2).map((f, idx) => (
-                <figure key={idx} style={{ margin: 0 }}>
-                  <img src={f} alt={`Item ${i.n} — ${idx === 0 ? "visão geral" : "detalhe"}`}
-                    style={{ width: "100%", height: 170, objectFit: "cover", borderRadius: 8, border: `1px solid ${CINZA_BORDA}` }} />
-                  <figcaption style={{ fontSize: 9.5, color: "#8593a8", marginTop: 3 }}>{idx === 0 ? "Foto A — visão geral" : "Foto B — detalhe"}</figcaption>
+            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 12, marginBottom: 12 }}>
+              {(i.fotos || []).map((f, idx, todas) => (
+                <figure key={idx} style={{ margin: 0, flex: todas.length === 1 ? "0 0 100%" : "0 0 calc(50% - 6px)", breakInside: "avoid", pageBreakInside: "avoid" }}>
+                  <img src={f} alt={`Item ${i.n} — foto ${String.fromCharCode(65 + idx)}`}
+                    style={todas.length === 1
+                      ? { display: "block", margin: "0 auto", maxWidth: "100%", maxHeight: 620, objectFit: "contain", borderRadius: 8, border: `1px solid ${CINZA_BORDA}` }
+                      : { display: "block", width: "100%", height: todas.length === 2 ? 440 : 330, objectFit: "contain", background: CINZA_CLARO, borderRadius: 8, border: `1px solid ${CINZA_BORDA}` }} />
+                  <figcaption style={{ fontSize: 9.5, color: "#8593a8", marginTop: 3, textAlign: "center" }}>
+                    {idx === 0 ? "Foto A — visão geral" : idx === 1 ? "Foto B — detalhe" : `Foto ${String.fromCharCode(65 + idx)}`}
+                  </figcaption>
                 </figure>
-              ))}
-            </div>
-          )}
-          {/* Fotos além das duas principais entram menores, para nenhuma se perder. */}
-          {(i.fotos || []).length > 2 && (
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
-              {(i.fotos || []).slice(2).map((f, idx) => (
-                <img key={idx} src={f} alt={`Item ${i.n} — complementar ${idx + 1}`}
-                  style={{ width: 104, height: 78, objectFit: "cover", borderRadius: 6, border: `1px solid ${CINZA_BORDA}` }} />
               ))}
             </div>
           )}
