@@ -12344,9 +12344,14 @@ function CardPropostasCasaPronta({ token, notify }) {
             <div style={{ display: "grid", gap: 10 }}>
               {(aberta.servicos || []).map((s, i) => (
                 <div key={i} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "10px 12px" }}>
-                  <div style={{ fontWeight: 700, fontSize: 13.5 }}>{s.nome}</div>
-                  <div style={{ fontSize: 12, color: "#65758b", margin: "2px 0 6px" }}>
-                    {s.categoria} · {s.unidadeCobranca} · {s.precoInclui} · normal R$ {s.precoNormal || "—"}
+                  <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                    {s.foto && <img src={s.foto} alt="" style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, flexShrink: 0 }} />}
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 13.5 }}>{s.nome}</div>
+                      <div style={{ fontSize: 12, color: "#65758b", margin: "2px 0 6px" }}>
+                        {s.categoria} · {s.unidadeCobranca} · {s.precoInclui} · normal R$ {s.precoNormal || "—"}
+                      </div>
+                    </div>
                   </div>
                   {s.especificacao && <div style={{ fontSize: 12.5, marginBottom: 6 }}>{s.especificacao}</div>}
                   <div style={{ overflowX: "auto" }}>
@@ -15929,7 +15934,7 @@ function novaPropostaCasaProntaEmpresa() {
 function novoServicoCasaPronta() {
   return {
     nome: "", categoria: PROPOSTA_FORNECEDOR_CATEGORIAS[0], unidadeCobranca: CASA_PRONTA_UNIDADES[0],
-    precoInclui: CASA_PRONTA_INCLUI[0], especificacao: "", precoNormal: "",
+    precoInclui: CASA_PRONTA_INCLUI[0], especificacao: "", precoNormal: "", foto: "",
     faixas: Object.fromEntries(CASA_PRONTA_FAIXAS.map(([k]) => [k, { preco: "", prazoDias: "" }])),
     inicioContagemPrazo: "", garantiaMeses: "", coberturaGarantia: "", exclusoes: "",
   };
@@ -15950,6 +15955,16 @@ function PaginaCasaProntaFornecedor() {
   )));
   const addServico = () => setServicos((lista) => [...lista, novoServicoCasaPronta()]);
   const removerServico = (idx) => setServicos((lista) => lista.filter((_, i) => i !== idx));
+
+  const onFotoServico = (idx, e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { setErro("Envie uma imagem (PNG ou JPG) para a foto do serviço."); return; }
+    const reader = new FileReader();
+    reader.onload = () => setServico(idx, { foto: reader.result });
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
 
   const validarEtapa1 = () => {
     if (!empresaForm.empresa.trim() || !empresaForm.responsavel.trim() || !empresaForm.whatsapp.trim()
@@ -16088,6 +16103,23 @@ function PaginaCasaProntaFornecedor() {
                   <Field label="Especificação e o que será entregue *" value={s.especificacao} onChange={(v) => setServico(idx, { especificacao: v })} full placeholder="Medidas, marca, espessura, acabamento, preparação e instalação incluídos." />
                 </Grid>
 
+                <div style={{ ...cell(true), marginTop: 12 }}>
+                  <label style={lab}>Foto do serviço/produto (opcional)</label>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    {s.foto && <img src={s.foto} alt="" style={{ width: 64, height: 64, objectFit: "cover", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8 }} />}
+                    <label className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, cursor: "pointer" }}>
+                      <Camera size={14} /> {s.foto ? "Trocar foto" : "Anexar foto"}
+                      <input type="file" accept="image/*" onChange={(e) => onFotoServico(idx, e)} style={{ display: "none" }} />
+                    </label>
+                    {s.foto && (
+                      <button type="button" onClick={() => setServico(idx, { foto: "" })}
+                        style={{ background: "none", border: "none", color: "#C62828", fontSize: 12.5, cursor: "pointer" }}>
+                        Remover
+                      </button>
+                    )}
+                  </div>
+                </div>
+
                 <div style={{ marginTop: 14, overflowX: "auto" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
                     <thead>
@@ -16147,9 +16179,12 @@ function PaginaCasaProntaFornecedor() {
             </div>
             <div style={{ display: "grid", gap: 10 }}>
               {servicos.map((s, idx) => (
-                <div key={idx} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "10px 12px" }}>
-                  <div style={{ fontWeight: 700, fontSize: 13.5, color: AZUL_MARINHO }}>{s.nome || `Serviço ${idx + 1}`}</div>
-                  <div style={{ fontSize: 12.5, color: "#65758b" }}>{s.categoria} · {s.unidadeCobranca} · {s.precoInclui}</div>
+                <div key={idx} style={{ display: "flex", gap: 10, alignItems: "center", border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "10px 12px" }}>
+                  {s.foto && <img src={s.foto} alt="" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 8, flexShrink: 0 }} />}
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 13.5, color: AZUL_MARINHO }}>{s.nome || `Serviço ${idx + 1}`}</div>
+                    <div style={{ fontSize: 12.5, color: "#65758b" }}>{s.categoria} · {s.unidadeCobranca} · {s.precoInclui}</div>
+                  </div>
                 </div>
               ))}
             </div>
