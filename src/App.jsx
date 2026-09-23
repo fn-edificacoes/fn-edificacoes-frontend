@@ -16025,35 +16025,71 @@ function PaginaCasaProntaFornecedor() {
     );
   }
 
+  const FEATURES_CASA_PRONTA = [
+    ["Preços por serviço", "Do avulso aos grupos de imóveis."],
+    ["Compromisso com a entrega", "Prazos, capacidade e pagamento."],
+    ["Garantia com clareza", "Cobertura e atendimento pós-serviço."],
+  ];
+
   return (
-    <div style={{ minHeight: "100vh", background: CINZA_CLARO, fontFamily: "'Inter', system-ui, sans-serif" }}>
-      <header style={{ background: AZUL_MARINHO, color: "#fff" }}>
-        <div style={{ maxWidth: 820, margin: "0 auto", padding: "16px 18px", display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: "clamp(36px, 9vw, 44px)", height: "clamp(36px, 9vw, 44px)", borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
+    <div style={{ minHeight: "100vh", background: "#fff", fontFamily: "'Inter', system-ui, sans-serif" }}>
+      <header style={{ background: "#fff", borderBottom: `1px solid ${CINZA_BORDA}` }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto", padding: "14px 18px", display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: "clamp(34px, 8vw, 40px)", height: "clamp(34px, 8vw, 40px)", borderRadius: 9, background: AZUL_MARINHO, display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
             <img src={LOGO_URL} alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
           </div>
           <div style={{ lineHeight: 1.1, flex: 1 }}>
-            <div style={{ fontWeight: 700, fontSize: 15 }}>FN Casa Pronta</div>
-            <div style={{ fontSize: 11, opacity: 0.7 }}>Rede de fornecedores</div>
+            <div style={{ fontWeight: 800, fontSize: 15, color: AZUL_MARINHO }}>FN Casa Pronta</div>
+            <div style={{ fontSize: 10.5, color: "#8593a8", letterSpacing: 0.5, textTransform: "uppercase" }}>Rede de fornecedores</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#2E7D32", fontWeight: 700 }}>
+            <ClipboardCheck size={14} /> Proposta exclusiva para a FN
           </div>
         </div>
       </header>
-      <main style={{ maxWidth: 820, margin: "0 auto", padding: "22px 18px 80px" }}>
-        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 18px" }}>
-          Apresente seus serviços e as condições especiais para os clientes da FN Casa Pronta.
-        </p>
 
-        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          {["Sua empresa", "Serviços e condições", "Revisão"].map((label, i) => (
-            <div key={label} style={{
-              flex: 1, textAlign: "center", padding: "8px 6px", borderRadius: 8, fontSize: 12.5, fontWeight: 700,
-              background: etapa === i + 1 ? AZUL_MARINHO : "#fff", color: etapa === i + 1 ? "#fff" : "#8593a8",
-              border: `1.5px solid ${etapa === i + 1 ? AZUL_MARINHO : CINZA_BORDA}`,
-            }}>
-              {i + 1}. {label}
-            </div>
-          ))}
+      <main style={{ maxWidth: 1100, margin: "0 auto", padding: "28px 18px 80px", display: "grid", gap: 28, gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", alignItems: "start" }}>
+        <div>
+          <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 1, color: "#2E7D32", marginBottom: 10 }}>PARCERIAS QUE ENTREGAM</div>
+          <h1 style={{ fontSize: 26, lineHeight: 1.25, margin: "0 0 14px", color: AZUL_MARINHO }}>
+            Seu serviço. Novos lares. <span style={{ color: "#2E7D32" }}>Uma parceria FN.</span>
+          </h1>
+          <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 22px" }}>
+            Apresente seus serviços e as condições especiais para os clientes da FN Casa Pronta.
+          </p>
+          <div style={{ display: "grid", gap: 16, marginBottom: 22 }}>
+            {FEATURES_CASA_PRONTA.map(([titulo, texto]) => (
+              <div key={titulo} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <div style={{ width: 30, height: 30, borderRadius: 8, background: "#E6F4EA", display: "grid", placeItems: "center", flexShrink: 0 }}>
+                  <Check size={15} color="#2E7D32" />
+                </div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13.5, color: AZUL_MARINHO }}>{titulo}</div>
+                  <div style={{ fontSize: 12, color: "#65758b" }}>{texto}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+            {["5+", "10+", "15+", "21+"].map((n) => (
+              <div key={n} style={{ padding: "6px 12px", borderRadius: 999, background: CINZA_CLARO, color: AZUL_MARINHO, fontWeight: 800, fontSize: 13 }}>{n}</div>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: "#8593a8", letterSpacing: 0.5 }}>Transparência • Técnica • Segurança</div>
         </div>
+
+        <div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+            {["Sua empresa", "Serviços e condições", "Revisão"].map((label, i) => (
+              <div key={label} style={{
+                flex: 1, textAlign: "center", padding: "8px 6px", borderRadius: 8, fontSize: 12.5, fontWeight: 700,
+                background: etapa === i + 1 ? AZUL_MARINHO : "#fff", color: etapa === i + 1 ? "#fff" : "#8593a8",
+                border: `1.5px solid ${etapa === i + 1 ? AZUL_MARINHO : CINZA_BORDA}`,
+              }}>
+                {i + 1}. {label}
+              </div>
+            ))}
+          </div>
 
         {etapa === 1 && (
           <Card icon={Building2} titulo="Vamos conhecer sua empresa">
@@ -16202,8 +16238,9 @@ function PaginaCasaProntaFornecedor() {
             </button>
           )}
         </div>
+        </div>
       </main>
-      <footer style={{ textAlign: "center", fontSize: 11.5, color: "#8593a8", padding: "20px 18px" }}>
+      <footer style={{ textAlign: "center", fontSize: 11.5, color: "#8593a8", padding: "20px 18px", borderTop: `1px solid ${CINZA_BORDA}` }}>
         FN Edificações · FN Casa Pronta
       </footer>
     </div>
