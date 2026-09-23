@@ -1096,15 +1096,18 @@ function LaudoModelo({ laudo, assinatura, assinaturaVistoriador, aprovado = true
           <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 9 }}>{i.titulo}</div>
 
           {/* As fotos são a principal evidência da vistoria: entram inteiras (contain, nunca
-              cover) e grandes — uma sozinha ocupa a largura toda, duas ou mais vão em pares do
-              mesmo tamanho. Antes eram cortadas numa caixa de 170 px e da terceira em diante
-              viravam miniaturas de 104×78. Espelha as fichas do PDF (laudo-pdf.js, no backend). */}
+              cover) e grandes — uma sozinha ocupa a largura toda; duas ou mais vão em pares,
+              cada uma num quadro de mesmo tamanho, para foto em pé e foto deitada não parecerem
+              uma maior que a outra. Antes eram cortadas numa caixa de 170 px e da terceira em
+              diante viravam miniaturas de 104×78. Espelha as fichas do PDF (laudo-pdf.js, no backend). */}
           {(i.fotos || []).length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 12, marginBottom: 12 }}>
               {(i.fotos || []).map((f, idx, todas) => (
                 <figure key={idx} style={{ margin: 0, flex: todas.length === 1 ? "0 0 100%" : "0 0 calc(50% - 6px)", breakInside: "avoid", pageBreakInside: "avoid" }}>
                   <img src={f} alt={`Item ${i.n} — foto ${String.fromCharCode(65 + idx)}`}
-                    style={{ display: "block", margin: "0 auto", maxWidth: "100%", maxHeight: todas.length === 1 ? 620 : 440, objectFit: "contain", borderRadius: 8, border: `1px solid ${CINZA_BORDA}` }} />
+                    style={todas.length === 1
+                      ? { display: "block", margin: "0 auto", maxWidth: "100%", maxHeight: 620, objectFit: "contain", borderRadius: 8, border: `1px solid ${CINZA_BORDA}` }
+                      : { display: "block", width: "100%", height: todas.length === 2 ? 440 : 330, objectFit: "contain", background: CINZA_CLARO, borderRadius: 8, border: `1px solid ${CINZA_BORDA}` }} />
                   <figcaption style={{ fontSize: 9.5, color: "#8593a8", marginTop: 3, textAlign: "center" }}>
                     {idx === 0 ? "Foto A — visão geral" : idx === 1 ? "Foto B — detalhe" : `Foto ${String.fromCharCode(65 + idx)}`}
                   </figcaption>
