@@ -12327,7 +12327,7 @@ function CardPropostasCasaPronta({ token, notify }) {
               <button type="button" onClick={() => setAberta(null)} style={{ background: "none", border: "none", cursor: "pointer" }}><X size={18} color="#8593a8" /></button>
             </div>
             <p style={{ fontSize: 12.5, color: "#65758b", margin: "0 0 14px" }}>
-              {aberta.responsavel} · {aberta.whatsapp} · {aberta.email} {aberta.cnpj && <>· CNPJ {aberta.cnpj}</>}
+              {aberta.responsavel} · {aberta.whatsapp} · {aberta.email} {aberta.cnpj && <>· CNPJ/CPF {aberta.cnpj}</>}
             </p>
 
             <div style={{ display: "grid", gap: 4, fontSize: 13, marginBottom: 14 }}>
@@ -16048,7 +16048,7 @@ function PaginaCasaProntaFornecedor() {
               <Field label="Responsável pela proposta *" value={empresaForm.responsavel} onChange={(v) => setE("responsavel", v)} />
               <Field label="WhatsApp com DDD *" value={empresaForm.whatsapp} onChange={(v) => setE("whatsapp", v)} placeholder="(81) 99999-9999" />
               <Field label="E-mail *" type="email" value={empresaForm.email} onChange={(v) => setE("email", v)} />
-              <Field label="CNPJ (opcional)" value={empresaForm.cnpj} onChange={(v) => setE("cnpj", v)} />
+              <Field label="CNPJ ou CPF (opcional)" value={empresaForm.cnpj} onChange={(v) => setE("cnpj", v)} />
               <Field label="Cidade / UF *" value={empresaForm.cidade} onChange={(v) => setE("cidade", v)} placeholder="Ex.: Recife / PE" />
               <Field label="Cidades e regiões atendidas *" value={empresaForm.regioesAtendidas} onChange={(v) => setE("regioesAtendidas", v)} full placeholder="Informe onde consegue atender." />
               <Field label="Condições de pagamento *" value={empresaForm.condicoesPagamento} onChange={(v) => setE("condicoesPagamento", v)} full placeholder="Entrada, parcelas, Pix e momento de cada pagamento." />
