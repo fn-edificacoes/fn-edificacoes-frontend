@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import * as Rascunho from "./rascunho-local.js";
-import * as CasaProntaArquivos from "./casa-pronta-arquivos.js";
 import { listarAmbientes, paraItemDeLaudo, todasParaImportacao } from "./patologias-consulta.js";
 import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
@@ -9,7 +8,7 @@ import {
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
   ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle, Megaphone, Clock,
-  Package, Wrench, Paperclip, Menu
+  Wrench, Paperclip, Menu
 } from "lucide-react";
 
 /* ============================================================
@@ -547,13 +546,11 @@ const STATUS_INTERNO_OPCOES = ["Agendado", "Em vistoria", "Laudo em elaboração
                     (cadastro, agendamento, acompanhamento, aprovação), Agendamento (aprova
                     agendamento/feedback — item 3.24; substitui o antigo perfil "comercial"),
                     FAQ, Marketing e Vendas/Fornecedores.
-   vendas        -> só enxerga Casa Pronta > Fornecedores (a antiga tela "Parceiros e Afiliados",
-                    que deixou de existir como destino solto): analisa/aprova cadastros, acompanha
+   vendas        -> só enxerga Fornecedores (a antiga tela "Parceiros e Afiliados", que deixou
+                    de existir como destino solto): analisa/aprova cadastros, acompanha
                     cupons (vales) e cadastra parceiro/fornecedor manualmente. NÃO calcula nem
                     controla comissão individual de vendedor — vendedor recebe fixo, fora do
-                    sistema (ajuste de modelo comercial, ver ROLE_DESCRICAO.vendas). Reaproveita o
-                    mesmo componente que a Gerência já usa dentro de FN Casa Pronta
-                    (AbaGerenciaParceiros), sem duplicar tela.
+                    sistema (ajuste de modelo comercial, ver ROLE_DESCRICAO.vendas).
    gerencia      -> acesso restrito, mas enxerga tudo (incl. financeiro)
    O cadastro/acompanhamento de Cliente em si continua sendo uma tela pública separada, sem login.
 ------------------------------------------------------------------ */
@@ -1362,15 +1359,13 @@ function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], ava
 
   // --- Parceiros novos aguardando homologação: sem isto, ninguém era avisado — o cadastro
   // só aparecia se alguém abrisse a aba "Parceiros" por conta própria e reparasse na tabela. ---
-  if (["gerencia", "vendas", "atendimento"].includes(perfil)) {
+  if (["vendas", "atendimento"].includes(perfil)) {
     const aguardandoHomologacao = parceiros.filter((p) => p.status === "em_analise");
     if (aguardandoHomologacao.length) {
       itens.push({
         id: "parceiros-em-analise", urgente: true,
         texto: `${aguardandoHomologacao.length} parceiro(s) aguardando homologação`,
-        // Gerência acessa fornecedores/parceiros dentro de FN Casa Pronta (sub-nav); vendas/
-        // atendimento têm uma aba própria "vendas" sem sub-nav — cada perfil precisa do destino certo.
-        onde: perfil === "gerencia" ? { aba: "gerencia", sub: "casa-pronta" } : { aba: "vendas" },
+        onde: { aba: "vendas" },
       });
     }
   }
@@ -2109,10 +2104,6 @@ export default function App() {
   if (paginaFn === "fn-home") return <PaginaBeneficiosFn tipo="produto" />;
   if (paginaFn === "privacidade") return <PaginaPrivacidade />;
 
-  // Proposta pública de fornecedor do FN Casa Pronta (?pagina=casa-pronta-fornecedor) —
-  // mesmo padrão dos links acima, sem sessão nenhuma. Ver PaginaCasaProntaFornecedor.
-  if (paginaFn === "casa-pronta-fornecedor") return <PaginaCasaProntaFornecedor />;
-
   // Link público de avaliação (?avaliar=<id>&tipo=doc|cliente&servico=…), mandado pelo
   // Atendimento por WhatsApp/e-mail — mesmo padrão dos links acima, sem sessão nenhuma.
   const avaliarId = new URLSearchParams(window.location.search).get("avaliar");
@@ -2191,9 +2182,6 @@ const GERENCIA_MENU_LATERAL = [
     { aba: "gerencia", sub: "perfil-cliente", label: "Perfil do cliente", Icon: User },
     { aba: "gerencia", sub: "prospeccao", label: "Prospecção", Icon: TrendingUp },
   ] },
-  { titulo: "FN Casa Pronta", itens: [
-    { aba: "gerencia", sub: "casa-pronta", label: "FN Casa Pronta", Icon: Package },
-  ] },
   { titulo: "Visão geral & Indicadores", itens: [
     { aba: "gerencia", sub: "visao-geral", label: "Visão geral", Icon: LayoutGrid },
     { aba: "gerencia", sub: "indicadores", label: "Indicadores", Icon: PieChart },
@@ -2253,7 +2241,7 @@ function AppInterno({ session, onLogout }) {
   // Vistoriador começa na agenda (é de lá que ele inicia a vistoria, já com os dados
   // preenchidos); os demais caem direto na vistoria.
   const [aba, setAba] = useState("itens");
-  const [abaGerencia, setAbaGerencia] = useState("visao-geral"); // "visao-geral" | "casa-pronta" | "financeiro" | "prospeccao"
+  const [abaGerencia, setAbaGerencia] = useState("visao-geral"); // "visao-geral" | "financeiro" | "prospeccao"
   const [abaQualidade, setAbaQualidade] = useState("analise"); // "analise" | "vistoria" | "feedback"
   const [agendarAgoraId, setAgendarAgoraId] = useState(null); // id do cliente recém-aprovado, pra abrir direto o card dele em "Vistoria"
   // Sugere o nome de quem está logado como responsável técnico — evita repetir o bug
@@ -2496,9 +2484,6 @@ function AppInterno({ session, onLogout }) {
     try {
       await apiFetch(`/api/parceiros/${id}`, { method: "DELETE", token });
       setParceiros((atual) => atual.filter((p) => p.id !== id));
-      // Sem isso, a Ficha Casa Pronta e os contratos dele ficam presos no navegador pra sempre.
-      excluirExtraFornecedorCasaPronta(id);
-      CasaProntaArquivos.excluirContratosDoFornecedor(id).catch(() => {});
       notify("Parceiro apagado ✓");
       return true;
     } catch (e) {
@@ -2506,7 +2491,6 @@ function AppInterno({ session, onLogout }) {
       return false;
     }
   };
-  const [extrasFornecedorCasaPronta, salvarExtraFornecedorCasaPronta, excluirExtraFornecedorCasaPronta] = useCasaProntaFornecedorExtras();
   /* Aprova ou recusa a comissão que o parceiro propôs para um item do portfólio. Recarrega
      a lista porque é dela que sai o aviso de quantas ainda esperam decisão. */
   const decidirComissaoItem = async (itemId, acao) => {
@@ -3734,8 +3718,7 @@ function AppInterno({ session, onLogout }) {
             podeExcluir={perfil === "gerencia"} excluirParceiro={excluirParceiro}
             prospeccaoParceiros={prospeccaoParceiros} prospeccaoParceirosCarregando={prospeccaoParceirosCarregando}
             atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
-            importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao} meuConvite={meuConvite}
-            extrasFornecedorCasaPronta={extrasFornecedorCasaPronta} salvarExtraFornecedorCasaPronta={salvarExtraFornecedorCasaPronta} />
+            importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao} meuConvite={meuConvite} />
         )}
         {abaTop === "gerencia" && (
           <AbaGerencia sub={abaGerencia} usuarioAtual={session.usuario} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem}
@@ -3744,7 +3727,6 @@ function AppInterno({ session, onLogout }) {
             atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
             importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao}
             meuConvite={meuConvite}
-            extrasFornecedorCasaPronta={extrasFornecedorCasaPronta} salvarExtraFornecedorCasaPronta={salvarExtraFornecedorCasaPronta}
             docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} clientes={clientes} updCliente={updCliente} resetarSenhaCliente={resetarSenhaCliente} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
             usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} salvarPerfilTecnico={salvarPerfilTecnico} usuarioAtualId={session.usuario.id}
             avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
@@ -11223,7 +11205,7 @@ function CardProspeccaoParceiros({ empresas = [], carregando, onAtualizar, onAdi
   );
 }
 
-function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas = [], vendasCarregando, atualizarVenda, notify, token, perfil, decidirComissaoItem, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, extrasFornecedorCasaPronta, salvarExtraFornecedorCasaPronta }) {
+function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas = [], vendasCarregando, atualizarVenda, notify, token, perfil, decidirComissaoItem, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite }) {
   const [cadastrando, setCadastrando] = useState(false);
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -11241,8 +11223,7 @@ function AbaGerenciaParceiros({ parceiros, parceirosCarregando, atualizarParceir
       <CardParceiros parceiros={parceiros} carregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
         podeExcluir={podeExcluir} excluirParceiro={excluirParceiro} token={token} perfil={perfil}
         salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo}
-        decidirComissaoItem={decidirComissaoItem} notify={notify}
-        extrasFornecedorCasaPronta={extrasFornecedorCasaPronta} salvarExtraFornecedorCasaPronta={salvarExtraFornecedorCasaPronta} />
+        decidirComissaoItem={decidirComissaoItem} notify={notify} />
       <CardVendasComissoes vendas={vendas} carregando={vendasCarregando} atualizarVenda={atualizarVenda} notify={notify} />
       {cadastrando && (
         <ModalCriarParceiroManual onFechar={() => setCadastrando(false)} criarParceiroManual={criarParceiroManual} notify={notify} />
@@ -12136,1031 +12117,6 @@ function AbaGerenciaReformas({ usuarioAtual, perfil }) {
         />
       </div>
     </div>
-  );
-}
-
-/* ============================================================
-   GERÊNCIA · FN CASA PRONTA (rascunho)
-   Primeira versão do braço de pós-chaves descrito no documento "Projeto FN Casa
-   Pronta" (set/2026): cadastro de fornecedores homologados por categoria e ficha
-   técnica/comercial por empreendimento — a base sobre a qual os pacotes (Essencial,
-   Conforto, Casa Pronta) serão montados depois.
-
-   Sem tabela no backend ainda: os dados ficam neste navegador (localStorage), igual
-   ao carrinho de compras do marketplace. Quando o back-end ganhar as rotas certas,
-   isso migra para apiFetch como o resto do sistema — até lá, não é dado de verdade
-   compartilhado entre quem usa o sistema, só um rascunho local de quem cadastrou.
-   ============================================================ */
-const CASA_PRONTA_CATEGORIAS = [
-  "Box / vidraçaria", "Espelhos", "Telas de proteção", "Limpeza pós-serviço",
-  "Pintura", "Mármore / granito", "Elétrica / iluminação", "Gesso / drywall",
-  "Ar-condicionado", "Marcenaria", "Obras maiores", "Outro",
-];
-const CASA_PRONTA_STATUS = ["Em teste", "Homologado", "Preferencial", "Suspenso"];
-const CASA_PRONTA_STATUS_COR = {
-  "Em teste": { cor: "#8a6d00", bg: "#FFF4D6" },
-  "Homologado": { cor: "#1b6e3c", bg: "#E4F5E9" },
-  "Preferencial": { cor: "#12335B", bg: "#DCE7F5" },
-  "Suspenso": { cor: "#b3261e", bg: "#FBE7E6" },
-};
-const CHAVE_CASA_PRONTA_FICHAS = "fn_casa_pronta_fichas";
-const CHAVE_CASA_PRONTA_VENDAS = "fn_casa_pronta_vendas";
-const PACOTES_BASE_SUGESTOES = ["FN Essencial", "FN Conforto", "FN Casa Pronta", "Personalize"];
-/* Jornada do cliente, seção 7 do documento — usada como o "fluxograma" de acompanhamento
-   de cada pacote vendido. Fixa de propósito: mudar a ordem aqui muda o passo a passo de
-   toda obra em andamento, e o documento já validou essa sequência. */
-const ETAPAS_JORNADA_CASA_PRONTA = [
-  "Entrada", "Diagnóstico", "Conferência", "Proposta", "Contratação",
-  "Cronograma", "Execução", "Checklist", "Aceite", "Encerramento",
-];
-
-function lerCasaProntaLista(chave) {
-  try {
-    const bruto = window.localStorage.getItem(chave);
-    const lista = bruto ? JSON.parse(bruto) : [];
-    return Array.isArray(lista) ? lista : [];
-  } catch { return []; }
-}
-function gravarCasaProntaLista(chave, lista) {
-  try { window.localStorage.setItem(chave, JSON.stringify(lista)); } catch { /* sem storage, some ao fechar a aba */ }
-}
-
-const CHAVE_CASA_PRONTA_FORNECEDOR_EXTRAS = "fn_casa_pronta_fornecedor_extras";
-function lerCasaProntaExtras() {
-  try {
-    const bruto = window.localStorage.getItem(CHAVE_CASA_PRONTA_FORNECEDOR_EXTRAS);
-    const mapa = bruto ? JSON.parse(bruto) : {};
-    return mapa && typeof mapa === "object" && !Array.isArray(mapa) ? mapa : {};
-  } catch { return {}; }
-}
-function gravarCasaProntaExtras(mapa) {
-  try { window.localStorage.setItem(CHAVE_CASA_PRONTA_FORNECEDOR_EXTRAS, JSON.stringify(mapa)); } catch { /* sem storage, some ao fechar a aba */ }
-}
-const EXTRA_CASA_PRONTA_PADRAO = {
-  categoria: "", status: "Em teste", contato: "", areaAtendida: "",
-  precoPublico: "", precoFn1a4: "", precoFn5a9: "", precoFn10mais: "",
-  prazo: "", garantia: "", retrabalho: "", capacidade: "", pagamento: "", observacoes: "",
-};
-
-/* Fornecedores homologados do FN Casa Pronta agora SÃO os parceiros (mesmo cadastro, mesmo
-   login por convite, mesma homologação — ver AbaGerenciaParceiros). O que só existe pra Casa
-   Pronta (categoria de serviço pós-chaves, preço por faixa de volume, prazo/garantia/capacidade,
-   contratos) não tem coluna no backend do parceiro, então continua local, indexado pelo id
-   REAL do parceiro (não mais um id gerado aqui) — assim nada se perde se o mesmo parceiro for
-   editado por duas telas diferentes. */
-function useCasaProntaFornecedorExtras() {
-  const [extras, setExtras] = useState(() => lerCasaProntaExtras());
-  useEffect(() => gravarCasaProntaExtras(extras), [extras]);
-  const salvarExtraFornecedorCasaPronta = (parceiroId, patch) => setExtras((atual) => ({
-    ...atual, [parceiroId]: { ...EXTRA_CASA_PRONTA_PADRAO, ...atual[parceiroId], ...patch },
-  }));
-  const excluirExtraFornecedorCasaPronta = (parceiroId) => setExtras((atual) => {
-    if (!(parceiroId in atual)) return atual;
-    const { [parceiroId]: _removido, ...resto } = atual;
-    return resto;
-  });
-  return [extras, salvarExtraFornecedorCasaPronta, excluirExtraFornecedorCasaPronta];
-}
-
-/* Funde o parceiro de verdade (backend) com os campos extras de Casa Pronta (local) — assim
-   CardFichasTecnicasCasaPronta, CardAcompanhamentoCasaPronta e CardIndicadoresCasaPronta (que só
-   entendem esse "formato de fornecedor") continuam funcionando sem reescrita. Só entra na lista
-   quem já tem uma Ficha Casa Pronta salva — senão todo parceiro/afiliado do marketplace (que não
-   tem nada a ver com obra pós-chaves) apareceria aqui. */
-function mapParceiroParaFornecedorCasaPronta(parceiro, extra) {
-  return { id: parceiro.id, nome: parceiro.empresa, ...EXTRA_CASA_PRONTA_PADRAO, ...extra };
-}
-function fornecedoresCasaProntaDeParceiros(parceiros, extras) {
-  return parceiros.filter((p) => extras[p.id]).map((p) => mapParceiroParaFornecedorCasaPronta(p, extras[p.id]));
-}
-
-const CASA_PRONTA_PROPOSTA_STATUS_LABEL = { em_analise: "Em análise", aprovada: "Aprovada", recusada: "Recusada" };
-STATUS_COR["Em análise"] = STATUS_COR["Em análise"] || { cor: "#B26A00", bg: "#FFF4E0" };
-STATUS_COR["Aprovada"] = STATUS_COR["Aprovada"] || { cor: "#2E7D32", bg: "#E6F4EA" };
-STATUS_COR["Recusada"] = STATUS_COR["Recusada"] || { cor: "#C62828", bg: "#FCEAEA" };
-
-/* Fila de propostas de fornecedor recebidas pelo formulário público (ver
-   PaginaCasaProntaFornecedor, ?pagina=casa-pronta-fornecedor). Aprovar aqui não homologa o
-   fornecedor sozinho — só marca a decisão; quem dá o login é o convite de parceiro de sempre. */
-function CardPropostasCasaPronta({ token, notify }) {
-  const [propostas, setPropostas] = useState([]);
-  const [carregando, setCarregando] = useState(true);
-  const [aberta, setAberta] = useState(null); // proposta selecionada para detalhe
-  const [notas, setNotas] = useState("");
-  const [salvando, setSalvando] = useState(false);
-
-  const linkPublico = `${window.location.origin}${window.location.pathname}?pagina=casa-pronta-fornecedor`;
-
-  const carregar = () => {
-    setCarregando(true);
-    apiFetch("/api/casa-pronta/propostas", { token })
-      .then((r) => setPropostas(r.propostas || []))
-      .catch((e) => notify(e.message))
-      .finally(() => setCarregando(false));
-  };
-  useEffect(carregar, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const abrir = (p) => { setAberta(p); setNotas(p.notas_internas || ""); };
-
-  const decidir = async (status) => {
-    setSalvando(true);
-    try {
-      await apiFetch(`/api/casa-pronta/propostas/${aberta.id}`, { method: "PATCH", token, body: { status, notasInternas: notas } });
-      notify(status === "aprovada" ? "Proposta aprovada ✓" : "Proposta recusada");
-      setAberta(null);
-      carregar();
-    } catch (e) {
-      notify(e.message);
-    }
-    setSalvando(false);
-  };
-
-  const salvarNotas = async () => {
-    setSalvando(true);
-    try {
-      await apiFetch(`/api/casa-pronta/propostas/${aberta.id}`, { method: "PATCH", token, body: { notasInternas: notas } });
-      notify("Notas salvas ✓");
-      carregar();
-    } catch (e) {
-      notify(e.message);
-    }
-    setSalvando(false);
-  };
-
-  return (
-    <Card icon={Handshake} titulo="Propostas de fornecedor recebidas">
-      <div style={{ display: "flex", alignItems: "center", gap: 8, background: CINZA_CLARO, borderRadius: 8, padding: "8px 12px", marginBottom: 14, fontSize: 12.5, color: "#4a5a70" }}>
-        <span style={{ flex: 1 }}>Link do formulário para divulgar com possíveis fornecedores: <strong>{linkPublico}</strong></span>
-        <button type="button" className="btn-ghost" onClick={() => { navigator.clipboard.writeText(linkPublico); notify("Link copiado ✓"); }}>
-          <Copy size={13} /> Copiar
-        </button>
-      </div>
-
-      {carregando ? (
-        <p style={{ fontSize: 13, color: "#65758b" }}>Carregando…</p>
-      ) : propostas.length === 0 ? (
-        <p style={{ fontSize: 13, color: "#65758b" }}>Nenhuma proposta recebida ainda.</p>
-      ) : (
-        <div style={{ display: "grid", gap: 8 }}>
-          {propostas.map((p) => (
-            <button key={p.id} type="button" onClick={() => abrir(p)}
-              style={{ display: "flex", alignItems: "center", gap: 10, textAlign: "left", padding: "10px 12px", borderRadius: 10, border: `1px solid ${CINZA_BORDA}`, background: "#fff", cursor: "pointer" }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: 13.5, color: AZUL_MARINHO }}>{p.empresa}</div>
-                <div style={{ fontSize: 12, color: "#65758b" }}>
-                  {p.responsavel} · {p.cidade} · {(p.servicos || []).length} serviço(s) · {new Date(p.criado_em).toLocaleDateString("pt-BR")}
-                </div>
-              </div>
-              <Selo valor={CASA_PRONTA_PROPOSTA_STATUS_LABEL[p.status] || p.status} />
-              <ChevronRight size={16} color="#8593a8" />
-            </button>
-          ))}
-        </div>
-      )}
-
-      {aberta && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(18,51,91,.45)", display: "grid", placeItems: "center", zIndex: 50, padding: 18 }} onClick={() => setAberta(null)}>
-          <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: "100%", maxWidth: 640, maxHeight: "88vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-              <h3 style={{ margin: 0, color: AZUL_MARINHO, fontSize: 17, flex: 1 }}>{aberta.empresa}</h3>
-              <Selo valor={CASA_PRONTA_PROPOSTA_STATUS_LABEL[aberta.status] || aberta.status} />
-              <button type="button" onClick={() => setAberta(null)} style={{ background: "none", border: "none", cursor: "pointer" }}><X size={18} color="#8593a8" /></button>
-            </div>
-            <p style={{ fontSize: 12.5, color: "#65758b", margin: "0 0 14px" }}>
-              {aberta.responsavel} · {aberta.whatsapp} · {aberta.email} {aberta.cnpj && <>· CNPJ/CPF {aberta.cnpj}</>}
-            </p>
-
-            <div style={{ display: "grid", gap: 4, fontSize: 13, marginBottom: 14 }}>
-              <div><strong>Cidade:</strong> {aberta.cidade}</div>
-              <div><strong>Regiões atendidas:</strong> {aberta.regioes_atendidas || "—"}</div>
-              <div><strong>Condições de pagamento:</strong> {aberta.condicoes_pagamento || "—"}</div>
-              <div><strong>Capacidade mensal:</strong> {aberta.capacidade_mensal ?? "—"} imóveis/mês</div>
-              <div><strong>Preços válidos até:</strong> {aberta.precos_validos_ate ? new Date(aberta.precos_validos_ate).toLocaleDateString("pt-BR") : "—"}</div>
-              {aberta.visita_frete && <div><strong>Visita/frete:</strong> {aberta.visita_frete}</div>}
-              {aberta.website && <div><strong>Website:</strong> {aberta.website}</div>}
-            </div>
-
-            <h4 style={{ color: AZUL_MARINHO, fontSize: 14, margin: "16px 0 8px" }}>Serviços propostos</h4>
-            <div style={{ display: "grid", gap: 10 }}>
-              {(aberta.servicos || []).map((s, i) => (
-                <div key={i} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "10px 12px" }}>
-                  <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                    {s.foto && <img src={s.foto} alt="" style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, flexShrink: 0 }} />}
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 13.5 }}>{s.nome}</div>
-                      <div style={{ fontSize: 12, color: "#65758b", margin: "2px 0 6px" }}>
-                        {s.categoria} · {s.unidadeCobranca} · {s.precoInclui} · normal R$ {s.precoNormal || "—"}
-                      </div>
-                    </div>
-                  </div>
-                  {s.especificacao && <div style={{ fontSize: 12.5, marginBottom: 6 }}>{s.especificacao}</div>}
-                  <div style={{ overflowX: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                      <thead>
-                        <tr style={{ textAlign: "left", color: "#8593a8" }}>
-                          {CASA_PRONTA_FAIXAS.map(([chave, titulo]) => <th key={chave} style={{ padding: "3px 6px" }}>{titulo}</th>)}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr>
-                          {CASA_PRONTA_FAIXAS.map(([chave]) => (
-                            <td key={chave} style={{ padding: "3px 6px" }}>
-                              {s.faixas?.[chave]?.preco || "sob consulta"}{s.faixas?.[chave]?.prazoDias ? ` · ${s.faixas[chave].prazoDias}d` : ""}
-                            </td>
-                          ))}
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                  <div style={{ fontSize: 12, color: "#65758b", marginTop: 6 }}>
-                    Garantia: {s.garantiaMeses || 0} meses {s.coberturaGarantia && <>— {s.coberturaGarantia}</>}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div style={{ ...cell(true), marginTop: 16 }}>
-              <label style={lab}>Notas internas</label>
-              <textarea style={{ ...inp, minHeight: 60, resize: "vertical" }} value={notas} onChange={(e) => setNotas(e.target.value)} />
-            </div>
-
-            <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
-              <button type="button" className="btn-solid" disabled={salvando} onClick={() => decidir("aprovada")}>
-                <Check size={14} /> Aprovar
-              </button>
-              <button type="button" className="btn-ghost" style={{ color: "#C62828" }} disabled={salvando} onClick={() => decidir("recusada")}>
-                <X size={14} /> Recusar
-              </button>
-              <button type="button" className="btn-ghost" disabled={salvando} onClick={salvarNotas}>
-                <Save size={14} /> Salvar notas
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </Card>
-  );
-}
-
-function AbaGerenciaCasaPronta({ notify, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual,
-  podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando,
-  vendas = [], vendasCarregando, atualizarVenda, token, perfil, decidirComissaoItem,
-  prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro,
-  adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite,
-  extrasFornecedorCasaPronta, salvarExtraFornecedorCasaPronta }) {
-  const [sub, setSub] = useState("fornecedores"); // "propostas" | "fornecedores" | "fichas" | "vendas" | "indicadores"
-  const [fichas, setFichas] = useState(() => lerCasaProntaLista(CHAVE_CASA_PRONTA_FICHAS));
-  const [vendasCasaPronta, setVendasCasaPronta] = useState(() => lerCasaProntaLista(CHAVE_CASA_PRONTA_VENDAS));
-  /* extrasFornecedorCasaPronta vem de fora (AppInterno) — é a MESMA instância usada por
-     excluirParceiro e pela aba "Vendas". Duas instâncias independentes do hook (uma aqui,
-     outra em AppInterno) liam/gravavam a mesma chave do localStorage sem se enxergar: salvar
-     uma Ficha Casa Pronta aqui não aparecia pra quem exclui o parceiro em AppInterno, e a
-     limpeza ao excluir não encontrava o registro. */
-
-  useEffect(() => gravarCasaProntaLista(CHAVE_CASA_PRONTA_FICHAS, fichas), [fichas]);
-  useEffect(() => gravarCasaProntaLista(CHAVE_CASA_PRONTA_VENDAS, vendasCasaPronta), [vendasCasaPronta]);
-
-  const fornecedoresCasaPronta = useMemo(
-    () => fornecedoresCasaProntaDeParceiros(parceiros, extrasFornecedorCasaPronta),
-    [parceiros, extrasFornecedorCasaPronta]
-  );
-
-  return (
-    <div style={{ display: "grid", gap: 14 }}>
-      <div style={{ background: "#EAF2FB", border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "10px 14px", fontSize: 12.5, color: "#2C4A6E", display: "flex", gap: 8, alignItems: "flex-start" }}>
-        <Info size={15} style={{ flexShrink: 0, marginTop: 1 }} />
-        <span>
-          Primeira versão do <strong>FN Casa Pronta</strong> (pós-chaves): fornecedores homologados e ficha técnica por empreendimento.
-          Os dados ficam só neste navegador por enquanto — ainda não há tabela no servidor para isso.
-        </span>
-      </div>
-
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {[["propostas", "Propostas", Handshake], ["fornecedores", "Fornecedores", Wrench], ["fichas", "Fichas técnicas", Building2], ["vendas", "Pacotes vendidos", ClipboardList], ["indicadores", "Indicadores", PieChart]].map(([k, label, Icon]) => (
-          <button key={k} type="button" onClick={() => setSub(k)}
-            style={{
-              display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, cursor: "pointer",
-              border: `1.5px solid ${sub === k ? AZUL_MARINHO : CINZA_BORDA}`,
-              background: sub === k ? AZUL_MARINHO : "#fff", color: sub === k ? "#fff" : "#4a5a70", fontSize: 13, fontWeight: 600,
-            }}>
-            <Icon size={14} /> {label}
-          </button>
-        ))}
-      </div>
-
-      {sub === "propostas" && <CardPropostasCasaPronta token={token} notify={notify} />}
-      {sub === "fornecedores" && (
-        <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
-          criarParceiroManual={criarParceiroManual} podeExcluir={podeExcluir} excluirParceiro={excluirParceiro}
-          salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo}
-          vales={vales} valesCarregando={valesCarregando} vendas={vendas} vendasCarregando={vendasCarregando}
-          atualizarVenda={atualizarVenda} notify={notify} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem}
-          prospeccaoParceiros={prospeccaoParceiros} prospeccaoParceirosCarregando={prospeccaoParceirosCarregando}
-          atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
-          importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao} meuConvite={meuConvite}
-          extrasFornecedorCasaPronta={extrasFornecedorCasaPronta} salvarExtraFornecedorCasaPronta={salvarExtraFornecedorCasaPronta} />
-      )}
-      {sub === "fichas" && <CardFichasTecnicasCasaPronta fichas={fichas} setFichas={setFichas} fornecedores={fornecedoresCasaPronta} notify={notify} />}
-      {sub === "vendas" && <CardAcompanhamentoCasaPronta fichas={fichas} fornecedores={fornecedoresCasaPronta} vendas={vendasCasaPronta} setVendas={setVendasCasaPronta} notify={notify} />}
-      {sub === "indicadores" && <CardIndicadoresCasaPronta fornecedores={fornecedoresCasaPronta} fichas={fichas} vendas={vendasCasaPronta} />}
-    </div>
-  );
-}
-
-/* Contratos assinados com um fornecedor (o "Termo de parceria FN x fornecedor" do
-   documento) — um ou mais arquivos por fornecedor, guardados no IndexedDB deste
-   navegador (ver casa-pronta-arquivos.js). Ainda não sobe pro servidor: é anexo local,
-   igual o resto do FN Casa Pronta por enquanto. */
-function ModalContratosFornecedor({ fornecedor, onFechar, notify }) {
-  const [contratos, setContratos] = useState([]);
-  const [carregando, setCarregando] = useState(true);
-  const [enviando, setEnviando] = useState(false);
-  const [excluindoId, setExcluindoId] = useState(null);
-
-  const recarregar = () => {
-    setCarregando(true);
-    CasaProntaArquivos.listarContratos(fornecedor.id)
-      .then(setContratos)
-      .catch(() => notify("Não deu para carregar os contratos."))
-      .finally(() => setCarregando(false));
-  };
-  useEffect(recarregar, [fornecedor.id]);
-
-  const anexar = async (e) => {
-    const arquivos = [...(e.target.files || [])];
-    e.target.value = ""; // permite escolher o mesmo arquivo de novo depois de excluir
-    if (arquivos.length === 0) return;
-    setEnviando(true);
-    try {
-      for (const arquivo of arquivos) await CasaProntaArquivos.salvarContrato(fornecedor.id, arquivo);
-      recarregar();
-    } catch { notify("Não deu para anexar o arquivo."); }
-    setEnviando(false);
-  };
-
-  const abrir = async (id) => {
-    try {
-      const r = await CasaProntaArquivos.abrirContrato(id);
-      const url = URL.createObjectURL(r.blob);
-      window.open(url, "_blank");
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-    } catch { notify("Não deu para abrir o arquivo."); }
-  };
-
-  const excluir = async (id) => {
-    setExcluindoId(id);
-    await CasaProntaArquivos.excluirContrato(id);
-    setContratos((lista) => lista.filter((c) => c.id !== id));
-    setExcluindoId(null);
-  };
-
-  const tamanhoLegivel = (bytes) => (bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB`);
-
-  return (
-    <div className="no-print" style={overlay} onClick={onFechar}>
-      <div style={{ ...modal, maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-          <strong>Contratos — {fornecedor.nome}</strong>
-          <button className="icon-btn" onClick={onFechar}><X size={16} /></button>
-        </div>
-        <p style={{ margin: "0 0 14px", fontSize: 12.5, color: "#65758b" }}>
-          O termo de parceria assinado e qualquer aditivo. Fica só neste navegador, como o resto do FN Casa Pronta por enquanto.
-        </p>
-
-        <label className="btn-solid" style={{ width: "auto", padding: "9px 16px", cursor: enviando ? "wait" : "pointer", display: "inline-flex" }}>
-          {enviando ? <Loader2 size={14} className="spin" /> : <Paperclip size={14} />} Anexar contrato
-          <input type="file" accept="application/pdf,image/*" multiple onChange={anexar} disabled={enviando} style={{ display: "none" }} />
-        </label>
-
-        <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
-          {carregando && <p style={{ color: "#8593a8", fontSize: 13.5 }}>Carregando…</p>}
-          {!carregando && contratos.length === 0 && (
-            <p style={{ color: "#8593a8", fontSize: 13.5 }}>Nenhum contrato anexado ainda.</p>
-          )}
-          {contratos.map((c) => (
-            <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, padding: "8px 10px" }}>
-              <FileText size={16} color={AZUL_MEDIO} style={{ flexShrink: 0 }} />
-              <button type="button" onClick={() => abrir(c.id)} title="Abrir"
-                style={{ flex: 1, minWidth: 0, textAlign: "left", background: "none", border: "none", cursor: "pointer", padding: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: AZUL_MARINHO, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.nome}</div>
-                <div style={{ fontSize: 11.5, color: "#8593a8" }}>{tamanhoLegivel(c.tamanho)} · {new Date(c.adicionadoEm).toLocaleDateString("pt-BR")}</div>
-              </button>
-              <button className="icon-btn" onClick={() => excluir(c.id)} title="Excluir" disabled={excluindoId === c.id}>
-                {excluindoId === c.id ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} color="#c62828" />}
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* Campos exclusivos do FN Casa Pronta (pós-chaves) para um parceiro já homologado no
-   marketplace — o cadastro em si (login, dados de contato, CNPJ, homologação) é o mesmo
-   parceiro de sempre, sem duplicação; só isso aqui fica de fora do backend por enquanto. */
-function ModalFichaCasaProntaFornecedor({ parceiro, extra, salvarExtra, onFechar, notify }) {
-  const [form, setForm] = useState({
-    ...EXTRA_CASA_PRONTA_PADRAO, ...extra,
-    categoria: extra?.categoria || CASA_PRONTA_CATEGORIAS[0],
-  });
-  const [contratosAbertos, setContratosAbertos] = useState(false);
-  const setF = (campo, v) => setForm((f) => ({ ...f, [campo]: v }));
-
-  const salvar = () => {
-    salvarExtra(parceiro.id, form);
-    notify("Ficha Casa Pronta salva ✓");
-    onFechar();
-  };
-
-  return (
-    <>
-      <div className="no-print" style={overlay} onClick={onFechar}>
-        <div style={{ ...modal, maxWidth: 640, maxHeight: "88vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-            <strong>Ficha Casa Pronta — {parceiro.empresa}</strong>
-            <button className="icon-btn" onClick={onFechar}><X size={16} /></button>
-          </div>
-          <p style={{ margin: "0 0 14px", fontSize: 12.5, color: "#65758b" }}>
-            Campos exclusivos do FN Casa Pronta (pós-chaves) para este parceiro — ficam só neste navegador.
-          </p>
-
-          <button type="button" className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO, marginBottom: 14 }}
-            onClick={() => setContratosAbertos(true)}>
-            <Paperclip size={14} /> Contratos anexados
-          </button>
-
-          <Grid>
-            <div style={cell(false)}>
-              <label style={lab}>Categoria (serviço de pós-chaves)</label>
-              <select style={inp} value={form.categoria} onChange={(e) => setF("categoria", e.target.value)}>
-                {CASA_PRONTA_CATEGORIAS.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-            <div style={cell(false)}>
-              <label style={lab}>Status (homologação Casa Pronta)</label>
-              <select style={inp} value={form.status} onChange={(e) => setF("status", e.target.value)}>
-                {CASA_PRONTA_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-            <Field label="Contato" value={form.contato} onChange={(v) => setF("contato", v)} placeholder="WhatsApp / e-mail" />
-            <Field label="Área atendida" value={form.areaAtendida} onChange={(v) => setF("areaAtendida", v)} />
-            <Field label="Preço público" value={form.precoPublico} onChange={(v) => setF("precoPublico", v)} placeholder="R$" />
-            <Field label="Preço FN — 1 a 4 unidades" value={form.precoFn1a4} onChange={(v) => setF("precoFn1a4", v)} placeholder="R$" />
-            <Field label="Preço FN — 5 a 9 unidades" value={form.precoFn5a9} onChange={(v) => setF("precoFn5a9", v)} placeholder="R$" />
-            <Field label="Preço FN — 10+ unidades" value={form.precoFn10mais} onChange={(v) => setF("precoFn10mais", v)} placeholder="R$" />
-            <Field label="Prazo" value={form.prazo} onChange={(v) => setF("prazo", v)} placeholder="após medição/aprovação" />
-            <Field label="Garantia" value={form.garantia} onChange={(v) => setF("garantia", v)} />
-            <Field label="Prazo de retrabalho" value={form.retrabalho} onChange={(v) => setF("retrabalho", v)} />
-            <Field label="Capacidade" value={form.capacidade} onChange={(v) => setF("capacidade", v)} placeholder="por semana/mês" />
-            <Field label="Pagamento" value={form.pagamento} onChange={(v) => setF("pagamento", v)} placeholder="PIX, cartão, sinal..." />
-          </Grid>
-          <Area label="Observações" value={form.observacoes} onChange={(v) => setF("observacoes", v)} rows={2} />
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-            <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={onFechar}>Cancelar</button>
-            <button className="btn-solid" style={{ width: "auto", padding: "9px 18px" }} onClick={salvar}><Save size={14} /> Salvar</button>
-          </div>
-        </div>
-      </div>
-      {contratosAbertos && (
-        <ModalContratosFornecedor fornecedor={{ id: parceiro.id, nome: parceiro.empresa }}
-          onFechar={() => setContratosAbertos(false)} notify={notify} />
-      )}
-    </>
-  );
-}
-
-function CardFichasTecnicasCasaPronta({ fichas, setFichas, fornecedores, notify }) {
-  const [busca, setBusca] = useState("");
-  const [editando, setEditando] = useState(null); // ficha sendo editada, ou {} pra nova
-
-  const termo = busca.trim().toLowerCase();
-  const visiveis = termo
-    ? fichas.filter((f) => `${f.nome} ${f.construtora}`.toLowerCase().includes(termo))
-    : fichas;
-
-  const iniciarNova = () => setEditando({
-    nome: "", construtora: "", tiposPlanta: "", metragem: "", banheiros: "",
-    itensPadronizaveis: "", prazoMedioServico: "", margensMinimas: "",
-    historico: "", vinculos: [], pacotes: [],
-  });
-
-  const salvar = () => {
-    if (!editando.nome?.trim()) { notify("Informe o nome do empreendimento."); return; }
-    setFichas((lista) => (
-      editando.id ? lista.map((f) => (f.id === editando.id ? editando : f)) : [...lista, { ...editando, id: `ft_${Date.now()}` }]
-    ));
-    setEditando(null);
-  };
-
-  const excluir = (id) => setFichas((lista) => lista.filter((f) => f.id !== id));
-
-  const adicionarVinculo = () => setEditando((ed) => ({
-    ...ed,
-    vinculos: [...(ed.vinculos || []), { id: `v_${Date.now()}`, categoria: CASA_PRONTA_CATEGORIAS[0], fornecedorId: "", precoNegociado: "", faixaVolume: "1 a 4", prazo: "" }],
-  }));
-  const atualizarVinculo = (id, campo, valor) => setEditando((ed) => ({
-    ...ed,
-    vinculos: ed.vinculos.map((v) => (v.id === id ? { ...v, [campo]: valor, ...(campo === "categoria" ? { fornecedorId: "" } : {}) } : v)),
-  }));
-  const removerVinculo = (id) => setEditando((ed) => ({ ...ed, vinculos: ed.vinculos.filter((v) => v.id !== id) }));
-
-  const adicionarPacote = (nomeSugerido) => setEditando((ed) => ({
-    ...ed,
-    pacotes: [...(ed.pacotes || []), { id: `pc_${Date.now()}`, nome: nomeSugerido || "", conteudo: "", preco: "" }],
-  }));
-  const atualizarPacote = (id, campo, valor) => setEditando((ed) => ({
-    ...ed, pacotes: ed.pacotes.map((p) => (p.id === id ? { ...p, [campo]: valor } : p)),
-  }));
-  const removerPacote = (id) => setEditando((ed) => ({ ...ed, pacotes: ed.pacotes.filter((p) => p.id !== id) }));
-
-  return (
-    <Card icon={Building2} titulo={`Fichas técnicas por empreendimento (${fichas.length})`}>
-      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-        Uma ficha por condomínio: dados da planta, preços já negociados por fornecedor e condições — a base pra padronizar por empreendimento, e não por cliente.
-      </p>
-
-      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-        <input style={{ ...inp, flex: 1, minWidth: 200 }} value={busca} onChange={(e) => setBusca(e.target.value)}
-          placeholder={`Buscar em ${fichas.length} ficha(s)…`} />
-        <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }} onClick={iniciarNova}>
-          <Plus size={15} /> Nova ficha
-        </button>
-      </div>
-
-      {visiveis.length === 0 && (
-        <p style={{ color: "#8593a8", fontSize: 14 }}>
-          {fichas.length === 0 ? "Nenhuma ficha cadastrada ainda." : "Nada encontrado com esse filtro."}
-        </p>
-      )}
-
-      <div style={{ display: "grid", gap: 8 }}>
-        {visiveis.map((f) => (
-          <div key={f.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ flex: 1, minWidth: 220 }}>
-              <div style={{ fontWeight: 700, fontSize: 13.5 }}>{f.nome}</div>
-              <div style={{ fontSize: 12, color: "#65758b" }}>
-                {f.construtora && `${f.construtora} · `}{f.tiposPlanta || "sem plantas cadastradas"}
-                {(f.vinculos || []).length > 0 && ` · ${f.vinculos.length} fornecedor(es) vinculado(s)`}
-                {(f.pacotes || []).length > 0 && ` · ${f.pacotes.length} pacote(s)`}
-              </div>
-            </div>
-            <button className="icon-btn" onClick={() => setEditando({ ...f, vinculos: f.vinculos || [], pacotes: f.pacotes || [] })} title="Editar"><Edit3 size={15} color={AZUL_MEDIO} /></button>
-            <button className="icon-btn" onClick={() => excluir(f.id)} title="Excluir"><Trash2 size={15} color="#c62828" /></button>
-          </div>
-        ))}
-      </div>
-
-      {editando && (
-        <div className="no-print" style={overlay} onClick={() => setEditando(null)}>
-          <div style={{ ...modal, maxWidth: 760, maxHeight: "88vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <strong>{editando.id ? "Editar ficha técnica" : "Nova ficha técnica"}</strong>
-              <button className="icon-btn" onClick={() => setEditando(null)}><X size={16} /></button>
-            </div>
-            <Grid>
-              <Field label="Empreendimento" value={editando.nome} onChange={(v) => setEditando((ed) => ({ ...ed, nome: v }))} full />
-              <Field label="Construtora/incorporadora" value={editando.construtora} onChange={(v) => setEditando((ed) => ({ ...ed, construtora: v }))} />
-              <Field label="Tipos de planta e metragem" value={editando.tiposPlanta} onChange={(v) => setEditando((ed) => ({ ...ed, tiposPlanta: v }))} placeholder="2 e 3 quartos, 55 a 78 m²" />
-              <Field label="Banheiros / janelas / varanda" value={editando.banheiros} onChange={(v) => setEditando((ed) => ({ ...ed, banheiros: v }))} />
-              <Field label="Prazo médio por serviço" value={editando.prazoMedioServico} onChange={(v) => setEditando((ed) => ({ ...ed, prazoMedioServico: v }))} />
-              <Field label="Margens mínimas" value={editando.margensMinimas} onChange={(v) => setEditando((ed) => ({ ...ed, margensMinimas: v }))} />
-            </Grid>
-            <Area label="Itens passíveis de padronização por planta" value={editando.itensPadronizaveis} onChange={(v) => setEditando((ed) => ({ ...ed, itensPadronizaveis: v }))} rows={2} />
-            <Area label="Histórico de alterações, ocorrências e desempenho dos fornecedores" value={editando.historico} onChange={(v) => setEditando((ed) => ({ ...ed, historico: v }))} rows={2} />
-
-            <div style={{ marginTop: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
-                <label style={lab}>Catálogo de pacotes deste empreendimento</label>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {PACOTES_BASE_SUGESTOES.map((nome) => (
-                    <button key={nome} type="button" className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO, padding: "5px 10px", fontSize: 12 }}
-                      onClick={() => adicionarPacote(nome)}>
-                      <Plus size={12} /> {nome}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {(editando.pacotes || []).length === 0 && (
-                <p style={{ color: "#8593a8", fontSize: 13, margin: 0 }}>
-                  Nenhum pacote ainda — use os botões acima pra começar do padrão do documento (Essencial → Conforto → Casa Pronta → Personalize), ou monte o seu.
-                </p>
-              )}
-              <div style={{ display: "grid", gap: 8 }}>
-                {(editando.pacotes || []).map((p) => (
-                  <div key={p.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, padding: 10 }}>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
-                      <input style={{ ...inp, flex: 1 }} value={p.nome} onChange={(e) => atualizarPacote(p.id, "nome", e.target.value)} placeholder="Nome do pacote" />
-                      <input style={{ ...inp, width: 120 }} value={p.preco} onChange={(e) => atualizarPacote(p.id, "preco", e.target.value)} placeholder="R$" />
-                      <button className="icon-btn" onClick={() => removerPacote(p.id)} title="Remover"><Trash2 size={14} color="#c62828" /></button>
-                    </div>
-                    <textarea style={{ ...inp, width: "100%", resize: "vertical", fontFamily: "inherit" }} rows={2} value={p.conteudo}
-                      onChange={(e) => atualizarPacote(p.id, "conteudo", e.target.value)} placeholder="O que está incluso (itens, serviços, módulos)" />
-                  </div>
-                ))}
-              </div>
-              {/* Prévia comparativa: o que os pacotes editados acima parecem lado a lado pro
-                  cliente — cada linha do "conteúdo" vira um item da lista. Só aparece com 2+
-                  pacotes, porque comparar um só não ajuda ninguém a decidir. */}
-              {(editando.pacotes || []).length > 1 && (
-                <div style={{ marginTop: 14 }}>
-                  <label style={lab}>Prévia: como fica a comparação pro cliente</label>
-                  <div style={{ display: "flex", gap: 10, marginTop: 8, overflowX: "auto", paddingBottom: 4 }}>
-                    {editando.pacotes.map((p) => (
-                      <div key={p.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, background: "#fff", minWidth: 150, flex: "1 0 150px" }}>
-                        <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 4 }}>{p.nome || "Pacote sem nome"}</div>
-                        <div style={{ fontSize: 15, fontWeight: 800, color: AZUL_MARINHO, marginBottom: 8 }}>{p.preco || "sob consulta"}</div>
-                        <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 5 }}>
-                          {(p.conteudo || "").split("\n").map((l) => l.trim()).filter(Boolean).map((linha, idx) => (
-                            <li key={idx} style={{ fontSize: 12, color: "#4a5a70", paddingLeft: 14, position: "relative" }}>
-                              <span style={{ position: "absolute", left: 0, color: "#1b6e3c", fontWeight: 700 }}>✓</span>{linha}
-                            </li>
-                          ))}
-                          {!(p.conteudo || "").trim() && <li style={{ fontSize: 12, color: "#8593a8" }}>Descreva o que está incluso acima.</li>}
-                        </ul>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div style={{ marginTop: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <label style={lab}>Fornecedores vinculados e preço negociado</label>
-                <button type="button" className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO, padding: "5px 10px", fontSize: 12.5 }} onClick={adicionarVinculo}>
-                  <Plus size={13} /> Vincular fornecedor
-                </button>
-              </div>
-              {(editando.vinculos || []).length === 0 && (
-                <p style={{ color: "#8593a8", fontSize: 13, margin: 0 }}>Nenhum fornecedor vinculado ainda.</p>
-              )}
-              <div style={{ display: "grid", gap: 8 }}>
-                {(editando.vinculos || []).map((v) => {
-                  const opcoes = fornecedores.filter((f) => f.categoria === v.categoria);
-                  return (
-                    <div key={v.id} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, padding: 8 }}>
-                      <select style={{ ...inp, width: "auto" }} value={v.categoria} onChange={(e) => atualizarVinculo(v.id, "categoria", e.target.value)}>
-                        {CASA_PRONTA_CATEGORIAS.map((c) => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                      <select style={{ ...inp, width: "auto", flex: 1, minWidth: 160 }} value={v.fornecedorId} onChange={(e) => atualizarVinculo(v.id, "fornecedorId", e.target.value)}>
-                        <option value="">{opcoes.length ? "Selecione o fornecedor" : "Sem fornecedor dessa categoria"}</option>
-                        {opcoes.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
-                      </select>
-                      <select style={{ ...inp, width: "auto" }} value={v.faixaVolume} onChange={(e) => atualizarVinculo(v.id, "faixaVolume", e.target.value)}>
-                        {["1 a 4", "5 a 9", "10+"].map((f) => <option key={f} value={f}>{f} un.</option>)}
-                      </select>
-                      <input style={{ ...inp, width: 110 }} value={v.precoNegociado} onChange={(e) => atualizarVinculo(v.id, "precoNegociado", e.target.value)} placeholder="R$ negociado" />
-                      <input style={{ ...inp, width: 110 }} value={v.prazo} onChange={(e) => atualizarVinculo(v.id, "prazo", e.target.value)} placeholder="Prazo" />
-                      <button className="icon-btn" onClick={() => removerVinculo(v.id)} title="Remover"><Trash2 size={14} color="#c62828" /></button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setEditando(null)}>Cancelar</button>
-              <button className="btn-solid" style={{ width: "auto", padding: "9px 18px" }} onClick={salvar}><Save size={14} /> Salvar</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </Card>
-  );
-}
-
-const CRONOGRAMA_STATUS_CASA_PRONTA = ["Planejado", "Em andamento", "Concluído", "Atrasado"];
-const CRONOGRAMA_STATUS_COR = {
-  "Planejado": { cor: "#5a6a80", bg: "#F1F4F8" },
-  "Em andamento": { cor: "#8a6d00", bg: "#FFF4D6" },
-  "Concluído": { cor: "#1b6e3c", bg: "#E4F5E9" },
-  "Atrasado": { cor: "#b3261e", bg: "#FBE7E6" },
-};
-
-/* Acompanhamento de cada pacote vendido: a jornada do cliente (seção 7 do documento) como
-   fluxograma de etapas, o cronograma por serviço/fornecedor (seção 8, "painel mínimo por
-   apartamento") e as pendências em aberto. É o que fecha o ciclo depois que a ficha técnica
-   e o catálogo de pacotes por empreendimento já existem. */
-function CardAcompanhamentoCasaPronta({ fichas, fornecedores, vendas, setVendas, notify }) {
-  const [busca, setBusca] = useState("");
-  const [editando, setEditando] = useState(null);
-
-  const fichaPorId = Object.fromEntries(fichas.map((f) => [f.id, f]));
-  const termo = busca.trim().toLowerCase();
-  const visiveis = termo
-    ? vendas.filter((v) => `${v.cliente} ${fichaPorId[v.fichaId]?.nome || ""}`.toLowerCase().includes(termo))
-    : vendas;
-
-  const iniciarNova = () => setEditando({
-    fichaId: fichas[0]?.id || "", cliente: "", unidade: "", pacoteNome: "", valor: "", dataVenda: "",
-    etapaIndex: 0, cronograma: [], pendencias: [],
-  });
-
-  const salvar = () => {
-    if (!editando.cliente?.trim()) { notify("Informe o cliente."); return; }
-    if (!editando.fichaId) { notify("Selecione o empreendimento."); return; }
-    setVendas((lista) => (
-      editando.id ? lista.map((v) => (v.id === editando.id ? editando : v)) : [...lista, { ...editando, id: `vd_${Date.now()}` }]
-    ));
-    setEditando(null);
-  };
-  const excluir = (id) => setVendas((lista) => lista.filter((v) => v.id !== id));
-
-  const add = (campo, item) => setEditando((ed) => ({ ...ed, [campo]: [...(ed[campo] || []), item] }));
-  const upd = (campo, id, patch) => setEditando((ed) => ({ ...ed, [campo]: ed[campo].map((x) => (x.id === id ? { ...x, ...patch } : x)) }));
-  const rem = (campo, id) => setEditando((ed) => ({ ...ed, [campo]: ed[campo].filter((x) => x.id !== id) }));
-
-  const pacotesDaFicha = fichaPorId[editando?.fichaId]?.pacotes || [];
-
-  return (
-    <Card icon={ClipboardList} titulo={`Pacotes vendidos e acompanhamento (${vendas.length})`}>
-      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-        Cada pacote vendido a um cliente, com a jornada de pós-chaves (fluxograma), o cronograma por serviço e as pendências em aberto.
-      </p>
-
-      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-        <input style={{ ...inp, flex: 1, minWidth: 200 }} value={busca} onChange={(e) => setBusca(e.target.value)}
-          placeholder={`Buscar em ${vendas.length} pacote(s) vendido(s)…`} />
-        <button className="btn-solid" style={{ width: "auto", padding: "9px 16px" }} onClick={iniciarNova} disabled={fichas.length === 0}>
-          <Plus size={15} /> Novo pacote vendido
-        </button>
-      </div>
-      {fichas.length === 0 && <p style={{ color: "#8593a8", fontSize: 13 }}>Cadastre uma ficha técnica de empreendimento antes de registrar uma venda.</p>}
-
-      {fichas.length > 0 && visiveis.length === 0 && (
-        <p style={{ color: "#8593a8", fontSize: 14 }}>
-          {vendas.length === 0 ? "Nenhum pacote vendido ainda." : "Nada encontrado com esse filtro."}
-        </p>
-      )}
-
-      <div style={{ display: "grid", gap: 8 }}>
-        {visiveis.map((v) => {
-          const etapa = ETAPAS_JORNADA_CASA_PRONTA[v.etapaIndex] || ETAPAS_JORNADA_CASA_PRONTA[0];
-          const pendentes = (v.pendencias || []).filter((p) => !p.resolvida).length;
-          return (
-            <div key={v.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ flex: 1, minWidth: 220 }}>
-                <div style={{ fontWeight: 700, fontSize: 13.5 }}>{v.cliente}{v.unidade && ` · ${v.unidade}`}</div>
-                <div style={{ fontSize: 12, color: "#65758b" }}>
-                  {fichaPorId[v.fichaId]?.nome || "(empreendimento removido)"}{v.pacoteNome && ` · ${v.pacoteNome}`}{v.valor && ` · ${v.valor}`}
-                </div>
-              </div>
-              {pendentes > 0 && (
-                <span style={{ fontSize: 11, fontWeight: 700, color: "#b3261e", background: "#FBE7E6", borderRadius: 20, padding: "2px 10px", whiteSpace: "nowrap" }}>
-                  {pendentes} pendência(s)
-                </span>
-              )}
-              <span style={{ fontSize: 11, fontWeight: 700, color: AZUL_MARINHO, background: CINZA_CLARO, borderRadius: 20, padding: "2px 10px", whiteSpace: "nowrap" }}>
-                {etapa}
-              </span>
-              <button className="icon-btn" onClick={() => setEditando({ ...v, cronograma: v.cronograma || [], pendencias: v.pendencias || [] })} title="Editar"><Edit3 size={15} color={AZUL_MEDIO} /></button>
-              <button className="icon-btn" onClick={() => excluir(v.id)} title="Excluir"><Trash2 size={15} color="#c62828" /></button>
-            </div>
-          );
-        })}
-      </div>
-
-      {editando && (
-        <div className="no-print" style={overlay} onClick={() => setEditando(null)}>
-          <div style={{ ...modal, maxWidth: 780, maxHeight: "88vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <strong>{editando.id ? "Editar pacote vendido" : "Novo pacote vendido"}</strong>
-              <button className="icon-btn" onClick={() => setEditando(null)}><X size={16} /></button>
-            </div>
-            <Grid>
-              <Field label="Cliente" value={editando.cliente} onChange={(v) => setEditando((ed) => ({ ...ed, cliente: v }))} />
-              <Field label="Unidade" value={editando.unidade} onChange={(v) => setEditando((ed) => ({ ...ed, unidade: v }))} placeholder="Bloco / apto" />
-              <div style={cell(false)}>
-                <label style={lab}>Empreendimento</label>
-                <select style={inp} value={editando.fichaId} onChange={(e) => setEditando((ed) => ({ ...ed, fichaId: e.target.value, pacoteNome: "" }))}>
-                  {fichas.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
-                </select>
-              </div>
-              <div style={cell(false)}>
-                <label style={lab}>Pacote</label>
-                {pacotesDaFicha.length > 0 ? (
-                  <select style={inp} value={editando.pacoteNome} onChange={(e) => setEditando((ed) => ({ ...ed, pacoteNome: e.target.value }))}>
-                    <option value="">Selecione…</option>
-                    {pacotesDaFicha.map((p) => <option key={p.id} value={p.nome}>{p.nome}{p.preco ? ` — ${p.preco}` : ""}</option>)}
-                  </select>
-                ) : (
-                  <input style={inp} value={editando.pacoteNome} onChange={(e) => setEditando((ed) => ({ ...ed, pacoteNome: e.target.value }))} placeholder="Sem catálogo nesta ficha — digite o pacote" />
-                )}
-              </div>
-              <Field label="Valor" value={editando.valor} onChange={(v) => setEditando((ed) => ({ ...ed, valor: v }))} placeholder="R$" />
-              <Field label="Data da venda" value={editando.dataVenda} onChange={(v) => setEditando((ed) => ({ ...ed, dataVenda: v }))} type="date" />
-            </Grid>
-
-            <div style={{ marginTop: 18 }}>
-              <label style={lab}>Fluxograma — jornada do cliente</label>
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 8 }}>
-                {ETAPAS_JORNADA_CASA_PRONTA.map((etapa, i) => {
-                  const concluida = i < editando.etapaIndex;
-                  const atual = i === editando.etapaIndex;
-                  return (
-                    <button key={etapa} type="button" onClick={() => setEditando((ed) => ({ ...ed, etapaIndex: i }))}
-                      title={`Marcar etapa atual: ${etapa}`}
-                      style={{
-                        padding: "5px 11px", borderRadius: 20, cursor: "pointer", fontSize: 12, fontWeight: 600,
-                        border: `1.5px solid ${atual ? AZUL_MARINHO : concluida ? "#1b6e3c" : CINZA_BORDA}`,
-                        background: atual ? AZUL_MARINHO : concluida ? "#E4F5E9" : "#fff",
-                        color: atual ? "#fff" : concluida ? "#1b6e3c" : "#4a5a70",
-                      }}>
-                      {i + 1}. {etapa}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div style={{ marginTop: 18 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <label style={lab}>Cronograma por serviço</label>
-                <button type="button" className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO, padding: "5px 10px", fontSize: 12.5 }}
-                  onClick={() => add("cronograma", { id: `cr_${Date.now()}`, servico: "", fornecedorId: "", dataPlanejada: "", dataRealizada: "", status: "Planejado" })}>
-                  <Plus size={13} /> Adicionar serviço
-                </button>
-              </div>
-              {(editando.cronograma || []).length === 0 && <p style={{ color: "#8593a8", fontSize: 13, margin: 0 }}>Nenhum serviço lançado ainda.</p>}
-              <div style={{ display: "grid", gap: 8 }}>
-                {(editando.cronograma || []).map((c) => (
-                  <div key={c.id} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, padding: 8 }}>
-                    <input style={{ ...inp, flex: 1, minWidth: 140 }} value={c.servico} onChange={(e) => upd("cronograma", c.id, { servico: e.target.value })} placeholder="Serviço" />
-                    <select style={{ ...inp, width: "auto", minWidth: 140 }} value={c.fornecedorId} onChange={(e) => upd("cronograma", c.id, { fornecedorId: e.target.value })}>
-                      <option value="">Fornecedor…</option>
-                      {fornecedores.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
-                    </select>
-                    <input style={{ ...inp, width: 130 }} type="date" value={c.dataPlanejada} onChange={(e) => upd("cronograma", c.id, { dataPlanejada: e.target.value })} title="Data planejada" />
-                    <input style={{ ...inp, width: 130 }} type="date" value={c.dataRealizada} onChange={(e) => upd("cronograma", c.id, { dataRealizada: e.target.value })} title="Data realizada" />
-                    <select style={{ ...inp, width: "auto" }} value={c.status} onChange={(e) => upd("cronograma", c.id, { status: e.target.value })}>
-                      {CRONOGRAMA_STATUS_CASA_PRONTA.map((s) => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                    <button className="icon-btn" onClick={() => rem("cronograma", c.id)} title="Remover"><Trash2 size={14} color="#c62828" /></button>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div style={{ marginTop: 18 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <label style={lab}>Pendências</label>
-                <button type="button" className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO, padding: "5px 10px", fontSize: 12.5 }}
-                  onClick={() => add("pendencias", { id: `pd_${Date.now()}`, descricao: "", responsavel: "", prazo: "", resolvida: false })}>
-                  <Plus size={13} /> Adicionar pendência
-                </button>
-              </div>
-              {(editando.pendencias || []).length === 0 && <p style={{ color: "#8593a8", fontSize: 13, margin: 0 }}>Nenhuma pendência registrada.</p>}
-              <div style={{ display: "grid", gap: 8 }}>
-                {(editando.pendencias || []).map((p) => (
-                  <div key={p.id} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, padding: 8, opacity: p.resolvida ? 0.55 : 1 }}>
-                    <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                      <input type="checkbox" checked={p.resolvida} onChange={(e) => upd("pendencias", p.id, { resolvida: e.target.checked })} />
-                    </label>
-                    <input style={{ ...inp, flex: 1, minWidth: 160, textDecoration: p.resolvida ? "line-through" : "none" }} value={p.descricao} onChange={(e) => upd("pendencias", p.id, { descricao: e.target.value })} placeholder="Descrição" />
-                    <input style={{ ...inp, width: 140 }} value={p.responsavel} onChange={(e) => upd("pendencias", p.id, { responsavel: e.target.value })} placeholder="Responsável" />
-                    <input style={{ ...inp, width: 130 }} type="date" value={p.prazo} onChange={(e) => upd("pendencias", p.id, { prazo: e.target.value })} />
-                    <button className="icon-btn" onClick={() => rem("pendencias", p.id)} title="Remover"><Trash2 size={14} color="#c62828" /></button>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
-              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setEditando(null)}>Cancelar</button>
-              <button className="btn-solid" style={{ width: "auto", padding: "9px 18px" }} onClick={salvar}><Save size={14} /> Salvar</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </Card>
-  );
-}
-
-/* Converte "R$ 1.100,50" (ou variações soltas do mesmo formato) num número — os campos de
-   preço do FN Casa Pronta são texto livre (o documento trata isso como negociação, não como
-   uma planilha fechada), então os indicadores só conseguem somar o que consegue entender. */
-function paraNumeroBR(texto) {
-  if (!texto) return null;
-  let limpo = String(texto).replace(/[^\d.,]/g, "");
-  if (!limpo) return null;
-  if (limpo.includes(",")) {
-    limpo = limpo.replace(/\./g, "").replace(",", ".");
-  } else {
-    // Sem vírgula: "5.000" é 5 mil (separador de milhar), mas "10.5" é 10,5 (decimal) —
-    // o sinal é o tamanho do último grupo. Três dígitos depois do último ponto é milhar.
-    const partes = limpo.split(".");
-    if (partes.length > 1 && partes[partes.length - 1].length === 3) limpo = partes.join("");
-  }
-  const n = parseFloat(limpo);
-  return Number.isFinite(n) ? n : null;
-}
-const META_FORNECEDORES_POR_CATEGORIA = 2; // "dois fornecedores por categoria" — ver seção 9 do documento
-
-function CardIndicadoresCasaPronta({ fornecedores, fichas, vendas }) {
-  const totalVendido = useMemo(() => vendas.reduce((soma, v) => soma + (paraNumeroBR(v.valor) || 0), 0), [vendas]);
-  const vendasComValor = vendas.filter((v) => paraNumeroBR(v.valor) != null).length;
-  const ticketMedio = vendasComValor ? totalVendido / vendasComValor : null;
-  const pendenciasAbertas = useMemo(() => vendas.reduce((soma, v) => soma + (v.pendencias || []).filter((p) => !p.resolvida).length, 0), [vendas]);
-  const porEtapa = useMemo(() => {
-    const mapa = Object.fromEntries(ETAPAS_JORNADA_CASA_PRONTA.map((e) => [e, 0]));
-    vendas.forEach((v) => { const e = ETAPAS_JORNADA_CASA_PRONTA[v.etapaIndex]; if (e) mapa[e] += 1; });
-    return mapa;
-  }, [vendas]);
-
-  const porStatus = useMemo(() => {
-    const mapa = Object.fromEntries(CASA_PRONTA_STATUS.map((s) => [s, 0]));
-    fornecedores.forEach((f) => { if (mapa[f.status] !== undefined) mapa[f.status] += 1; });
-    return mapa;
-  }, [fornecedores]);
-
-  const cobertura = useMemo(() => CASA_PRONTA_CATEGORIAS.filter((c) => c !== "Outro").map((categoria) => {
-    const doGrupo = fornecedores.filter((f) => f.categoria === categoria);
-    const ativos = doGrupo.filter((f) => f.status !== "Suspenso");
-    return { categoria, total: doGrupo.length, ativos: ativos.length };
-  }), [fornecedores]);
-  const semCobertura = cobertura.filter((c) => c.ativos === 0).length;
-  const abaixoDaMeta = cobertura.filter((c) => c.ativos > 0 && c.ativos < META_FORNECEDORES_POR_CATEGORIA).length;
-
-  const totalVinculos = useMemo(() => fichas.reduce((soma, f) => soma + (f.vinculos || []).length, 0), [fichas]);
-  const fichasSemVinculo = fichas.filter((f) => (f.vinculos || []).length === 0).length;
-
-  const economiaPorVinculo = useMemo(() => {
-    const fornecedorPorId = Object.fromEntries(fornecedores.map((f) => [f.id, f]));
-    const linhas = [];
-    fichas.forEach((ficha) => (ficha.vinculos || []).forEach((v) => {
-      const negociado = paraNumeroBR(v.precoNegociado);
-      const publico = paraNumeroBR(fornecedorPorId[v.fornecedorId]?.precoPublico);
-      if (negociado != null && publico > 0) linhas.push({ economia: (publico - negociado) / publico });
-    }));
-    return linhas;
-  }, [fichas, fornecedores]);
-  const economiaMedia = economiaPorVinculo.length
-    ? economiaPorVinculo.reduce((s, l) => s + l.economia, 0) / economiaPorVinculo.length
-    : null;
-
-  const cartao = (titulo, valor, cor) => (
-    <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "12px 14px", background: "#fff" }}>
-      <div style={{ fontSize: 11.5, color: "#65758b", fontWeight: 600 }}>{titulo}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, color: cor || AZUL_MARINHO, marginTop: 2 }}>{valor}</div>
-    </div>
-  );
-
-  return (
-    <Card icon={PieChart} titulo="Indicadores do FN Casa Pronta">
-      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-        Calculados em cima do que já está cadastrado neste navegador — fornecedores, status de homologação e fichas técnicas. Sem venda ainda, o painel de conversão/ticket do documento fica pra quando houver pedido de verdade.
-      </p>
-
-      <Grid>
-        {cartao("Fornecedores cadastrados", fornecedores.length)}
-        {cartao("Homologados/preferenciais", porStatus["Homologado"] + porStatus["Preferencial"], "#1b6e3c")}
-        {cartao("Categorias sem cobertura", semCobertura, semCobertura > 0 ? "#b3261e" : "#1b6e3c")}
-        {cartao("Categorias abaixo da meta", abaixoDaMeta, abaixoDaMeta > 0 ? "#8a6d00" : "#1b6e3c")}
-        {cartao("Fichas técnicas", fichas.length)}
-        {cartao("Fornecedores vinculados a fichas", totalVinculos)}
-        {cartao("Fichas sem fornecedor vinculado", fichasSemVinculo, fichasSemVinculo > 0 ? "#8a6d00" : "#1b6e3c")}
-        {cartao("Economia média negociada", economiaMedia != null ? `${(economiaMedia * 100).toFixed(0)}%` : "—",
-          economiaMedia != null ? "#1b6e3c" : undefined)}
-        {cartao("Pacotes vendidos", vendas.length)}
-        {cartao("Ticket médio", ticketMedio != null ? ticketMedio.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "—")}
-        {cartao("Pendências em aberto", pendenciasAbertas, pendenciasAbertas > 0 ? "#8a6d00" : "#1b6e3c")}
-      </Grid>
-
-      {vendas.length > 0 && (
-        <div style={{ marginTop: 20 }}>
-          <label style={lab}>Pacotes vendidos por etapa da jornada</label>
-          <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
-            {ETAPAS_JORNADA_CASA_PRONTA.map((etapa) => porEtapa[etapa] > 0 && (
-              <div key={etapa} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
-                <span style={{ flex: 1, minWidth: 160 }}>{etapa}</span>
-                <span style={{ fontSize: 11.5, fontWeight: 700, color: AZUL_MARINHO, background: CINZA_CLARO, borderRadius: 20, padding: "2px 10px", whiteSpace: "nowrap" }}>
-                  {porEtapa[etapa]}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div style={{ marginTop: 20 }}>
-        <label style={lab}>Cobertura por categoria (meta: {META_FORNECEDORES_POR_CATEGORIA}+ fornecedores ativos)</label>
-        <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
-          {cobertura.map((c) => {
-            const cor = c.ativos === 0 ? "#b3261e" : c.ativos < META_FORNECEDORES_POR_CATEGORIA ? "#8a6d00" : "#1b6e3c";
-            const bg = c.ativos === 0 ? "#FBE7E6" : c.ativos < META_FORNECEDORES_POR_CATEGORIA ? "#FFF4D6" : "#E4F5E9";
-            return (
-              <div key={c.categoria} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
-                <span style={{ flex: 1, minWidth: 160 }}>{c.categoria}</span>
-                <span style={{ fontSize: 11.5, fontWeight: 700, color: cor, background: bg, borderRadius: 20, padding: "2px 10px", whiteSpace: "nowrap" }}>
-                  {c.ativos} ativo(s){c.total !== c.ativos ? ` · ${c.total} no total` : ""}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </Card>
   );
 }
 
@@ -14210,7 +13166,7 @@ function AbaGerenciaImportacao({ clientes = [], precos = [], empreendimentosRef 
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", token, perfil, usuarioAtual, decidirComissaoItem, importarClientesHistorico, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas, extrasFornecedorCasaPronta, salvarExtraFornecedorCasaPronta }) {
+function AbaGerencia({ sub = "visao-geral", token, perfil, usuarioAtual, decidirComissaoItem, importarClientesHistorico, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
   if (sub === "painel") {
     return <AbaGerenciaPainelEstrategico clientes={clientes} docs={docs} usuarios={usuarios}
       avaliacoes={avaliacoes} prospeccao={prospeccao} prospeccaoParceiros={prospeccaoParceiros}
@@ -14232,18 +13188,6 @@ function AbaGerencia({ sub = "visao-geral", token, perfil, usuarioAtual, decidir
   }
   if (sub === "reformas") {
     return <AbaGerenciaReformas usuarioAtual={usuarioAtual} perfil={perfil} />;
-  }
-  if (sub === "casa-pronta") {
-    return <AbaGerenciaCasaPronta notify={notify}
-      parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual}
-      salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo} vales={vales} valesCarregando={valesCarregando}
-      vendas={vendas} vendasCarregando={vendasCarregando} atualizarVenda={atualizarVenda}
-      token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem}
-      podeExcluir excluirParceiro={excluirParceiro}
-      prospeccaoParceiros={prospeccaoParceiros} prospeccaoParceirosCarregando={prospeccaoParceirosCarregando}
-      atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
-      importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao} meuConvite={meuConvite}
-      extrasFornecedorCasaPronta={extrasFornecedorCasaPronta} salvarExtraFornecedorCasaPronta={salvarExtraFornecedorCasaPronta} />;
   }
   if (sub === "perfil-cliente") {
     return <AbaPerfilCliente clientes={clientes} token={token} notify={notify}
@@ -14279,7 +13223,7 @@ const ROLE_DESCRICAO = {
   vistoriador: "Só acessa Laudos. Sem acesso a Documentação nem Gerência.",
   documentacao: "Só acessa Documentação/TRT. Sem acesso a Laudos nem Gerência.",
   atendimento: "Acessa Clientes (cadastro, agendamento, aprovação e encaminhamento ao técnico), Agendamento (aprova avaliações que entram na vitrine), FAQ, Marketing e Vendas/Fornecedores.",
-  vendas: "Só acessa Casa Pronta > Fornecedores: analisa/aprova cadastros de parceiros/fornecedores, cadastra fornecedor manualmente e acompanha cupons. Recebe salário fixo — o sistema não calcula comissão individual.",
+  vendas: "Só acessa Fornecedores: analisa/aprova cadastros de parceiros/fornecedores, cadastra fornecedor manualmente e acompanha cupons. Recebe salário fixo — o sistema não calcula comissão individual.",
   gerencia: "Acesso completo: Laudos, Documentação, Clientes, Agendamento, Vendas, Gerência e financeiro.",
 };
 
@@ -15903,350 +14847,6 @@ function PaginaBeneficiosFn({ tipo }) {
   );
 }
 
-/* ---- Página pública: proposta de fornecedor do FN Casa Pronta (?pagina=casa-pronta-fornecedor) ----
-   Empresa que quer virar fornecedor homologado (marmoraria, pintura, elétrica etc.) se
-   apresenta aqui, serviço por serviço, com preço e prazo por faixa de volume de imóveis.
-   Não cria login nenhum: vira uma proposta "em_analise" (POST /api/casa-pronta/propostas)
-   que a Gerência avalia em Gerência → FN Casa Pronta → Propostas. Aprovar não homologa
-   sozinho — quem faz o fornecedor logar é o convite de parceiro de sempre. */
-const PROPOSTA_FORNECEDOR_CATEGORIAS = [
-  "Box e vidros", "Marmoraria", "Marcenaria", "Pintura", "Elétrica e iluminação", "Hidráulica",
-  "Gesso e forro", "Pisos e revestimentos", "Climatização", "Cortinas e persianas",
-  "Redes e telas", "Limpeza pós-obra", "Gás", "Outros",
-];
-const CASA_PRONTA_UNIDADES = ["unidade", "m²", "metro linear", "ambiente", "apartamento", "serviço"];
-const CASA_PRONTA_INCLUI = ["Material e instalação", "Somente mão de obra", "Somente material"];
-const CASA_PRONTA_FAIXAS = [
-  ["avulso", "FN avulso", "1 a 4 imóveis"],
-  ["de5", "A partir de 5", "5 a 9 imóveis"],
-  ["de10", "A partir de 10", "10 a 14 imóveis"],
-  ["de15", "A partir de 15", "15 a 20 imóveis"],
-  ["de20", "Acima de 20", "21 ou mais imóveis"],
-];
-
-function novaPropostaCasaProntaEmpresa() {
-  return {
-    empresa: "", responsavel: "", whatsapp: "", email: "", cnpj: "", cidade: "",
-    regioesAtendidas: "", condicoesPagamento: "", capacidadeMensal: "", precosValidosAte: "",
-    visitaFrete: "", website: "",
-  };
-}
-function novoServicoCasaPronta() {
-  return {
-    nome: "", categoria: PROPOSTA_FORNECEDOR_CATEGORIAS[0], unidadeCobranca: CASA_PRONTA_UNIDADES[0],
-    precoInclui: CASA_PRONTA_INCLUI[0], especificacao: "", precoNormal: "", foto: "",
-    faixas: Object.fromEntries(CASA_PRONTA_FAIXAS.map(([k]) => [k, { preco: "", prazoDias: "" }])),
-    inicioContagemPrazo: "", garantiaMeses: "", coberturaGarantia: "", exclusoes: "",
-  };
-}
-
-function PaginaCasaProntaFornecedor() {
-  const [etapa, setEtapa] = useState(1);
-  const [empresaForm, setEmpresaForm] = useState(novaPropostaCasaProntaEmpresa());
-  const [servicos, setServicos] = useState([novoServicoCasaPronta()]);
-  const [erro, setErro] = useState("");
-  const [enviando, setEnviando] = useState(false);
-  const [resultado, setResultado] = useState(false);
-
-  const setE = (campo, v) => setEmpresaForm((f) => ({ ...f, [campo]: v }));
-  const setServico = (idx, patch) => setServicos((lista) => lista.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
-  const setFaixa = (idx, chave, patch) => setServicos((lista) => lista.map((s, i) => (
-    i === idx ? { ...s, faixas: { ...s.faixas, [chave]: { ...s.faixas[chave], ...patch } } } : s
-  )));
-  const addServico = () => setServicos((lista) => [...lista, novoServicoCasaPronta()]);
-  const removerServico = (idx) => setServicos((lista) => lista.filter((_, i) => i !== idx));
-
-  const onFotoServico = (idx, e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith("image/")) { setErro("Envie uma imagem (PNG ou JPG) para a foto do serviço."); return; }
-    const reader = new FileReader();
-    reader.onload = () => setServico(idx, { foto: reader.result });
-    reader.readAsDataURL(file);
-    e.target.value = "";
-  };
-
-  const validarEtapa1 = () => {
-    if (!empresaForm.empresa.trim() || !empresaForm.responsavel.trim() || !empresaForm.whatsapp.trim()
-      || !empresaForm.email.trim() || !empresaForm.cidade.trim()) {
-      setErro("Preencha empresa, responsável, WhatsApp, e-mail e cidade.");
-      return false;
-    }
-    setErro("");
-    return true;
-  };
-  const validarEtapa2 = () => {
-    if (servicos.some((s) => !s.nome.trim())) { setErro("Dê um nome para cada serviço cadastrado."); return false; }
-    setErro("");
-    return true;
-  };
-
-  const avancar = () => {
-    if (etapa === 1 && !validarEtapa1()) return;
-    if (etapa === 2 && !validarEtapa2()) return;
-    setEtapa((e) => Math.min(3, e + 1));
-  };
-  const voltarEtapa = () => setEtapa((e) => Math.max(1, e - 1));
-
-  const enviar = async () => {
-    if (!validarEtapa1() || !validarEtapa2()) return;
-    setEnviando(true);
-    setErro("");
-    try {
-      await apiFetch("/api/casa-pronta/propostas", {
-        method: "POST",
-        body: {
-          ...empresaForm,
-          capacidadeMensal: empresaForm.capacidadeMensal ? Number(empresaForm.capacidadeMensal) : null,
-          servicos: servicos.map((s) => ({ ...s, garantiaMeses: s.garantiaMeses ? Number(s.garantiaMeses) : null })),
-        },
-      });
-      setResultado(true);
-    } catch (e) {
-      setErro(e.message);
-    }
-    setEnviando(false);
-  };
-
-  if (resultado) {
-    return (
-      <div style={{ minHeight: "100vh", background: CINZA_CLARO, display: "grid", placeItems: "center", padding: 18, fontFamily: "'Inter', system-ui, sans-serif" }}>
-        <div style={{ background: "#fff", borderRadius: 16, padding: "36px 30px", width: "100%", maxWidth: 440, boxShadow: "0 10px 30px rgba(18,51,91,.12)", textAlign: "center" }}>
-          <div style={{ width: 56, height: 56, borderRadius: "50%", background: "#E6F4EA", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
-            <Check size={28} color="#2E7D32" />
-          </div>
-          <h2 style={{ color: AZUL_MARINHO, fontSize: 19, margin: "0 0 8px" }}>Proposta enviada!</h2>
-          <p style={{ color: "#65758b", fontSize: 13.5, margin: "0 0 6px" }}>
-            Recebemos a proposta da <strong>{empresaForm.empresa}</strong>. Nossa equipe analisa os serviços,
-            preços e condições e entra em contato pelo WhatsApp informado.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  const FEATURES_CASA_PRONTA = [
-    ["Preços por serviço", "Do avulso aos grupos de imóveis."],
-    ["Compromisso com a entrega", "Prazos, capacidade e pagamento."],
-    ["Garantia com clareza", "Cobertura e atendimento pós-serviço."],
-  ];
-
-  return (
-    <div style={{ minHeight: "100vh", background: "#fff", fontFamily: "'Inter', system-ui, sans-serif" }}>
-      <header style={{ background: "#fff", borderBottom: `1px solid ${CINZA_BORDA}` }}>
-        <div style={{ maxWidth: 1100, margin: "0 auto", padding: "14px 18px", display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: "clamp(34px, 8vw, 40px)", height: "clamp(34px, 8vw, 40px)", borderRadius: 9, background: AZUL_MARINHO, display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
-            <img src={LOGO_URL} alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-          </div>
-          <div style={{ lineHeight: 1.1, flex: 1 }}>
-            <div style={{ fontWeight: 800, fontSize: 15, color: AZUL_MARINHO }}>FN Casa Pronta</div>
-            <div style={{ fontSize: 10.5, color: "#8593a8", letterSpacing: 0.5, textTransform: "uppercase" }}>Rede de fornecedores</div>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#2E7D32", fontWeight: 700 }}>
-            <ClipboardCheck size={14} /> Proposta exclusiva para a FN
-          </div>
-        </div>
-      </header>
-
-      <main style={{ maxWidth: 1100, margin: "0 auto", padding: "28px 18px 80px", display: "grid", gap: 28, gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", alignItems: "start" }}>
-        <div>
-          <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 1, color: "#2E7D32", marginBottom: 10 }}>PARCERIAS QUE ENTREGAM</div>
-          <h1 style={{ fontSize: 26, lineHeight: 1.25, margin: "0 0 14px", color: AZUL_MARINHO }}>
-            Seu serviço. Novos lares. <span style={{ color: "#2E7D32" }}>Uma parceria FN.</span>
-          </h1>
-          <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 22px" }}>
-            Apresente seus serviços e as condições especiais para os clientes da FN Casa Pronta.
-          </p>
-          <div style={{ display: "grid", gap: 16, marginBottom: 22 }}>
-            {FEATURES_CASA_PRONTA.map(([titulo, texto]) => (
-              <div key={titulo} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                <div style={{ width: 30, height: 30, borderRadius: 8, background: "#E6F4EA", display: "grid", placeItems: "center", flexShrink: 0 }}>
-                  <Check size={15} color="#2E7D32" />
-                </div>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 13.5, color: AZUL_MARINHO }}>{titulo}</div>
-                  <div style={{ fontSize: 12, color: "#65758b" }}>{texto}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-            {["5+", "10+", "15+", "21+"].map((n) => (
-              <div key={n} style={{ padding: "6px 12px", borderRadius: 999, background: CINZA_CLARO, color: AZUL_MARINHO, fontWeight: 800, fontSize: 13 }}>{n}</div>
-            ))}
-          </div>
-          <div style={{ fontSize: 11, color: "#8593a8", letterSpacing: 0.5 }}>Transparência • Técnica • Segurança</div>
-        </div>
-
-        <div>
-          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-            {["Sua empresa", "Serviços e condições", "Revisão"].map((label, i) => (
-              <div key={label} style={{
-                flex: 1, textAlign: "center", padding: "8px 6px", borderRadius: 8, fontSize: 12.5, fontWeight: 700,
-                background: etapa === i + 1 ? AZUL_MARINHO : "#fff", color: etapa === i + 1 ? "#fff" : "#8593a8",
-                border: `1.5px solid ${etapa === i + 1 ? AZUL_MARINHO : CINZA_BORDA}`,
-              }}>
-                {i + 1}. {label}
-              </div>
-            ))}
-          </div>
-
-        {etapa === 1 && (
-          <Card icon={Building2} titulo="Vamos conhecer sua empresa">
-            <p style={{ fontSize: 12, color: "#8593a8", margin: "0 0 14px" }}>Campos com * são obrigatórios.</p>
-            <Grid>
-              <Field label="Empresa ou nome profissional *" value={empresaForm.empresa} onChange={(v) => setE("empresa", v)} full />
-              <Field label="Responsável pela proposta *" value={empresaForm.responsavel} onChange={(v) => setE("responsavel", v)} />
-              <Field label="WhatsApp com DDD *" value={empresaForm.whatsapp} onChange={(v) => setE("whatsapp", v)} placeholder="(81) 99999-9999" />
-              <Field label="E-mail *" type="email" value={empresaForm.email} onChange={(v) => setE("email", v)} />
-              <Field label="CNPJ ou CPF (opcional)" value={empresaForm.cnpj} onChange={(v) => setE("cnpj", v)} />
-              <Field label="Cidade / UF *" value={empresaForm.cidade} onChange={(v) => setE("cidade", v)} placeholder="Ex.: Recife / PE" />
-              <Field label="Cidades e regiões atendidas *" value={empresaForm.regioesAtendidas} onChange={(v) => setE("regioesAtendidas", v)} full placeholder="Informe onde consegue atender." />
-              <Field label="Condições de pagamento *" value={empresaForm.condicoesPagamento} onChange={(v) => setE("condicoesPagamento", v)} full placeholder="Entrada, parcelas, Pix e momento de cada pagamento." />
-              <Field label="Capacidade de atendimento por mês *" type="number" value={empresaForm.capacidadeMensal} onChange={(v) => setE("capacidadeMensal", v)} />
-              <Field label="Preços válidos até *" type="date" value={empresaForm.precosValidosAte} onChange={(v) => setE("precosValidosAte", v)} />
-              <Field label="Visita, frete e deslocamento" value={empresaForm.visitaFrete} onChange={(v) => setE("visitaFrete", v)} full placeholder="Ex.: visita para medição, frete por região ou requisitos de acesso." />
-              <Field label="Website" value={empresaForm.website} onChange={(v) => setE("website", v)} full />
-            </Grid>
-          </Card>
-        )}
-
-        {etapa === 2 && (
-          <div style={{ display: "grid", gap: 14 }}>
-            {servicos.map((s, idx) => (
-              <Card key={idx} icon={Wrench} titulo={`Serviço ${String(idx + 1).padStart(2, "0")}`}>
-                <Grid>
-                  <Field label="Nome do serviço *" value={s.nome} onChange={(v) => setServico(idx, { nome: v })} full placeholder="Ex.: box de vidro temperado 8 mm" />
-                  <div style={cell()}>
-                    <label style={lab}>Categoria *</label>
-                    <select style={inp} value={s.categoria} onChange={(e) => setServico(idx, { categoria: e.target.value })}>
-                      {PROPOSTA_FORNECEDOR_CATEGORIAS.map((c) => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                  </div>
-                  <div style={cell()}>
-                    <label style={lab}>Unidade de cobrança *</label>
-                    <select style={inp} value={s.unidadeCobranca} onChange={(e) => setServico(idx, { unidadeCobranca: e.target.value })}>
-                      {CASA_PRONTA_UNIDADES.map((u) => <option key={u} value={u}>{u}</option>)}
-                    </select>
-                  </div>
-                  <div style={cell()}>
-                    <label style={lab}>O preço inclui *</label>
-                    <select style={inp} value={s.precoInclui} onChange={(e) => setServico(idx, { precoInclui: e.target.value })}>
-                      {CASA_PRONTA_INCLUI.map((o) => <option key={o} value={o}>{o}</option>)}
-                    </select>
-                  </div>
-                  <Field label="Preço normal por unidade (R$) *" value={s.precoNormal} onChange={(v) => setServico(idx, { precoNormal: v })} placeholder="0,00" />
-                  <Field label="Especificação e o que será entregue *" value={s.especificacao} onChange={(v) => setServico(idx, { especificacao: v })} full placeholder="Medidas, marca, espessura, acabamento, preparação e instalação incluídos." />
-                </Grid>
-
-                <div style={{ ...cell(true), marginTop: 12 }}>
-                  <label style={lab}>Foto do serviço/produto (opcional)</label>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    {s.foto && <img src={s.foto} alt="" style={{ width: 64, height: 64, objectFit: "cover", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8 }} />}
-                    <label className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, cursor: "pointer" }}>
-                      <Camera size={14} /> {s.foto ? "Trocar foto" : "Anexar foto"}
-                      <input type="file" accept="image/*" onChange={(e) => onFotoServico(idx, e)} style={{ display: "none" }} />
-                    </label>
-                    {s.foto && (
-                      <button type="button" onClick={() => setServico(idx, { foto: "" })}
-                        style={{ background: "none", border: "none", color: "#C62828", fontSize: 12.5, cursor: "pointer" }}>
-                        Remover
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <div style={{ marginTop: 14, overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
-                    <thead>
-                      <tr style={{ textAlign: "left", color: "#5a6a80" }}>
-                        <th style={{ padding: "4px 6px" }}>Condição FN</th>
-                        <th style={{ padding: "4px 6px" }}>Preço por unidade (R$)</th>
-                        <th style={{ padding: "4px 6px" }}>Prazo em dias corridos</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {CASA_PRONTA_FAIXAS.map(([chave, titulo, subtitulo]) => (
-                        <tr key={chave} style={{ borderTop: `1px solid ${CINZA_BORDA}` }}>
-                          <td style={{ padding: "6px" }}>{titulo}<div style={{ fontSize: 11, color: "#8593a8" }}>{subtitulo}</div></td>
-                          <td style={{ padding: "6px" }}>
-                            <input style={{ ...inp, width: "100%" }} placeholder="0,00" value={s.faixas[chave].preco}
-                              onChange={(e) => setFaixa(idx, chave, { preco: e.target.value })} />
-                          </td>
-                          <td style={{ padding: "6px" }}>
-                            <input style={{ ...inp, width: "100%" }} type="number" placeholder="Dias" value={s.faixas[chave].prazoDias}
-                              onChange={(e) => setFaixa(idx, chave, { prazoDias: e.target.value })} />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <Grid>
-                  <Field label="Quando começa a contagem do prazo? *" value={s.inicioContagemPrazo} onChange={(v) => setServico(idx, { inicioContagemPrazo: v })} full placeholder="Ex.: após medição, aprovação do projeto e pagamento do sinal." />
-                  <Field label="Garantia contratual oferecida (meses) *" type="number" value={s.garantiaMeses} onChange={(v) => setServico(idx, { garantiaMeses: v })} />
-                  <Field label="Cobertura e condições da garantia *" value={s.coberturaGarantia} onChange={(v) => setServico(idx, { coberturaGarantia: v })} full placeholder="O que cobre, quando começa e como solicitar atendimento." />
-                  <Field label="O que não está incluído e condições do desconto" value={s.exclusoes} onChange={(v) => setServico(idx, { exclusoes: v })} full placeholder="Custos extras, medidas fora do padrão, mesma região ou agendamento conjunto." />
-                </Grid>
-
-                {servicos.length > 1 && (
-                  <button type="button" onClick={() => removerServico(idx)}
-                    style={{ marginTop: 12, background: "none", border: "none", color: "#C62828", fontSize: 12.5, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}>
-                    <Trash2 size={13} /> Remover este serviço
-                  </button>
-                )}
-              </Card>
-            ))}
-            <button type="button" className="btn-ghost" onClick={addServico} style={{ justifySelf: "start" }}>
-              <Plus size={14} /> Adicionar outro serviço
-            </button>
-          </div>
-        )}
-
-        {etapa === 3 && (
-          <Card icon={ClipboardCheck} titulo="Revisão">
-            <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 14px" }}>
-              Confira os dados antes de enviar. Depois de enviada, a proposta segue para análise da FN.
-            </p>
-            <div style={{ display: "grid", gap: 4, fontSize: 13.5, marginBottom: 16 }}>
-              <div><strong>{empresaForm.empresa}</strong> — {empresaForm.responsavel}</div>
-              <div style={{ color: "#65758b" }}>{empresaForm.whatsapp} · {empresaForm.email} · {empresaForm.cidade}</div>
-            </div>
-            <div style={{ display: "grid", gap: 10 }}>
-              {servicos.map((s, idx) => (
-                <div key={idx} style={{ display: "flex", gap: 10, alignItems: "center", border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "10px 12px" }}>
-                  {s.foto && <img src={s.foto} alt="" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 8, flexShrink: 0 }} />}
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 13.5, color: AZUL_MARINHO }}>{s.nome || `Serviço ${idx + 1}`}</div>
-                    <div style={{ fontSize: 12.5, color: "#65758b" }}>{s.categoria} · {s.unidadeCobranca} · {s.precoInclui}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
-        )}
-
-        {erro && <div style={{ marginTop: 14, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>{erro}</div>}
-
-        <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-          {etapa > 1 && <button type="button" className="btn-ghost" onClick={voltarEtapa}>← Voltar</button>}
-          {etapa < 3 && <button type="button" className="btn-solid" onClick={avancar}>Continuar</button>}
-          {etapa === 3 && (
-            <button type="button" className="btn-solid" onClick={enviar} disabled={enviando}>
-              {enviando ? <><Loader2 size={15} className="spin" /> Enviando…</> : <><Send size={14} /> Enviar proposta</>}
-            </button>
-          )}
-        </div>
-        </div>
-      </main>
-      <footer style={{ textAlign: "center", fontSize: 11.5, color: "#8593a8", padding: "20px 18px", borderTop: `1px solid ${CINZA_BORDA}` }}>
-        FN Edificações · FN Casa Pronta
-      </footer>
-    </div>
-  );
-}
-
 /* ---- Tela pública: cadastro de Parceiro/Afiliado (sem login) ---- */
 function TelaCadastroParceiro({ convite, onVoltar, onIrParaLogin }) {
   const [form, setForm] = useState(novoCadastroParceiro());
@@ -17862,12 +16462,11 @@ function ModalCatalogoParceiro({ parceiro, onFechar, salvarItemCatalogo, excluir
 }
 
 /* ---- Aba Parceiros dentro da Gerência (homologação) ---- */
-function CardParceiros({ parceiros, carregando, atualizarParceiro, podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, notify, token, perfil, decidirComissaoItem, extrasFornecedorCasaPronta = {}, salvarExtraFornecedorCasaPronta }) {
+function CardParceiros({ parceiros, carregando, atualizarParceiro, podeExcluir = false, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, notify, token, perfil, decidirComissaoItem }) {
   const [editando, setEditando] = useState(null); // { id, status, avaliacao }
   const [catalogoDe, setCatalogoDe] = useState(null); // parceiro cujo portfólio está aberto
   const [perfilDe, setPerfilDe] = useState(null); // parceiro cujo perfil de venda está sendo editado
   const [excluindo, setExcluindo] = useState(null); // parceiro sendo confirmado para exclusão
-  const [fichaCasaProntaDe, setFichaCasaProntaDe] = useState(null); // parceiro cuja Ficha Casa Pronta está aberta
 
   const abrirEdicao = (p) => setEditando({ id: p.id, status: p.status, avaliacao: p.avaliacao || "" });
   const salvar = async () => {
@@ -17943,7 +16542,6 @@ function CardParceiros({ parceiros, carregando, atualizarParceiro, podeExcluir =
                     <button className="icon-btn" onClick={() => setPerfilDe(p)} title="Editar perfil de venda"><User size={15} color={AZUL_MEDIO} /></button>
                     <button className="icon-btn" onClick={() => setCatalogoDe(p)} title="Portfólio"><Camera size={15} color={AZUL_MEDIO} /></button>
                     <button className="icon-btn" onClick={() => abrirEdicao(p)} title="Homologação"><Edit3 size={15} color={AZUL_MEDIO} /></button>
-                    <button className="icon-btn" onClick={() => setFichaCasaProntaDe(p)} title="Ficha Casa Pronta"><Wrench size={15} color={AZUL_MEDIO} /></button>
                     {podeExcluir && (
                       <button className="icon-btn" onClick={() => setExcluindo(p)} title="Apagar parceiro"><Trash2 size={15} color="#c62828" /></button>
                     )}
@@ -17986,11 +16584,6 @@ function CardParceiros({ parceiros, carregando, atualizarParceiro, podeExcluir =
       {perfilDe && (
         <ModalPerfilParceiroAdmin parceiro={perfilDe} onFechar={() => setPerfilDe(null)}
           atualizarParceiro={atualizarParceiro} notify={notify} />
-      )}
-
-      {fichaCasaProntaDe && (
-        <ModalFichaCasaProntaFornecedor parceiro={fichaCasaProntaDe} extra={extrasFornecedorCasaPronta[fichaCasaProntaDe.id]}
-          salvarExtra={salvarExtraFornecedorCasaPronta} onFechar={() => setFichaCasaProntaDe(null)} notify={notify} />
       )}
 
       <ConfirmModal aberto={!!excluindo} titulo="Apagar parceiro"
