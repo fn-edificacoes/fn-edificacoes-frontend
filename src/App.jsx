@@ -5406,10 +5406,14 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
         <button className="icon-btn" onClick={() => setMesRef(new Date(ano, mes + 1, 1))} aria-label="Próximo mês"><ChevronRight size={18} /></button>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, fontSize: 11, color: "#8593a8", textAlign: "center", marginBottom: 4 }}>
-        {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((d) => <div key={d}>{d}</div>)}
+      {/* minmax(0, 1fr), e não 1fr: 1fr tem mínimo "auto", e a coluna crescia até caber o
+          conteúdo mais largo (a pílula "3 vistorias", o nome do cliente). No iPhone a grade
+          passava da tela, o Safari dava zoom-out na página inteira e o Domingo ficava
+          esmagado. Com mínimo 0 as sete colunas dividem só a largura que existe. */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 4, fontSize: 11, color: "#8593a8", textAlign: "center", marginBottom: 4 }}>
+        {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((d) => <div key={d} style={{ minWidth: 0, overflow: "hidden" }}>{d}</div>)}
       </div>
-      <div ref={gridRef} style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+      <div ref={gridRef} className="cal-grade" style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 4 }}>
         {celulas.map((dia, i) => {
           if (dia === null) return <div key={`vazio-${i}`} />;
           const chave = paraChaveISO(new Date(ano, mes, dia));
@@ -5428,7 +5432,7 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
               onClick={() => setDiaSelecionado(selecionado ? null : chave)}
               title={doDia.length > 0 ? `${doDia.length} vistoria(s) marcada(s) neste dia` : "Nenhuma vistoria marcada"}
               style={{
-                minHeight: 88,
+                minHeight: 88, minWidth: 0, overflow: "hidden",
                 // Dia com vistoria marcada fica visualmente destacado (fundo e borda azuis),
                 // pra dar pra bater o olho no mês e ver onde tem compromisso.
                 border: selecionado ? `2px solid ${AZUL_MEDIO}` : temAgendamento ? `1.5px solid ${AZUL_MEDIO}` : `1px solid ${CINZA_BORDA}`,
@@ -5437,11 +5441,11 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
                 cursor: "pointer", display: "flex", flexDirection: "column",
                 alignItems: "stretch", gap: 3, padding: 4, textAlign: "left",
               }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
-                <span style={{ fontSize: 12, fontWeight: hoje ? 800 : 600, color: hoje ? AZUL_MARINHO : "#1a2330" }}>{dia}</span>
+              <div className="cal-topo" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+                <span style={{ fontSize: 12, fontWeight: hoje ? 800 : 600, color: hoje ? AZUL_MARINHO : "#1a2330", flexShrink: 0 }}>{dia}</span>
                 {temAgendamento && (
-                  <span style={{ background: AZUL_MEDIO, color: "#fff", borderRadius: 10, padding: "1px 6px", fontSize: 9, fontWeight: 800, whiteSpace: "nowrap" }}>
-                    {doDia.length} {doDia.length === 1 ? "vistoria" : "vistorias"}
+                  <span className="cal-contagem" style={{ background: AZUL_MEDIO, color: "#fff", borderRadius: 10, padding: "1px 6px", fontSize: 9, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>
+                    {doDia.length}<span className="cal-rotulo-contagem"> {doDia.length === 1 ? "vistoria" : "vistorias"}</span>
                   </span>
                 )}
               </div>
@@ -5453,13 +5457,16 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
                   })}
                 </div>
               )}
-              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              {/* No celular (< 640px) as pílulas e o "+N outras" somem (.cal-pilulas, nos estilos
+                  globais): numa coluna de ~45px não cabe nome nenhum. Fica o número, as
+                  bolinhas dos técnicos e a contagem; o clique no dia abre a agenda completa. */}
+              <div className="cal-pilulas" style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
                 {doDia.slice(0, 3).map((c) => {
                   const tecnico = vistoriadores.find((v) => String(v.id) === String(c.vistoriadorId));
                   const cor = tecnico ? corDoTecnico(tecnico.id) : "#8593a8";
                   const sigla = tecnico ? siglaDoNome(tecnico.nome) : "—";
                   return (
-                    <div key={c.id} style={{ background: cor, color: "#fff", borderRadius: 4, padding: "1px 4px", fontSize: 9, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    <div key={c.id} style={{ background: cor, color: "#fff", borderRadius: 4, padding: "1px 4px", fontSize: 9, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>
                       {sigla} {c.horarioDesejado || ""} {(c.nome || "").split(" ")[0]}
                     </div>
                   );
@@ -17072,7 +17079,7 @@ function Card({ icon: Icon, titulo, children }) {
        no Agendamento → Análise): sem isso, uma linha com scroll horizontal lá dentro
        (overflowX:"auto") empurra o Card inteiro pra largura do conteúdo, que estoura o
        max-width de <main> e quebra o layout de tudo que vem depois (calendário incluso). */
-    <section style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 14, padding: 20, minWidth: 0 }}>
+    <section style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 14, padding: 20, minWidth: 0, maxWidth: "100%" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 15 }}>
         <div style={{ width: 30, height: 30, borderRadius: 8, background: CINZA_CLARO, display: "grid", placeItems: "center" }}><Icon size={16} color={AZUL_MEDIO} /></div>
         <h3 style={{ margin: 0, fontSize: 15, color: AZUL_MARINHO }}>{titulo}</h3>
@@ -17114,6 +17121,13 @@ const estilos = `
      break-word, ele também deixa o bloco ENCOLHER abaixo do tamanho da palavra — que é o
      que faz um item flex parar de empurrar a página inteira para a direita. */
   body { overflow-wrap: anywhere; }
+  /* Última barreira contra scroll lateral: se algum elemento ainda passar da largura, ele é
+     cortado em vez de alargar a página — no iPhone, página mais larga que a tela faz o
+     Safari dar zoom-out em tudo. "clip" não cria contêiner de rolagem (não quebra o
+     position:sticky); "hidden" fica de reserva para navegador antigo. Só no body, não no
+     html: assim o valor passa para a janela e o body não vira contêiner de rolagem. */
+  html { max-width: 100%; }
+  body { overflow-x: hidden; overflow-x: clip; }
   .quebra-texto { overflow-wrap: anywhere; min-width: 0; }
   .tab { background:none; border:none; border-bottom:3px solid transparent; padding:11px 14px; font-size:14px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:7px; }
   .btn-ghost { background:rgba(255,255,255,.1); color:#fff; border:none; padding:8px 13px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:6px; }
@@ -17185,5 +17199,12 @@ const estilos = `
     .tab { padding:10px 11px; font-size:13px; }
     table { font-size:12.5px; }
     input, select, textarea { font-size:16px; } /* evita zoom automático em iOS ao focar o campo */
+    /* Calendário de vistorias no celular: só número, bolinhas dos técnicos e contagem. */
+    .cal-pilulas, .cal-rotulo-contagem { display:none !important; }
+    .cal-grade .dia-cel { min-height:56px !important; padding:3px !important; }
+    /* Dia de dois dígitos + contagem mal cabem em ~40px: a contagem desce de linha em vez
+       de virar "5…". */
+    .cal-topo { gap:2px !important; flex-wrap:wrap; }
+    .cal-contagem { padding:1px 4px !important; }
   }
 `;
