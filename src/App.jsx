@@ -5341,12 +5341,28 @@ function BlocoAprovacaoClientes({ clientes = [], carregando, podeAgir, onAprovar
    Mostra, por dia: número (destaque hoje), faixa de presença por técnico (ordem fixa) e
    até 3 barras de agendamento coloridas por técnico com sigla + horário + cliente. Clicar
    num dia abre o painel lateral com a agenda completa daquele dia. */
-function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], mesRef, setMesRef, diaSelecionado, setDiaSelecionado, filtroTecnicos, aoTrocarFiltro, filtroEtapa, aoTrocarEtapa }) {
+function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], mesRef, setMesRef, diaSelecionado, setDiaSelecionado, filtroTecnicos, aoTrocarFiltro, filtroEtapa, aoTrocarEtapa, mostrarContagem = false }) {
   const ano = mesRef.getFullYear(), mes = mesRef.getMonth();
   const primeiroDiaSemana = new Date(ano, mes, 1).getDay();
   const totalDias = new Date(ano, mes + 1, 0).getDate();
   const hojeISO = paraChaveISO(new Date());
   const gridRef = useRef(null);
+
+  /* Contador por técnico no chip do nome (só Gerência). Conta do mesmo `clientes` e com a
+     mesma regra que desenha as barras do mês (sem cancelado, sem documentação, respeitando
+     a etapa filtrada) — então remarcar, trocar o técnico ou cancelar muda o número junto.
+     O filtro de técnico NÃO entra aqui: cada chip mostra o seu total mesmo desmarcado. */
+  const prefixoMes = `${ano}-${String(mes + 1).padStart(2, "0")}-`;
+  const contagemPorTecnico = {};
+  if (mostrarContagem) {
+    clientes.forEach((c) => {
+      if (!c.dataDesejada || !String(c.dataDesejada).startsWith(prefixoMes)) return;
+      if (c.status === "Cancelado" || ehServicoDocumentacao(c)) return;
+      if (filtroEtapa && etapaVistoriaCliente(c, docs) !== filtroEtapa) return;
+      const id = String(c.vistoriadorId ?? "");
+      contagemPorTecnico[id] = (contagemPorTecnico[id] || 0) + 1;
+    });
+  }
 
   // Mostra todo cliente já cadastrado com data desejada (não só quem já tem técnico
   // confirmado) — "Cancelado" fica de fora por não ser mais um compromisso ativo.
@@ -5386,6 +5402,12 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
                 style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px 5px 5px", borderRadius: 20, border: `1.5px solid ${cor}`, background: ativo ? cor : "#fff", color: ativo ? "#fff" : cor, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
                 <span style={{ width: 18, height: 18, borderRadius: "50%", background: ativo ? "rgba(255,255,255,.25)" : cor, color: "#fff", display: "grid", placeItems: "center", fontSize: 9 }}>{siglaDoNome(v.nome)}</span>
                 {v.nome}
+                {mostrarContagem && (
+                  <span title={`${contagemPorTecnico[String(v.id)] || 0} agendamento(s) de ${v.nome} neste mês`}
+                    style={{ minWidth: 18, padding: "0 5px", height: 18, borderRadius: 9, background: ativo ? "#fff" : cor, color: ativo ? cor : "#fff", display: "grid", placeItems: "center", fontSize: 10.5, fontWeight: 800 }}>
+                    {contagemPorTecnico[String(v.id)] || 0}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -5845,7 +5867,7 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
         <CalendarioAgendamento clientes={clientes} vistoriadores={vistoriadores} docs={docs}
           mesRef={mesRef} setMesRef={setMesRef} diaSelecionado={diaSelecionado} setDiaSelecionado={setDiaSelecionado}
           filtroTecnicos={filtroTecnicos} aoTrocarFiltro={toggleFiltroTecnico}
-          filtroEtapa={filtroEtapa} aoTrocarEtapa={aoTrocarEtapa} />
+          filtroEtapa={filtroEtapa} aoTrocarEtapa={aoTrocarEtapa} mostrarContagem={ehGerencia} />
       </Card>
 
       {diaSelecionado && (
