@@ -1234,7 +1234,7 @@ function diasDesde(quando) {
   return (Date.now() - d.getTime()) / 86400000;
 }
 
-function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], avaliacoes = [], documentosArt = [], agendaVistoriador = [], meusLaudos = [], parceiros = [], usuarioAtualId = null }) {
+function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], avaliacoes = [], documentosArt = [], agendaVistoriador = [], meusLaudos = [], parceiros = [], usuarioAtualId = null, cobrancasPendentes = 0 }) {
   const itens = [];
   const hojeISO = paraChaveISO(new Date());
 
@@ -1370,24 +1370,17 @@ function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], ava
     }
   }
 
-  /* --- Cobrança esperando lançamento ---
+  /* --- Cobrança pendente ---
      A vistoria acontece e o dinheiro só existe no sistema quando alguém lança. Sem este aviso,
      o Atendimento precisaria lembrar de abrir a aba por conta própria — e foi assim que a
-     planilha do Financeiro passou meses mostrando recebido zerado. */
-  if (perfil === "atendimento" || perfil === "gerencia") {
-    const aguardandoCobranca = clientes.filter((c) => {
-      if (!ehTrabalhoDeVistoria(c) || c.status === "Cancelado" || c.status === "Cancelamento solicitado") return false;
-      if (c.valorCobrado != null) return false;
-      const quando = momentoDeCobrar(c);
-      return quando && quando <= new Date();
+     planilha do Financeiro passou meses mostrando recebido zerado. A contagem é a mesma lista
+     do servidor que alimenta o card e o contador do menu, para os três nunca discordarem. */
+  if ((perfil === "atendimento" || perfil === "gerencia") && cobrancasPendentes > 0) {
+    itens.push({
+      id: "cobranca", urgente: true,
+      texto: `${cobrancasPendentes} cobrança(s) pendente(s) de vistoria concluída`,
+      onde: { aba: "qualidade", sub: "cobranca" },
     });
-    if (aguardandoCobranca.length) {
-      itens.push({
-        id: "cobranca", urgente: true,
-        texto: `${aguardandoCobranca.length} vistoria(s) esperando o valor da cobrança`,
-        onde: { aba: "qualidade", sub: "cobranca" },
-      });
-    }
   }
 
   // --- Documentação: ART/TRT sem os dois anexos ---
@@ -2190,6 +2183,7 @@ const GERENCIA_MENU_LATERAL = [
   ] },
   { titulo: "Financeiro", itens: [
     { aba: "gerencia", sub: "financeiro", label: "Financeiro", Icon: DollarSign },
+    { aba: "gerencia", sub: "repasses", label: "Repasses", Icon: Handshake },
   ] },
   { titulo: "Sistema", itens: [
     { aba: "gerencia", sub: "reformas", label: "Reformas", Icon: Building2 },
@@ -2754,6 +2748,46 @@ function AppInterno({ session, onLogout }) {
     setPrecosCarregando(false);
   };
   useEffect(() => { carregarPrecos(); }, []);
+
+  /* ---- Cobranças pendentes (Atendimento e Gerência) ----
+     A lista vem pronta do servidor (GET /api/cobrancas/pendentes): vistoria na agenda, uma
+     hora passada do horário agendado e pagamento ainda não quitado. Sem cron — é uma consulta,
+     e por isso é refeita de minuto em minuto: a vistoria que "acaba" agora entra sozinha, e o
+     contador do menu acompanha. */
+  const veCobrancas = perfil === "atendimento" || perfil === "gerencia";
+  const [cobrancasPendentes, setCobrancasPendentes] = useState([]);
+  const [chavePix, setChavePix] = useState("");
+  const [cobrancasCarregando, setCobrancasCarregando] = useState(false);
+  const carregarCobrancas = async () => {
+    if (!veCobrancas) return;
+    setCobrancasCarregando(true);
+    try {
+      const r = await apiFetch("/api/cobrancas/pendentes", { token });
+      setCobrancasPendentes(r.cobrancas || []);
+      setChavePix(r.chavePix || "");
+    } catch { /* a lista antiga do Setor de cobrança continua na tela; o próximo ciclo tenta de novo */ }
+    setCobrancasCarregando(false);
+  };
+  useEffect(() => {
+    carregarCobrancas();
+    const t = setInterval(carregarCobrancas, 60000);
+    return () => clearInterval(t);
+  }, []);
+  /* Registrar o pagamento quita o cadastro e gera o repasse do técnico no servidor, numa
+     transação só. Depois recarrega as duas listas: o card sai de "pendentes" e o cadastro
+     passa a constar como pago no Financeiro. */
+  const registrarPagamentoCliente = async (clienteId, valorPago) => {
+    try {
+      await apiFetch(`/api/cobrancas/${clienteId}/pagamento`, { method: "POST", token, body: { valorPago } });
+      setCobrancasPendentes((atual) => atual.filter((c) => c.id !== clienteId));
+      carregarClientes();
+      return true;
+    } catch (e) {
+      notify(`Não foi possível registrar o pagamento: ${e.message}`);
+      carregarCobrancas();
+      return false;
+    }
+  };
   /* precos: { precoVistoria?, precoDocumentacao? } — o que não vier mantém o valor atual. */
   const salvarPreco = async (empreendimento, precos) => {
     try {
@@ -3495,6 +3529,7 @@ function AppInterno({ session, onLogout }) {
                         color: ativo ? "#fff" : "rgba(255,255,255,.75)",
                       }}>
                       <item.Icon size={15} style={{ flexShrink: 0 }} /> {item.label}
+                      {item.aba === "qualidade" && <Contador n={cobrancasPendentes.length} titulo="Cobranças pendentes" />}
                     </button>
                   );
                 })}
@@ -3530,7 +3565,7 @@ function AppInterno({ session, onLogout }) {
               <div style={{ opacity: 0.7 }}>{PERFIL_LABEL[perfil] || perfil}</div>
             </div>
             <SinoNotificacoes
-              itens={calcularNotificacoes({ perfil, clientes: clientesAtivos, laudosPendentes, avaliacoes, documentosArt, agendaVistoriador, meusLaudos, parceiros, usuarioAtualId: session.usuario.id })}
+              itens={calcularNotificacoes({ perfil, clientes: clientesAtivos, laudosPendentes, avaliacoes, documentosArt, agendaVistoriador, meusLaudos, parceiros, usuarioAtualId: session.usuario.id, cobrancasPendentes: cobrancasPendentes.length })}
               onIr={({ aba, sub }) => {
                 if (aba) setAbaTop(aba);
                 if (sub && aba === "qualidade") setAbaQualidade(sub);
@@ -3584,6 +3619,7 @@ function AppInterno({ session, onLogout }) {
               .map(([k, label, Icon]) => (
                 <button key={k} onClick={() => setAbaTop(k)} className="tab" style={{ borderBottomColor: abaTop === k ? "#fff" : "transparent", color: abaTop === k ? "#fff" : "rgba(255,255,255,.55)", whiteSpace: "nowrap", flexShrink: 0 }}>
                   <Icon size={15} /> {label}
+                  {k === "qualidade" && <Contador n={cobrancasPendentes.length} titulo="Cobranças pendentes" />}
                 </button>
               ))}
           </nav>
@@ -3617,6 +3653,7 @@ function AppInterno({ session, onLogout }) {
             {[["analise", "Análise", ClipboardCheck], ["fila", "Fila de espera", Clock], ["vistoria", "Vistoria", CalendarDays], ["cobranca", "Cobrança", DollarSign], ["feedback", "Feedback", Star], ["acompanhamento", "Acompanhamento", ClipboardList]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setAbaQualidade(k)} className="tab" style={{ borderBottomColor: abaQualidade === k ? AZUL_MEDIO : "transparent", color: abaQualidade === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
                 <Icon size={15} /> {label}
+                {k === "cobranca" && <Contador n={cobrancasPendentes.length} titulo="Cobranças pendentes" />}
               </button>
             ))}
           </nav>
@@ -3703,6 +3740,8 @@ function AppInterno({ session, onLogout }) {
             clientes={clientesAtivos} clientesCarregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} preencherComCliente={preencherComCliente}
             agendarAgoraId={agendarAgoraId} setAgendarAgoraId={setAgendarAgoraId}
             precos={precos}
+            cobrancasPendentes={cobrancasPendentes} cobrancasCarregando={cobrancasCarregando} chavePix={chavePix}
+            registrarPagamentoCliente={registrarPagamentoCliente}
             podeAgir={perfil === "atendimento" || perfil === "gerencia"} ehGerencia={perfil === "gerencia"} />
         )}
         {abaTop === "faq" && (
@@ -4635,7 +4674,7 @@ function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [], f
   );
 }
 
-function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, agendarAgoraId, setAgendarAgoraId, podeAgir = false, ehGerencia = false, precos = [] }) {
+function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, agendarAgoraId, setAgendarAgoraId, podeAgir = false, ehGerencia = false, precos = [], cobrancasPendentes = [], cobrancasCarregando = false, chavePix = "", registrarPagamentoCliente }) {
   const [diaParaAbrir, setDiaParaAbrir] = useState(null); // data (ISO) que o calendário da Análise deve abrir já selecionada
   // Etapa escolhida nos indicadores — filtra a lista da sub-aba aberta. Fica aqui (e não em
   // cada sub-aba) pra que o filtro continue valendo ao trocar de sub-aba.
@@ -4656,7 +4695,9 @@ function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, u
         filtroEtapa={filtroEtapa} aoTrocarEtapa={setFiltroEtapa} />
       {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} abrirAutomaticoId={agendarAgoraId} aoAbrirAutomatico={() => setAgendarAgoraId(null)} aoConfirmar={aoConfirmarVistoria} filtroEtapa={filtroEtapa} />}
       {sub === "cobranca" && <AbaQualidadeCobranca clientes={clientes} carregando={clientesCarregando} updCliente={updCliente}
-        usuarios={usuarios} precos={precos} notify={notify} podeAgir={podeAgir} />}
+        usuarios={usuarios} precos={precos} notify={notify} podeAgir={podeAgir}
+        pendentes={cobrancasPendentes} pendentesCarregando={cobrancasCarregando} chavePix={chavePix}
+        registrarPagamento={registrarPagamentoCliente} />}
       {sub === "acompanhamento" && <AbaQualidadeAcompanhamento clientes={clientes} clientesCarregando={clientesCarregando}
         docs={docs} avaliacoes={avaliacoes} filtroEtapa={filtroEtapa} />}
       {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} clientes={clientes} clientesCarregando={clientesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
@@ -4792,8 +4833,143 @@ function LinhaCobranca({ cliente, sugerido, tecnico, podeAgir, onSalvar }) {
   );
 }
 
-function AbaQualidadeCobranca({ clientes = [], carregando, updCliente, usuarios = [], precos = [], notify, podeAgir = false }) {
-  const [filtro, setFiltro] = useState("lancar"); // lancar | aberto | quitadas | todas
+/* ================= Cobrança pendente: card, mensagem e pagamento =================
+   A lista vem do servidor (GET /api/cobrancas/pendentes): a vistoria conta como concluída uma
+   hora depois do horário agendado e entra aqui na hora, até alguém registrar o pagamento.
+   O Atendimento copia a mensagem ou abre o WhatsApp já com ela, e quando o cliente paga,
+   registra — é esse registro que gera o repasse do técnico (Financeiro › Repasses). */
+const fmtValorSemMoeda = (v) => (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtDataBR = (iso) => (iso ? String(iso).split("-").reverse().join("/") : "");
+
+function mensagemDeCobranca(c, chavePix) {
+  const primeiroNome = String(c.nome || "").trim().split(/\s+/)[0] || "tudo bem";
+  /* "Sua vistoria de Revistoria" soaria estranho: a revistoria já é o nome do serviço. */
+  const servico = c.tipoVistoria === "Revistoria" ? "revistoria" : "vistoria de entrega de chaves";
+  const unidade = [c.apartamento, c.blocoTorre].filter(Boolean).join(" – ");
+  const onde = `${c.empreendimento || "seu imóvel"}${unidade ? ` – unidade ${unidade}` : ""}`;
+  /* "Hoje" só quando foi hoje mesmo: a cobrança atrasada de ontem diria uma coisa falsa. */
+  const quando = c.dataDesejada === paraChaveISO(new Date())
+    ? `hoje (${fmtDataBR(c.dataDesejada)})`
+    : `em ${fmtDataBR(c.dataDesejada)}`;
+  const pix = chavePix ? ` Segue a chave PIX para pagamento: ${chavePix}.` : "";
+  return `Olá, ${primeiroNome}! Aqui é da FN Edificações. Sua ${servico} no ${onde} foi concluída ${quando}. `
+    + `O valor do serviço é R$ ${fmtValorSemMoeda(c.valorPrevisto)}.${pix} `
+    + "Assim que efetuar, por favor nos envie o comprovante. Obrigado!";
+}
+/* Telefone salvo com ou sem o 55: o link leva o 55 uma vez só. */
+function linkWhatsappComTexto(telefone, texto) {
+  let d = String(telefone || "").replace(/\D/g, "");
+  if (d.length < 10) return null;
+  if (!(d.startsWith("55") && d.length >= 12)) d = `55${d}`;
+  return `https://wa.me/${d}?text=${encodeURIComponent(texto)}`;
+}
+
+function ModalRegistrarPagamento({ cobranca, onFechar, onConfirmar }) {
+  const [valor, setValor] = useState(cobranca.valorPrevisto ? String(cobranca.valorPrevisto) : "");
+  const [erro, setErro] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const confirmar = async () => {
+    const numero = Number(String(valor).replace(",", "."));
+    if (valor === "" || !Number.isFinite(numero) || numero < 0) { setErro("Informe um valor válido."); return; }
+    setEnviando(true);
+    const ok = await onConfirmar(numero);
+    setEnviando(false);
+    if (ok) onFechar();
+  };
+  return (
+    <div className="no-print" style={overlay} onClick={onFechar}>
+      <div style={{ ...modal, maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <strong>Registrar pagamento</strong>
+          <button className="icon-btn" onClick={onFechar}><X size={16} /></button>
+        </div>
+        <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 14px" }}>
+          {cobranca.nome} · {cobranca.empreendimento}{cobranca.apartamento ? ` · ${cobranca.apartamento}` : ""}
+        </p>
+        <div style={cell(true)}>
+          <label style={lab}>Valor pago (R$)</label>
+          <input style={inp} type="number" min="0" step="0.01" autoFocus value={valor}
+            onChange={(e) => setValor(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") confirmar(); }} />
+          <span style={{ fontSize: 11.5, color: "#8593a8" }}>Previsto: {fmtReal(cobranca.valorPrevisto)}. Ao confirmar, o repasse do técnico é gerado.</span>
+        </div>
+        {erro && <div style={{ color: "#C62828", fontSize: 12.5, marginTop: 8 }}>{erro}</div>}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+          <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={onFechar}>Cancelar</button>
+          <button className="btn-solid" onClick={confirmar} disabled={enviando}>
+            {enviando ? <Loader2 size={15} className="spin" /> : <Check size={15} />} OK
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CardCobrancaPendente({ cobranca: c, chavePix, podeAgir, notify, registrarPagamento }) {
+  const [pagando, setPagando] = useState(false);
+  const texto = mensagemDeCobranca(c, chavePix);
+  const whats = linkWhatsappComTexto(c.telefone, texto);
+  const copiar = async () => {
+    try { await navigator.clipboard.writeText(texto); notify("Mensagem copiada ✓"); }
+    catch { notify("Não foi possível copiar — selecione e copie manualmente."); }
+  };
+  const unidade = [c.blocoTorre, c.apartamento].filter(Boolean).join(" · ");
+  return (
+    <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, display: "grid", gap: 10, background: "#fff" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <strong style={{ fontSize: 14 }}>{c.nome}</strong>
+            {c.tipoVistoria === "Revistoria" && <SeloRevistoria seq={c.revistoriaSeq || 1} />}
+            {c.pagamento === "Parcial" && <Selo valor="Parcial" />}
+          </div>
+          <div style={{ fontSize: 12.5, color: "#65758b", marginTop: 2 }}>
+            {c.telefone || "(sem telefone)"} · {c.empreendimento || "(sem empreendimento)"}{unidade ? ` · ${unidade}` : ""}
+          </div>
+          <div style={{ fontSize: 12.5, color: "#65758b" }}>
+            {c.tipoVistoria} · {c.vistoriadorNome || "(sem técnico)"} · {fmtDataBR(c.dataDesejada)}{c.horarioDesejado ? ` às ${c.horarioDesejado}` : ""}
+          </div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 11, color: "#8593a8" }}>Valor previsto</div>
+          <div style={{ fontSize: 17, fontWeight: 800, color: AZUL_MARINHO }}>{fmtReal(c.valorPrevisto)}</div>
+          {!c.valorPrevisto && <div style={{ fontSize: 11, color: "#B26A00" }}>Sem preço para o empreendimento</div>}
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO }} onClick={copiar}>
+          <Copy size={14} /> Copiar mensagem
+        </button>
+        {whats ? (
+          <a className="btn-ghost" style={{ color: "#fff", background: "#1E9E57", textDecoration: "none" }} href={whats} target="_blank" rel="noopener noreferrer">
+            <Send size={14} /> Abrir WhatsApp
+          </a>
+        ) : (
+          <span style={{ fontSize: 12, color: "#B26A00", alignSelf: "center" }}>Telefone inválido para o WhatsApp</span>
+        )}
+        {podeAgir && (
+          <button className="btn-solid" style={{ width: "auto", padding: "8px 14px" }} onClick={() => setPagando(true)}>
+            <DollarSign size={14} /> Registrar pagamento
+          </button>
+        )}
+      </div>
+      {pagando && (
+        <ModalRegistrarPagamento cobranca={c} onFechar={() => setPagando(false)}
+          onConfirmar={async (valor) => {
+            const ok = await registrarPagamento(c.id, valor);
+            if (ok) notify("Pagamento registrado ✓ — repasse do técnico gerado");
+            return ok;
+          }} />
+      )}
+    </div>
+  );
+}
+
+function AbaQualidadeCobranca({ clientes = [], carregando, updCliente, usuarios = [], precos = [], notify, podeAgir = false,
+  pendentes = [], pendentesCarregando = false, chavePix = "", registrarPagamento }) {
+  /* "Pendentes" é a lista do servidor, com os cards de cobrança. "Quitadas" e "Todas"
+     continuam com o lançamento antigo, linha a linha — é onde se ajusta um valor já lançado
+     ou um pagamento parcial. */
+  const [filtro, setFiltro] = useState("pendentes"); // pendentes | quitadas | todas
   const [busca, setBusca] = useState("");
   const agora = new Date();
 
@@ -4807,14 +4983,9 @@ function AbaQualidadeCobranca({ clientes = [], carregando, updCliente, usuarios 
     return quando && quando <= agora;
   });
 
-  const faltaLancar = naJanela.filter((c) => c.valorCobrado == null);
-  const emAberto = naJanela.filter((c) => c.valorCobrado != null && c.pagamento !== "Pago");
   const quitadas = naJanela.filter((c) => c.valorCobrado != null && c.pagamento === "Pago");
 
-  const listaPorFiltro = filtro === "lancar" ? faltaLancar
-    : filtro === "aberto" ? emAberto
-    : filtro === "quitadas" ? quitadas
-    : naJanela;
+  const listaPorFiltro = filtro === "quitadas" ? quitadas : naJanela;
 
   const termo = busca.trim().toLowerCase();
   const lista = (termo
@@ -4825,6 +4996,10 @@ function AbaQualidadeCobranca({ clientes = [], carregando, updCliente, usuarios 
   const soma = (arr, f) => arr.reduce((s, c) => s + f(c), 0);
   const totalCobrado = soma(naJanela, (c) => Number(c.valorCobrado) || 0);
   const totalRecebido = soma(naJanela, (c) => (c.pagamento === "Pago" ? Number(c.valorCobrado) || 0 : Number(c.valorRecebido) || 0));
+  const totalAReceber = pendentes.reduce((s, c) => s + (Number(c.valorPrevisto) || 0) - (Number(c.valorRecebido) || 0), 0);
+  const pendentesFiltrados = termo
+    ? pendentes.filter((c) => `${c.nome} ${c.empreendimento} ${c.blocoTorre} ${c.apartamento} ${c.vistoriadorNome}`.toLowerCase().includes(termo))
+    : pendentes;
 
   const salvar = async (id, patch) => {
     const ok = await updCliente(id, patch);
@@ -4832,8 +5007,7 @@ function AbaQualidadeCobranca({ clientes = [], carregando, updCliente, usuarios 
   };
 
   const CHIPS = [
-    ["lancar", "Falta lançar", faltaLancar.length],
-    ["aberto", "Em aberto", emAberto.length],
+    ["pendentes", "Pendentes", pendentes.length],
     ["quitadas", "Quitadas", quitadas.length],
     ["todas", "Todas", naJanela.length],
   ];
@@ -4842,14 +5016,21 @@ function AbaQualidadeCobranca({ clientes = [], carregando, updCliente, usuarios 
     <div style={{ display: "grid", gap: 16 }}>
       <Card icon={DollarSign} titulo="Setor de cobrança">
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-          Cada vistoria entra aqui uma hora depois do horário agendado. Confirme o valor cobrado — vem
-          sugerido pela tabela de preços do empreendimento, e pode ser alterado — e diga como ficou o
-          pagamento. O que for lançado aqui aparece no Financeiro como recebido, sem ninguém redigitar.
+          A vistoria conta como concluída uma hora depois do horário agendado e entra em
+          "Pendentes" na hora. Copie a mensagem ou abra o WhatsApp do cliente já com ela; quando o
+          pagamento chegar, registre — o cadastro fica quitado no Financeiro e o repasse do técnico
+          é gerado para a Gerência.
         </p>
+        {!chavePix && (
+          <div style={{ background: "#FFF4E0", color: "#B26A00", padding: "8px 10px", borderRadius: 8, fontSize: 12.5, marginBottom: 12 }}>
+            <AlertTriangle size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+            A chave PIX ainda não foi cadastrada — a mensagem sai sem ela. A Gerência cadastra em Financeiro › Repasses.
+          </div>
+        )}
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 14 }}>
-          <KpiCard label="Falta lançar" valor={faltaLancar.length} cor={faltaLancar.length ? "#B26A00" : "#2E7D32"} Icon={ClipboardList} />
-          <KpiCard label="Em aberto" valor={emAberto.length} cor={emAberto.length ? "#C62828" : "#65758b"} Icon={AlertTriangle} />
+          <KpiCard label="Pendentes" valor={pendentes.length} cor={pendentes.length ? "#C62828" : "#2E7D32"} Icon={AlertTriangle} />
+          <KpiCard label="A receber" valor={fmtReal(totalAReceber)} cor={totalAReceber ? "#B26A00" : "#65758b"} Icon={ClipboardList} />
           <KpiCard label="Total cobrado" valor={fmtReal(totalCobrado)} Icon={DollarSign} />
           <KpiCard label="Já recebido" valor={fmtReal(totalRecebido)} cor="#2E7D32" Icon={Check} />
         </div>
@@ -4866,8 +5047,27 @@ function AbaQualidadeCobranca({ clientes = [], carregando, updCliente, usuarios 
         <input style={{ ...inp, width: "100%", marginBottom: 14 }} placeholder="Buscar por cliente, empreendimento ou bloco…"
           value={busca} onChange={(e) => setBusca(e.target.value)} />
 
-        {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
-        {!carregando && lista.length === 0 && (
+        {filtro === "pendentes" && (
+          <>
+            {pendentesCarregando && pendentes.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+            {!pendentesCarregando && pendentesFiltrados.length === 0 && (
+              <p style={{ color: "#8593a8", fontSize: 14 }}>
+                {pendentes.length === 0
+                  ? "Nenhuma cobrança pendente — a vistoria aparece aqui uma hora depois do horário agendado."
+                  : "Nada encontrado nesta busca."}
+              </p>
+            )}
+            <div style={{ display: "grid", gap: 10 }}>
+              {pendentesFiltrados.map((c) => (
+                <CardCobrancaPendente key={c.id} cobranca={c} chavePix={chavePix} podeAgir={podeAgir}
+                  notify={notify} registrarPagamento={registrarPagamento} />
+              ))}
+            </div>
+          </>
+        )}
+
+        {filtro !== "pendentes" && carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+        {filtro !== "pendentes" && !carregando && lista.length === 0 && (
           <p style={{ color: "#8593a8", fontSize: 14 }}>
             {naJanela.length === 0
               ? "Nenhuma vistoria passou do horário ainda — a lista aparece uma hora depois do horário agendado."
@@ -4876,7 +5076,7 @@ function AbaQualidadeCobranca({ clientes = [], carregando, updCliente, usuarios 
         )}
 
         <div style={{ display: "grid", gap: 10 }}>
-          {lista.map((c) => (
+          {filtro !== "pendentes" && lista.map((c) => (
             <LinhaCobranca key={c.id} cliente={c} sugerido={precoSugerido(c, precos)}
               tecnico={nomeTecnico(c.vistoriadorId)} podeAgir={podeAgir}
               onSalvar={{ salvar, notify }} />
@@ -7146,6 +7346,16 @@ const STATUS_COR = {
 function Selo({ valor }) {
   const s = STATUS_COR[valor] || { cor: "#65758b", bg: "#EEF1F5" };
   return <span style={{ background: s.bg, color: s.cor, padding: "3px 9px", borderRadius: 20, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>{valor}</span>;
+}
+/* Contador vermelho ao lado de um item de menu (ex.: cobranças pendentes). Zero não aparece:
+   um "0" aceso ensina a ignorar o contador. */
+function Contador({ n = 0, titulo }) {
+  if (!n) return null;
+  return (
+    <span title={titulo} style={{ background: "#C62828", color: "#fff", borderRadius: 20, padding: "1px 7px", fontSize: 11, fontWeight: 700, lineHeight: "16px", marginLeft: 4 }}>
+      {n > 99 ? "99+" : n}
+    </span>
+  );
 }
 /* Marca de revistoria. Anda junto do selo de status (nunca no lugar dele): status diz em que
    ponto do fluxo o atendimento está; isto diz que é retorno a um imóvel já vistoriado — quem
@@ -12020,6 +12230,282 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
 }
 
 /* ============================================================
+   GERÊNCIA › FINANCEIRO › REPASSES
+   ============================================================
+   O que a FN deve a cada vistoriador. O repasse nasce sozinho quando o Atendimento registra o
+   pagamento do cliente (src/cobranca.js no backend), com o valor da tabela de repasse daquele
+   momento — mudar a tabela depois não reescreve o que já era devido. A Gerência vista a
+   vistoria dela e não recebe repasse: seria a empresa pagando a si mesma.
+
+   Esta tela é a única que lê repasses, e só a Gerência chega nela (as rotas também recusam
+   qualquer outro papel). */
+function AbaGerenciaRepasses({ token, usuarios = [], notify }) {
+  const [repasses, setRepasses] = useState([]);
+  const [tabela, setTabela] = useState([]);
+  const [chavePix, setChavePix] = useState("");
+  const [chavePixSalva, setChavePixSalva] = useState("");
+  const [carregando, setCarregando] = useState(true);
+  const [pagando, setPagando] = useState(false);
+  // "Pagar tudo do dia" pede confirmação no próprio botão: é dinheiro saindo em lote.
+  const [confirmandoDia, setConfirmandoDia] = useState(null);
+  const [fVistoriador, setFVistoriador] = useState("todos");
+  const [fStatus, setFStatus] = useState("pendente");
+  const [fDe, setFDe] = useState("");
+  const [fAte, setFAte] = useState("");
+
+  const carregar = async () => {
+    setCarregando(true);
+    try {
+      const [rRep, rTab, rCfg] = await Promise.all([
+        apiFetch("/api/repasses", { token }),
+        apiFetch("/api/tabela-repasse", { token }),
+        apiFetch("/api/configuracoes/cobranca", { token }),
+      ]);
+      setRepasses(rRep.repasses || []);
+      setTabela(rTab.tabela || []);
+      setChavePix(rCfg.chavePix || "");
+      setChavePixSalva(rCfg.chavePix || "");
+    } catch (e) { notify(`Não foi possível carregar os repasses: ${e.message}`); }
+    setCarregando(false);
+  };
+  useEffect(() => { carregar(); }, []);
+
+  const pagar = async (ids) => {
+    if (!ids.length) return;
+    setPagando(true);
+    try {
+      const r = await apiFetch("/api/repasses/pagar", { method: "POST", token, body: { ids } });
+      notify(`${r.pagos} repasse(s) marcado(s) como pago ✓`);
+      await carregar();
+    } catch (e) { notify(`Não foi possível marcar como pago: ${e.message}`); }
+    setPagando(false);
+    setConfirmandoDia(null);
+  };
+
+  const salvarTabela = async (tipoVistoria, valorRepasse) => {
+    const numero = Number(String(valorRepasse).replace(",", "."));
+    if (valorRepasse === "" || !Number.isFinite(numero) || numero < 0) { notify("Informe um valor válido."); return; }
+    try {
+      await apiFetch("/api/tabela-repasse", { method: "PUT", token, body: { tipoVistoria, valorRepasse: numero } });
+      setTabela((atual) => atual.map((t) => (t.tipoVistoria === tipoVistoria ? { ...t, valorRepasse: numero, atualizadoEm: new Date().toISOString() } : t)));
+      notify("Tabela de repasse atualizada ✓ — vale para os próximos pagamentos");
+    } catch (e) { notify(`Não foi possível salvar: ${e.message}`); }
+  };
+  const salvarChavePix = async () => {
+    try {
+      const r = await apiFetch("/api/configuracoes/cobranca", { method: "PUT", token, body: { chavePix } });
+      setChavePixSalva(r.chavePix || "");
+      notify("Chave PIX salva ✓");
+    } catch (e) { notify(`Não foi possível salvar: ${e.message}`); }
+  };
+
+  /* Resumo do topo: sempre sobre tudo, sem os filtros — é a foto do que se deve hoje. */
+  const mesAtual = paraChaveISO(new Date()).slice(0, 7);
+  const pagoNoMes = (r) => r.status === "pago" && r.pagoEm && paraChaveISO(new Date(r.pagoEm)).slice(0, 7) === mesAtual;
+  const soma = (lista) => lista.reduce((s, r) => s + (Number(r.valor) || 0), 0);
+  const totalPendente = soma(repasses.filter((r) => r.status === "pendente"));
+  const totalPagoMes = soma(repasses.filter(pagoNoMes));
+  const nomeDe = (id, fallback) => usuarios.find((u) => String(u.id) === String(id))?.nome || fallback || "(técnico removido)";
+  const porVistoriador = {};
+  repasses.forEach((r) => {
+    const v = (porVistoriador[r.vistoriadorId] ||= { id: r.vistoriadorId, nome: nomeDe(r.vistoriadorId, r.vistoriadorNome), pendente: 0, pagoMes: 0 });
+    if (r.status === "pendente") v.pendente += Number(r.valor) || 0;
+    if (pagoNoMes(r)) v.pagoMes += Number(r.valor) || 0;
+  });
+  const resumoVistoriadores = Object.values(porVistoriador).sort((a, b) => a.nome.localeCompare(b.nome));
+
+  const filtrados = repasses.filter((r) => {
+    if (fVistoriador !== "todos" && String(r.vistoriadorId) !== fVistoriador) return false;
+    if (fStatus !== "todos" && r.status !== fStatus) return false;
+    if (fDe && (r.dataVistoria || "") < fDe) return false;
+    if (fAte && (r.dataVistoria || "") > fAte) return false;
+    return true;
+  });
+  /* Vistoriador -> dia -> linhas. O dia é o da vistoria, não o do pagamento do cliente: é o
+     dia de trabalho que o técnico confere no extrato dele. */
+  const grupos = {};
+  filtrados.forEach((r) => {
+    const g = (grupos[r.vistoriadorId] ||= { id: r.vistoriadorId, nome: nomeDe(r.vistoriadorId, r.vistoriadorNome), dias: {} });
+    (g.dias[r.dataVistoria || ""] ||= []).push(r);
+  });
+  const listaGrupos = Object.values(grupos).sort((a, b) => a.nome.localeCompare(b.nome));
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <Card icon={Handshake} titulo="Repasses aos vistoriadores">
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+          Cada repasse nasce quando o Atendimento registra o pagamento do cliente, com o valor da
+          tabela de repasse daquele dia. Marque como pago quando o dinheiro sair para o técnico.
+        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10, marginBottom: 14 }}>
+          <KpiCard label="Total pendente" valor={fmtReal(totalPendente)} cor={totalPendente ? "#C62828" : "#65758b"} Icon={AlertTriangle} />
+          <KpiCard label="Pago no mês" valor={fmtReal(totalPagoMes)} cor="#2E7D32" Icon={Check} />
+        </div>
+        {resumoVistoriadores.length > 0 && (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ textAlign: "left", color: "#65758b", fontSize: 12 }}>
+                  <th style={{ padding: "6px 8px" }}>Vistoriador</th>
+                  <th style={{ padding: "6px 8px", textAlign: "right" }}>Pendente</th>
+                  <th style={{ padding: "6px 8px", textAlign: "right" }}>Pago no mês</th>
+                </tr>
+              </thead>
+              <tbody>
+                {resumoVistoriadores.map((v) => (
+                  <tr key={v.id} style={{ borderTop: `1px solid ${CINZA_BORDA}` }}>
+                    <td style={{ padding: "6px 8px" }}>{v.nome}</td>
+                    <td style={{ padding: "6px 8px", textAlign: "right", color: v.pendente ? "#C62828" : "#65758b", fontWeight: 700 }}>{fmtReal(v.pendente)}</td>
+                    <td style={{ padding: "6px 8px", textAlign: "right" }}>{fmtReal(v.pagoMes)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      <Card icon={Filter} titulo="Repasses por vistoriador e por dia">
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14, alignItems: "flex-end" }}>
+          <div style={{ ...cell(), minWidth: 170 }}>
+            <label style={lab}>Vistoriador</label>
+            <select style={inp} value={fVistoriador} onChange={(e) => setFVistoriador(e.target.value)}>
+              <option value="todos">Todos</option>
+              {resumoVistoriadores.map((v) => <option key={v.id} value={String(v.id)}>{v.nome}</option>)}
+            </select>
+          </div>
+          <div style={{ ...cell(), minWidth: 130 }}>
+            <label style={lab}>Status</label>
+            <select style={inp} value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
+              <option value="pendente">Pendente</option>
+              <option value="pago">Pago</option>
+              <option value="todos">Todos</option>
+            </select>
+          </div>
+          <div style={{ ...cell(), minWidth: 140 }}>
+            <label style={lab}>De</label>
+            <input style={inp} type="date" value={fDe} onChange={(e) => setFDe(e.target.value)} />
+          </div>
+          <div style={{ ...cell(), minWidth: 140 }}>
+            <label style={lab}>Até</label>
+            <input style={inp} type="date" value={fAte} onChange={(e) => setFAte(e.target.value)} />
+          </div>
+          <button className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO }} onClick={carregar}>
+            <RefreshCcw size={14} className={carregando ? "spin" : ""} /> Atualizar
+          </button>
+        </div>
+
+        {carregando && repasses.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+        {!carregando && listaGrupos.length === 0 && (
+          <p style={{ color: "#8593a8", fontSize: 14 }}>
+            {repasses.length === 0 ? "Nenhum repasse ainda — eles aparecem quando o Atendimento registra o pagamento de uma vistoria." : "Nada com estes filtros."}
+          </p>
+        )}
+
+        <div style={{ display: "grid", gap: 14 }}>
+          {listaGrupos.map((g) => (
+            <div key={g.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, overflow: "hidden" }}>
+              <div style={{ background: CINZA_CLARO, padding: "8px 12px", display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                <strong style={{ color: AZUL_MARINHO }}>{g.nome}</strong>
+                <span style={{ fontSize: 13, color: "#4a5a70" }}>{fmtReal(soma(Object.values(g.dias).flat()))}</span>
+              </div>
+              {Object.keys(g.dias).sort((a, b) => b.localeCompare(a)).map((dia) => {
+                const linhas = g.dias[dia];
+                const pendentesDoDia = linhas.filter((r) => r.status === "pendente");
+                const chaveDia = `${g.id}|${dia}`;
+                return (
+                  <div key={dia} style={{ borderTop: `1px solid ${CINZA_BORDA}`, padding: "8px 12px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                      <strong style={{ fontSize: 13 }}>{dia ? fmtDataBR(dia) : "(sem data)"}</strong>
+                      <span style={{ fontSize: 12.5, color: "#65758b" }}>Total do dia: <strong>{fmtReal(soma(linhas))}</strong></span>
+                      <div style={{ flex: 1 }} />
+                      {pendentesDoDia.length > 0 && (confirmandoDia === chaveDia ? (
+                        <>
+                          <button className="btn-solid" style={{ width: "auto", padding: "6px 12px", background: "#2E7D32" }} disabled={pagando}
+                            onClick={() => pagar(pendentesDoDia.map((r) => r.id))}>
+                            {pagando ? <Loader2 size={13} className="spin" /> : <Check size={13} />} Confirmar {fmtReal(soma(pendentesDoDia))}
+                          </button>
+                          <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, padding: "6px 10px" }} onClick={() => setConfirmandoDia(null)}>Cancelar</button>
+                        </>
+                      ) : (
+                        <button className="btn-ghost" style={{ color: "#2E7D32", background: "#E6F4EA", padding: "6px 12px" }} onClick={() => setConfirmandoDia(chaveDia)}>
+                          <Check size={13} /> Pagar tudo do dia ({pendentesDoDia.length})
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{ display: "grid", gap: 4 }}>
+                      {linhas.map((r) => (
+                        <div key={r.id} style={{ display: "flex", flexWrap: "wrap", gap: "4px 10px", alignItems: "center", fontSize: 13, padding: "4px 0" }}>
+                          <span style={{ color: "#65758b" }}>{fmtDataBR(r.dataVistoria)}</span>
+                          <span style={{ flex: 1, minWidth: 160 }}>
+                            {r.clienteNome}
+                            <span style={{ color: "#8593a8", fontSize: 12 }}> · {r.tipoVistoria}</span>
+                          </span>
+                          <strong title={!r.valor ? "Não havia valor na tabela de repasse quando o cliente pagou" : undefined}
+                            style={{ color: r.valor ? undefined : "#B26A00" }}>{fmtReal(r.valor)}</strong>
+                          <span title={r.status === "pago" && r.pagoEm ? `Pago em ${fmtDataHora(r.pagoEm)}${r.pagoPorNome ? ` por ${r.pagoPorNome}` : ""}` : undefined}>
+                            <Selo valor={r.status === "pago" ? "Pago" : "Pendente"} />
+                          </span>
+                          {r.status === "pendente" ? (
+                            <button className="btn-ghost" style={{ color: AZUL_MEDIO, background: CINZA_CLARO, padding: "4px 10px", fontSize: 12 }} disabled={pagando}
+                              onClick={() => pagar([r.id])}>
+                              Marcar como pago
+                            </button>
+                          ) : <span />}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <Card icon={DollarSign} titulo="Tabela de repasse por tipo de vistoria">
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
+          Quanto o técnico recebe por vistoria paga. Mudar um valor vale para os próximos
+          pagamentos — os repasses já gerados continuam com o valor da época.
+        </p>
+        <div style={{ display: "grid", gap: 8 }}>
+          {tabela.map((t) => <LinhaTabelaRepasse key={t.tipoVistoria} item={t} onSalvar={salvarTabela} />)}
+        </div>
+      </Card>
+
+      <Card icon={Send} titulo="Chave PIX da mensagem de cobrança">
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
+          Entra na mensagem que o Atendimento manda ao cliente (Agendamento › Cobrança).
+        </p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input style={{ ...inp, flex: 1, minWidth: 220 }} value={chavePix} placeholder="CNPJ, e-mail, telefone ou chave aleatória"
+            onChange={(e) => setChavePix(e.target.value)} />
+          <button className="btn-solid" style={{ width: "auto", padding: "9px 14px" }} onClick={salvarChavePix} disabled={chavePix.trim() === chavePixSalva}>
+            <Save size={14} /> Salvar
+          </button>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function LinhaTabelaRepasse({ item, onSalvar }) {
+  const [valor, setValor] = useState(String(item.valorRepasse ?? ""));
+  useEffect(() => { setValor(String(item.valorRepasse ?? "")); }, [item.valorRepasse]);
+  return (
+    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+      <span style={{ flex: 1, minWidth: 200, fontSize: 13.5 }}>{item.tipoVistoria}</span>
+      <input style={{ ...inp, width: 130 }} type="number" min="0" step="0.01" value={valor} onChange={(e) => setValor(e.target.value)} />
+      <button className="btn-solid" style={{ width: "auto", padding: "8px 12px" }} disabled={String(valor) === String(item.valorRepasse)}
+        onClick={() => onSalvar(item.tipoVistoria, valor)}>
+        <Save size={14} /> Salvar
+      </button>
+      {!Number(item.valorRepasse) && <span style={{ fontSize: 11.5, color: "#B26A00" }}>Sem valor — o repasse nasce com R$ 0,00</span>}
+    </div>
+  );
+}
+
+/* ============================================================
    GERÊNCIA › REFORMAS  —  o FN Projetos embutido
    ============================================================
    O FN Projetos é um módulo separado (outro repositório, outro endereço) que
@@ -13224,6 +13710,9 @@ function AbaGerencia({ sub = "visao-geral", token, perfil, usuarioAtual, decidir
     return <CardProspeccao prospeccao={prospeccao} carregando={prospeccaoCarregando} atualizar={atualizarProspeccao}
       publicarNoDrive={publicarProspeccaoDrive}
       clientes={clientes} notify={notify} token={token} />;
+  }
+  if (sub === "repasses") {
+    return <AbaGerenciaRepasses token={token} usuarios={usuarios} notify={notify} />;
   }
   if (sub === "financeiro") {
     return <AbaGerenciaFinanceiro docs={docs} clientes={clientes} precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
