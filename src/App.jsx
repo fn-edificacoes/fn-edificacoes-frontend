@@ -6483,6 +6483,7 @@ function AbaElaboracaoLaudo({ itens, setItens, updItem, escolherPatologia, patol
    Vistoria de sempre, igual a qualquer item criado por lá. Mesma lógica de casamento
    ambiente→patologia do ItemCard, só que num layout mais rápido de percorrer em lote. */
 function ItemRapido({ item, patologiasBanco, ambientes, onLocal, onPatologia, onRemover }) {
+  const [fotoAmpliada, setFotoAmpliada] = useState(null);
   const ambienteSlug = useMemo(() => {
     const termo = (item.local || "").trim().toLowerCase();
     if (!termo) return "";
@@ -6496,9 +6497,11 @@ function ItemRapido({ item, patologiasBanco, ambientes, onLocal, onPatologia, on
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start", border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, marginBottom: 10, background: "#fff" }}>
       <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
         {item.fotos.slice(0, 2).map((f, i) => (
-          <img key={i} src={f} alt="" style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8, border: `1px solid ${CINZA_BORDA}` }} />
+          <img key={i} src={f} alt="Foto do item — toque para ampliar" style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8, border: `1px solid ${CINZA_BORDA}`, cursor: "zoom-in" }}
+            onClick={() => setFotoAmpliada(f)} />
         ))}
       </div>
+      <VisualizadorFoto src={fotoAmpliada} onFechar={() => setFotoAmpliada(null)} />
       <div style={{ flex: 1, minWidth: 0, display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
         <div>
           <label style={{ fontSize: 11.5, color: "#8593a8", marginBottom: 3, display: "block" }}>Ambiente</label>
@@ -6589,6 +6592,7 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
   const fotoClienteRef = useRef();        // câmera (capture="environment")
   const fotoClienteGaleriaRef = useRef(); // galeria do aparelho
   const [seletorAberto, setSeletorAberto] = useState(false);
+  const [fotoAmpliada, setFotoAmpliada] = useState(null);
   const handleFotoCliente = (file) => {
     if (!file) return;
     if (!file.type.startsWith("image/")) { notify("Envie uma imagem (PNG ou JPG)"); return; }
@@ -6734,7 +6738,8 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
           <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
             {fotoCliente ? (
               <div style={{ position: "relative", width: 160, height: 160, borderRadius: 10, overflow: "hidden", border: `1px solid ${CINZA_BORDA}` }}>
-                <img src={fotoCliente} alt="Foto com o cliente" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                <img src={fotoCliente} alt="Foto com o cliente — toque para ampliar" style={{ width: "100%", height: "100%", objectFit: "cover", cursor: "zoom-in" }}
+                  onClick={() => setFotoAmpliada(fotoCliente)} />
                 <button className="foto-x" onClick={() => setFotoCliente(null)}><X size={12} /></button>
               </div>
             ) : (
@@ -6814,6 +6819,25 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
           }}
         />
       )}
+      <VisualizadorFoto src={fotoAmpliada} onFechar={() => setFotoAmpliada(null)} />
+    </div>
+  );
+}
+
+/* Abre a foto em tamanho maior por cima da tela — o quadradinho da lista mostra só uma
+   prévia recortada (object-fit: cover), então dá pra perder detalhe da não conformidade.
+   Clicar fora ou no X minimiza de volta, sem sair da tela onde estava. */
+function VisualizadorFoto({ src, onFechar }) {
+  if (!src) return null;
+  return (
+    <div className="no-print" style={{ ...overlay, background: "rgba(10,20,35,.85)", padding: 16 }} onClick={onFechar}>
+      <div style={{ position: "relative", maxWidth: "94vw", maxHeight: "94vh" }} onClick={(e) => e.stopPropagation()}>
+        <img src={src} alt="Foto ampliada" style={{ maxWidth: "94vw", maxHeight: "94vh", display: "block", borderRadius: 10, objectFit: "contain" }} />
+        <button className="icon-btn" onClick={onFechar} title="Minimizar"
+          style={{ position: "absolute", top: -14, right: -14, background: "#fff", borderRadius: "50%", boxShadow: "0 2px 8px rgba(0,0,0,.3)" }}>
+          <X size={18} />
+        </button>
+      </div>
     </div>
   );
 }
@@ -6822,6 +6846,7 @@ function ItemCard({ item, num, onChange, onPatologia, onFotos, onRemoveFoto, onD
   const fileRef = useRef();     // câmera (capture="environment")
   const galeriaRef = useRef();  // galeria do aparelho
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
+  const [fotoAmpliada, setFotoAmpliada] = useState(null);
   const m = sevMeta[item.severidade] || sevMeta.Média;
 
   /* ---- Sugestão de descrição/recomendação com IA (ver POST /api/laudos/itens/sugestao-ia
@@ -6918,7 +6943,8 @@ function ItemCard({ item, num, onChange, onPatologia, onFotos, onRemoveFoto, onD
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         {item.fotos.map((src, i) => (
           <div key={i} style={{ position: "relative", width: 92, height: 92, borderRadius: 9, overflow: "hidden", border: `1px solid ${CINZA_BORDA}` }}>
-            <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            <img src={src} alt="Foto do item — toque para ampliar" style={{ width: "100%", height: "100%", objectFit: "cover", cursor: "zoom-in" }}
+              onClick={() => setFotoAmpliada(src)} />
             <button className="foto-x" onClick={() => onRemoveFoto(i)}><X size={12} /></button>
           </div>
         ))}
@@ -7044,6 +7070,7 @@ function ItemCard({ item, num, onChange, onPatologia, onFotos, onRemoveFoto, onD
       <ConfirmModal aberto={confirmandoExclusao} titulo="Excluir item"
         mensagem={`Tem certeza que deseja excluir o Item ${num}${item.patologia ? ` (${item.patologia})` : ""}? Essa ação não pode ser desfeita.`}
         onConfirm={() => { onDelete(); setConfirmandoExclusao(false); }} onCancel={() => setConfirmandoExclusao(false)} />
+      <VisualizadorFoto src={fotoAmpliada} onFechar={() => setFotoAmpliada(null)} />
     </div>
   );
 }
