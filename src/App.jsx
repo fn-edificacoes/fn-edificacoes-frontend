@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import * as Rascunho from "./rascunho-local.js";
 import { listarAmbientes, paraItemDeLaudo, todasParaImportacao } from "./patologias-consulta.js";
+import * as Fin from "./financeiro-regras.js";
 import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
   Building2, User, ClipboardList, ChevronDown, ChevronRight, ChevronLeft, Check,
@@ -8,7 +9,7 @@ import {
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
   ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle, Megaphone, Clock,
-  Wrench, Paperclip, Menu
+  Wrench, Paperclip, Menu, Receipt, Car, FileBarChart, Gauge, Settings, Landmark, Wallet, Archive, FileSpreadsheet, FileCheck
 } from "lucide-react";
 
 /* ============================================================
@@ -554,11 +555,13 @@ const STATUS_INTERNO_OPCOES = ["Agendado", "Em vistoria", "Laudo em elaboração
    gerencia      -> acesso restrito, mas enxerga tudo (incl. financeiro)
    O cadastro/acompanhamento de Cliente em si continua sendo uma tela pública separada, sem login.
 ------------------------------------------------------------------ */
+/* "despesas" é o lançamento de despesa e comprovante (Financeiro): toda a equipe lança o que
+   gastou pela FN e vê só o que lançou. A Gerência tem o módulo inteiro no menu lateral. */
 const MODULOS_POR_PERFIL = {
-  vistoriador: ["laudos"],
-  documentacao: ["documentacao"],
-  atendimento: ["clientes", "qualidade", "faq", "marketing", "vendas"],
-  vendas: ["vendas"],
+  vistoriador: ["laudos", "despesas"],
+  documentacao: ["documentacao", "despesas"],
+  atendimento: ["clientes", "qualidade", "faq", "marketing", "vendas", "despesas"],
+  vendas: ["vendas", "despesas"],
   gerencia: ["laudos", "documentacao", "gerencia", "usuarios", "clientes", "qualidade", "faq", "marketing"],
 };
 const PERFIL_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", vendas: "Vendas", gerencia: "Gerência" };
@@ -2188,8 +2191,18 @@ const GERENCIA_MENU_LATERAL = [
     { aba: "gerencia", sub: "painel", label: "Painel estratégico", Icon: BarChart3 },
     { aba: "gerencia", sub: "acompanhamento", label: "Acompanhamento", Icon: ClipboardList },
   ] },
+  /* Os itens "fin-*" são o módulo Despesas e Controle Fiscal; "financeiro" é a tela de receita
+     e preços que já existia, e continua com a mesma chave para não quebrar atalhos do sino.
+     "Indicadores financeiros", e não só "Indicadores": o menu já tem um "Indicadores" (o de
+     atendimentos), e dois itens com o mesmo nome na mesma barra é clique no lugar errado. */
   { titulo: "Financeiro", itens: [
-    { aba: "gerencia", sub: "financeiro", label: "Financeiro", Icon: DollarSign },
+    { aba: "gerencia", sub: "financeiro", label: "Receitas", Icon: DollarSign },
+    { aba: "gerencia", sub: "fin-despesas", label: "Despesas", Icon: Receipt },
+    { aba: "gerencia", sub: "fin-notas", label: "Notas e Comprovantes", Icon: FileCheck },
+    { aba: "gerencia", sub: "fin-deslocamentos", label: "Deslocamentos", Icon: Car },
+    { aba: "gerencia", sub: "fin-relatorios", label: "Relatórios", Icon: FileBarChart },
+    { aba: "gerencia", sub: "fin-indicadores", label: "Indicadores financeiros", Icon: Gauge },
+    { aba: "gerencia", sub: "fin-config", label: "Configurações Fiscais", Icon: Settings },
   ] },
   { titulo: "Sistema", itens: [
     { aba: "gerencia", sub: "reformas", label: "Reformas", Icon: Building2 },
@@ -2273,6 +2286,13 @@ function AppInterno({ session, onLogout }) {
   const [docsCarregando, setDocsCarregando] = useState(false);
 
   const notify = (m) => { setToast(m); setTimeout(() => setToast(""), 2200); };
+
+  /* ---- Financeiro: despesas e controle fiscal ---- */
+  const [novaDespesaAberta, setNovaDespesaAberta] = useState(false);
+  const fin = useFinanceiro({
+    token, perfil, notify,
+    ativo: novaDespesaAberta || abaTop === "despesas" || (abaTop === "gerencia" && (abaGerencia === "financeiro" || String(abaGerencia).startsWith("fin-"))),
+  });
 
   /* ---- Documentação/Gerência: carregar e persistir via API real ---- */
   const podeVerDocs = perfil === "gerencia" || perfil === "documentacao" || perfil === "atendimento";
@@ -3537,6 +3557,11 @@ function AppInterno({ session, onLogout }) {
                 if (sub && aba === "gerencia") setAbaGerencia(sub);
                 if (sub && aba === "laudos") setAba(sub);
               }} />
+            {/* Atalho do pedido: lançar a despesa na hora, de qualquer tela — no celular é foto,
+                valor, categoria, vistoria e salvar. */}
+            <button className="btn-ghost" onClick={() => setNovaDespesaAberta(true)} title="Lançar uma despesa">
+              <Plus size={14} /> Despesa
+            </button>
             <button className="btn-ghost" onClick={() => setTrocandoSenha(true)} title="Alterar minha senha">
               <Lock size={14} /> Senha
             </button>
@@ -3579,7 +3604,7 @@ function AppInterno({ session, onLogout }) {
             esta barra, ela tem o menu lateral com tudo já agrupado. */}
         {perfil !== "gerencia" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, borderTop: "1px solid rgba(255,255,255,.12)", overflowX: "auto" }}>
-            {[["laudos", "Laudos", FileText], ["documentacao", "Documentação", ClipboardCheck], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Fornecedores", Wrench], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog]]
+            {[["laudos", "Laudos", FileText], ["documentacao", "Documentação", ClipboardCheck], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Fornecedores", Wrench], ["despesas", "Despesas", Receipt], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog]]
               .filter(([k]) => modulosPermitidos.includes(k))
               .map(([k, label, Icon]) => (
                 <button key={k} onClick={() => setAbaTop(k)} className="tab" style={{ borderBottomColor: abaTop === k ? "#fff" : "transparent", color: abaTop === k ? "#fff" : "rgba(255,255,255,.55)", whiteSpace: "nowrap", flexShrink: 0 }}>
@@ -3720,8 +3745,15 @@ function AppInterno({ session, onLogout }) {
             atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
             importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao} meuConvite={meuConvite} />
         )}
-        {abaTop === "gerencia" && (
-          <AbaGerencia sub={abaGerencia} usuarioAtual={session.usuario} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem}
+        {abaTop === "despesas" && (
+          <AbaMinhasDespesas fin={fin} clientes={clientesAtivos} usuarioAtual={session.usuario} telaEstreita={telaEstreita} notify={notify} />
+        )}
+        {abaTop === "gerencia" && String(abaGerencia).startsWith("fin-") && (
+          <AbaFinanceiroDespesas sub={abaGerencia} fin={fin} clientes={clientes} docs={docs} precos={precos} usuarios={usuarios}
+            usuarioAtual={session.usuario} telaEstreita={telaEstreita} notify={notify} />
+        )}
+        {abaTop === "gerencia" && !String(abaGerencia).startsWith("fin-") && (
+          <AbaGerencia sub={abaGerencia} fin={fin} usuarioAtual={session.usuario} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem}
             importarClientesHistorico={importarClientesHistorico}
             prospeccaoParceiros={prospeccaoParceiros} prospeccaoParceirosCarregando={prospeccaoParceirosCarregando}
             atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
@@ -3771,6 +3803,11 @@ function AppInterno({ session, onLogout }) {
             </p>
           </div>
         </div>
+      )}
+
+      {novaDespesaAberta && (
+        <ModalDespesa fin={fin} clientes={clientesAtivos} usuarios={usuarios} usuarioAtual={session.usuario} telaEstreita={telaEstreita}
+          notify={notify} onFechar={() => setNovaDespesaAberta(false)} />
       )}
 
       {toast && <div className="no-print" style={toastStyle}><Check size={15} /> {toast}</div>}
@@ -12020,6 +12057,1564 @@ function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salva
 }
 
 /* ============================================================
+   FINANCEIRO — DESPESAS E CONTROLE FISCAL
+   ============================================================
+   Despesas da empresa, comprovantes, deslocamentos, relatórios para o contador e a situação
+   do MEI. As regras (o que conta, saúde documental, limite, exportação) moram em
+   src/financeiro-regras.js; aqui ficam só as telas.
+
+   Quem vê o quê (o servidor confere de novo — ver src/financeiro.js no backend):
+   - Gerência: tudo — inclui, altera, exclui, confere/aprova e exporta. O pedido separava
+     "administrador" de "gestor", mas os dois papéis são a mesma pessoa aqui; se um dia houver
+     um gestor que não é Gerência, é um papel novo no backend, não um if a mais nesta tela.
+   - Demais perfis da equipe: lançam despesa e comprovante e veem só o que lançaram (ou o que
+     foi lançado em nome deles), no módulo "Despesas".
+
+   A receita não é lançada aqui: é a mesma do Financeiro/Indicadores (valorDoAtendimento, a
+   partir dos cadastros), mais as "outras receitas" que não passam por vistoria. */
+
+/* Baixa um arquivo protegido pelo login. O apiFetch lê JSON; comprovante é PDF ou foto. */
+async function baixarComToken(caminho, token) {
+  let resp;
+  try {
+    resp = await fetch(`${API_URL}${caminho}`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout?.(TIMEOUT_API_MS) });
+  } catch { throw new Error(MSG_API_FORA); }
+  if (!resp.ok) {
+    let dados = null;
+    try { dados = await resp.json(); } catch { /* corpo não-JSON */ }
+    throw new Error(dados?.erro || (resp.status >= 500 ? MSG_API_FORA : `Erro ${resp.status}`));
+  }
+  return resp.blob();
+}
+const lerArquivoComoDataUrl = (arquivo) => new Promise((resolver, rejeitar) => {
+  const leitor = new FileReader();
+  leitor.onload = () => resolver(leitor.result);
+  leitor.onerror = () => rejeitar(new Error("Não foi possível ler o arquivo."));
+  leitor.readAsDataURL(arquivo);
+});
+
+/* Estado do módulo, num lugar só. Carrega quando alguém abre uma tela do Financeiro — não no
+   login: o técnico que só vai fazer vistoria não precisa baixar a lista de despesas. */
+function useFinanceiro({ token, perfil, notify, ativo }) {
+  const ehGerencia = perfil === "gerencia";
+  const [despesas, setDespesas] = useState([]);
+  const [receitas, setReceitas] = useState([]);
+  const [config, setConfig] = useState({});
+  const [carregando, setCarregando] = useState(false);
+  const [carregado, setCarregado] = useState(false);
+
+  const carregar = async () => {
+    setCarregando(true);
+    try {
+      const [rd, rc, rr] = await Promise.all([
+        apiFetch("/api/financeiro/despesas", { token }),
+        apiFetch("/api/financeiro/config", { token }).catch(() => ({ config: {} })),
+        ehGerencia ? apiFetch("/api/financeiro/receitas", { token }) : Promise.resolve({ receitas: [] }),
+      ]);
+      setDespesas(rd.despesas || []);
+      setConfig(rc.config || {});
+      setReceitas(rr.receitas || []);
+      setCarregado(true);
+    } catch (e) { notify(`Não foi possível carregar o Financeiro: ${e.message}`); }
+    setCarregando(false);
+  };
+  useEffect(() => { if (ativo && !carregado && !carregando) carregar(); }, [ativo]);
+
+  const trocar = (d) => setDespesas((atual) => (atual.some((x) => x.id === d.id) ? atual.map((x) => (x.id === d.id ? d : x)) : [d, ...atual]));
+
+  /* Devolve a despesa gravada (ou null): o cadastro rápido precisa do id para anexar a foto
+     logo em seguida. */
+  const salvarDespesa = async (dados, id) => {
+    try {
+      const r = id
+        ? await apiFetch(`/api/financeiro/despesas/${id}`, { method: "PATCH", token, body: dados })
+        : await apiFetch("/api/financeiro/despesas", { method: "POST", token, body: dados });
+      trocar(r.despesa);
+      return r.despesa;
+    } catch (e) { notify(`Não foi possível salvar a despesa: ${e.message}`); return null; }
+  };
+  /* Foto de celular sai com 4–8 MB; reduzida para 1600px fica legível (número da nota, CNPJ)
+     e cabe folgada no limite do servidor. PDF vai como está. */
+  const anexar = async (despesaId, arquivo) => {
+    try {
+      let dataUrl = await lerArquivoComoDataUrl(arquivo);
+      let mimeType = arquivo.type || "application/pdf";
+      if (mimeType.startsWith("image/") && !/hei[cf]/.test(mimeType)) {
+        dataUrl = await redimensionar(dataUrl, 1600);
+        mimeType = "image/jpeg";
+      }
+      const nome = mimeType === "image/jpeg" ? String(arquivo.name || "comprovante").replace(/\.[^.]+$/, "") + ".jpg" : arquivo.name;
+      const r = await apiFetch(`/api/financeiro/despesas/${despesaId}/anexos`, { method: "POST", token, body: { nomeArquivo: nome, mimeType, arquivoBase64: dataUrl } });
+      trocar(r.despesa);
+      return r.despesa;
+    } catch (e) { notify(`Não foi possível anexar ${arquivo.name || "o comprovante"}: ${e.message}`); return null; }
+  };
+  const removerAnexo = async (anexoId) => {
+    try {
+      const r = await apiFetch(`/api/financeiro/anexos/${anexoId}`, { method: "DELETE", token });
+      trocar(r.despesa);
+    } catch (e) { notify(`Não foi possível remover o comprovante: ${e.message}`); }
+  };
+  const baixarAnexo = (anexo) => baixarComToken(`/api/financeiro/anexos/${anexo.id}/arquivo`, token);
+  /* A aba abre ANTES do download: aberta depois de um await, o navegador trata como pop-up
+     e bloqueia. */
+  const abrirAnexo = async (anexo) => {
+    const janela = window.open("", "_blank");
+    try {
+      const blob = await baixarAnexo(anexo);
+      const url = URL.createObjectURL(blob);
+      if (janela) janela.location.href = url; else window.location.href = url;
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) { janela?.close(); notify(e.message); }
+  };
+  const decidir = async (id, decisao, motivo) => {
+    try {
+      const r = await apiFetch(`/api/financeiro/despesas/${id}/aprovacao`, { method: "POST", token, body: { decisao, motivo } });
+      trocar(r.despesa);
+      notify(decisao === "aprovar" ? "Despesa aprovada ✓" : decisao === "rejeitar" ? "Despesa rejeitada" : "Devolvida para correção");
+      return true;
+    } catch (e) { notify(`Não foi possível registrar a decisão: ${e.message}`); return false; }
+  };
+  const excluir = async (id) => {
+    try {
+      await apiFetch(`/api/financeiro/despesas/${id}`, { method: "DELETE", token });
+      setDespesas((atual) => atual.filter((d) => d.id !== id));
+      notify("Despesa excluída");
+    } catch (e) { notify(`Não foi possível excluir: ${e.message}`); }
+  };
+  const salvarReceita = async (dados, id) => {
+    try {
+      const r = id
+        ? await apiFetch(`/api/financeiro/receitas/${id}`, { method: "PATCH", token, body: dados })
+        : await apiFetch("/api/financeiro/receitas", { method: "POST", token, body: dados });
+      setReceitas((atual) => (id ? atual.map((x) => (x.id === id ? r.receita : x)) : [r.receita, ...atual]));
+      notify("Receita salva ✓");
+      return true;
+    } catch (e) { notify(`Não foi possível salvar a receita: ${e.message}`); return false; }
+  };
+  const excluirReceita = async (id) => {
+    try {
+      await apiFetch(`/api/financeiro/receitas/${id}`, { method: "DELETE", token });
+      setReceitas((atual) => atual.filter((x) => x.id !== id));
+    } catch (e) { notify(`Não foi possível excluir: ${e.message}`); }
+  };
+  const salvarConfig = async (nova) => {
+    try {
+      const r = await apiFetch("/api/financeiro/config", { method: "PUT", token, body: nova });
+      setConfig(r.config || nova);
+      notify("Configurações fiscais salvas ✓");
+      return true;
+    } catch (e) { notify(`Não foi possível salvar: ${e.message}`); return false; }
+  };
+
+  return { ehGerencia, despesas, receitas, config, carregando, carregado, carregar, salvarDespesa, anexar, removerAnexo,
+    baixarAnexo, abrirAnexo, decidir, excluir, salvarReceita, excluirReceita, salvarConfig };
+}
+
+/* ---------- Receita de um recorte ----------
+   A mesma conta da aba Indicadores (resumirAtendimentos), para os dois números baterem. "base"
+   vem da configuração fiscal: "cobrado" é o valor dos serviços do período (competência);
+   "recebido", só o que já entrou (caixa). */
+function receitaDoPeriodo({ clientes = [], docs = [], precos = [], receitas = [], periodo, base = "cobrado" }) {
+  const precoPorChave = {};
+  precos.forEach((p) => { precoPorChave[normalizarChaveEmpreendimento(p.empreendimento)] = p; });
+  const ativos = clientes.filter((c) => c.status !== "Cancelado");
+  const r = resumirAtendimentos(ativos, docs, precoPorChave, periodo);
+  const avulsas = receitas.filter((x) => dentroDoPeriodo(x.data, periodo));
+  const valorAvulsa = (x) => (base === "recebido" && !x.recebido ? 0 : Number(x.valor) || 0);
+  const deAtendimentos = base === "recebido" ? r.recebido : r.cobrado;
+  const deAvulsas = avulsas.reduce((s, x) => s + valorAvulsa(x), 0);
+  /* Valor de um atendimento na base escolhida — usado no rateio por serviço e empreendimento. */
+  const valorDe = (c) => {
+    const doc = docDoCliente(c, docs);
+    const valor = valorDoAtendimento(c, doc, precoPorChave);
+    if (base !== "recebido") return valor;
+    const pago = doc?.pagamento === "Pago" || c.pagamento === "Pago";
+    return pago ? valor : c.pagamento === "Parcial" ? (Number(c.valorRecebido) || 0) : 0;
+  };
+  return {
+    total: deAtendimentos + deAvulsas, deAtendimentos, deAvulsas,
+    atendimentos: r.lista, avulsas, valorDe, valorAvulsa,
+    vistorias: r.lista.filter(ehTrabalhoDeVistoria).length,
+  };
+}
+
+/* Período padrão das telas do Financeiro: o mês corrente, que é como a FN fecha as contas. */
+const periodoMesAtual = () => ({ granularidade: "mes", ano: new Date().getFullYear(), indice: new Date().getMonth() });
+function anosDasDespesas(despesas = [], receitas = []) {
+  const s = new Set([new Date().getFullYear()]);
+  [...despesas, ...receitas].forEach((d) => { const p = partesDaData(d.data); if (p) s.add(p.ano); });
+  return [...s].sort((a, b) => b - a);
+}
+/* "01/09/2026 a 30/09/2026" — o cabeçalho do relatório. */
+function intervaloDoPeriodo(periodo) {
+  if (!periodo || periodo.granularidade === "tudo") return "Todo o período";
+  const d = (a, m, dia) => `${String(dia).padStart(2, "0")}/${String(m + 1).padStart(2, "0")}/${a}`;
+  const { ano } = periodo;
+  if (periodo.granularidade === "ano") return `${d(ano, 0, 1)} a ${d(ano, 11, 31)}`;
+  if (periodo.granularidade === "trimestre") {
+    const m0 = periodo.indice * 3;
+    return `${d(ano, m0, 1)} a ${d(ano, m0 + 2, Fin.ultimoDiaDoMes(ano, m0 + 2))}`;
+  }
+  return `${d(ano, periodo.indice, 1)} a ${d(ano, periodo.indice, Fin.ultimoDiaDoMes(ano, periodo.indice))}`;
+}
+
+/* Rótulo de um cadastro nas listas de vínculo: quem, onde e quando. */
+const rotuloAtendimento = (c) => [c.nome, c.empreendimento, c.blocoTorre, c.dataDesejada ? Fin.dataBr(c.dataDesejada) : ""].filter(Boolean).join(" · ");
+const tipoVinculoDoCliente = (c) => (c?.servico === SERVICO_REVISTORIA ? "Revistoria" : ehServicoDocumentacao(c) ? "Documentação ART/TRT" : "Vistoria");
+
+function SeloFin({ texto, cor, fundo, title }) {
+  return (
+    <span title={title} style={{ display: "inline-block", fontSize: 11, fontWeight: 700, color: cor, background: fundo, borderRadius: 20, padding: "2px 9px", whiteSpace: "nowrap" }}>
+      {texto}
+    </span>
+  );
+}
+function SeloDocumental({ despesa }) {
+  const s = Fin.statusDocumental(despesa);
+  return s.ok
+    ? <SeloFin texto="✅ Documento completo" cor="#1B7F4B" fundo="#E6F4EC" />
+    : <SeloFin texto={`⚠️ ${s.rotulo}`} cor="#B26A00" fundo="#FFF4E0" title={s.todas.map((k) => Fin.PENDENCIAS_DOC[k]).join(" · ")} />;
+}
+function SeloAprovacao({ status }) {
+  const c = Fin.COR_STATUS_APROVACAO[status] || Fin.COR_STATUS_APROVACAO["Aguardando conferência"];
+  return <SeloFin texto={status} cor={c.cor} fundo={c.fundo} />;
+}
+function AvisoFin({ tom = "atencao", children }) {
+  const cores = {
+    atencao: { cor: "#8a5300", fundo: "#FFF4E0", borda: "#f0c987" },
+    erro: { cor: "#A12020", fundo: "#FDECEC", borda: "#f3b9b9" },
+    info: { cor: AZUL_MARINHO, fundo: "#EEF4FB", borda: "#c9dcf0" },
+  }[tom];
+  return (
+    <div style={{ background: cores.fundo, color: cores.cor, border: `1px solid ${cores.borda}`, borderRadius: 10, padding: "9px 12px", fontSize: 13, lineHeight: 1.45 }}>
+      {children}
+    </div>
+  );
+}
+
+/* ---------- Alertas automáticos ----------
+   Só dizem o que falta e onde. Nenhum deles muda a despesa sozinho. */
+function AlertasFinanceiro({ despesas = [], ehGerencia = false }) {
+  const empresariais = despesas.filter(Fin.contaNosIndicadores);
+  const semDoc = empresariais.filter((d) => !(d.anexos?.length)).length;
+  const semCnpj = empresariais.filter((d) => String(d.numeroNf || "").trim() && d.nfCnpjFn !== true).length;
+  const pessoais = despesas.filter((d) => d.finalidade === "pessoal" && d.statusAprovacao !== "Rejeitada").length;
+  const aguardando = despesas.filter((d) => d.statusAprovacao === "Aguardando conferência").length;
+  const corrigir = despesas.filter((d) => d.statusAprovacao === "Necessita correção").length;
+  const itens = [];
+  if (semDoc) itens.push(["atencao", semDoc === 1 ? "Existe 1 despesa sem documentação." : `Existem ${semDoc} despesas sem documentação.`]);
+  if (semCnpj) itens.push(["atencao", semCnpj === 1 ? "1 despesa empresarial não possui o CNPJ da FN informado na nota." : `${semCnpj} despesas empresariais não possuem o CNPJ da FN informado na nota.`]);
+  if (pessoais) itens.push(["info", pessoais === 1 ? "1 despesa foi classificada como pessoal e não é considerada nos indicadores empresariais." : `${pessoais} despesas foram classificadas como pessoais e não são consideradas nos indicadores empresariais.`]);
+  if (ehGerencia && aguardando) itens.push(["info", `${aguardando} despesa(s) aguardando conferência.`]);
+  if (corrigir) itens.push(["erro", ehGerencia ? `${corrigir} despesa(s) devolvida(s) para correção, esperando o colaborador.` : `${corrigir} despesa(s) sua(s) precisa(m) de correção — veja o motivo na lista.`]);
+  if (!itens.length) return null;
+  return <div style={{ display: "grid", gap: 8 }}>{itens.map(([tom, t]) => <AvisoFin key={t} tom={tom}>{t}</AvisoFin>)}</div>;
+}
+
+/* ============================================================
+   Cadastro de despesa (e de deslocamento)
+   ============================================================
+   No celular o caminho é o do pedido: foto da nota → valor → categoria → vistoria → salvar.
+   Todo o resto fica em "Mais detalhes", aberto por padrão só no computador e na edição —
+   quem lança no balcão do posto não pode ter de rolar 18 campos. */
+const DESPESA_VAZIA = {
+  data: "", descricao: "", valor: "", categoria: "", subcategoria: "", formaPagamento: "", situacaoPagamento: "Pago",
+  fornecedor: "", fornecedorDocumento: "", numeroNf: "", nfCnpjFn: null, possuiComprovante: null,
+  finalidade: "empresarial", percentualEmpresarial: "", vinculoTipo: "", clienteId: "", empreendimento: "",
+  servicoRelacionado: "", colaboradorId: "", observacoes: "", deslocamento: null,
+};
+const DESLOCAMENTO_VAZIO = { veiculo: "", motorista: "", kmInicial: "", kmFinal: "", origem: "", destino: "", motivo: "", litros: "", precoLitro: "", posto: "", postoCnpj: "" };
+
+function BotaoSimNao({ valor, onChange }) {
+  const b = (v, t) => (
+    <button type="button" onClick={() => onChange(valor === v ? null : v)}
+      style={{ flex: 1, padding: "8px 0", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer",
+        border: `1px solid ${valor === v ? AZUL_MEDIO : CINZA_BORDA}`, background: valor === v ? "#EEF4FB" : "#fff", color: valor === v ? AZUL_MARINHO : "#65758b" }}>
+      {t}
+    </button>
+  );
+  return <div style={{ display: "flex", gap: 6 }}>{b(true, "Sim")}{b(false, "Não")}</div>;
+}
+
+function ModalDespesa({ inicial = null, modo = "despesa", fin, clientes = [], usuarios = [], usuarioAtual, telaEstreita, onFechar, notify }) {
+  const editando = !!inicial?.id;
+  const comDeslocamento = modo === "deslocamento" || !!inicial?.deslocamento;
+  /* A despesa viva (com os anexos que acabaram de subir), não a cópia de quando o modal abriu. */
+  const atual = editando ? (fin.despesas.find((d) => d.id === inicial.id) || inicial) : null;
+  const [f, setF] = useState(() => {
+    const base = { ...DESPESA_VAZIA, data: Fin.hojeIso(), ...(inicial || {}) };
+    base.valor = base.valor === 0 && comDeslocamento ? "" : String(base.valor ?? "").replace(".", ",");
+    base.percentualEmpresarial = base.percentualEmpresarial == null ? "" : String(base.percentualEmpresarial);
+    if (comDeslocamento) {
+      base.categoria ||= "Deslocamento";
+      base.subcategoria ||= "Combustível";
+      base.deslocamento = { ...DESLOCAMENTO_VAZIO, ...(base.deslocamento || {}) };
+      Object.keys(base.deslocamento).forEach((k) => { if (base.deslocamento[k] == null) base.deslocamento[k] = ""; });
+    }
+    return base;
+  });
+  const [detalhes, setDetalhes] = useState(editando || comDeslocamento || !telaEstreita);
+  const [arquivos, setArquivos] = useState([]);
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState("");
+  const set = (campo, valor) => setF((x) => ({ ...x, [campo]: valor }));
+  const setDesl = (campo, valor) => setF((x) => {
+    const deslocamento = { ...x.deslocamento, [campo]: valor };
+    const novo = { ...x, deslocamento };
+    /* Posto e CNPJ do posto são o fornecedor da despesa — uma informação só, digitada uma vez. */
+    if (campo === "posto") novo.fornecedor = valor;
+    if (campo === "postoCnpj") novo.fornecedorDocumento = valor;
+    return novo;
+  });
+
+  const bloqueada = editando && !fin.ehGerencia && atual?.statusAprovacao === "Aprovada";
+  const subcategorias = Fin.CATEGORIAS_DESPESA[f.categoria] || [];
+  const clientesOrdenados = useMemo(() => clientes
+    .filter((c) => c.status !== "Cancelado")
+    .sort((a, b) => String(b.dataDesejada || "").localeCompare(String(a.dataDesejada || ""))), [clientes]);
+  const numero = (v) => { const n = Number(String(v ?? "").replace(/\./g, "").replace(",", ".")); return Number.isFinite(n) ? n : NaN; };
+  const numeroSimples = (v) => { const n = Number(String(v ?? "").replace(",", ".")); return Number.isFinite(n) ? n : NaN; };
+
+  const escolherCliente = (id) => {
+    const c = clientes.find((x) => x.id === id);
+    setF((x) => ({ ...x, clienteId: id, ...(c ? { empreendimento: c.empreendimento || x.empreendimento, vinculoTipo: tipoVinculoDoCliente(c) } : {}) }));
+  };
+
+  /* Prévia do cálculo da viagem, com a mesma regra da tela de Deslocamentos. */
+  const previaDesl = comDeslocamento ? Fin.calculoDeslocamento({
+    valor: numero(f.valor) || 0, finalidade: f.finalidade, percentualEmpresarial: numeroSimples(f.percentualEmpresarial),
+    deslocamento: { kmInicial: numeroSimples(f.deslocamento.kmInicial), kmFinal: numeroSimples(f.deslocamento.kmFinal) },
+  }, Fin.custoMedioPorKm(fin.despesas.filter(Fin.ehDeslocamento))) : null;
+  const completarAbastecimento = () => {
+    const extra = Fin.completarAbastecimento({ valor: numero(f.valor) || "", litros: f.deslocamento.litros, precoLitro: f.deslocamento.precoLitro });
+    if (extra.valor != null) set("valor", String(extra.valor).replace(".", ","));
+    if (extra.litros != null) setDesl("litros", String(extra.litros).replace(".", ","));
+    if (extra.precoLitro != null) setDesl("precoLitro", String(extra.precoLitro).replace(".", ","));
+  };
+
+  const salvar = async () => {
+    setErro("");
+    const valor = f.valor === "" && comDeslocamento ? 0 : numero(f.valor);
+    if (!Number.isFinite(valor) || valor < 0 || (!comDeslocamento && valor === 0)) { setErro("Informe o valor."); return; }
+    if (!f.categoria) { setErro("Escolha a categoria."); return; }
+    if (comDeslocamento) {
+      const ini = numeroSimples(f.deslocamento.kmInicial), fim = numeroSimples(f.deslocamento.kmFinal);
+      if (f.deslocamento.kmInicial !== "" && f.deslocamento.kmFinal !== "" && fim < ini) { setErro("A quilometragem final é menor que a inicial."); return; }
+      if (valor === 0 && !(fim > ini)) { setErro("Informe o valor abastecido ou a quilometragem da viagem."); return; }
+    }
+    const corpo = {
+      ...f, valor,
+      percentualEmpresarial: f.finalidade === "parcial" ? numeroSimples(f.percentualEmpresarial || 50) : null,
+      clienteId: f.clienteId || null, colaboradorId: f.colaboradorId || null,
+      /* Descrição vazia vira "Combustível — Posto X": a lista e a planilha do contador precisam
+         de alguma coisa legível na linha. */
+      descricao: f.descricao.trim() || [f.subcategoria || f.categoria, f.fornecedor].filter(Boolean).join(" — "),
+      deslocamento: comDeslocamento ? Object.fromEntries(Object.entries(f.deslocamento).map(([k, v]) =>
+        [k, ["kmInicial", "kmFinal", "litros", "precoLitro"].includes(k) ? (v === "" ? null : numeroSimples(v)) : v])) : null,
+    };
+    delete corpo.anexos;
+    setSalvando(true);
+    const salva = await fin.salvarDespesa(corpo, editando ? inicial.id : null);
+    if (!salva) { setSalvando(false); return; }
+    let falhas = 0;
+    for (const arq of arquivos) { if (!(await fin.anexar(salva.id, arq))) falhas += 1; }
+    setSalvando(false);
+    if (falhas) {
+      /* A despesa já existe; fechar aqui faria a pessoa achar que o comprovante foi junto. */
+      setArquivos([]);
+      setErro(`A despesa foi salva, mas ${falhas} comprovante(s) não subiram. Tente anexar de novo.`);
+      return;
+    }
+    notify(editando ? "Despesa atualizada ✓" : "Despesa lançada ✓");
+    onFechar();
+  };
+
+  const pessoal = f.finalidade === "pessoal";
+  const notaSemCnpj = !pessoal && String(f.numeroNf || "").trim() && f.nfCnpjFn === false;
+  const docInvalido = String(f.fornecedorDocumento || "").replace(/\D/g, "").length >= 11 && !Fin.documentoFornecedorValido(f.fornecedorDocumento);
+  const grade = { display: "grid", gridTemplateColumns: telaEstreita ? "1fr" : "1fr 1fr", gap: 12 };
+  const inputArquivo = (props) => (
+    <input type="file" hidden multiple={!props.capture} {...props}
+      onChange={(e) => { const lista = [...(e.target.files || [])]; if (lista.length) setArquivos((a) => [...a, ...lista]); e.target.value = ""; }} />
+  );
+
+  return (
+    <div className="no-print" style={{ ...overlay, alignItems: telaEstreita ? "stretch" : "center", padding: telaEstreita ? 0 : 20 }} onClick={onFechar}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ ...modal, maxWidth: 720, maxHeight: telaEstreita ? "100vh" : "92vh", overflowY: "auto", borderRadius: telaEstreita ? 0 : 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <strong style={{ color: AZUL_MARINHO, fontSize: 16 }}>
+            {editando ? (comDeslocamento ? "Deslocamento" : "Despesa") : comDeslocamento ? "Novo deslocamento" : "Nova despesa"}
+          </strong>
+          <button className="icon-btn" onClick={onFechar} title="Fechar"><X size={18} /></button>
+        </div>
+
+        {editando && (
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+            <SeloAprovacao status={atual.statusAprovacao} />
+            <SeloDocumental despesa={atual} />
+            {atual.aprovadoPor && <span style={{ fontSize: 12, color: "#65758b" }}>por {atual.aprovadoPor} em {fmtDataHora(atual.aprovadoEm)}</span>}
+          </div>
+        )}
+        {editando && atual.motivoAprovacao && atual.statusAprovacao !== "Aprovada" && (
+          <div style={{ marginBottom: 12 }}><AvisoFin tom="erro"><strong>Motivo:</strong> {atual.motivoAprovacao}</AvisoFin></div>
+        )}
+        {bloqueada && <div style={{ marginBottom: 12 }}><AvisoFin tom="info">Esta despesa já foi aprovada. Para corrigir algo, fale com a Gerência.</AvisoFin></div>}
+
+        <fieldset disabled={bloqueada || salvando} style={{ border: "none", padding: 0, margin: 0, display: "grid", gap: 14 }}>
+          {/* 1. Comprovante — primeiro, porque no celular a nota está na mão agora. */}
+          <div>
+            <label style={lab}>Comprovante (foto ou PDF)</label>
+            <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+              <label className="btn-solid" style={{ cursor: "pointer" }}>
+                <Camera size={15} /> Tirar foto
+                {inputArquivo({ accept: "image/*", capture: "environment" })}
+              </label>
+              <label className="btn-solid" style={{ cursor: "pointer", background: "#fff", color: AZUL_MEDIO, border: `1px solid ${AZUL_MEDIO}` }}>
+                <Paperclip size={15} /> Anexar arquivo
+                {inputArquivo({ accept: "application/pdf,image/*" })}
+              </label>
+            </div>
+            {(atual?.anexos?.length > 0 || arquivos.length > 0) && (
+              <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+                {(atual?.anexos || []).map((a) => (
+                  <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                    <Paperclip size={13} color="#65758b" />
+                    <button type="button" onClick={() => fin.abrirAnexo(a)} style={{ background: "none", border: "none", color: AZUL_MEDIO, cursor: "pointer", padding: 0, textAlign: "left", fontSize: 13 }}>{a.nomeArquivo}</button>
+                    {!bloqueada && <button type="button" className="icon-btn" title="Remover comprovante" onClick={() => fin.removerAnexo(a.id)}><Trash2 size={13} color="#C62828" /></button>}
+                  </div>
+                ))}
+                {arquivos.map((a, i) => (
+                  <div key={`${a.name}-${i}`} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#4a5a70" }}>
+                    <Upload size={13} /> {a.name || "foto"} <span style={{ color: "#8593a8" }}>(sobe ao salvar)</span>
+                    <button type="button" className="icon-btn" title="Tirar da lista" onClick={() => setArquivos((l) => l.filter((_, j) => j !== i))}><X size={13} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* 2. Valor */}
+          <div style={cell()}>
+            <label style={lab}>{comDeslocamento ? "Valor abastecido (R$) — deixe em branco se não abasteceu" : "Valor (R$)"}</label>
+            <input style={{ ...inp, fontSize: 20, fontWeight: 700 }} inputMode="decimal" placeholder="0,00" value={f.valor}
+              onChange={(e) => set("valor", e.target.value.replace(/[^\d,.]/g, ""))} />
+          </div>
+
+          {/* 3. Categoria */}
+          {!comDeslocamento && (
+            <div>
+              <label style={lab}>Categoria</label>
+              <div style={{ display: "grid", gridTemplateColumns: telaEstreita ? "1fr 1fr" : "repeat(3, 1fr)", gap: 6, marginTop: 6 }}>
+                {Fin.CATEGORIAS.map((c) => (
+                  <button key={c} type="button" onClick={() => setF((x) => ({ ...x, categoria: c, subcategoria: x.categoria === c ? x.subcategoria : "" }))}
+                    style={{ padding: "10px 6px", borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: "pointer",
+                      border: `1px solid ${f.categoria === c ? AZUL_MEDIO : CINZA_BORDA}`, background: f.categoria === c ? AZUL_MEDIO : "#fff", color: f.categoria === c ? "#fff" : AZUL_MARINHO }}>
+                    {Fin.CATEGORIA_CURTA[c]}
+                  </button>
+                ))}
+              </div>
+              {f.categoria && (
+                <select style={{ ...inp, marginTop: 8, width: "100%" }} value={f.subcategoria} onChange={(e) => set("subcategoria", e.target.value)}>
+                  <option value="">Subcategoria…</option>
+                  {subcategorias.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              )}
+            </div>
+          )}
+
+          {/* 4. Vínculo com o atendimento */}
+          <div style={cell()}>
+            <label style={lab}>Vistoria / cliente relacionado</label>
+            <select style={inp} value={f.clienteId || ""} onChange={(e) => escolherCliente(e.target.value)}>
+              <option value="">— Nenhum (despesa geral) —</option>
+              {clientesOrdenados.map((c) => <option key={c.id} value={c.id}>{rotuloAtendimento(c)}</option>)}
+            </select>
+          </div>
+
+          {comDeslocamento && (
+            <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: 14, display: "grid", gap: 12 }}>
+              <strong style={{ fontSize: 13, color: AZUL_MARINHO }}>Viagem</strong>
+              <div style={grade}>
+                <Field label="Veículo" value={f.deslocamento.veiculo} onChange={(v) => setDesl("veiculo", v)} placeholder="Ex.: Onix placa ABC1D23" />
+                <Field label="Motorista" value={f.deslocamento.motorista} onChange={(v) => setDesl("motorista", v)} />
+                <Field label="Km inicial" value={f.deslocamento.kmInicial} onChange={(v) => setDesl("kmInicial", v.replace(/[^\d,.]/g, ""))} />
+                <Field label="Km final" value={f.deslocamento.kmFinal} onChange={(v) => setDesl("kmFinal", v.replace(/[^\d,.]/g, ""))} />
+                <Field label="Origem" value={f.deslocamento.origem} onChange={(v) => setDesl("origem", v)} />
+                <Field label="Destino" value={f.deslocamento.destino} onChange={(v) => setDesl("destino", v)} />
+                <Field label="Motivo da viagem" value={f.deslocamento.motivo} onChange={(v) => setDesl("motivo", v)} full />
+                <Field label="Litros" value={f.deslocamento.litros} onChange={(v) => setDesl("litros", v.replace(/[^\d,.]/g, ""))} />
+                <Field label="Preço por litro (R$)" value={f.deslocamento.precoLitro} onChange={(v) => setDesl("precoLitro", v.replace(/[^\d,.]/g, ""))} />
+                <Field label="Posto" value={f.deslocamento.posto} onChange={(v) => setDesl("posto", v)} />
+                <Field label="CNPJ do posto" value={f.deslocamento.postoCnpj} onChange={(v) => setDesl("postoCnpj", v)} />
+              </div>
+              <button type="button" className="btn-mini" style={{ justifySelf: "start" }} onClick={completarAbastecimento}>Completar litros / preço / valor</button>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <CartaoIndicador titulo="Km rodados" valor={previaDesl.km ? previaDesl.km.toLocaleString("pt-BR") : "—"} />
+                <CartaoIndicador titulo="Custo por km" valor={previaDesl.custoKm ? Fin.brl(previaDesl.custoKm) : "—"} />
+                <CartaoIndicador titulo="Custo do deslocamento" valor={previaDesl.custoTotal ? Fin.brl(previaDesl.custoTotal) : "—"}
+                  apoio={previaDesl.estimado ? "estimado pela média de custo por km" : f.finalidade === "parcial" ? "só a parte empresarial" : null} />
+              </div>
+            </div>
+          )}
+
+          <div style={cell()}>
+            <label style={lab}>Uso</label>
+            <select style={inp} value={f.finalidade} onChange={(e) => set("finalidade", e.target.value)}>
+              {Fin.FINALIDADES.map((x) => <option key={x.valor} value={x.valor}>{x.rotulo}</option>)}
+            </select>
+            {f.finalidade === "parcial" && (
+              <input style={{ ...inp, marginTop: 6 }} inputMode="decimal" placeholder="% empresarial (padrão 50)" value={f.percentualEmpresarial}
+                onChange={(e) => set("percentualEmpresarial", e.target.value.replace(/[^\d,.]/g, ""))} />
+            )}
+          </div>
+          {pessoal && <AvisoFin tom="info">Esta despesa foi classificada como pessoal e não será considerada nos indicadores empresariais.</AvisoFin>}
+
+          {!detalhes && (
+            <button type="button" onClick={() => setDetalhes(true)} style={{ background: "none", border: "none", color: AZUL_MEDIO, fontWeight: 700, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, padding: 0 }}>
+              <ChevronDown size={15} /> Mais detalhes (nota, fornecedor, pagamento…)
+            </button>
+          )}
+
+          {detalhes && (
+            <div style={{ display: "grid", gap: 12 }}>
+              <div style={grade}>
+                <Field label="Data" type="date" value={f.data} onChange={(v) => set("data", v)} />
+                <Field label="Descrição" value={f.descricao} onChange={(v) => set("descricao", v)} placeholder="Ex.: Gasolina ida à vistoria" />
+                {comDeslocamento && (
+                  <div style={cell()}>
+                    <label style={lab}>Tipo de gasto</label>
+                    <select style={inp} value={f.subcategoria} onChange={(e) => set("subcategoria", e.target.value)}>
+                      {Fin.CATEGORIAS_DESPESA.Deslocamento.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                )}
+                <div style={cell()}>
+                  <label style={lab}>Forma de pagamento</label>
+                  <select style={inp} value={f.formaPagamento} onChange={(e) => set("formaPagamento", e.target.value)}>
+                    <option value="">—</option>
+                    {Fin.FORMAS_PAGAMENTO.map((x) => <option key={x} value={x}>{x}</option>)}
+                  </select>
+                </div>
+                <div style={cell()}>
+                  <label style={lab}>Pago / Pendente</label>
+                  <select style={inp} value={f.situacaoPagamento} onChange={(e) => set("situacaoPagamento", e.target.value)}>
+                    <option value="Pago">Pago</option><option value="Pendente">Pendente</option>
+                  </select>
+                </div>
+                {!comDeslocamento && <Field label="Empresa ou fornecedor" value={f.fornecedor} onChange={(v) => set("fornecedor", v)} />}
+                {!comDeslocamento && (
+                  <div style={cell()}>
+                    <label style={lab}>CPF/CNPJ do fornecedor</label>
+                    <input style={{ ...inp, borderColor: docInvalido ? "#C62828" : CINZA_BORDA }} value={f.fornecedorDocumento} onChange={(e) => set("fornecedorDocumento", e.target.value)} inputMode="numeric" />
+                    {docInvalido && <span style={{ fontSize: 11.5, color: "#C62828" }}>Os dígitos não conferem — confira o número na nota.</span>}
+                  </div>
+                )}
+                <Field label="Número da nota fiscal" value={f.numeroNf} onChange={(v) => set("numeroNf", v)} />
+                <div style={cell()}>
+                  <label style={lab}>Nota emitida no CNPJ da FN?{fin.config?.cnpj ? ` (${Fin.formatarCpfCnpj(fin.config.cnpj)})` : ""}</label>
+                  <BotaoSimNao valor={f.nfCnpjFn} onChange={(v) => set("nfCnpjFn", v)} />
+                </div>
+                <div style={cell()}>
+                  <label style={lab}>Possui comprovante?</label>
+                  <BotaoSimNao valor={(atual?.anexos?.length || arquivos.length) ? true : f.possuiComprovante} onChange={(v) => set("possuiComprovante", v)} />
+                </div>
+                <div style={cell()}>
+                  <label style={lab}>Tipo de serviço relacionado</label>
+                  <select style={inp} value={f.vinculoTipo} onChange={(e) => set("vinculoTipo", e.target.value)}>
+                    <option value="">—</option>
+                    {Fin.TIPOS_VINCULO.map((x) => <option key={x} value={x}>{x}</option>)}
+                  </select>
+                </div>
+                <Field label="Empreendimento relacionado" value={f.empreendimento} onChange={(v) => set("empreendimento", v)} />
+                <Field label="Serviço / projeto (texto livre)" value={f.servicoRelacionado} onChange={(v) => set("servicoRelacionado", v)} placeholder="Ex.: Reforma apto 302" />
+                {fin.ehGerencia ? (
+                  <div style={cell()}>
+                    <label style={lab}>Colaborador responsável</label>
+                    <select style={inp} value={f.colaboradorId || ""} onChange={(e) => set("colaboradorId", e.target.value)}>
+                      <option value="">{usuarioAtual?.nome ? `${usuarioAtual.nome} (eu)` : "Eu"}</option>
+                      {usuarios.filter((u) => u.id !== usuarioAtual?.id && u.role !== "afiliado" && u.role !== "cliente").map((u) => <option key={u.id} value={u.id}>{u.nome}</option>)}
+                    </select>
+                  </div>
+                ) : (
+                  <Field label="Colaborador responsável" value={atual?.colaboradorNome || usuarioAtual?.nome || ""} onChange={() => {}} disabled />
+                )}
+              </div>
+              {notaSemCnpj && <AvisoFin tom="atencao">Esta despesa empresarial não possui o CNPJ da FN informado na nota.</AvisoFin>}
+              <Area label="Observações" value={f.observacoes} onChange={(v) => set("observacoes", v)} rows={2} />
+            </div>
+          )}
+        </fieldset>
+
+        {erro && <div style={{ marginTop: 12 }}><AvisoFin tom="erro">{erro}</AvisoFin></div>}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16, position: telaEstreita ? "sticky" : "static", bottom: 0, background: "#fff", paddingTop: 8 }}>
+          <button className="btn-solid" style={{ background: "#fff", color: "#4a5a70", border: `1px solid ${CINZA_BORDA}` }} onClick={onFechar}>Cancelar</button>
+          {!bloqueada && (
+            <button className="btn-solid" onClick={salvar} disabled={salvando} style={{ minWidth: 120, justifyContent: "center" }}>
+              {salvando ? <Loader2 size={15} className="spin" /> : <Check size={15} />} Salvar
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Aprovar é um clique; devolver e rejeitar pedem o motivo, que é o que o colaborador lê. */
+function ModalDecisaoDespesa({ despesa, decisao, onConfirmar, onFechar }) {
+  const [motivo, setMotivo] = useState("");
+  const titulo = decisao === "rejeitar" ? "Rejeitar despesa" : "Devolver para correção";
+  return (
+    <div className="no-print" style={overlay} onClick={onFechar}>
+      <div style={modal} onClick={(e) => e.stopPropagation()}>
+        <strong style={{ color: AZUL_MARINHO }}>{titulo}</strong>
+        <p style={{ fontSize: 13, color: "#4a5a70" }}>{despesa.descricao} — {Fin.brl(despesa.valor)} ({Fin.dataBr(despesa.data)})</p>
+        <textarea rows={3} style={{ ...inp, width: "100%", resize: "vertical" }} autoFocus value={motivo} onChange={(e) => setMotivo(e.target.value)}
+          placeholder={decisao === "rejeitar" ? "Por que não é despesa da empresa?" : "O que precisa ser corrigido? (ex.: falta a nota no CNPJ da FN)"} />
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+          <button className="btn-solid" style={{ background: "#fff", color: "#4a5a70", border: `1px solid ${CINZA_BORDA}` }} onClick={onFechar}>Cancelar</button>
+          <button className="btn-solid" style={{ background: decisao === "rejeitar" ? "#C62828" : "#B85E10" }} disabled={!motivo.trim()}
+            onClick={() => onConfirmar(motivo.trim())}>{decisao === "rejeitar" ? "Rejeitar" : "Devolver"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Lista de despesas (usada na Gerência e no "Minhas despesas") ---------- */
+function TabelaDespesas({ lista, fin, clientesPorId = {}, onEditar, vazio = "Nenhuma despesa neste recorte." }) {
+  const [decidindo, setDecidindo] = useState(null); // { despesa, decisao }
+  const [excluindo, setExcluindo] = useState(null);
+  if (!lista.length) return <p style={{ fontSize: 13.5, color: "#65758b", margin: 0 }}>{vazio}</p>;
+  const th = { textAlign: "left", padding: "8px 10px", fontSize: 11.5, color: "#65758b", fontWeight: 700, borderBottom: `1px solid ${CINZA_BORDA}`, whiteSpace: "nowrap" };
+  const td = { padding: "9px 10px", borderBottom: `1px solid ${CINZA_CLARO}`, fontSize: 13, verticalAlign: "top" };
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
+        <thead><tr>
+          <th style={th}>Data</th><th style={th}>Despesa</th><th style={th}>Categoria</th><th style={{ ...th, textAlign: "right" }}>Valor</th>
+          <th style={th}>Documento</th><th style={th}>Conferência</th><th style={th}></th>
+        </tr></thead>
+        <tbody>
+          {lista.map((d) => {
+            const cliente = d.clienteId ? clientesPorId[d.clienteId] : null;
+            const pessoal = d.finalidade === "pessoal";
+            return (
+              <tr key={d.id} style={{ opacity: pessoal || d.statusAprovacao === "Rejeitada" ? 0.6 : 1 }}>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>{Fin.dataBr(d.data)}</td>
+                <td style={td}>
+                  <button onClick={() => onEditar(d)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", color: AZUL_MARINHO, fontWeight: 700, fontSize: 13 }}>
+                    {d.descricao || d.subcategoria || d.categoria}
+                  </button>
+                  <div style={{ fontSize: 11.5, color: "#65758b" }}>
+                    {[d.fornecedor, cliente ? cliente.nome : "", d.empreendimento, d.colaboradorNome && fin.ehGerencia ? `por ${d.colaboradorNome}` : ""].filter(Boolean).join(" · ")}
+                  </div>
+                  {pessoal && <div style={{ fontSize: 11, color: "#65758b" }}>Uso pessoal — fora dos indicadores</div>}
+                  {d.finalidade === "parcial" && <div style={{ fontSize: 11, color: "#65758b" }}>Uso parcial — {d.percentualEmpresarial ?? 50}% empresarial</div>}
+                  {d.motivoAprovacao && d.statusAprovacao !== "Aprovada" && <div style={{ fontSize: 11.5, color: "#A12020" }}>Motivo: {d.motivoAprovacao}</div>}
+                </td>
+                <td style={td}>{d.categoria}<div style={{ fontSize: 11.5, color: "#65758b" }}>{d.subcategoria}</div></td>
+                <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap", fontWeight: 700 }}>
+                  {Fin.brl(d.valor)}
+                  {d.situacaoPagamento === "Pendente" && <div style={{ fontSize: 11, color: "#B26A00", fontWeight: 600 }}>pendente</div>}
+                </td>
+                <td style={td}><SeloDocumental despesa={d} /></td>
+                <td style={td}><SeloAprovacao status={d.statusAprovacao} /></td>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>
+                  <div style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
+                    {fin.ehGerencia && d.statusAprovacao !== "Aprovada" && (
+                      <button className="icon-btn" title="Aprovar" onClick={() => fin.decidir(d.id, "aprovar")}><Check size={15} color="#1B7F4B" /></button>
+                    )}
+                    {fin.ehGerencia && d.statusAprovacao !== "Necessita correção" && (
+                      <button className="icon-btn" title="Devolver para correção" onClick={() => setDecidindo({ despesa: d, decisao: "corrigir" })}><Undo2 size={15} color="#B85E10" /></button>
+                    )}
+                    {fin.ehGerencia && d.statusAprovacao !== "Rejeitada" && (
+                      <button className="icon-btn" title="Rejeitar" onClick={() => setDecidindo({ despesa: d, decisao: "rejeitar" })}><X size={15} color="#C62828" /></button>
+                    )}
+                    <button className="icon-btn" title="Abrir" onClick={() => onEditar(d)}><Edit3 size={15} color={AZUL_MEDIO} /></button>
+                    {fin.ehGerencia && <button className="icon-btn" title="Excluir" onClick={() => setExcluindo(d)}><Trash2 size={15} color="#C62828" /></button>}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {decidindo && (
+        <ModalDecisaoDespesa despesa={decidindo.despesa} decisao={decidindo.decisao} onFechar={() => setDecidindo(null)}
+          onConfirmar={async (motivo) => { if (await fin.decidir(decidindo.despesa.id, decidindo.decisao, motivo)) setDecidindo(null); }} />
+      )}
+      <ConfirmModal aberto={!!excluindo} titulo="Excluir despesa"
+        mensagem={excluindo ? `Excluir "${excluindo.descricao}" (${Fin.brl(excluindo.valor)})? Os comprovantes anexados também são apagados do Drive. Não dá para desfazer.` : ""}
+        onConfirm={async () => { const d = excluindo; setExcluindo(null); await fin.excluir(d.id); }} onCancel={() => setExcluindo(null)} />
+    </div>
+  );
+}
+
+/* Filtros de lista: período (o mesmo seletor do resto da Gerência), categoria, conferência,
+   situação do documento e busca livre. */
+function useFiltroDespesas(despesas, clientesPorId = {}) {
+  const [periodo, setPeriodo] = useState(periodoMesAtual);
+  const [categoria, setCategoria] = useState("");
+  const [aprovacao, setAprovacao] = useState("");
+  const [documento, setDocumento] = useState("");
+  const [busca, setBusca] = useState("");
+  const termo = busca.trim().toLowerCase();
+  const filtradas = despesas.filter((d) => {
+    if (!dentroDoPeriodo(d.data, periodo)) return false;
+    if (categoria && d.categoria !== categoria) return false;
+    if (aprovacao && d.statusAprovacao !== aprovacao) return false;
+    if (documento) {
+      const s = Fin.statusDocumental(d);
+      if (documento === "completo" ? !s.ok : !(s.todas || []).includes(documento)) return false;
+    }
+    if (termo) {
+      const alvo = [d.descricao, d.fornecedor, d.fornecedorDocumento, d.numeroNf, d.subcategoria, d.empreendimento, d.servicoRelacionado, d.colaboradorNome, clientesPorId[d.clienteId]?.nome].join(" ").toLowerCase();
+      if (!alvo.includes(termo)) return false;
+    }
+    return true;
+  });
+  const controles = (anos, { mostrarAprovacao = true } = {}) => (
+    <div style={{ display: "grid", gap: 10 }}>
+      <FiltroPeriodo periodo={periodo} aoMudar={setPeriodo} anos={anos} />
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ position: "relative", flex: "1 1 200px" }}>
+          <Search size={14} style={{ position: "absolute", left: 10, top: 11, color: "#8593a8" }} />
+          <input style={{ ...inp, width: "100%", paddingLeft: 30 }} placeholder="Buscar fornecedor, nota, cliente…" value={busca} onChange={(e) => setBusca(e.target.value)} />
+        </div>
+        <select style={inp} value={categoria} onChange={(e) => setCategoria(e.target.value)}>
+          <option value="">Todas as categorias</option>
+          {Fin.CATEGORIAS.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        {mostrarAprovacao && (
+          <select style={inp} value={aprovacao} onChange={(e) => setAprovacao(e.target.value)}>
+            <option value="">Qualquer conferência</option>
+            {Fin.STATUS_APROVACAO.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        )}
+        <select style={inp} value={documento} onChange={(e) => setDocumento(e.target.value)}>
+          <option value="">Qualquer documento</option>
+          <option value="completo">✅ Documento completo</option>
+          <option value="semNota">⚠️ Sem nota fiscal</option>
+          <option value="notaSemCnpj">⚠️ Nota sem CNPJ da FN</option>
+          <option value="semComprovante">⚠️ Falta comprovante</option>
+        </select>
+      </div>
+    </div>
+  );
+  return { periodo, setPeriodo, filtradas, controles };
+}
+
+const indexarClientes = (clientes) => Object.fromEntries(clientes.map((c) => [c.id, c]));
+
+/* ============================================================
+   Gerência › Financeiro › Despesas
+   ============================================================ */
+function AbaFinDespesas({ fin, clientes = [], usuarios = [], usuarioAtual, telaEstreita, notify }) {
+  const clientesPorId = useMemo(() => indexarClientes(clientes), [clientes]);
+  const filtro = useFiltroDespesas(fin.despesas, clientesPorId);
+  const [editando, setEditando] = useState(null); // { despesa, modo }
+  const aguardando = fin.despesas.filter((d) => d.statusAprovacao === "Aguardando conferência");
+  const lista = filtro.filtradas;
+  const totalEmpresarial = Fin.somaEmpresarial(lista);
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <h2 style={{ margin: 0, fontSize: 18, color: AZUL_MARINHO, flex: 1 }}>Despesas</h2>
+        <button className="btn-solid" onClick={() => setEditando({ despesa: null, modo: "despesa" })}><Plus size={15} /> Nova Despesa</button>
+        <button className="btn-solid" style={{ background: AZUL_MARINHO }} onClick={() => setEditando({ despesa: null, modo: "deslocamento" })}><Car size={15} /> Deslocamento</button>
+        <button className="btn-solid" style={{ background: "#fff", color: AZUL_MEDIO, border: `1px solid ${CINZA_BORDA}` }} onClick={fin.carregar}><RefreshCcw size={15} className={fin.carregando ? "spin" : ""} /></button>
+      </div>
+      <AlertasFinanceiro despesas={fin.despesas.filter((d) => dentroDoPeriodo(d.data, filtro.periodo))} ehGerencia />
+
+      {aguardando.length > 0 && (
+        <Card icon={ClipboardCheck} titulo={`Aguardando conferência (${aguardando.length})`}>
+          <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
+            Lançadas pela equipe e ainda não conferidas — de todos os períodos. Aprovar grava quem aprovou e quando.
+          </p>
+          <TabelaDespesas lista={aguardando} fin={fin} clientesPorId={clientesPorId} onEditar={(d) => setEditando({ despesa: d })} />
+        </Card>
+      )}
+
+      <Card icon={Receipt} titulo="Todas as despesas">
+        {filtro.controles(anosDasDespesas(fin.despesas))}
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", margin: "14px 0" }}>
+          <CartaoIndicador titulo="Lançamentos" valor={lista.length} />
+          <CartaoIndicador titulo="Total lançado" valor={Fin.brl(lista.reduce((s, d) => s + (Number(d.valor) || 0), 0))} />
+          <CartaoIndicador titulo="Total empresarial" valor={Fin.brl(totalEmpresarial)} apoio="sem pessoais e rejeitadas" />
+        </div>
+        {fin.carregando && !fin.carregado ? <p style={{ fontSize: 13, color: "#65758b" }}><Loader2 size={14} className="spin" /> Carregando…</p>
+          : <TabelaDespesas lista={lista} fin={fin} clientesPorId={clientesPorId} onEditar={(d) => setEditando({ despesa: d })} />}
+      </Card>
+
+      {editando && (
+        <ModalDespesa inicial={editando.despesa} modo={editando.modo} fin={fin} clientes={clientes} usuarios={usuarios} usuarioAtual={usuarioAtual}
+          telaEstreita={telaEstreita} notify={notify} onFechar={() => setEditando(null)} />
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   Minhas despesas — o módulo "Despesas" de quem não é Gerência
+   ============================================================ */
+function AbaMinhasDespesas({ fin, clientes = [], usuarioAtual, telaEstreita, notify }) {
+  const clientesPorId = useMemo(() => indexarClientes(clientes), [clientes]);
+  const filtro = useFiltroDespesas(fin.despesas, clientesPorId);
+  const [editando, setEditando] = useState(null);
+  const corrigir = fin.despesas.filter((d) => d.statusAprovacao === "Necessita correção");
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <h2 style={{ margin: 0, fontSize: 18, color: AZUL_MARINHO, flex: 1 }}>Minhas despesas</h2>
+        <button className="btn-solid" onClick={() => setEditando({ despesa: null, modo: "despesa" })}><Plus size={15} /> Despesa</button>
+        <button className="btn-solid" style={{ background: AZUL_MARINHO }} onClick={() => setEditando({ despesa: null, modo: "deslocamento" })}><Car size={15} /> Deslocamento</button>
+      </div>
+      <AvisoFin tom="info">
+        Lance aqui o que você gastou pela FN — combustível, pedágio, material — com a foto da nota. A Gerência confere e
+        aprova; se faltar algo, a despesa volta para você com o motivo.
+        {fin.config?.cnpj ? <> Peça a nota no CNPJ da FN: <strong>{Fin.formatarCpfCnpj(fin.config.cnpj)}</strong>{fin.config.razaoSocial ? ` (${fin.config.razaoSocial})` : ""}.</> : null}
+      </AvisoFin>
+      <AlertasFinanceiro despesas={fin.despesas} />
+      {corrigir.length > 0 && (
+        <Card icon={Undo2} titulo={`Para corrigir (${corrigir.length})`}>
+          <TabelaDespesas lista={corrigir} fin={fin} clientesPorId={clientesPorId} onEditar={(d) => setEditando({ despesa: d })} />
+        </Card>
+      )}
+      <Card icon={Receipt} titulo="Meus lançamentos">
+        {filtro.controles(anosDasDespesas(fin.despesas))}
+        <div style={{ marginTop: 14 }}>
+          {fin.carregando && !fin.carregado ? <p style={{ fontSize: 13, color: "#65758b" }}><Loader2 size={14} className="spin" /> Carregando…</p>
+            : <TabelaDespesas lista={filtro.filtradas} fin={fin} clientesPorId={clientesPorId} onEditar={(d) => setEditando({ despesa: d })}
+                vazio="Nenhuma despesa lançada neste período." />}
+        </div>
+      </Card>
+      {editando && (
+        <ModalDespesa inicial={editando.despesa} modo={editando.modo} fin={fin} clientes={clientes} usuarioAtual={usuarioAtual}
+          telaEstreita={telaEstreita} notify={notify} onFechar={() => setEditando(null)} />
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   Notas e Comprovantes — a central de documentos
+   ============================================================ */
+function AbaFinNotas({ fin, clientes = [], usuarios = [], usuarioAtual, telaEstreita, notify }) {
+  const clientesPorId = useMemo(() => indexarClientes(clientes), [clientes]);
+  const filtro = useFiltroDespesas(fin.despesas, clientesPorId);
+  const [editando, setEditando] = useState(null);
+  const lista = filtro.filtradas.filter((d) => d.statusAprovacao !== "Rejeitada");
+  const contagem = { completo: 0, semNota: 0, notaSemCnpj: 0, semComprovante: 0 };
+  lista.filter(Fin.contaNosIndicadores).forEach((d) => {
+    const s = Fin.statusDocumental(d);
+    if (s.ok) contagem.completo += 1; else s.todas.forEach((k) => { contagem[k] += 1; });
+  });
+  const th = { textAlign: "left", padding: "8px 10px", fontSize: 11.5, color: "#65758b", fontWeight: 700, borderBottom: `1px solid ${CINZA_BORDA}`, whiteSpace: "nowrap" };
+  const td = { padding: "9px 10px", borderBottom: `1px solid ${CINZA_CLARO}`, fontSize: 13, verticalAlign: "top" };
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <h2 style={{ margin: 0, fontSize: 18, color: AZUL_MARINHO }}>Notas e Comprovantes</h2>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <CartaoIndicador titulo="✅ Documento completo" valor={contagem.completo} cor="#1B7F4B" />
+        <CartaoIndicador titulo="⚠️ Sem nota fiscal" valor={contagem.semNota} cor="#B26A00" />
+        <CartaoIndicador titulo="⚠️ Nota sem CNPJ da FN" valor={contagem.notaSemCnpj} cor="#B26A00" />
+        <CartaoIndicador titulo="⚠️ Falta comprovante" valor={contagem.semComprovante} cor="#C62828" />
+      </div>
+      <Card icon={FileCheck} titulo="Documentos das despesas">
+        {filtro.controles(anosDasDespesas(fin.despesas), { mostrarAprovacao: false })}
+        <div style={{ overflowX: "auto", marginTop: 14 }}>
+          {lista.length === 0 ? <p style={{ fontSize: 13.5, color: "#65758b", margin: 0 }}>Nenhum documento neste recorte.</p> : (
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 820 }}>
+              <thead><tr>
+                <th style={th}>Data</th><th style={th}>Fornecedor</th><th style={{ ...th, textAlign: "right" }}>Valor</th><th style={th}>Categoria</th>
+                <th style={th}>CNPJ na nota</th><th style={th}>Serviço relacionado</th><th style={th}>Documento anexado</th><th style={th}>Status</th>
+              </tr></thead>
+              <tbody>
+                {lista.map((d) => {
+                  const cliente = d.clienteId ? clientesPorId[d.clienteId] : null;
+                  return (
+                    <tr key={d.id} style={{ cursor: "pointer" }} onClick={() => setEditando(d)}>
+                      <td style={{ ...td, whiteSpace: "nowrap" }}>{Fin.dataBr(d.data)}</td>
+                      <td style={td}><strong style={{ color: AZUL_MARINHO }}>{d.fornecedor || "—"}</strong>
+                        <div style={{ fontSize: 11.5, color: "#65758b" }}>{Fin.formatarCpfCnpj(d.fornecedorDocumento)}{d.numeroNf ? ` · NF ${d.numeroNf}` : ""}</div></td>
+                      <td style={{ ...td, textAlign: "right", fontWeight: 700, whiteSpace: "nowrap" }}>{Fin.brl(d.valor)}</td>
+                      <td style={td}>{d.categoria}<div style={{ fontSize: 11.5, color: "#65758b" }}>{d.subcategoria}</div></td>
+                      <td style={td}>{d.nfCnpjFn === true ? "Sim" : d.nfCnpjFn === false ? "Não" : "—"}</td>
+                      <td style={td}>{[d.vinculoTipo, cliente?.nome, d.empreendimento, d.servicoRelacionado].filter(Boolean).join(" · ") || "—"}</td>
+                      <td style={td} onClick={(e) => e.stopPropagation()}>
+                        {(d.anexos || []).length === 0 ? <span style={{ color: "#8593a8" }}>—</span> : d.anexos.map((a) => (
+                          <button key={a.id} onClick={() => fin.abrirAnexo(a)} title={a.nomeArquivo}
+                            style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", padding: "1px 0", color: AZUL_MEDIO, cursor: "pointer", fontSize: 12.5 }}>
+                            <Paperclip size={12} /> {a.mimeType === "application/pdf" ? "PDF" : "Foto"}
+                          </button>
+                        ))}
+                      </td>
+                      <td style={td}><SeloDocumental despesa={d} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </Card>
+      {editando && (
+        <ModalDespesa inicial={editando} fin={fin} clientes={clientes} usuarios={usuarios} usuarioAtual={usuarioAtual}
+          telaEstreita={telaEstreita} notify={notify} onFechar={() => setEditando(null)} />
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   Deslocamentos — controle de combustível
+   ============================================================ */
+function AbaFinDeslocamentos({ fin, clientes = [], docs = [], precos = [], usuarios = [], usuarioAtual, telaEstreita, notify }) {
+  const clientesPorId = useMemo(() => indexarClientes(clientes), [clientes]);
+  const [periodo, setPeriodo] = useState(periodoMesAtual);
+  const [editando, setEditando] = useState(null);
+  const viagens = fin.despesas.filter((d) => Fin.ehDeslocamento(d) && d.statusAprovacao !== "Rejeitada" && dentroDoPeriodo(d.data, periodo));
+  const empresariais = viagens.filter(Fin.contaNosIndicadores);
+  /* A média de custo por km sai só das viagens com abastecimento E quilometragem — é ela que
+     estima o custo das viagens registradas sem abastecer. */
+  const mediaKm = Fin.custoMedioPorKm(empresariais);
+  const calculos = Object.fromEntries(viagens.map((d) => [d.id, Fin.calculoDeslocamento(d, mediaKm)]));
+  const kmTotal = empresariais.reduce((s, d) => s + calculos[d.id].km, 0);
+  const combustivel = Fin.somaEmpresarial(empresariais);
+  const custoViagens = empresariais.reduce((s, d) => s + calculos[d.id].custoTotal, 0);
+  /* Outros gastos de deslocamento (pedágio, estacionamento, aplicativo) lançados como despesa
+     comum também são custo de ir à vistoria. */
+  const outrosDesl = Fin.somaEmpresarial(fin.despesas.filter((d) => !Fin.ehDeslocamento(d) && d.categoria === "Deslocamento" && dentroDoPeriodo(d.data, periodo)));
+  const { vistorias } = receitaDoPeriodo({ clientes, docs, precos, periodo });
+  const custoTotalDesl = custoViagens + outrosDesl;
+
+  const th = { textAlign: "left", padding: "8px 10px", fontSize: 11.5, color: "#65758b", fontWeight: 700, borderBottom: `1px solid ${CINZA_BORDA}`, whiteSpace: "nowrap" };
+  const td = { padding: "9px 10px", borderBottom: `1px solid ${CINZA_CLARO}`, fontSize: 13, verticalAlign: "top" };
+  const n = (v, casas = 2) => (v ? v.toLocaleString("pt-BR", { maximumFractionDigits: casas }) : "—");
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <h2 style={{ margin: 0, fontSize: 18, color: AZUL_MARINHO, flex: 1 }}>Deslocamentos</h2>
+        <button className="btn-solid" onClick={() => setEditando({ despesa: null })}><Plus size={15} /> Novo deslocamento</button>
+      </div>
+      <Card icon={CalendarDays} titulo="Período">
+        <FiltroPeriodo periodo={periodo} aoMudar={setPeriodo} anos={anosDasDespesas(fin.despesas)} />
+      </Card>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <CartaoIndicador titulo="Km rodados" valor={n(kmTotal, 0)} apoio="uso empresarial" />
+        <CartaoIndicador titulo="Combustível" valor={Fin.brl(combustivel)} />
+        <CartaoIndicador titulo="Custo médio por km" valor={mediaKm ? Fin.brl(mediaKm) : "—"} />
+        <CartaoIndicador titulo="Custo total de deslocamento" valor={Fin.brl(custoTotalDesl)} apoio={outrosDesl ? `inclui ${Fin.brl(outrosDesl)} de pedágio, estacionamento etc.` : null} />
+        <CartaoIndicador titulo="Custo de deslocamento por vistoria" valor={vistorias ? Fin.brl(custoTotalDesl / vistorias) : "—"} apoio={`${vistorias} vistoria(s) no período`} />
+      </div>
+      {viagens.some((d) => d.finalidade === "pessoal") && (
+        <AvisoFin tom="info">Viagens de uso pessoal aparecem na lista, mas não entram nos números acima.</AvisoFin>
+      )}
+      <Card icon={Car} titulo="Viagens e abastecimentos">
+        <div style={{ overflowX: "auto" }}>
+          {viagens.length === 0 ? <p style={{ fontSize: 13.5, color: "#65758b", margin: 0 }}>Nenhum deslocamento neste período.</p> : (
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
+              <thead><tr>
+                <th style={th}>Data</th><th style={th}>Veículo / motorista</th><th style={th}>Trajeto</th><th style={{ ...th, textAlign: "right" }}>Km</th>
+                <th style={{ ...th, textAlign: "right" }}>Abastecido</th><th style={{ ...th, textAlign: "right" }}>Litros · R$/L</th>
+                <th style={{ ...th, textAlign: "right" }}>Custo/km</th><th style={{ ...th, textAlign: "right" }}>Custo total</th><th style={th}>Uso</th><th style={th}>Documento</th>
+              </tr></thead>
+              <tbody>
+                {viagens.map((d) => {
+                  const c = calculos[d.id];
+                  const x = d.deslocamento || {};
+                  const cliente = d.clienteId ? clientesPorId[d.clienteId] : null;
+                  return (
+                    <tr key={d.id} style={{ cursor: "pointer", opacity: d.finalidade === "pessoal" ? 0.55 : 1 }} onClick={() => setEditando({ despesa: d })}>
+                      <td style={{ ...td, whiteSpace: "nowrap" }}>{Fin.dataBr(d.data)}</td>
+                      <td style={td}>{x.veiculo || "—"}<div style={{ fontSize: 11.5, color: "#65758b" }}>{x.motorista || d.colaboradorNome}</div></td>
+                      <td style={td}>{[x.origem, x.destino].filter(Boolean).join(" → ") || "—"}
+                        <div style={{ fontSize: 11.5, color: "#65758b" }}>{[x.motivo, cliente?.nome, d.empreendimento].filter(Boolean).join(" · ")}</div></td>
+                      <td style={{ ...td, textAlign: "right" }}>{n(c.km, 0)}</td>
+                      <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>{d.valor ? Fin.brl(d.valor) : "—"}</td>
+                      <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>{n(x.litros)} · {x.precoLitro ? Fin.brl(x.precoLitro) : "—"}</td>
+                      <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>{c.custoKm ? Fin.brl(c.custoKm) : "—"}</td>
+                      <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap", fontWeight: 700 }}>{c.custoTotal ? Fin.brl(c.custoTotal) : "—"}{c.estimado && <div style={{ fontSize: 10.5, color: "#B26A00", fontWeight: 600 }}>estimado</div>}</td>
+                      <td style={td}>{d.finalidade === "pessoal" ? "Pessoal" : d.finalidade === "parcial" ? `Parcial (${d.percentualEmpresarial ?? 50}%)` : "100% empresa"}</td>
+                      <td style={td}><SeloDocumental despesa={d} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </Card>
+      {editando && (
+        <ModalDespesa inicial={editando.despesa} modo="deslocamento" fin={fin} clientes={clientes} usuarios={usuarios} usuarioAtual={usuarioAtual}
+          telaEstreita={telaEstreita} notify={notify} onFechar={() => setEditando(null)} />
+      )}
+    </div>
+  );
+}
+
+/* ---------- Rentabilidade: receita × custo por serviço, empreendimento e atendimento ----------
+   O custo de um atendimento é a soma das despesas ligadas ao cadastro dele. O de um serviço ou
+   empreendimento soma também as despesas ligadas só pelo tipo/nome (reforma, projeto…).
+   Despesa sem vínculo nenhum é custo da empresa, não de um serviço: aparece numa linha à parte,
+   em vez de ser rateada por um critério que alguém teria de inventar. */
+function calcularRentabilidade({ receita, despesasEmp, clientesPorId }) {
+  const servicoDaDespesa = (d) => {
+    const c = d.clienteId ? clientesPorId[d.clienteId] : null;
+    if (c) return c.servico || "Outro";
+    const mapa = { "Vistoria": SERVICO_VISTORIA, "Revistoria": SERVICO_REVISTORIA, "Documentação ART/TRT": SERVICO_DOCUMENTACAO };
+    if (d.vinculoTipo && d.vinculoTipo !== "Geral da empresa") return mapa[d.vinculoTipo] || d.vinculoTipo;
+    return null;
+  };
+  const empreendimentoDaDespesa = (d) => (d.clienteId && clientesPorId[d.clienteId]?.empreendimento) || d.empreendimento || "";
+
+  const porServico = {}, porEmp = {};
+  const linha = (mapa, chave, nome) => (mapa[chave] ||= { nome, receita: 0, custo: 0, qtd: 0 });
+  receita.atendimentos.forEach((c) => {
+    const l = linha(porServico, c.servico || "Outro", c.servico || "Outro");
+    l.receita += receita.valorDe(c); l.qtd += 1;
+    if (c.empreendimento) {
+      const e = linha(porEmp, normalizarChaveEmpreendimento(c.empreendimento), c.empreendimento.trim());
+      e.receita += receita.valorDe(c); e.qtd += 1;
+    }
+  });
+  receita.avulsas.forEach((x) => {
+    const l = linha(porServico, x.servico || "Outras receitas", x.servico || "Outras receitas");
+    l.receita += receita.valorAvulsa(x); l.qtd += 1;
+    if (x.empreendimento) linha(porEmp, normalizarChaveEmpreendimento(x.empreendimento), x.empreendimento.trim()).receita += receita.valorAvulsa(x);
+  });
+  let naoVinculado = 0;
+  despesasEmp.forEach((d) => {
+    const v = Fin.valorEmpresarial(d);
+    const s = servicoDaDespesa(d);
+    if (s) linha(porServico, s, s).custo += v; else naoVinculado += v;
+    const emp = empreendimentoDaDespesa(d);
+    if (emp) linha(porEmp, normalizarChaveEmpreendimento(emp), emp.trim()).custo += v;
+  });
+  const fechar = (mapa) => Object.values(mapa).map((l) => ({ ...l, ...Fin.resultado(l.receita, l.custo) }))
+    .sort((a, b) => b.resultado - a.resultado);
+
+  /* Por atendimento: só quem tem despesa ligada — é onde a conta "receita − custo" diz algo. */
+  const custoPorCliente = {};
+  despesasEmp.forEach((d) => { if (d.clienteId) custoPorCliente[d.clienteId] = (custoPorCliente[d.clienteId] || 0) + Fin.valorEmpresarial(d); });
+  const porAtendimento = Object.entries(custoPorCliente).map(([id, custo]) => {
+    const c = clientesPorId[id];
+    const rec = c ? receita.valorDe(c) : 0;
+    return { id, nome: c ? rotuloAtendimento(c) : "(cadastro excluído)", servico: c?.servico || "", ...Fin.resultado(rec, custo) };
+  }).sort((a, b) => (b.margem ?? -999) - (a.margem ?? -999));
+
+  return { porServico: fechar(porServico), porEmpreendimento: fechar(porEmp), porAtendimento, naoVinculado };
+}
+
+function TabelaRentabilidade({ linhas, rotulo, rodape }) {
+  const th = { textAlign: "right", padding: "7px 10px", fontSize: 11.5, color: "#65758b", fontWeight: 700, borderBottom: `1px solid ${CINZA_BORDA}`, whiteSpace: "nowrap" };
+  const td = { textAlign: "right", padding: "8px 10px", borderBottom: `1px solid ${CINZA_CLARO}`, fontSize: 13, whiteSpace: "nowrap" };
+  if (!linhas.length) return <p style={{ fontSize: 13, color: "#65758b", margin: 0 }}>Sem movimento neste recorte.</p>;
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
+        <thead><tr>
+          <th style={{ ...th, textAlign: "left" }}>{rotulo}</th><th style={th}>Receita</th><th style={th}>Custos</th><th style={th}>Resultado</th><th style={th}>Margem</th>
+        </tr></thead>
+        <tbody>
+          {linhas.map((l) => (
+            <tr key={l.nome + (l.id || "")}>
+              <td style={{ ...td, textAlign: "left", whiteSpace: "normal", fontWeight: 600, color: AZUL_MARINHO }}>{l.nome}</td>
+              <td style={td}>{Fin.brl(l.receita)}</td>
+              <td style={td}>{Fin.brl(l.despesa)}</td>
+              <td style={{ ...td, fontWeight: 700, color: l.resultado < 0 ? "#C62828" : "#1B7F4B" }}>{Fin.brl(l.resultado)}</td>
+              <td style={td}>{Fin.pct(l.margem)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {rodape && <p style={{ fontSize: 12, color: "#65758b", margin: "8px 0 0" }}>{rodape}</p>}
+    </div>
+  );
+}
+
+/* Barra do MEI: faturamento do ano contra o limite configurado. */
+function PainelSituacaoTributaria({ fin, clientes, docs, precos, ano = new Date().getFullYear() }) {
+  const config = fin.config || {};
+  const receita = receitaDoPeriodo({ clientes, docs, precos, receitas: fin.receitas, periodo: { granularidade: "ano", ano, indice: 0 }, base: config.baseFaturamento || "cobrado" });
+  const limite = Fin.limiteEfetivo(config, ano);
+  const s = Fin.situacaoMei(receita.total, limite);
+  const regime = config.regime || "MEI";
+  return (
+    <Card icon={Landmark} titulo="Situação Tributária">
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+        <CartaoIndicador titulo="Regime atual" valor={regime} />
+        <CartaoIndicador titulo={`Faturamento em ${ano}`} valor={Fin.brl(receita.total)}
+          apoio={config.baseFaturamento === "recebido" ? "o que já foi recebido" : "serviços do ano (cobrado)"} />
+        {regime === "MEI" && <CartaoIndicador titulo="Limite anual configurado" valor={Fin.brl(limite)} apoio={config.limiteProporcional ? "proporcional ao 1º ano" : null} />}
+        {regime === "MEI" && <CartaoIndicador titulo="Percentual utilizado" valor={Fin.pct(s.pct)} cor={s.faixa.cor} />}
+      </div>
+      {regime === "MEI" ? (
+        <>
+          <div style={{ height: 16, borderRadius: 9, background: CINZA_CLARO, overflow: "hidden", position: "relative" }}
+            role="progressbar" aria-valuenow={Math.round(s.pct)} aria-valuemin={0} aria-valuemax={100} aria-label="Percentual do limite do MEI utilizado">
+            <div style={{ width: `${Math.min(100, s.pct)}%`, height: "100%", background: s.faixa.cor, transition: "width .3s" }} />
+            {[70, 90].map((m) => <div key={m} style={{ position: "absolute", left: `${m}%`, top: 0, bottom: 0, width: 1.5, background: "rgba(0,0,0,.18)" }} />)}
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "#65758b", marginTop: 5, flexWrap: "wrap", gap: 6 }}>
+            <span>{s.faixa.emoji} {s.faixa.rotulo}</span>
+            <span>🟢 até 70% · 🟡 71–90% · 🟠 91–100% · 🔴 acima do limite</span>
+          </div>
+          <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+            {s.alertas.map((a) => <AvisoFin key={a} tom={s.pct >= 100 ? "erro" : "atencao"}>{a}</AvisoFin>)}
+            {s.pct < 100 && <p style={{ fontSize: 13, color: "#4a5a70", margin: 0 }}>Ainda cabem <strong>{Fin.brl(s.restante)}</strong> no limite deste ano.</p>}
+          </div>
+        </>
+      ) : (
+        <p style={{ fontSize: 13, color: "#4a5a70", margin: 0 }}>
+          Com o regime {regime}, o acompanhamento de limite do MEI fica desligado. Os campos do Simples Nacional estão em
+          Configurações Fiscais, sem cálculo automático nesta versão.
+        </p>
+      )}
+      <p style={{ fontSize: 12.5, color: "#8a5300", margin: "12px 0 0", fontWeight: 600 }}>
+        Consulte sua contabilidade antes de alterar o regime tributário.
+      </p>
+    </Card>
+  );
+}
+
+/* ============================================================
+   Indicadores — o dashboard financeiro
+   ============================================================ */
+function AbaFinIndicadores({ fin, clientes = [], docs = [], precos = [] }) {
+  const [periodo, setPeriodo] = useState(periodoMesAtual);
+  const clientesPorId = useMemo(() => indexarClientes(clientes), [clientes]);
+  const receita = receitaDoPeriodo({ clientes, docs, precos, receitas: fin.receitas, periodo, base: fin.config?.baseFaturamento || "cobrado" });
+  const doPeriodo = fin.despesas.filter((d) => dentroDoPeriodo(d.data, periodo));
+  const empresariais = doPeriodo.filter(Fin.contaNosIndicadores);
+  const totalDespesas = Fin.somaEmpresarial(empresariais);
+  const r = Fin.resultado(receita.total, totalDespesas);
+  const saude = Fin.saudeDocumental(doPeriodo);
+  const completas = empresariais.filter((d) => Fin.statusDocumental(d).ok).length;
+  const semComprovante = empresariais.filter((d) => !(d.anexos?.length)).length;
+  const pctDe = (n) => (empresariais.length ? (n / empresariais.length) * 100 : null);
+
+  /* Custo por vistoria: o que está ligado a vistoria/revistoria, dividido pelas vistorias do
+     período. Ao lado, o custo total da empresa dividido pelo mesmo número — as duas leituras
+     respondem perguntas diferentes (quanto custa ir a campo × quanto custa a operação). */
+  const ligadasAVistoria = empresariais.filter((d) => {
+    const c = d.clienteId ? clientesPorId[d.clienteId] : null;
+    return c ? ehTrabalhoDeVistoria(c) : d.vinculoTipo === "Vistoria" || d.vinculoTipo === "Revistoria";
+  });
+  const custoVistorias = Fin.somaEmpresarial(ligadasAVistoria);
+  const mediaKm = Fin.custoMedioPorKm(empresariais.filter(Fin.ehDeslocamento));
+  const custoDesl = empresariais.filter((d) => d.categoria === "Deslocamento")
+    .reduce((s, d) => s + (Fin.ehDeslocamento(d) ? Fin.calculoDeslocamento(d, mediaKm).custoTotal : Fin.valorEmpresarial(d)), 0);
+
+  const porCategoria = Fin.CATEGORIAS.map((c) => ({ nome: c, valor: Fin.somaEmpresarial(empresariais.filter((d) => d.categoria === c)) }))
+    .filter((x) => x.valor > 0).sort((a, b) => b.valor - a.valor);
+  const maiorCat = porCategoria[0]?.valor || 1;
+  /* Viagem registrada só pela quilometragem tem valor zero — não é "despesa grande". */
+  const maiores = empresariais.filter((d) => Fin.valorEmpresarial(d) > 0).sort((a, b) => Fin.valorEmpresarial(b) - Fin.valorEmpresarial(a)).slice(0, 10);
+  const rent = calcularRentabilidade({ receita, despesasEmp: empresariais, clientesPorId });
+  const CORES_CAT = ["#2C75B5", "#12335B", "#0F7259", "#B85E10", "#6E36BE", "#C01F52"];
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <h2 style={{ margin: 0, fontSize: 18, color: AZUL_MARINHO }}>Indicadores financeiros</h2>
+      <Card icon={CalendarDays} titulo="Período">
+        <FiltroPeriodo periodo={periodo} aoMudar={setPeriodo} anos={anosDasDespesas(fin.despesas, fin.receitas)} />
+        <p style={{ fontSize: 12, color: "#65758b", margin: "10px 0 0" }}>
+          Receita: a mesma da aba Indicadores (serviços do período, pela data do serviço){receita.deAvulsas ? ", mais as outras receitas lançadas" : ""}.
+          Despesas: só a parte empresarial — pessoais e rejeitadas ficam fora.
+        </p>
+      </Card>
+      <AlertasFinanceiro despesas={doPeriodo} ehGerencia={fin.ehGerencia} />
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
+        <KpiCard label="Receita do período" valor={Fin.brl(r.receita)} Icon={TrendingUp} />
+        <KpiCard label="Despesas" valor={Fin.brl(r.despesa)} Icon={Receipt} cor="#B85E10" />
+        <KpiCard label="Resultado operacional" valor={Fin.brl(r.resultado)} Icon={DollarSign} cor={r.resultado < 0 ? "#C62828" : "#1B7F4B"} />
+        <KpiCard label="Margem" valor={Fin.pct(r.margem)} Icon={Percent} />
+        <KpiCard label="Despesas com documentos completos" valor={Fin.pct(pctDe(completas), 0)} Icon={FileCheck} />
+        <KpiCard label="Despesas sem comprovante" valor={Fin.pct(pctDe(semComprovante), 0)} Icon={AlertTriangle} cor={semComprovante ? "#C62828" : AZUL_MARINHO} />
+        <KpiCard label={`Custo médio por vistoria (${receita.vistorias})`} valor={receita.vistorias ? Fin.brl(custoVistorias / receita.vistorias) : "—"} Icon={ClipboardList}
+          percentual={receita.vistorias ? `total ÷ vistorias: ${Fin.brl(totalDespesas / receita.vistorias)}` : null} />
+        <KpiCard label="Custo de deslocamento" valor={Fin.brl(custoDesl)} Icon={Car} />
+      </div>
+
+      <Card icon={Gauge} titulo="Saúde documental das despesas">
+        <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ background: saude.faixa.fundo, color: saude.faixa.cor, borderRadius: 14, padding: "14px 20px", minWidth: 170, textAlign: "center" }}>
+            <div style={{ fontSize: 32, fontWeight: 800, lineHeight: 1 }}>{saude.percentual == null ? "—" : Fin.pct(saude.percentual, 0)}</div>
+            <div style={{ fontSize: 13, fontWeight: 700, marginTop: 4 }}>{saude.faixa.emoji} {saude.faixa.rotulo}</div>
+          </div>
+          <div style={{ flex: 1, minWidth: 240, display: "grid", gap: 6 }}>
+            {saude.porCriterio.map((c) => (
+              <div key={c.chave} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
+                <span style={{ width: 190, flexShrink: 0, color: "#4a5a70" }}>{c.rotulo}</span>
+                <div style={{ flex: 1, height: 8, background: CINZA_CLARO, borderRadius: 5, overflow: "hidden" }}>
+                  <div style={{ width: `${c.pct}%`, height: "100%", background: c.pct >= 90 ? "#1B7F4B" : c.pct >= 70 ? "#E0A100" : "#C62828" }} />
+                </div>
+                <strong style={{ width: 52, textAlign: "right" }}>{c.ok}/{c.total}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+        <p style={{ fontSize: 12, color: "#65758b", margin: "12px 0 0" }}>🟢 90–100% Excelente · 🟡 70–89% Atenção · 🔴 abaixo de 70% Documentação insuficiente. Cada despesa empresarial vale cinco pontos, um por critério.</p>
+      </Card>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16 }}>
+        <Card icon={PieChart} titulo="Despesas por categoria">
+          {porCategoria.length === 0 ? <p style={{ fontSize: 13, color: "#65758b", margin: 0 }}>Sem despesas no período.</p> : porCategoria.map((c, i) => (
+            <div key={c.nome} style={{ marginBottom: 9 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 3 }}>
+                <span style={{ color: "#4a5a70" }}>{c.nome}</span>
+                <strong>{Fin.brl(c.valor)} <span style={{ color: "#8593a8", fontWeight: 500 }}>({Fin.pct((c.valor / totalDespesas) * 100, 0)})</span></strong>
+              </div>
+              <div style={{ height: 10, background: CINZA_CLARO, borderRadius: 5, overflow: "hidden" }}>
+                <div style={{ width: `${(c.valor / maiorCat) * 100}%`, height: "100%", background: CORES_CAT[i % CORES_CAT.length], borderRadius: 5 }} />
+              </div>
+            </div>
+          ))}
+        </Card>
+        <Card icon={BarChart3} titulo="Maiores despesas">
+          {maiores.length === 0 ? <p style={{ fontSize: 13, color: "#65758b", margin: 0 }}>Sem despesas no período.</p> : (
+            <ol style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 6 }}>
+              {maiores.map((d) => (
+                <li key={d.id} style={{ fontSize: 13 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                    <span style={{ color: AZUL_MARINHO, fontWeight: 600 }}>{d.descricao || d.subcategoria}</span>
+                    <strong style={{ whiteSpace: "nowrap" }}>{Fin.brl(Fin.valorEmpresarial(d))}</strong>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "#65758b" }}>{Fin.dataBr(d.data)} · {d.categoria}{d.fornecedor ? ` · ${d.fornecedor}` : ""}</div>
+                </li>
+              ))}
+            </ol>
+          )}
+        </Card>
+      </div>
+
+      <Card icon={TrendingUp} titulo="Rentabilidade por serviço">
+        <TabelaRentabilidade linhas={rent.porServico} rotulo="Serviço"
+          rodape={rent.naoVinculado ? `${Fin.brl(rent.naoVinculado)} em despesas não estão ligadas a serviço nenhum (custo geral da empresa) e ficam fora desta tabela.` : null} />
+      </Card>
+
+      <Card icon={Building2} titulo="Comparação entre empreendimentos">
+        {rent.porEmpreendimento.length > 0 && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 10, marginBottom: 14 }}>
+            {rent.porEmpreendimento.slice(0, 6).map((e) => (
+              <div key={e.nome} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: "12px 14px" }}>
+                <div style={{ fontWeight: 800, color: AZUL_MARINHO, marginBottom: 6 }}>{e.nome}</div>
+                <div style={{ fontSize: 12.5, display: "grid", gap: 2, color: "#4a5a70" }}>
+                  <span>Receita: <strong>{Fin.brl(e.receita)}</strong></span>
+                  <span>Custos: <strong>{Fin.brl(e.despesa)}</strong></span>
+                  <span>Resultado: <strong style={{ color: e.resultado < 0 ? "#C62828" : "#1B7F4B" }}>{Fin.brl(e.resultado)}</strong></span>
+                  <span>Margem: <strong>{Fin.pct(e.margem)}</strong></span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <TabelaRentabilidade linhas={rent.porEmpreendimento} rotulo="Empreendimento" />
+      </Card>
+
+      <Card icon={ClipboardCheck} titulo="Resultado por atendimento">
+        <p style={{ fontSize: 12.5, color: "#65758b", margin: "0 0 10px" }}>
+          Atendimentos com despesa ligada a eles neste período: o valor do serviço menos o que foi gasto para prestá-lo.
+        </p>
+        <TabelaRentabilidade linhas={rent.porAtendimento} rotulo="Atendimento" />
+      </Card>
+
+      <PainelSituacaoTributaria fin={fin} clientes={clientes} docs={docs} precos={precos} ano={periodo.ano || new Date().getFullYear()} />
+    </div>
+  );
+}
+
+/* ============================================================
+   Relatórios — mensal e exportação para a contabilidade
+   ============================================================ */
+/* PDF sem biblioteca: uma janela com o relatório pronto para "Salvar como PDF" na impressão —
+   o mesmo caminho que o laudo usa (window.print). A janela abre no clique, antes de qualquer
+   await, senão o navegador a bloqueia como pop-up. */
+function imprimirDocumento(titulo, corpoHtml) {
+  const janela = window.open("", "_blank");
+  if (!janela) { alert("O navegador bloqueou a janela do relatório. Libere pop-ups para este site e tente de novo."); return; }
+  janela.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${titulo}</title>
+    <style>
+      body { font-family: Inter, system-ui, sans-serif; color: #1a2330; margin: 28px; }
+      h1 { color: ${AZUL_MARINHO}; font-size: 20px; margin: 0 0 4px; } h2 { color: ${AZUL_MARINHO}; font-size: 15px; margin: 22px 0 8px; }
+      table { width: 100%; border-collapse: collapse; font-size: 11.5px; } th, td { border: 1px solid ${CINZA_BORDA}; padding: 5px 7px; text-align: left; }
+      th { background: ${CINZA_CLARO}; } td.n { text-align: right; white-space: nowrap; }
+      .resumo td { font-size: 14px; padding: 8px 12px; } .resumo td:first-child { background: ${CINZA_CLARO}; font-weight: 700; width: 40%; }
+      .rodape { margin-top: 24px; font-size: 11px; color: #65758b; }
+      @page { size: A4; margin: 14mm; }
+    </style></head><body>${corpoHtml}<p class="rodape">Gerado pelo Sistema FN em ${new Date().toLocaleString("pt-BR")}.</p>
+    <script>window.onload = () => setTimeout(() => window.print(), 250);<\/script></body></html>`);
+  janela.document.close();
+}
+const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+function AbaFinRelatorios({ fin, clientes = [], docs = [], precos = [], notify }) {
+  const [periodo, setPeriodo] = useState(periodoMesAtual);
+  const [incluirPessoais, setIncluirPessoais] = useState(false);
+  const [zipando, setZipando] = useState(null); // { feito, total }
+  const clientesPorId = useMemo(() => indexarClientes(clientes), [clientes]);
+  const receita = receitaDoPeriodo({ clientes, docs, precos, receitas: fin.receitas, periodo, base: fin.config?.baseFaturamento || "cobrado" });
+  const doPeriodo = fin.despesas.filter((d) => dentroDoPeriodo(d.data, periodo) && d.statusAprovacao !== "Rejeitada");
+  const empresariais = doPeriodo.filter(Fin.contaNosIndicadores);
+  const r = Fin.resultado(receita.total, Fin.somaEmpresarial(empresariais));
+  const porGrupo = Fin.GRUPOS_RELATORIO.map((g) => ({ grupo: g, valor: Fin.somaEmpresarial(empresariais.filter((d) => Fin.grupoDoRelatorio(d) === g)) }));
+  const intervalo = intervaloDoPeriodo(periodo);
+  const paraContador = (incluirPessoais ? doPeriodo : empresariais)
+    .map((d) => ({ ...d, clienteNome: clientesPorId[d.clienteId]?.nome || "" }))
+    .sort((a, b) => String(a.data).localeCompare(String(b.data)));
+  const sufixo = (rotuloPeriodo(periodo) || "periodo").replace(/\s+/g, "-").toLowerCase();
+
+  const imprimirMensal = () => imprimirDocumento("Relatório Financeiro FN", `
+    <h1>RELATÓRIO FINANCEIRO FN</h1><div>Período: ${esc(intervalo)}</div>
+    <table class="resumo" style="margin-top:14px">
+      <tr><td>Receita</td><td class="n">${Fin.brl(r.receita)}</td></tr>
+      <tr><td>Despesas</td><td class="n">${Fin.brl(r.despesa)}</td></tr>
+      <tr><td>Resultado</td><td class="n">${Fin.brl(r.resultado)}</td></tr>
+      <tr><td>Margem</td><td class="n">${Fin.pct(r.margem)}</td></tr>
+    </table>
+    <h2>Despesas</h2>
+    <table>${porGrupo.map((g) => `<tr><td>${esc(g.grupo)}</td><td class="n">${Fin.brl(g.valor)}</td></tr>`).join("")}</table>
+    <p class="rodape">Despesas pela parte empresarial (sem as de uso pessoal e as rejeitadas). Receita pela data do serviço${fin.config?.baseFaturamento === "recebido" ? ", só o que foi recebido" : ""}.</p>`);
+
+  const imprimirContador = () => imprimirDocumento("Despesas para a contabilidade", `
+    <h1>Despesas — FN Edificações</h1><div>Período: ${esc(intervalo)}${fin.config?.cnpj ? ` · CNPJ ${esc(Fin.formatarCpfCnpj(fin.config.cnpj))}` : ""}</div>
+    <table style="margin-top:14px"><thead><tr>${["Data", "Descrição", "Fornecedor", "CPF/CNPJ", "Categoria", "Valor", "Pagamento", "NF", "CNPJ FN", "Cliente", "Empreendimento", "Serviço", "Obs."].map((t) => `<th>${t}</th>`).join("")}</tr></thead>
+    <tbody>${paraContador.map((d) => `<tr><td>${Fin.dataBr(d.data)}</td><td>${esc(d.descricao)}</td><td>${esc(d.fornecedor)}</td><td>${esc(Fin.formatarCpfCnpj(d.fornecedorDocumento))}</td>
+      <td>${esc(d.categoria)}${d.subcategoria ? ` / ${esc(d.subcategoria)}` : ""}</td><td class="n">${Fin.brl(d.valor)}${d.finalidade === "parcial" ? ` (${d.percentualEmpresarial ?? 50}% emp.)` : ""}</td>
+      <td>${esc(d.formaPagamento)}</td><td>${esc(d.numeroNf)}</td><td>${d.nfCnpjFn === true ? "Sim" : d.nfCnpjFn === false ? "Não" : ""}</td>
+      <td>${esc(d.clienteNome)}</td><td>${esc(d.empreendimento)}</td><td>${esc([d.vinculoTipo, d.servicoRelacionado].filter(Boolean).join(" — "))}</td><td>${esc(d.observacoes)}</td></tr>`).join("")}
+    <tr><th colspan="5">Total</th><th class="n">${Fin.brl(paraContador.reduce((s, d) => s + (Number(d.valor) || 0), 0))}</th><th colspan="7"></th></tr></tbody></table>`);
+
+  /* Um comprovante por vez: são poucas dezenas por mês, e em paralelo o Drive devolve erro de
+     cota. Se um falhar, o ZIP sai com os outros e a tela diz quantos ficaram de fora. */
+  const baixarZip = async () => {
+    const lista = paraContador.flatMap((d) => (d.anexos || []).map((a) => ({ d, a })));
+    if (!lista.length) { notify("Nenhum comprovante anexado neste período."); return; }
+    setZipando({ feito: 0, total: lista.length });
+    const arquivos = [];
+    let falhas = 0;
+    for (const [i, { d, a }] of lista.entries()) {
+      try {
+        const blob = await fin.baixarAnexo(a);
+        arquivos.push({ caminho: Fin.caminhoNoZip(d, a), dados: new Uint8Array(await blob.arrayBuffer()) });
+      } catch { falhas += 1; }
+      setZipando({ feito: i + 1, total: lista.length });
+    }
+    setZipando(null);
+    if (!arquivos.length) { notify("Não foi possível baixar os comprovantes agora. Tente de novo em instantes."); return; }
+    Fin.baixarBlob(Fin.criarZip(arquivos), `comprovantes-fn-${sufixo}.zip`);
+    notify(falhas ? `ZIP gerado, mas ${falhas} comprovante(s) não baixaram — gere de novo para tentar incluí-los.` : "ZIP dos comprovantes gerado ✓");
+  };
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <h2 style={{ margin: 0, fontSize: 18, color: AZUL_MARINHO }}>Relatórios</h2>
+      <Card icon={CalendarDays} titulo="Período">
+        <FiltroPeriodo periodo={periodo} aoMudar={setPeriodo} anos={anosDasDespesas(fin.despesas, fin.receitas)} />
+      </Card>
+
+      <Card icon={FileBarChart} titulo="Relatório mensal">
+        <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: 18, maxWidth: 520 }}>
+          <div style={{ fontWeight: 800, color: AZUL_MARINHO, fontSize: 15 }}>RELATÓRIO FINANCEIRO FN</div>
+          <div style={{ fontSize: 13, color: "#4a5a70", marginBottom: 12 }}>Período: {intervalo}</div>
+          <TabelaDados rows={[["Receita", Fin.brl(r.receita)], ["Despesas", Fin.brl(r.despesa)], ["Resultado", Fin.brl(r.resultado)], ["Margem", Fin.pct(r.margem)]]} />
+          <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, margin: "4px 0 6px" }}>Despesas</div>
+          <TabelaDados rows={porGrupo.map((g) => [g.grupo, Fin.brl(g.valor)])} />
+        </div>
+        <button className="btn-solid" style={{ marginTop: 12 }} onClick={imprimirMensal}><Printer size={15} /> Imprimir / salvar em PDF</button>
+      </Card>
+
+      <Card icon={FileSpreadsheet} titulo="Exportar para Contabilidade">
+        <p style={{ fontSize: 13, color: "#4a5a70", margin: "0 0 10px" }}>
+          {paraContador.length} despesa(s) no período, sem as rejeitadas. Colunas: data, descrição, fornecedor, CPF/CNPJ,
+          categoria, valor, forma de pagamento, número da NF, CNPJ da FN na nota, cliente, empreendimento, serviço e observação.
+        </p>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginBottom: 12 }}>
+          <input type="checkbox" checked={incluirPessoais} onChange={(e) => setIncluirPessoais(e.target.checked)} />
+          Incluir despesas de uso pessoal (saem marcadas na coluna "Finalidade")
+        </label>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="btn-solid" onClick={() => Fin.baixarBlob(Fin.gerarXlsx(paraContador), `despesas-fn-${sufixo}.xlsx`)} disabled={!paraContador.length}><FileSpreadsheet size={15} /> Excel</button>
+          <button className="btn-solid" onClick={() => Fin.baixarBlob(Fin.gerarCsv(paraContador), `despesas-fn-${sufixo}.csv`)} disabled={!paraContador.length}><Download size={15} /> CSV</button>
+          <button className="btn-solid" onClick={imprimirContador} disabled={!paraContador.length}><Printer size={15} /> PDF</button>
+          <button className="btn-solid" style={{ background: AZUL_MARINHO }} onClick={baixarZip} disabled={!!zipando}>
+            {zipando ? <><Loader2 size={15} className="spin" /> {zipando.feito}/{zipando.total}</> : <><Archive size={15} /> Comprovantes (ZIP)</>}
+          </button>
+        </div>
+        <p style={{ fontSize: 12, color: "#65758b", margin: "10px 0 0" }}>
+          O ZIP organiza os comprovantes por ano → mês → grupo (Combustível, Prestadores, Marketing, Equipamentos, Tributos…).
+        </p>
+      </Card>
+    </div>
+  );
+}
+
+/* ============================================================
+   Receitas — o Financeiro de sempre + o que não passa por vistoria
+   ============================================================ */
+function CardOutrasReceitas({ fin }) {
+  const vazio = { data: Fin.hojeIso(), descricao: "", valor: "", servico: "Reforma", clienteNome: "", empreendimento: "", recebido: true, numeroNf: "", observacoes: "" };
+  const [f, setF] = useState(null);
+  const [excluindo, setExcluindo] = useState(null);
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  const salvar = async () => {
+    const valor = Number(String(f.valor).replace(/\./g, "").replace(",", "."));
+    if (await fin.salvarReceita({ ...f, valor }, f.id)) setF(null);
+  };
+  return (
+    <Card icon={Wallet} titulo="Outras receitas (reformas, projetos, consultoria)">
+      <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
+        Serviços que não passam pelo cadastro de vistoria. Entram no faturamento do ano — e, portanto, no limite do MEI —
+        e na rentabilidade por serviço e empreendimento.
+      </p>
+      {!f && <button className="btn-solid" onClick={() => setF(vazio)}><Plus size={15} /> Lançar receita</button>}
+      {f && (
+        <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: 14, display: "grid", gap: 12 }}>
+          <Grid>
+            <Field label="Data" type="date" value={f.data} onChange={(v) => set("data", v)} />
+            <Field label="Descrição" value={f.descricao} onChange={(v) => set("descricao", v)} />
+            <Field label="Valor (R$)" value={String(f.valor).replace(".", ",")} onChange={(v) => set("valor", v.replace(/[^\d,.]/g, ""))} />
+            <div style={cell()}>
+              <label style={lab}>Serviço</label>
+              <select style={inp} value={f.servico} onChange={(e) => set("servico", e.target.value)}>
+                {["Reforma", "Projeto", "Consultoria", "Vistoria avulsa", "Outro"].map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <Field label="Cliente" value={f.clienteNome} onChange={(v) => set("clienteNome", v)} />
+            <Field label="Empreendimento" value={f.empreendimento} onChange={(v) => set("empreendimento", v)} />
+            <Field label="Número da NF emitida" value={f.numeroNf} onChange={(v) => set("numeroNf", v)} />
+            <div style={cell()}>
+              <label style={lab}>Recebido?</label>
+              <BotaoSimNao valor={f.recebido} onChange={(v) => set("recebido", v !== false)} />
+            </div>
+          </Grid>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn-solid" onClick={salvar}><Check size={15} /> Salvar</button>
+            <button className="btn-solid" style={{ background: "#fff", color: "#4a5a70", border: `1px solid ${CINZA_BORDA}` }} onClick={() => setF(null)}>Cancelar</button>
+          </div>
+        </div>
+      )}
+      {fin.receitas.length > 0 && (
+        <div style={{ overflowX: "auto", marginTop: 12 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 560 }}>
+            <tbody>
+              {fin.receitas.map((x) => (
+                <tr key={x.id} style={{ borderBottom: `1px solid ${CINZA_CLARO}` }}>
+                  <td style={{ padding: "7px 8px", whiteSpace: "nowrap" }}>{Fin.dataBr(x.data)}</td>
+                  <td style={{ padding: "7px 8px" }}><strong style={{ color: AZUL_MARINHO }}>{x.descricao}</strong>
+                    <div style={{ fontSize: 11.5, color: "#65758b" }}>{[x.servico, x.clienteNome, x.empreendimento].filter(Boolean).join(" · ")}</div></td>
+                  <td style={{ padding: "7px 8px", textAlign: "right", fontWeight: 700, whiteSpace: "nowrap" }}>{Fin.brl(x.valor)}</td>
+                  <td style={{ padding: "7px 8px" }}>{x.recebido ? <SeloFin texto="Recebido" cor="#1B7F4B" fundo="#E6F4EC" /> : <SeloFin texto="A receber" cor="#B26A00" fundo="#FFF4E0" />}</td>
+                  <td style={{ padding: "7px 8px", whiteSpace: "nowrap", textAlign: "right" }}>
+                    <button className="icon-btn" title="Editar" onClick={() => setF({ ...x })}><Edit3 size={14} color={AZUL_MEDIO} /></button>
+                    <button className="icon-btn" title="Excluir" onClick={() => setExcluindo(x)}><Trash2 size={14} color="#C62828" /></button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <ConfirmModal aberto={!!excluindo} titulo="Excluir receita" mensagem={excluindo ? `Excluir "${excluindo.descricao}" (${Fin.brl(excluindo.valor)})?` : ""}
+        onConfirm={async () => { const x = excluindo; setExcluindo(null); await fin.excluirReceita(x.id); }} onCancel={() => setExcluindo(null)} />
+    </Card>
+  );
+}
+
+/* ============================================================
+   Configurações Fiscais
+   ============================================================
+   O regime e o limite são o que a Gerência informa. Os campos do Simples Nacional ficam
+   guardados para a próxima versão e não alimentam cálculo nenhum — o pedido é explícito:
+   nada de decisão tributária automática. */
+function AbaFinConfig({ fin, clientes = [], docs = [], precos = [] }) {
+  const [f, setF] = useState(() => ({ regime: "MEI", limiteAnual: Fin.LIMITE_MEI_PADRAO, baseFaturamento: "cobrado", ...fin.config }));
+  useEffect(() => { setF({ regime: "MEI", limiteAnual: Fin.LIMITE_MEI_PADRAO, baseFaturamento: "cobrado", ...fin.config }); }, [fin.config]);
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  const numOuVazio = (v) => (v === "" || v == null ? null : Number(String(v).replace(/\./g, "").replace(",", ".")));
+  const ano = new Date().getFullYear();
+  const proporcional = Fin.limiteProporcionalMei(f.dataAbertura, ano, Number(f.limiteAnual) || Fin.LIMITE_MEI_PADRAO);
+  const salvar = () => fin.salvarConfig({
+    ...f,
+    limiteAnual: numOuVazio(f.limiteAnual), aliquotaEfetiva: numOuVazio(f.aliquotaEfetiva), receita12Meses: numOuVazio(f.receita12Meses),
+    folhaPagamento: numOuVazio(f.folhaPagamento), proLabore: numOuVazio(f.proLabore), fatorR: numOuVazio(f.fatorR), dasEstimado: numOuVazio(f.dasEstimado),
+  });
+  const campoNum = (rotulo, k, placeholder) => (
+    <Field label={rotulo} value={f[k] == null ? "" : String(f[k]).replace(".", ",")} placeholder={placeholder} onChange={(v) => set(k, v.replace(/[^\d,.]/g, ""))} />
+  );
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <h2 style={{ margin: 0, fontSize: 18, color: AZUL_MARINHO }}>Configurações Fiscais</h2>
+      <PainelSituacaoTributaria fin={fin} clientes={clientes} docs={docs} precos={precos} ano={ano} />
+      <Card icon={Settings} titulo="Empresa e regime">
+        <Grid>
+          <div style={cell()}>
+            <label style={lab}>Regime</label>
+            <select style={inp} value={f.regime} onChange={(e) => set("regime", e.target.value)}>
+              {["MEI", "Simples Nacional", "Outros"].map((x) => <option key={x} value={x}>{x}</option>)}
+            </select>
+          </div>
+          <Field label="CNPJ da FN" value={f.cnpj || ""} onChange={(v) => set("cnpj", v)} placeholder="Aparece para a equipe conferir a nota" />
+          <Field label="Razão social" value={f.razaoSocial || ""} onChange={(v) => set("razaoSocial", v)} />
+          <Field label="Data de abertura do CNPJ" type="date" value={f.dataAbertura || ""} onChange={(v) => set("dataAbertura", v)} />
+          {campoNum("Limite anual do MEI (R$)", "limiteAnual", "81.000")}
+          <div style={cell()}>
+            <label style={lab}>Faturamento considerado</label>
+            <select style={inp} value={f.baseFaturamento || "cobrado"} onChange={(e) => set("baseFaturamento", e.target.value)}>
+              <option value="cobrado">Serviços prestados no período (cobrado)</option>
+              <option value="recebido">Só o que foi recebido (caixa)</option>
+            </select>
+          </div>
+        </Grid>
+        <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13, marginTop: 14 }}>
+          <input type="checkbox" checked={!!f.limiteProporcional} onChange={(e) => set("limiteProporcional", e.target.checked)} style={{ marginTop: 3 }} />
+          <span>
+            Primeiro ano do CNPJ: usar limite proporcional aos meses de atividade.
+            {f.dataAbertura && <> Para {ano}, com abertura em {Fin.dataBr(f.dataAbertura)}: <strong>{Fin.brl(proporcional)}</strong>.</>}
+            {!f.dataAbertura && <> Informe a data de abertura para o cálculo.</>}
+          </span>
+        </label>
+        <p style={{ fontSize: 12, color: "#65758b", margin: "10px 0 0" }}>
+          O limite é o que você configurar aqui — a regra muda por lei e o sistema não decide enquadramento. Consulte sua
+          contabilidade antes de alterar o regime tributário.
+        </p>
+      </Card>
+      <Card icon={Landmark} titulo="Simples Nacional — preparação (sem cálculo nesta versão)">
+        <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 12px" }}>
+          Campos guardados para a futura migração MEI → ME. Nenhum deles gera cálculo automático agora.
+        </p>
+        <Grid>
+          <Field label="Anexo do Simples" value={f.anexoSimples || ""} onChange={(v) => set("anexoSimples", v)} placeholder="Ex.: III ou V" />
+          {campoNum("Alíquota efetiva (%)", "aliquotaEfetiva")}
+          {campoNum("Receita acumulada 12 meses (R$)", "receita12Meses")}
+          {campoNum("Folha de pagamento (R$)", "folhaPagamento")}
+          {campoNum("Pró-labore (R$)", "proLabore")}
+          {campoNum("Fator R", "fatorR", "Ex.: 0,28")}
+          {campoNum("DAS estimado (R$)", "dasEstimado")}
+        </Grid>
+      </Card>
+      <div><button className="btn-solid" onClick={salvar}><Save size={15} /> Salvar configurações</button></div>
+    </div>
+  );
+}
+
+/* Despacho das telas do módulo dentro da Gerência (itens "fin-*" do menu lateral). */
+function AbaFinanceiroDespesas({ sub, fin, clientes = [], docs = [], precos = [], usuarios = [], usuarioAtual, telaEstreita, notify }) {
+  const comum = { fin, clientes, usuarios, usuarioAtual, telaEstreita, notify };
+  if (sub === "fin-notas") return <AbaFinNotas {...comum} />;
+  if (sub === "fin-deslocamentos") return <AbaFinDeslocamentos {...comum} docs={docs} precos={precos} />;
+  if (sub === "fin-relatorios") return <AbaFinRelatorios fin={fin} clientes={clientes} docs={docs} precos={precos} notify={notify} />;
+  if (sub === "fin-indicadores") return <AbaFinIndicadores fin={fin} clientes={clientes} docs={docs} precos={precos} />;
+  if (sub === "fin-config") return <AbaFinConfig fin={fin} clientes={clientes} docs={docs} precos={precos} />;
+  return <AbaFinDespesas {...comum} />;
+}
+
+/* ============================================================
    GERÊNCIA › REFORMAS  —  o FN Projetos embutido
    ============================================================
    O FN Projetos é um módulo separado (outro repositório, outro endereço) que
@@ -13188,7 +14783,7 @@ function AbaGerenciaImportacao({ clientes = [], precos = [], empreendimentosRef 
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", token, perfil, usuarioAtual, decidirComissaoItem, importarClientesHistorico, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
+function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, decidirComissaoItem, importarClientesHistorico, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
   if (sub === "painel") {
     return <AbaGerenciaPainelEstrategico clientes={clientes} docs={docs} usuarios={usuarios}
       avaliacoes={avaliacoes} prospeccao={prospeccao} prospeccaoParceiros={prospeccaoParceiros}
@@ -13226,8 +14821,13 @@ function AbaGerencia({ sub = "visao-geral", token, perfil, usuarioAtual, decidir
       clientes={clientes} notify={notify} token={token} />;
   }
   if (sub === "financeiro") {
-    return <AbaGerenciaFinanceiro docs={docs} clientes={clientes} precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
-      adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento} notify={notify} usuarios={usuarios} />;
+    return (
+      <div style={{ display: "grid", gap: 16 }}>
+        <AbaGerenciaFinanceiro docs={docs} clientes={clientes} precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
+          adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento} notify={notify} usuarios={usuarios} />
+        {fin && <CardOutrasReceitas fin={fin} />}
+      </div>
+    );
   }
   return (
     <AbaGerenciaVisaoGeral token={token} docs={docs} clientes={clientes} updCliente={updCliente} carregando={carregando}
