@@ -8,7 +8,7 @@ import {
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
   ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle, Megaphone, Clock,
-  Wrench, Paperclip, Menu
+  Wrench, Paperclip, Menu, Smartphone
 } from "lucide-react";
 
 /* ============================================================
@@ -1661,6 +1661,53 @@ function PrimeiroAcessoPorEmail() {
   );
 }
 
+/* "Instalar o app": o sistema vira ícone na tela inicial do celular, sem loja (manifest.json +
+   sw.js em public/). O Android oferece a instalação por um evento do navegador, e aí o botão
+   instala direto. O iPhone não tem esse evento — lá só o próprio Safari instala, pelo menu
+   Compartilhar — então o botão mostra o caminho em vez de fingir que instala.
+   Some quando o sistema já está aberto como app. */
+function InstalarApp({ semLinha = false }) {
+  const [pedido, setPedido] = useState(null);
+  const [ajudaIphone, setAjudaIphone] = useState(false);
+  const jaInstalado = typeof window !== "undefined" &&
+    (window.matchMedia?.("(display-mode: standalone)").matches || window.navigator.standalone === true);
+  const ehIphone = typeof navigator !== "undefined" && /iphone|ipad|ipod/i.test(navigator.userAgent);
+
+  useEffect(() => {
+    const guardar = (e) => { e.preventDefault(); setPedido(e); };
+    window.addEventListener("beforeinstallprompt", guardar);
+    return () => window.removeEventListener("beforeinstallprompt", guardar);
+  }, []);
+
+  if (jaInstalado || (!pedido && !ehIphone)) return null;
+
+  const instalar = async () => {
+    if (pedido) {
+      pedido.prompt();
+      await pedido.userChoice.catch(() => null);
+      setPedido(null);
+    } else {
+      setAjudaIphone((a) => !a);
+    }
+  };
+
+  return (
+    <div style={semLinha ? { margin: "-6px 0 18px", textAlign: "center" } : { marginTop: 14, borderTop: `1px solid ${CINZA_BORDA}`, paddingTop: 14, textAlign: "center" }}>
+      <button type="button" onClick={instalar} className="btn-ghost"
+        style={{ display: "inline-flex", alignItems: "center", gap: 6, color: AZUL_MARINHO, background: CINZA_CLARO, padding: "8px 14px", fontSize: 13, borderRadius: 8, border: "none", cursor: "pointer" }}>
+        <Smartphone size={15} /> Instalar o app no celular
+      </button>
+      {ajudaIphone && (
+        <ol style={{ textAlign: "left", fontSize: 12.5, color: "#4a5a70", margin: "10px 0 0", paddingLeft: 20, lineHeight: 1.6 }}>
+          <li>Abra este endereço no <strong>Safari</strong>.</li>
+          <li>Toque em <strong>Compartilhar</strong> (o quadrado com a seta para cima).</li>
+          <li>Escolha <strong>Adicionar à Tela de Início</strong> e toque em Adicionar.</li>
+        </ol>
+      )}
+    </div>
+  );
+}
+
 function TelaLogin({ onLogin, onVoltar }) {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
@@ -1727,6 +1774,8 @@ function TelaLogin({ onLogin, onVoltar }) {
         <button type="button" onClick={onVoltar} style={{ width: "100%", marginTop: 14, background: "none", border: "none", color: AZUL_MEDIO, fontSize: 13, cursor: "pointer" }}>
           ← Sou cliente e quero me cadastrar
         </button>
+
+        <InstalarApp />
 
         {/* Não há mais botão de cadastro de parceiro aqui: parceiro entra por convite de um
             vendedor (link com o código dele). Quem chegava sozinho por esta tela virava fila
@@ -1826,6 +1875,8 @@ function PortalCliente({ onIrParaLogin, onLogin }) {
         }}>
           <Lock size={20} /> SOU CLIENTE — ENTRAR
         </button>
+        {/* É por esta página que o cliente chega pelo link: daqui ele já instala o app. */}
+        <InstalarApp semLinha />
 
         {/* FN Serviços é a marca guarda-chuva das 3 áreas: contratando um serviço técnico, o
             cliente também passa a ter acesso ao FN Clube e ao FN Home. A navegação entre elas
