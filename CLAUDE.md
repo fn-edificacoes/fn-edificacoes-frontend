@@ -97,6 +97,7 @@ src/App.jsx                 o app inteiro: telas, componentes e chamadas de API
 src/patologias-ambiente.js  catálogo de patologias por ambiente
 src/patologias-consulta.js  busca no catálogo
 src/rascunho-local.js       vistoria em edição salva no navegador
+src/financeiro-regras.js    regras do Financeiro (despesas, MEI, exportação) — sem tela
 ```
 
 Para achar algo no `App.jsx`, procure pela definição da componente
@@ -147,6 +148,23 @@ baixar, situação do acesso ao portal, cupons, orçamentos e pedidos —, tudo 
 É visão administrativa, não "entrar como o cliente": a edição sai pelo mesmo `updCliente` de
 sempre. Os campos do cadastro moram em `CamposCadastroCliente`, compartilhado com o modal de
 "Editar cliente" da aba Clientes — mexer em um muda os dois, de propósito.
+
+## Financeiro — Despesas e Controle Fiscal
+
+Menu lateral da Gerência → Financeiro: Receitas (a tela de preços/receita que já existia,
+mais "outras receitas"), Despesas, Notas e Comprovantes, Deslocamentos, Relatórios,
+Indicadores financeiros e Configurações Fiscais (itens `fin-*`, despachados por
+`AbaFinanceiroDespesas`). Os outros perfis da equipe têm o módulo **Despesas**
+(`AbaMinhasDespesas`): lançam e veem só o que lançaram. O botão "+ Despesa" do cabeçalho abre o
+cadastro rápido (`ModalDespesa`) de qualquer tela.
+
+- Estado e chamadas em `useFinanceiro`; API em `/api/financeiro/*` (`src/financeiro.js` no
+  backend). Comprovante vai para o Drive, nunca para o banco.
+- Regra única em `src/financeiro-regras.js`: o que entra nos indicadores (pessoal e rejeitada
+  não entram; parcial entra pela parte empresarial), saúde documental, limite do MEI, CSV/Excel/ZIP.
+  Dashboard, relatório e planilha do contador saem dessas mesmas funções.
+- A receita **não é lançada** no módulo: vem de `resumirAtendimentos`, a mesma da aba Indicadores.
+- Nada decide regime tributário. O limite do MEI é o configurado; os campos do Simples são só guardados.
 
 ## Rotas públicas (querystring, sem login)
 
