@@ -12215,12 +12215,14 @@ function useFinanceiro({ token, perfil, notify, ativo }) {
    A mesma conta da aba Indicadores (resumirAtendimentos), para os dois números baterem. "base"
    vem da configuração fiscal: "cobrado" é o valor dos serviços do período (competência);
    "recebido", só o que já entrou (caixa). */
-function receitaDoPeriodo({ clientes = [], docs = [], precos = [], receitas = [], periodo, base = "cobrado" }) {
+/* "aPartirDe" (AAAA-MM-DD) corta o que veio antes de uma data — é a abertura do CNPJ: serviço
+   prestado antes de a empresa existir não é faturamento dela e não conta no limite do MEI. */
+function receitaDoPeriodo({ clientes = [], docs = [], precos = [], receitas = [], periodo, base = "cobrado", aPartirDe = "" }) {
   const precoPorChave = {};
   precos.forEach((p) => { precoPorChave[normalizarChaveEmpreendimento(p.empreendimento)] = p; });
-  const ativos = clientes.filter((c) => c.status !== "Cancelado");
+  const ativos = clientes.filter((c) => c.status !== "Cancelado" && (!aPartirDe || String(dataDeReferencia(c, docs)) >= aPartirDe));
   const r = resumirAtendimentos(ativos, docs, precoPorChave, periodo);
-  const avulsas = receitas.filter((x) => dentroDoPeriodo(x.data, periodo));
+  const avulsas = receitas.filter((x) => dentroDoPeriodo(x.data, periodo) && (!aPartirDe || String(x.data) >= aPartirDe));
   const valorAvulsa = (x) => (base === "recebido" && !x.recebido ? 0 : Number(x.valor) || 0);
   const deAtendimentos = base === "recebido" ? r.recebido : r.cobrado;
   const deAvulsas = avulsas.reduce((s, x) => s + valorAvulsa(x), 0);
@@ -13139,7 +13141,13 @@ function TabelaRentabilidade({ linhas, rotulo, rodape }) {
 /* Barra do MEI: faturamento do ano contra o limite configurado. */
 function PainelSituacaoTributaria({ fin, clientes, docs, precos, ano = new Date().getFullYear() }) {
   const config = fin.config || {};
-  const receita = receitaDoPeriodo({ clientes, docs, precos, receitas: fin.receitas, periodo: { granularidade: "ano", ano, indice: 0 }, base: config.baseFaturamento || "cobrado" });
+  /* No ano da abertura, o faturamento começa na data de abertura — o limite proporcional já
+     conta só os meses de atividade, e somar o que veio antes compararia um ano inteiro de
+     receita com um limite de poucos meses (a FN abriu o CNPJ em setembro, com a operação
+     rodando desde julho). */
+  const abertura = /^\d{4}-\d{2}-\d{2}$/.test(String(config.dataAbertura || "")) ? config.dataAbertura : "";
+  const desde = abertura && Number(abertura.slice(0, 4)) === Number(ano) ? abertura : "";
+  const receita = receitaDoPeriodo({ clientes, docs, precos, receitas: fin.receitas, periodo: { granularidade: "ano", ano, indice: 0 }, base: config.baseFaturamento || "cobrado", aPartirDe: desde });
   const limite = Fin.limiteEfetivo(config, ano);
   const s = Fin.situacaoMei(receita.total, limite);
   const regime = config.regime || "MEI";
@@ -13148,7 +13156,7 @@ function PainelSituacaoTributaria({ fin, clientes, docs, precos, ano = new Date(
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
         <CartaoIndicador titulo="Regime atual" valor={regime} />
         <CartaoIndicador titulo={`Faturamento em ${ano}`} valor={Fin.brl(receita.total)}
-          apoio={config.baseFaturamento === "recebido" ? "o que já foi recebido" : "serviços do ano (cobrado)"} />
+          apoio={`${config.baseFaturamento === "recebido" ? "o que já foi recebido" : "serviços prestados (cobrado)"}${desde ? ` desde a abertura (${Fin.dataBr(desde)})` : ""}`} />
         {regime === "MEI" && <CartaoIndicador titulo="Limite anual configurado" valor={Fin.brl(limite)} apoio={config.limiteProporcional ? "proporcional ao 1º ano" : null} />}
         {regime === "MEI" && <CartaoIndicador titulo="Percentual utilizado" valor={Fin.pct(s.pct)} cor={s.faixa.cor} />}
       </div>
