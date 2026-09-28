@@ -189,6 +189,9 @@ function mapClienteDaApi(c) {
     valorCobrado: c.valor_cobrado == null ? null : Number(c.valor_cobrado),
     valorRecebido: c.valor_recebido == null ? null : Number(c.valor_recebido),
     cobrancaEm: c.cobranca_em || null,
+    /* Quando o dinheiro entrou — gravado pelo link de pagamento (Mercado Pago). null quando o
+       pagamento foi marcado à mão: aí a data real só vem da conciliação com o extrato. */
+    pagoEm: c.pago_em || null,
     /* O servidor já diz se este cadastro virou laudo. Sem isso, quem não recebe os registros
        de "docs" (o Atendimento) não conseguia distinguir vistoria em campo de vistoria
        entregue — e contava as duas como "Em vistoria". */
@@ -2119,6 +2122,11 @@ export default function App() {
     );
   }
 
+  // Volta do pagamento de um link de cobrança (?cobranca=<id>), que o Mercado Pago faz com ou
+  // sem o cliente logado — o link costuma ser aberto direto do WhatsApp.
+  const cobrancaRetorno = new URLSearchParams(window.location.search).get("cobranca");
+  if (cobrancaRetorno) return <PaginaRetornoCobranca id={cobrancaRetorno} />;
+
   // Link de criação de senha do portal do cliente (?criar-senha=<token>), vindo do e-mail de
   // "primeiro acesso" — também funciona sem sessão, e tem prioridade sobre ela.
   const criarSenhaToken = new URLSearchParams(window.location.search).get("criar-senha");
@@ -3723,7 +3731,7 @@ function AppInterno({ session, onLogout }) {
             resetarSenhaCliente={resetarSenhaCliente} notify={notify} docs={docs} perfil={perfil} />
         )}
         {abaTop === "qualidade" && (
-          <AbaQualidade sub={abaQualidade} setSub={setAbaQualidade} avaliacoes={avaliacoes} carregando={avaliacoesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
+          <AbaQualidade sub={abaQualidade} setSub={setAbaQualidade} token={token} avaliacoes={avaliacoes} carregando={avaliacoesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
             solicitarExclusaoAvaliacao={solicitarExclusaoAvaliacao} manterAvaliacao={manterAvaliacao} excluirAvaliacao={excluirAvaliacao}
             clientes={clientesAtivos} clientesCarregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} preencherComCliente={preencherComCliente}
             agendarAgoraId={agendarAgoraId} setAgendarAgoraId={setAgendarAgoraId}
@@ -4672,7 +4680,7 @@ function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [], f
   );
 }
 
-function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, agendarAgoraId, setAgendarAgoraId, podeAgir = false, ehGerencia = false, precos = [] }) {
+function AbaQualidade({ sub = "analise", setSub, token, clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, agendarAgoraId, setAgendarAgoraId, podeAgir = false, ehGerencia = false, precos = [] }) {
   const [diaParaAbrir, setDiaParaAbrir] = useState(null); // data (ISO) que o calendário da Análise deve abrir já selecionada
   // Etapa escolhida nos indicadores — filtra a lista da sub-aba aberta. Fica aqui (e não em
   // cada sub-aba) pra que o filtro continue valendo ao trocar de sub-aba.
@@ -4693,7 +4701,7 @@ function AbaQualidade({ sub = "analise", setSub, clientes, clientesCarregando, u
         filtroEtapa={filtroEtapa} aoTrocarEtapa={setFiltroEtapa} />
       {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} abrirAutomaticoId={agendarAgoraId} aoAbrirAutomatico={() => setAgendarAgoraId(null)} aoConfirmar={aoConfirmarVistoria} filtroEtapa={filtroEtapa} />}
       {sub === "cobranca" && <AbaQualidadeCobranca clientes={clientes} carregando={clientesCarregando} updCliente={updCliente}
-        usuarios={usuarios} precos={precos} notify={notify} podeAgir={podeAgir} />}
+        usuarios={usuarios} precos={precos} notify={notify} podeAgir={podeAgir} token={token} />}
       {sub === "acompanhamento" && <AbaQualidadeAcompanhamento clientes={clientes} clientesCarregando={clientesCarregando}
         docs={docs} avaliacoes={avaliacoes} filtroEtapa={filtroEtapa} />}
       {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} clientes={clientes} clientesCarregando={clientesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
@@ -4735,12 +4743,18 @@ function precoSugerido(cliente, precos = []) {
   return Number(preco?.precoVistoria) || 0;
 }
 
-function LinhaCobranca({ cliente, sugerido, tecnico, podeAgir, onSalvar }) {
+function LinhaCobranca({ cliente, sugerido, tecnico, podeAgir, onSalvar, cobranca = null, gerarLink }) {
   const lancado = cliente.valorCobrado != null;
   const [valor, setValor] = useState(lancado ? String(cliente.valorCobrado) : (sugerido ? String(sugerido) : ""));
   const [pagamento, setPagamento] = useState(cliente.pagamento || "Pendente");
   const [recebido, setRecebido] = useState(cliente.valorRecebido != null ? String(cliente.valorRecebido) : "");
   const [salvando, setSalvando] = useState(false);
+  /* O pagamento pelo link muda o cadastro por fora (webhook do Mercado Pago). Sem isto, a
+     linha continuava mostrando "Pendente" no seletor até alguém recarregar a página. */
+  useEffect(() => {
+    setPagamento(cliente.pagamento || "Pendente");
+    setRecebido(cliente.valorRecebido != null ? String(cliente.valorRecebido) : "");
+  }, [cliente.pagamento, cliente.valorRecebido]);
 
   const mudou = String(valor) !== (lancado ? String(cliente.valorCobrado) : (sugerido ? String(sugerido) : ""))
     || pagamento !== (cliente.pagamento || "Pendente")
@@ -4820,6 +4834,10 @@ function LinhaCobranca({ cliente, sugerido, tecnico, podeAgir, onSalvar }) {
         )}
       </div>
 
+      {podeAgir && gerarLink && lancado && (
+        <BlocoLinkPagamento cliente={cliente} cobranca={cobranca} gerarLink={gerarLink} notify={onSalvar.notify} />
+      )}
+
       {cliente.cobrancaEm && (
         <div style={{ fontSize: 11.5, color: "#8593a8" }}>
           Último lançamento em {fmtDataHora(cliente.cobrancaEm)}
@@ -4829,8 +4847,83 @@ function LinhaCobranca({ cliente, sugerido, tecnico, podeAgir, onSalvar }) {
   );
 }
 
-function AbaQualidadeCobranca({ clientes = [], carregando, updCliente, usuarios = [], precos = [], notify, podeAgir = false }) {
+/* Link de pagamento (Pix ou cartão, pelo Mercado Pago) de um serviço já lançado.
+   Quando o cliente paga, o webhook marca o cadastro como "Pago" com a data e o valor que o
+   Mercado Pago informou — ninguém precisa voltar aqui para dar baixa. */
+const FORMA_PAGAMENTO_MP = { bank_transfer: "Pix", account_money: "saldo Mercado Pago", credit_card: "cartão de crédito", debit_card: "cartão de débito", ticket: "boleto" };
+function BlocoLinkPagamento({ cliente, cobranca, gerarLink, notify }) {
+  const [gerando, setGerando] = useState(false);
+  if (cobranca?.status === "paga") {
+    return (
+      <div style={{ background: "#E6F4EC", color: "#1B7F4B", borderRadius: 8, padding: "8px 12px", fontSize: 13 }}>
+        ✓ Pago pelo link — {fmtReal(cobranca.valorPago ?? cobranca.valor)}
+        {cobranca.formaPagamento ? ` via ${FORMA_PAGAMENTO_MP[cobranca.formaPagamento] || cobranca.formaPagamento}` : ""}
+        {cobranca.pagoEm ? ` em ${fmtDataHora(cobranca.pagoEm)}` : ""}
+      </div>
+    );
+  }
+  if (cliente.pagamento === "Pago") return null;
+  const gerar = async () => { setGerando(true); await gerarLink(cliente.id); setGerando(false); };
+  const telefone = String(cliente.telefone || "").replace(/\D/g, "");
+  const foneWhats = telefone.length >= 12 ? telefone : telefone.length >= 10 ? `55${telefone}` : "";
+  const primeiroNome = String(cliente.nome || "").trim().split(/\s+/)[0] || "";
+  const mensagem = cobranca ? `Olá${primeiroNome ? `, ${primeiroNome}` : ""}! Aqui é da FN Edificações. Segue o link para pagamento da ${String(cobranca.descricao || "vistoria").split(" — ")[0].toLowerCase()} (${fmtReal(cobranca.valor)}), por Pix ou cartão:\n${cobranca.link}\n\nAssim que o pagamento cair, ele aparece como pago no seu portal. Obrigado!` : "";
+  const copiar = async () => {
+    try { await navigator.clipboard.writeText(cobranca.link); notify("Link copiado ✓"); }
+    catch { notify("Não foi possível copiar — selecione o link e copie à mão."); }
+  };
+  return (
+    <div style={{ background: "#F6F9FD", border: `1px dashed ${AZUL_MEDIO}`, borderRadius: 8, padding: "10px 12px", display: "grid", gap: 8 }}>
+      {!cobranca ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12.5, color: "#4a5a70", flex: 1, minWidth: 200 }}>
+            Mande um link de pagamento (Pix ou cartão). Quando o cliente pagar, o serviço fica <strong>Pago</strong> sozinho, com a data certa.
+          </span>
+          <button className="btn-solid" onClick={gerar} disabled={gerando}>
+            {gerando ? <Loader2 size={14} className="spin" /> : <DollarSign size={14} />} Gerar link de pagamento
+          </button>
+        </div>
+      ) : (
+        <>
+          <div style={{ fontSize: 12.5, color: AZUL_MARINHO }}>
+            <strong>Link de pagamento — {fmtReal(cobranca.valor)}</strong> · aguardando o cliente pagar
+          </div>
+          <input readOnly value={cobranca.link} onFocus={(e) => e.target.select()} style={{ ...inp, fontSize: 12, width: "100%" }} />
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className="btn-mini" onClick={copiar}><Copy size={12} /> Copiar link</button>
+            {foneWhats && (
+              <a className="btn-mini" style={{ textDecoration: "none", background: "#1B7F4B" }} target="_blank" rel="noreferrer"
+                href={`https://wa.me/${foneWhats}?text=${encodeURIComponent(mensagem)}`}>Enviar no WhatsApp</a>
+            )}
+            <a className="btn-mini" style={{ textDecoration: "none", background: "#fff", color: AZUL_MEDIO, border: `1px solid ${AZUL_MEDIO}` }}
+              target="_blank" rel="noreferrer" href={cobranca.link}>Abrir</a>
+          </div>
+          <div style={{ fontSize: 11.5, color: "#8593a8" }}>O link também aparece no portal do cliente, no botão "Pagar agora".</div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function AbaQualidadeCobranca({ clientes = [], carregando, updCliente, usuarios = [], precos = [], notify, podeAgir = false, token }) {
   const [filtro, setFiltro] = useState("lancar"); // lancar | aberto | quitadas | todas
+  /* Links de pagamento (Mercado Pago) já gerados — o mais recente de cada cadastro. Recarrega
+     junto com a lista de clientes (a cada 20s no AppInterno), que é quando um pagamento
+     confirmado pelo webhook aparece como "Pago". */
+  const [cobrancas, setCobrancas] = useState([]);
+  const carregarCobrancas = async () => {
+    if (!podeAgir || !token) return;
+    try { const r = await apiFetch("/api/cobrancas", { token }); setCobrancas(r.cobrancas || []); } catch { /* sem link não é erro */ }
+  };
+  useEffect(() => { carregarCobrancas(); }, [clientes]);
+  const cobrancaDe = (id) => cobrancas.find((b) => b.clienteId === id) || null;
+  const gerarLink = async (clienteId) => {
+    try {
+      const r = await apiFetch("/api/cobrancas", { method: "POST", token, body: { clienteId } });
+      setCobrancas((atual) => [r.cobranca, ...atual.filter((b) => b.id !== r.cobranca.id)]);
+      return r.cobranca;
+    } catch (e) { notify(`Não foi possível gerar o link: ${e.message}`); return null; }
+  };
   const [busca, setBusca] = useState("");
   const agora = new Date();
 
@@ -4916,7 +5009,7 @@ function AbaQualidadeCobranca({ clientes = [], carregando, updCliente, usuarios 
           {lista.map((c) => (
             <LinhaCobranca key={c.id} cliente={c} sugerido={precoSugerido(c, precos)}
               tecnico={nomeTecnico(c.vistoriadorId)} podeAgir={podeAgir}
-              onSalvar={{ salvar, notify }} />
+              onSalvar={{ salvar, notify }} cobranca={cobrancaDe(c.id)} gerarLink={gerarLink} />
           ))}
         </div>
       </Card>
@@ -17419,6 +17512,53 @@ function CardPrivacidadeCliente({ token, notify }) {
   );
 }
 
+/* Volta do Mercado Pago depois de pagar um link de cobrança. Confere a situação no nosso
+   servidor (que reconsulta o Mercado Pago) algumas vezes: o Pix aprovado costuma levar alguns
+   segundos para ser confirmado. */
+function PaginaRetornoCobranca({ id }) {
+  const [situacao, setSituacao] = useState(null);
+  const [tentativas, setTentativas] = useState(0);
+  const paymentId = new URLSearchParams(window.location.search).get("payment_id") || "";
+  useEffect(() => {
+    let cancelado = false;
+    const consultar = async () => {
+      try {
+        const r = await apiFetch(`/api/cobrancas/${encodeURIComponent(id)}/situacao${/^\d+$/.test(paymentId) ? `?payment_id=${paymentId}` : ""}`);
+        if (!cancelado) setSituacao(r);
+      } catch (e) { if (!cancelado) setSituacao({ erro: e.message }); }
+    };
+    consultar();
+    const t = [3000, 8000, 15000].map((ms, i) => setTimeout(() => { consultar(); setTentativas(i + 1); }, ms));
+    return () => { cancelado = true; t.forEach(clearTimeout); };
+  }, [id]);
+  const pago = situacao?.status === "paga";
+  const irAoPortal = () => { window.location.href = window.location.pathname; };
+  return (
+    <div style={{ fontFamily: "'Inter', system-ui, sans-serif", background: CINZA_CLARO, minHeight: "100vh", display: "grid", placeItems: "center", padding: 18 }}>
+      <style>{estilos}</style>
+      <div style={{ background: "#fff", borderRadius: 14, padding: 26, maxWidth: 420, width: "100%", textAlign: "center", border: `1px solid ${CINZA_BORDA}` }}>
+        <img src={LOGO_URL} alt="FN Edificações" style={{ width: 56, height: 56, objectFit: "contain", marginBottom: 10 }} />
+        {!situacao && <p><Loader2 size={18} className="spin" /> Conferindo o pagamento…</p>}
+        {situacao?.erro && <p style={{ color: "#C62828" }}>{situacao.erro}</p>}
+        {situacao && !situacao.erro && (
+          <>
+            <h2 style={{ color: pago ? "#1B7F4B" : AZUL_MARINHO, margin: "0 0 8px", fontSize: 20 }}>
+              {pago ? "Pagamento confirmado ✓" : "Pagamento em processamento"}
+            </h2>
+            <p style={{ color: "#4a5a70", fontSize: 14, margin: "0 0 6px" }}>{situacao.descricao} — {fmtReal(situacao.valor)}</p>
+            <p style={{ color: "#65758b", fontSize: 13, margin: "0 0 16px" }}>
+              {pago ? "Obrigado! O pagamento já aparece no seu portal."
+                : tentativas < 3 ? "A confirmação costuma levar alguns segundos. Esta página confere sozinha."
+                : "Ainda não recebemos a confirmação. Se você concluiu o pagamento, ela chega em breve — não precisa pagar de novo."}
+            </p>
+          </>
+        )}
+        <button className="btn-solid" style={{ margin: "0 auto" }} onClick={irAoPortal}>Ir para a Área do Cliente</button>
+      </div>
+    </div>
+  );
+}
+
 function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
@@ -17482,6 +17622,14 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
      pagamento chega com ?pedido=<id> na URL — o pagamento aprovado costuma levar alguns
      segundos até o webhook do Mercado Pago confirmar aqui, então essa lista é recarregada
      algumas vezes sozinha logo depois de um retorno de pagamento. */
+  /* Links de pagamento que a equipe gerou para os serviços deste cliente (Setor de cobrança). */
+  const [cobrancas, setCobrancas] = useState([]);
+  useEffect(() => {
+    apiFetch("/api/cobrancas/minhas", { token: session.token })
+      .then((r) => setCobrancas(r.cobrancas || []))
+      .catch(() => { /* sem cobrança não é erro para o cliente */ });
+  }, []);
+
   const [pedidos, setPedidos] = useState([]);
   const [pedidosCarregando, setPedidosCarregando] = useState(true);
   const pedidoRetorno = new URLSearchParams(window.location.search).get("pedido");
@@ -17683,6 +17831,31 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
                 );
               })}
             </div>
+          </Card>
+        )}
+
+        {cobrancas.length > 0 && (
+          <Card icon={DollarSign} titulo="Pagamentos">
+            <div style={{ display: "grid", gap: 10 }}>
+              {cobrancas.map((b) => (
+                <div key={b.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 180 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>{fmtReal(b.valor)}</div>
+                    <div style={{ fontSize: 12.5, color: "#65758b" }}>{b.descricao}</div>
+                  </div>
+                  {b.status === "paga" ? (
+                    <span style={{ background: "#E6F4EC", color: "#1B7F4B", borderRadius: 20, padding: "4px 12px", fontSize: 12.5, fontWeight: 700 }}>
+                      ✓ Pago{b.pagoEm ? ` em ${fmtData(b.pagoEm)}` : ""}
+                    </span>
+                  ) : (
+                    <a className="btn-solid" href={b.link} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+                      <DollarSign size={15} /> Pagar agora (Pix ou cartão)
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+            <p style={{ fontSize: 12, color: "#8593a8", margin: "10px 0 0" }}>O pagamento é feito no ambiente seguro do Mercado Pago, em nome da FN Edificações.</p>
           </Card>
         )}
 

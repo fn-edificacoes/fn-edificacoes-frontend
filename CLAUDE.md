@@ -166,6 +166,11 @@ cadastro rápido (`ModalDespesa`) de qualquer tela.
 - A receita **não é lançada** no módulo: vem de `resumirAtendimentos`, a mesma da aba Indicadores.
 - Nada decide regime tributário. O limite do MEI é o configurado; os campos do Simples são só guardados.
 
+**Link de pagamento (Setor de cobrança):** `BlocoLinkPagamento`, dentro de `LinhaCobranca`, gera
+o link do Mercado Pago (`POST /api/cobrancas`) e oferece copiar/WhatsApp. O cliente paga pelo
+card "Pagamentos" do `PainelCliente`; a volta do Mercado Pago cai em `?cobranca=<id>`
+(`PaginaRetornoCobranca`, rota pública). Quem dá baixa é o webhook no backend — a tela só lê.
+
 ## Rotas públicas (querystring, sem login)
 
 O app não usa router; as páginas públicas são interceptadas no começo de `App()`:
