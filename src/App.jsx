@@ -5467,6 +5467,77 @@ function BlocoAprovacaoClientes({ clientes = [], carregando, podeAgir, onAprovar
   );
 }
 
+/* Onde vai parar quem foi recusado. "Recusar" grava status "Cancelado" (ver o comentário de
+   CardClientePendente) e o cadastro sumia de todas as telas do Agendamento — não havia como
+   voltar atrás num clique errado. Aqui aparecem os cancelados de vistoria, com busca, e
+   "Reativar" devolve o cadastro para "Em análise". O mesmo status cobre também cancelamento a
+   pedido do cliente: a lista não distingue os dois porque o banco também não distingue. */
+function BlocoRecusados({ clientes = [], podeAgir, onReativar }) {
+  const [aberto, setAberto] = useState(false);
+  const [busca, setBusca] = useState("");
+  const [reativando, setReativando] = useState(null);
+
+  const cancelados = clientes
+    .filter((c) => c.status === "Cancelado" && !ehServicoDocumentacao(c))
+    .sort((a, b) => String(b.criadoEm || b.dataDesejada || "").localeCompare(String(a.criadoEm || a.dataDesejada || "")));
+  if (cancelados.length === 0) return null;
+
+  const termo = busca.trim().toLowerCase();
+  const soDigitos = termo.replace(/\D/g, "");
+  const visiveis = !termo ? cancelados : cancelados.filter((c) =>
+    [c.nome, c.empreendimento, c.blocoTorre, c.email].some((v) => String(v || "").toLowerCase().includes(termo)) ||
+    (soDigitos && String(c.cpf || "").replace(/\D/g, "").includes(soDigitos)));
+
+  const reativar = async (c) => {
+    setReativando(c.id);
+    await onReativar(c);
+    setReativando(null);
+  };
+
+  return (
+    <Card icon={Undo2} titulo={`Recusados e cancelados (${cancelados.length})`}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <p style={{ fontSize: 13, color: "#65758b", margin: 0 }}>
+          Quem foi recusado na aprovação fica aqui. Reativar devolve o cadastro para aprovação, de onde ele pode ser agendado de novo.
+        </p>
+        <button className="btn-ghost" style={{ width: "auto", padding: "6px 12px", fontSize: 12.5 }} onClick={() => setAberto((v) => !v)}>
+          {aberto ? "Ocultar" : "Ver lista"}
+        </button>
+      </div>
+      {aberto && (
+        <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+          {cancelados.length > 6 && (
+            <input style={inp} placeholder="Buscar por nome, CPF, e-mail ou empreendimento" value={busca} onChange={(e) => setBusca(e.target.value)} />
+          )}
+          {visiveis.length === 0 && <p style={{ color: "#8593a8", fontSize: 13, margin: 0 }}>Nenhum cadastro encontrado.</p>}
+          {visiveis.map((c) => (
+            <div key={c.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: "8px 12px" }}>
+              <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <strong style={{ fontSize: 13.5 }}>{c.nome}</strong>
+                  {ehRevistoria(c) && <SeloRevistoria seq={c.revistoriaSeq} />}
+                  <span style={{ fontSize: 11, color: "#65758b" }}>{mascararCpf(c.cpf)}</span>
+                </div>
+                <div style={{ fontSize: 12, color: "#4a5a70" }}>
+                  {[c.empreendimento && `${c.empreendimento}${c.blocoTorre ? ` · ${c.blocoTorre}` : ""}`, c.servico,
+                    c.dataDesejada ? `${c.dataDesejada.split("-").reverse().join("/")}${c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""}` : "sem data"]
+                    .filter(Boolean).join(" — ")}
+                </div>
+              </div>
+              {podeAgir && (
+                <button className="btn-solid" style={{ width: "auto", padding: "6px 12px", fontSize: 12.5 }}
+                  disabled={reativando === c.id} onClick={() => reativar(c)}>
+                  {reativando === c.id ? <Loader2 size={13} className="spin" /> : <Undo2 size={13} />} Reativar
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 /* ================= Calendário interativo do Agendamento (item 3 e 4) =================
    Mostra, por dia: número (destaque hoje), faixa de presença por técnico (ordem fixa) e
    até 3 barras de agendamento coloridas por técnico com sigla + horário + cliente. Clicar
@@ -5925,11 +5996,26 @@ function useAprovacaoAnalise(clientes, vistoriadores, updCliente, notify) {
   };
 
   const recusar = async (c) => {
-    try { await updCliente(c.id, { status: "Cancelado" }); notify("Cadastro recusado"); }
+    try {
+      const ok = await updCliente(c.id, { status: "Cancelado" });
+      if (!ok) return;
+      notify("Cadastro recusado — dá para reativar em Análise → \"Recusados e cancelados\"");
+    }
     catch (e) { notify(`Erro: ${e.message}`); }
   };
 
-  return { aprovar, recusar, clienteAprovado, setClienteAprovado };
+  /* Desfaz o "Recusar": o cadastro volta para "Em análise" e reaparece no bloco de aprovação
+     (ou na Fila de espera, se não tiver data/horário), de onde segue o caminho normal. */
+  const reativar = async (c) => {
+    try {
+      const ok = await updCliente(c.id, { status: "Em análise" });
+      if (!ok) return;
+      notify(`${c.nome} reativado ✓ — voltou para aprovação`);
+    }
+    catch (e) { notify(`Erro: ${e.message}`); }
+  };
+
+  return { aprovar, recusar, reativar, clienteAprovado, setClienteAprovado };
 }
 
 /* ================= Agendamento · Análise: aprovação de clientes + calendário operacional ================= */
@@ -5962,7 +6048,7 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
     }
   }, [diaParaAbrir]);
 
-  const { aprovar, recusar, clienteAprovado, setClienteAprovado } = useAprovacaoAnalise(clientes, vistoriadores, updCliente, notify);
+  const { aprovar, recusar, reativar, clienteAprovado, setClienteAprovado } = useAprovacaoAnalise(clientes, vistoriadores, updCliente, notify);
   const toggleFiltroTecnico = (id) => {
     setFiltroTecnicos((atual) => {
       const novo = new Set(atual);
@@ -5989,6 +6075,8 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
       <BlocoAprovacaoClientes clientes={clientes} carregando={carregando} podeAgir={podeAgir}
         onAprovar={aprovar} onRecusar={recusar} vistoriadores={vistoriadores}
         clienteAprovado={clienteAprovado} onAgendarAgora={aoClicarAgendarAgora} onFecharAviso={() => setClienteAprovado(null)} />
+
+      <BlocoRecusados clientes={clientes} podeAgir={podeAgir} onReativar={reativar} />
 
       <Card icon={CalendarDays} titulo="Calendário de vistorias">
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
