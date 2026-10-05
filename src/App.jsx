@@ -5470,7 +5470,8 @@ function BlocoAprovacaoClientes({ clientes = [], carregando, podeAgir, onAprovar
 /* ================= Calendário interativo do Agendamento (item 3 e 4) =================
    Mostra, por dia: número (destaque hoje), faixa de presença por técnico (ordem fixa) e
    até 3 barras de agendamento coloridas por técnico com sigla + horário + cliente. Clicar
-   num dia abre o painel lateral com a agenda completa daquele dia. */
+   num dia abre o painel lateral com a agenda completa daquele dia. A coluna de domingo
+   (sem expediente) é o contador da semana — ver `resumirSemana`. */
 function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], mesRef, setMesRef, diaSelecionado, setDiaSelecionado, filtroTecnicos, aoTrocarFiltro, filtroEtapa, aoTrocarEtapa, mostrarContagem = false }) {
   const ano = mesRef.getFullYear(), mes = mesRef.getMonth();
   const primeiroDiaSemana = new Date(ano, mes, 1).getDay();
@@ -5507,6 +5508,37 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
   const celulas = [];
   for (let i = 0; i < primeiroDiaSemana; i++) celulas.push(null);
   for (let dia = 1; dia <= totalDias; dia++) celulas.push(dia);
+
+  /* Domingo não tem expediente, então a coluna dele virou o contador da semana: quantas
+     vistorias a linha tem — a soma dos selos "N vistorias" dos dias ao lado, com os mesmos
+     filtros de técnico e de etapa — e, para a Gerência, quantas são de cada técnico (mesma
+     regra do contador do chip, que também é só da Gerência). Duas armadilhas tratadas aqui:
+     - nada impede marcar vistoria num domingo. Se acontecer, ela entra no total e aparece um
+       aviso que abre a agenda daquele domingo — senão sumiria do calendário sem ninguém ver;
+     - na primeira e na última linha, parte da semana cai no mês vizinho. O número grande
+       conta só os dias que aparecem na linha (senão não bate com os selos) e "semana toda"
+       mostra o total de domingo a sábado quando ele for diferente. */
+  const resumirSemana = (inicioLinha) => {
+    const dias = Array.from({ length: 7 }, (_, col) => {
+      const data = new Date(ano, mes, inicioLinha + col - primeiroDiaSemana + 1);
+      return { data, chave: paraChaveISO(data), noMes: data.getMonth() === mes };
+    });
+    const doMes = dias.filter((d) => d.noMes).flatMap((d) => agendadosPorDia[d.chave] || []);
+    const porTecnico = {};
+    doMes.forEach((c) => {
+      // Técnico fora da lista (sem técnico, ou desativado) conta como "—", igual às barras.
+      const id = vistoriadores.some((v) => String(v.id) === String(c.vistoriadorId)) ? String(c.vistoriadorId) : "";
+      porTecnico[id] = (porTecnico[id] || 0) + 1;
+    });
+    return {
+      dias, porTecnico,
+      total: doMes.length,
+      semanaToda: dias.reduce((soma, d) => soma + (agendadosPorDia[d.chave] || []).length, 0),
+      noDomingo: dias[0].noMes ? (agendadosPorDia[dias[0].chave] || []).length : 0,
+      temDiaUtil: dias.slice(1).some((d) => d.noMes),
+      atual: dias[0].chave <= hojeISO && hojeISO <= dias[6].chave,
+    };
+  };
 
   return (
     <div>
@@ -5559,10 +5591,61 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, fontSize: 11, color: "#8593a8", textAlign: "center", marginBottom: 4 }}>
-        {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((d) => <div key={d}>{d}</div>)}
+        {["Semana", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((d) => <div key={d} style={d === "Semana" ? { fontWeight: 700, color: AZUL_MARINHO, overflowWrap: "normal" } : undefined}>{d}</div>)}
       </div>
       <div ref={gridRef} style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
         {celulas.map((dia, i) => {
+          if (i % 7 === 0) {
+            const s = resumirSemana(i);
+            // Mês que acaba num domingo deixa uma linha só com ele: vazio, não há o que contar.
+            if (!s.temDiaUtil && s.noDomingo === 0) return null;
+            const fmt = (d) => d.data.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+            const pilula = { color: "#fff", borderRadius: 4, padding: "1px 4px", fontSize: 9, fontWeight: 700, whiteSpace: "nowrap" };
+            return (
+              <div key={`semana-${i}`}
+                title={`Semana de ${fmt(s.dias[1])} a ${fmt(s.dias[6])}: ${s.total} ${s.total === 1 ? "vistoria" : "vistorias"}${s.semanaToda !== s.total ? ` neste mês, ${s.semanaToda} na semana toda` : ""}`}
+                style={{
+                  // Sem minWidth:0/overflow aqui, e com quebra só entre palavras: senão, numa tela
+                  // estreita, o `overflow-wrap:anywhere` do body espreme a coluna até virar uma
+                  // letra por linha. Aqui só tem número e sigla, nada de nome comprido.
+                  minHeight: 88, overflowWrap: "normal", borderRadius: 8, padding: "4px 4px 4px 7px",
+                  background: "#F6F8FB", border: "1px solid #E3E8EF",
+                  // Friso na semana de hoje: no domingo, o destaque de "hoje" não tem mais célula.
+                  boxShadow: s.atual ? `inset 3px 0 0 ${AZUL_MARINHO}` : "none",
+                  display: "flex", flexDirection: "column", gap: 3,
+                }}>
+                <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", color: s.atual ? AZUL_MARINHO : "#8593a8" }}>
+                  {s.atual ? "Esta semana" : `Semana ${i / 7 + 1}`}
+                </span>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 3, flexWrap: "wrap" }}>
+                  <strong style={{ fontSize: 18, lineHeight: 1, color: s.total > 0 ? AZUL_MARINHO : "#B5C0CF" }}>{s.total}</strong>
+                  <span style={{ fontSize: 9.5, color: "#65758b" }}>{s.total === 1 ? "vistoria" : "vistorias"}</span>
+                </div>
+                {mostrarContagem && s.total > 0 && (
+                  <div style={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+                    {vistoriadores.filter((v) => s.porTecnico[String(v.id)]).map((v) => (
+                      <span key={v.id} title={`${v.nome}: ${s.porTecnico[String(v.id)]} nesta semana`} style={{ ...pilula, background: corDoTecnico(v.id) }}>
+                        {siglaDoNome(v.nome)} {s.porTecnico[String(v.id)]}
+                      </span>
+                    ))}
+                    {s.porTecnico[""] > 0 && (
+                      <span title={`Sem técnico definido: ${s.porTecnico[""]}`} style={{ ...pilula, background: "#65758b" }}>— {s.porTecnico[""]}</span>
+                    )}
+                  </div>
+                )}
+                {s.semanaToda !== s.total && (
+                  <span style={{ fontSize: 9, color: "#65758b" }}>semana toda: <strong>{s.semanaToda}</strong></span>
+                )}
+                {s.noDomingo > 0 && (
+                  <button className="aviso-domingo" onClick={() => setDiaSelecionado(s.dias[0].chave)}
+                    title="Tem vistoria marcada no domingo — clique para ver a agenda do dia"
+                    style={{ marginTop: "auto", display: "flex", alignItems: "center", gap: 3, background: "#FFF4E0", color: "#B26A00", border: "none", borderRadius: 4, padding: "2px 4px", fontSize: 9, fontWeight: 700, cursor: "pointer", textAlign: "left" }}>
+                    <AlertTriangle size={10} style={{ flexShrink: 0 }} /> {s.noDomingo} no domingo
+                  </button>
+                )}
+              </div>
+            );
+          }
           if (dia === null) return <div key={`vazio-${i}`} />;
           const chave = paraChaveISO(new Date(ano, mes, dia));
           const doDia = agendadosPorDia[chave] || [];
@@ -5575,7 +5658,11 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
                 const passos = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[e.key];
                 if (!passos) return;
                 e.preventDefault();
-                gridRef.current?.querySelector(`[data-dia-idx="${i + passos}"]`)?.focus();
+                // A coluna de domingo é o contador, não um dia: andando de lado, pula ela
+                // (de segunda volta para o sábado de cima, de sábado vai para a segunda de baixo).
+                let alvo = i + passos;
+                if (Math.abs(passos) === 1 && alvo % 7 === 0) alvo += passos;
+                gridRef.current?.querySelector(`[data-dia-idx="${alvo}"]`)?.focus();
               }}
               onClick={() => setDiaSelecionado(selecionado ? null : chave)}
               title={doDia.length > 0 ? `${doDia.length} vistoria(s) marcada(s) neste dia` : "Nenhuma vistoria marcada"}
@@ -18962,7 +19049,8 @@ const estilos = `
     .laudo-ficha { break-inside: avoid; page-break-inside: avoid; }
     .laudo-modelo img { max-width: 100%; }
   }
-  .dia-cel:focus-visible, .chip-tecnico:focus-visible { outline: 2.5px solid ${AZUL_MARINHO}; outline-offset: 2px; }
+  .dia-cel:focus-visible, .chip-tecnico:focus-visible, .aviso-domingo:focus-visible { outline: 2.5px solid ${AZUL_MARINHO}; outline-offset: 2px; }
+  .aviso-domingo:hover { text-decoration: underline; }
   /* Sino com pendência urgente pulsa de leve, para ser notado sem incomodar. */
   .sino-alerta { animation: pulsa-sino 2s ease-in-out infinite; }
   @keyframes pulsa-sino {
