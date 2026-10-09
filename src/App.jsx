@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import * as Rascunho from "./rascunho-local.js";
 import { listarAmbientes, paraItemDeLaudo, todasParaImportacao } from "./patologias-consulta.js";
 import * as Fin from "./financeiro-regras.js";
+import AbaRedeNacional from "./rede-nacional.jsx";
 import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
   Building2, User, ClipboardList, ChevronDown, ChevronRight, ChevronLeft, Check,
@@ -565,9 +566,11 @@ const MODULOS_POR_PERFIL = {
   documentacao: ["documentacao", "despesas"],
   atendimento: ["clientes", "qualidade", "faq", "marketing", "vendas", "despesas"],
   vendas: ["vendas", "despesas"],
-  gerencia: ["laudos", "documentacao", "gerencia", "usuarios", "clientes", "qualidade", "faq", "marketing"],
+  gerencia: ["laudos", "documentacao", "gerencia", "usuarios", "clientes", "qualidade", "faq", "marketing", "nacional"],
+  /* FN Nacional por regional: só a Rede Nacional, filtrada pelo servidor às regionais dele. */
+  gestor_regional: ["nacional"],
 };
-const PERFIL_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", vendas: "Vendas", gerencia: "Gerência" };
+const PERFIL_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", vendas: "Vendas", gerencia: "Gerência", gestor_regional: "Gestor regional" };
 
 /* Quem pode ser escalado para uma vistoria. A Gerência também vistoria — o gerente atende
    em campo como qualquer técnico — e o Atendimento precisa poder marcá-lo no agendamento.
@@ -2193,6 +2196,9 @@ const GERENCIA_MENU_LATERAL = [
     { aba: "gerencia", sub: "perfil-cliente", label: "Perfil do cliente", Icon: User },
     { aba: "gerencia", sub: "prospeccao", label: "Prospecção", Icon: TrendingUp },
   ] },
+  { titulo: "FN Nacional", itens: [
+    { aba: "nacional", label: "Rede Nacional", Icon: Landmark },
+  ] },
   { titulo: "Visão geral & Indicadores", itens: [
     { aba: "gerencia", sub: "visao-geral", label: "Visão geral", Icon: LayoutGrid },
     { aba: "gerencia", sub: "indicadores", label: "Indicadores", Icon: PieChart },
@@ -3612,7 +3618,7 @@ function AppInterno({ session, onLogout }) {
             esta barra, ela tem o menu lateral com tudo já agrupado. */}
         {perfil !== "gerencia" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, borderTop: "1px solid rgba(255,255,255,.12)", overflowX: "auto" }}>
-            {[["laudos", "Laudos", FileText], ["documentacao", "Documentação", ClipboardCheck], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Fornecedores", Wrench], ["despesas", "Despesas", Receipt], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog]]
+            {[["laudos", "Laudos", FileText], ["documentacao", "Documentação", ClipboardCheck], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Fornecedores", Wrench], ["despesas", "Despesas", Receipt], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog], ["nacional", "Rede Nacional", Landmark]]
               .filter(([k]) => modulosPermitidos.includes(k))
               .map(([k, label, Icon]) => (
                 <button key={k} onClick={() => setAbaTop(k)} className="tab" style={{ borderBottomColor: abaTop === k ? "#fff" : "transparent", color: abaTop === k ? "#fff" : "rgba(255,255,255,.55)", whiteSpace: "nowrap", flexShrink: 0 }}>
@@ -3788,6 +3794,9 @@ function AppInterno({ session, onLogout }) {
             patologiasBanco={patologiasBanco} patologiasBancoCarregando={patologiasBancoCarregando}
             criarPatologia={criarPatologia} atualizarPatologia={atualizarPatologia} excluirPatologia={excluirPatologia}
             importarPatologiasEstaticas={importarPatologiasEstaticas} />
+        )}
+        {abaTop === "nacional" && (
+          <AbaRedeNacional token={token} perfil={perfil} apiFetch={apiFetch} notify={notify} usuarios={usuarios} />
         )}
         {abaTop === "usuarios" && (
           <CardUsuarios usuarios={usuarios} carregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario}
@@ -15028,13 +15037,14 @@ function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, de
   );
 }
 
-const ROLE_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", vendas: "Vendas", gerencia: "Gerência" };
+const ROLE_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", vendas: "Vendas", gerencia: "Gerência", gestor_regional: "Gestor regional" };
 const ROLE_DESCRICAO = {
   vistoriador: "Só acessa Laudos. Sem acesso a Documentação nem Gerência.",
   documentacao: "Só acessa Documentação/TRT. Sem acesso a Laudos nem Gerência.",
   atendimento: "Acessa Clientes (cadastro, agendamento, aprovação e encaminhamento ao técnico), Agendamento (aprova avaliações que entram na vitrine), FAQ, Marketing e Vendas/Fornecedores.",
   vendas: "Só acessa Fornecedores: analisa/aprova cadastros de parceiros/fornecedores, cadastra fornecedor manualmente e acompanha cupons. Recebe salário fixo — o sistema não calcula comissão individual.",
   gerencia: "Acesso completo: Laudos, Documentação, Clientes, Agendamento, Vendas, Gerência e financeiro.",
+  gestor_regional: "Só acessa a Rede Nacional, e só das regionais liberadas para ele (Rede Nacional → Regionais → Gestores). Sem regional liberada, não vê nada.",
 };
 
 function CardUsuarios({ usuarios, carregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, notify, usuarioAtualId }) {
