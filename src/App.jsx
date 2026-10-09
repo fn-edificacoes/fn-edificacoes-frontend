@@ -3,6 +3,7 @@ import * as Rascunho from "./rascunho-local.js";
 import { listarAmbientes, paraItemDeLaudo, todasParaImportacao } from "./patologias-consulta.js";
 import * as Fin from "./financeiro-regras.js";
 import AbaRedeNacional from "./rede-nacional.jsx";
+import AbaMapaAtuacao from "./mapa-atuacao.jsx";
 import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
   Building2, User, ClipboardList, ChevronDown, ChevronRight, ChevronLeft, Check,
@@ -10,7 +11,8 @@ import {
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
   ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle, Megaphone, Clock,
-  Wrench, Paperclip, Menu, Receipt, Car, FileBarChart, Gauge, Settings, Landmark, Wallet, Archive, FileSpreadsheet, FileCheck
+  Wrench, Paperclip, Menu, Receipt, Car, FileBarChart, Gauge, Settings, Landmark, Wallet, Archive, FileSpreadsheet, FileCheck,
+  Map as IconeMapa
 } from "lucide-react";
 
 /* ============================================================
@@ -566,9 +568,9 @@ const MODULOS_POR_PERFIL = {
   documentacao: ["documentacao", "despesas"],
   atendimento: ["clientes", "qualidade", "faq", "marketing", "vendas", "despesas"],
   vendas: ["vendas", "despesas"],
-  gerencia: ["laudos", "documentacao", "gerencia", "usuarios", "clientes", "qualidade", "faq", "marketing", "nacional"],
+  gerencia: ["laudos", "documentacao", "gerencia", "usuarios", "clientes", "qualidade", "faq", "marketing", "nacional", "mapa"],
   /* FN Nacional por regional: só a Rede Nacional, filtrada pelo servidor às regionais dele. */
-  gestor_regional: ["nacional", "despesas"],
+  gestor_regional: ["nacional", "mapa", "despesas"],
 };
 const PERFIL_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", vendas: "Vendas", gerencia: "Gerência", gestor_regional: "Gestor regional" };
 
@@ -2202,6 +2204,7 @@ const GERENCIA_MENU_LATERAL = [
   { titulo: "Visão geral & Indicadores", itens: [
     { aba: "gerencia", sub: "visao-geral", label: "Visão geral", Icon: LayoutGrid },
     { aba: "gerencia", sub: "indicadores", label: "Indicadores", Icon: PieChart },
+    { aba: "mapa", label: "Mapa de atuação", Icon: IconeMapa },
     { aba: "gerencia", sub: "painel", label: "Painel estratégico", Icon: BarChart3 },
     { aba: "gerencia", sub: "acompanhamento", label: "Acompanhamento", Icon: ClipboardList },
   ] },
@@ -3625,7 +3628,7 @@ function AppInterno({ session, onLogout }) {
             esta barra, ela tem o menu lateral com tudo já agrupado. */}
         {perfil !== "gerencia" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, borderTop: "1px solid rgba(255,255,255,.12)", overflowX: "auto" }}>
-            {[["laudos", "Laudos", FileText], ["documentacao", "Documentação", ClipboardCheck], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Fornecedores", Wrench], ["despesas", "Despesas", Receipt], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog], ["nacional", "Rede Nacional", Landmark]]
+            {[["laudos", "Laudos", FileText], ["documentacao", "Documentação", ClipboardCheck], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Fornecedores", Wrench], ["despesas", "Despesas", Receipt], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog], ["nacional", "Rede Nacional", Landmark], ["mapa", "Mapa de atuação", IconeMapa]]
               .filter(([k]) => modulosPermitidos.includes(k))
               .map(([k, label, Icon]) => (
                 <button key={k} onClick={() => setAbaTop(k)} className="tab" style={{ borderBottomColor: abaTop === k ? "#fff" : "transparent", color: abaTop === k ? "#fff" : "rgba(255,255,255,.55)", whiteSpace: "nowrap", flexShrink: 0 }}>
@@ -3802,6 +3805,7 @@ function AppInterno({ session, onLogout }) {
             criarPatologia={criarPatologia} atualizarPatologia={atualizarPatologia} excluirPatologia={excluirPatologia}
             importarPatologiasEstaticas={importarPatologiasEstaticas} />
         )}
+        {abaTop === "mapa" && <AbaMapaAtuacao token={token} apiFetch={apiFetch} notify={notify} />}
         {abaTop === "nacional" && (
           <AbaRedeNacional token={token} perfil={perfil} apiFetch={apiFetch} notify={notify} usuarios={usuarios} />
         )}
