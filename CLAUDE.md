@@ -171,6 +171,39 @@ o link do Mercado Pago (`POST /api/cobrancas`) e oferece copiar/WhatsApp. O clie
 card "Pagamentos" do `PainelCliente`; a volta do Mercado Pago cai em `?cobranca=<id>`
 (`PaginaRetornoCobranca`, rota pública). Quem dá baixa é o webhook no backend — a tela só lê.
 
+## Rede Nacional (FN Nacional)
+
+Módulo `nacional`, em **arquivo próprio**: `src/rede-nacional.jsx` (`AbaRedeNacional`). O
+`App.jsx` só o importa e o encaixa (menu lateral da Gerência, barra do `gestor_regional`) e lhe
+entrega o `apiFetch` por prop — continua sendo o único caminho para a API. Fala só com
+`/api/nacional/*` (ver `src/nacional.js` no backend).
+
+- Papel novo `gestor_regional`: `MODULOS_POR_PERFIL.gestor_regional = ["nacional"]`. O
+  servidor filtra tudo pelas regionais liberadas a ele; a tela só esconde as abas que dariam 403.
+- A OS é o cadastro do cliente: escalar técnico continua no Agendamento, pelo `updCliente` de
+  sempre. Quando o técnico não pode receber a OS, o backend devolve 409 com o motivo, e o
+  aviso já aparece pelo `notify` do `updCliente`.
+- Origem comercial, nível/situação do técnico e valor do técnico pedem justificativa
+  (`ModalJustificativa`, mínimo de 10 caracteres — a mesma regra do servidor).
+
+## Mapa de atuação
+
+Módulo `mapa` (`src/mapa-atuacao.jsx`), no menu da Gerência logo abaixo de Indicadores —
+**só da Gerência**: clientes e parceiros por cidade são informação comercial. O site
+institucional tem a versão pública (`/api/nacional/mapa-publico`), ligada regional por
+regional em Rede Nacional → Regionais → "No site". Dados de
+`GET /api/nacional/mapa`: clientes (por CPF), empreendimentos e parceiros ativos por UF e por
+cidade, lidos do banco a cada consulta; a tela relê sozinha a cada minuto.
+
+- **Brasil:** desenho estático em `src/mapa-brasil.js`. **Regional:** um arquivo por UF em
+  `public/mapas/municipios-XX.json`, baixado só quando a regional é aberta. Os dois vêm da
+  malha do IBGE e são refeitos por `scripts/mapas/gerar-mapa.cjs` e `gerar-municipios.cjs`.
+- A cidade do cadastro casa com o município do IBGE sem acento nem caixa; o que não casar
+  aparece em "Cidades não localizadas" — corrige-se a grafia, não o mapa.
+- Cores: calor amarelo → vermelho em até 5 faixas com legenda, e cinza-azulado para "sem
+  atuação" (validados para daltonismo). A legenda do mapa regional fica **embaixo**: por cima
+  ela cobria a região metropolitana.
+
 ## Rotas públicas (querystring, sem login)
 
 O app não usa router; as páginas públicas são interceptadas no começo de `App()`:
