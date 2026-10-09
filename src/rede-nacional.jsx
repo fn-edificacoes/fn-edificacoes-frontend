@@ -23,7 +23,9 @@ const AMBAR = "#B26A00";
 
 const lab = { fontSize: 12, fontWeight: 600, color: "#5a6a80" };
 const inp = { padding: "8px 10px", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, fontSize: 13.5, outline: "none", background: "#fff", fontFamily: "inherit", minWidth: 0 };
-const th = { textAlign: "left", fontSize: 11.5, fontWeight: 700, color: "#5a6a80", padding: "8px 8px", borderBottom: `1px solid ${CINZA_BORDA}`, whiteSpace: "nowrap" };
+/* Cabeçalho preso no topo da caixa de rolagem (ver Tabela): rolando uma lista longa, o
+   nome de cada coluna continua à vista. */
+const th = { textAlign: "left", fontSize: 11.5, fontWeight: 700, color: "#5a6a80", padding: "8px 8px", borderBottom: `1px solid ${CINZA_BORDA}`, whiteSpace: "nowrap", position: "sticky", top: 0, background: "#fff", zIndex: 1 };
 const td = { fontSize: 13, padding: "8px 8px", borderBottom: `1px solid ${CINZA_CLARO}`, verticalAlign: "top" };
 const tdN = { ...td, whiteSpace: "nowrap" };
 const btn = { display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: 8, border: "none", background: AZUL_MEDIO, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" };
@@ -61,8 +63,15 @@ function Caixa({ icon: Icon, titulo, acoes, children }) {
     </section>
   );
 }
+/* A tabela rola dentro de uma caixa com altura máxima, e não a página inteira. Assim a barra
+   de rolagem lateral fica sempre à vista, na base da caixa — antes ela só existia no fim da
+   tabela, e numa lista de OS longa ninguém chegava até ela para ver as colunas da direita. */
 function Tabela({ children }) {
-  return <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse" }}>{children}</table></div>;
+  return (
+    <div style={{ overflow: "auto", maxHeight: "70vh", border: `1px solid ${CINZA_CLARO}`, borderRadius: 10 }}>
+      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>{children}</table>
+    </div>
+  );
 }
 function Etiqueta({ cor = AZUL_MEDIO, children }) {
   return <span style={{ display: "inline-block", fontSize: 11.5, fontWeight: 700, color: cor, background: `${cor}14`, border: `1px solid ${cor}33`, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" }}>{children}</span>;
@@ -261,7 +270,7 @@ function AbaTecnicos({ token, apiFetch, notify, ehNacional, regionais }) {
                 <td style={tdN}>{t.nivel ? ROTULO_NIVEL[t.nivel] : "—"}</td>
                 <td style={tdN}>{t.situacao ? ROTULO_SITUACAO[t.situacao] : "—"}</td>
                 <td style={tdN}>{t.regional_nome || "—"}</td>
-                <td style={td}>
+                <td style={{ ...td, minWidth: 210 }}>
                   {t.apto ? <Etiqueta cor={VERDE}>Sim</Etiqueta> : <Etiqueta cor={VERMELHO}>Não</Etiqueta>}
                   {(t.motivos || []).map((m) => <div key={m} style={{ fontSize: 11.5, color: VERMELHO, marginTop: 3 }}>{m}</div>)}
                 </td>
@@ -450,7 +459,33 @@ function AbaEmpreendimentos({ token, apiFetch, notify, ehNacional, regionais }) 
       recarregar();
     } catch (err) { notify(err.message); }
   };
-  const naoMapeados = (dados?.empreendimentos || []).filter((e) => !e.mapeado).length;
+  /* "Sem regional" é o que conta, não "sem linha nacional": um empreendimento pode ter sido
+     mapeado só com a cidade, e continuar fora de toda regional. */
+  const semRegional = (dados?.empreendimentos || []).filter((e) => !e.regional_id);
+  const naoMapeados = semRegional.length;
+
+  /* Regional em lote: no começo quase toda a base é de uma regional só (hoje, Pernambuco), e
+     escolher um por um era trabalho de uma tarde. Usa a mesma rota do salvar individual, um
+     empreendimento por vez, então cada mudança fica na auditoria como se fosse feita à mão. */
+  const [regionalLote, setRegionalLote] = useState("");
+  const [aplicandoLote, setAplicandoLote] = useState(null); // { feitos, total } durante a aplicação
+  const aplicarEmLote = async () => {
+    const regional = regionais.find((r) => r.id === regionalLote);
+    if (!regional || !semRegional.length) return;
+    if (!window.confirm(`Colocar os ${semRegional.length} empreendimento(s) sem regional na ${regional.nome} (UF ${regional.uf})? Dá para trocar um a um depois.`)) return;
+    let feitos = 0; const falhas = [];
+    setAplicandoLote({ feitos, total: semRegional.length });
+    for (const e of semRegional) {
+      try {
+        await apiFetch("/api/nacional/empreendimentos", { method: "PUT", token, body: { nome: e.nome, regionalId: regional.id, uf: e.uf || regional.uf } });
+        feitos++;
+      } catch { falhas.push(e.nome); }
+      setAplicandoLote({ feitos: feitos + falhas.length, total: semRegional.length });
+    }
+    setAplicandoLote(null);
+    notify(falhas.length ? `${feitos} colocado(s) na ${regional.nome}; não deu em: ${falhas.join(", ")}` : `${feitos} empreendimento(s) na ${regional.nome} ✓`);
+    recarregar();
+  };
   return (
     <Caixa icon={Building2} titulo="Empreendimentos e carteira FN"
       acoes={<>
@@ -462,12 +497,24 @@ function AbaEmpreendimentos({ token, apiFetch, notify, ehNacional, regionais }) 
         {ehNacional && naoMapeados > 0 && <> <b>{naoMapeados}</b> ainda sem regional — aparecem primeiro.</>}
         {" "}<b>Carteira FN</b> ligada: o parceiro só enxerga as OS atribuídas a ele, nunca a lista de clientes ou leads.
       </p>
+      {ehNacional && naoMapeados > 0 && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", background: "#FFF4E0", border: "1px solid #F2D49B", borderRadius: 10, padding: "10px 12px", marginBottom: 12, fontSize: 13 }}>
+          <b>{naoMapeados} sem regional.</b> Colocar todos em:
+          <select style={inp} value={regionalLote} onChange={(ev) => setRegionalLote(ev.target.value)} disabled={!!aplicandoLote}>
+            <option value="">escolha a regional…</option>
+            {regionais.map((r) => <option key={r.id} value={r.id}>{r.nome} · {r.uf}</option>)}
+          </select>
+          <button style={{ ...btn, opacity: regionalLote && !aplicandoLote ? 1 : 0.5 }} disabled={!regionalLote || !!aplicandoLote} onClick={aplicarEmLote}>
+            {aplicandoLote ? `Aplicando… ${aplicandoLote.feitos}/${aplicandoLote.total}` : "Aplicar a todos sem regional"}
+          </button>
+        </div>
+      )}
       <Tabela>
         <thead><tr>{["Empreendimento", "Regional", "Cidade", "UF", "Carteira FN", "Origem", "OS (mês/total)", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
         <tbody>
           {linhas.map((e) => (
             <tr key={e.chave}>
-              <td style={td}><b>{e.nome}</b><div style={{ fontSize: 11.5, color: "#7a889c" }}>{e.construtora || ""}</div></td>
+              <td style={{ ...td, minWidth: 200 }}><b>{e.nome}</b><div style={{ fontSize: 11.5, color: "#7a889c" }}>{e.construtora || ""}</div></td>
               <td style={td}>
                 <select style={inp} value={valor(e, "regionalId", e.regional_id || "")} onChange={(ev) => mudar(e, "regionalId", ev.target.value || null)}>
                   <option value="">— sem regional —</option>
@@ -555,7 +602,9 @@ function AbaOs({ token, apiFetch, notify, ehNacional, regionais }) {
           {os.map((o) => (
             <tr key={o.id}>
               <td style={tdN}><b>{o.numero}</b>{o.prioridade && o.prioridade !== "normal" && <div><Etiqueta cor={o.prioridade === "urgente" ? VERMELHO : AMBAR}>{o.prioridade}</Etiqueta></div>}</td>
-              <td style={td}>{o.nome}<div style={{ fontSize: 11.5, color: "#7a889c" }}>{o.empreendimento} {o.bloco_torre} {o.apartamento}</div></td>
+              {/* Largura mínima: sem ela as colunas que não quebram espremiam o nome do cliente
+                  numa palavra por linha, e cada OS ocupava meia tela de altura. */}
+              <td style={{ ...td, minWidth: 230 }}>{o.nome}<div style={{ fontSize: 11.5, color: "#7a889c" }}>{o.empreendimento} {o.bloco_torre} {o.apartamento}</div></td>
               <td style={tdN}>{o.servico}</td>
               <td style={tdN}>{o.status}</td>
               <td style={tdN}>{dataBr(o.data_desejada)}</td>
