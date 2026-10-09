@@ -188,8 +188,10 @@ entrega o `apiFetch` por prop — continua sendo o único caminho para a API. Fa
 
 ## Mapa de atuação
 
-Módulo `mapa` (`src/mapa-atuacao.jsx`), no menu da Gerência logo abaixo de Indicadores e
-também do `gestor_regional` (que abre direto na regional dele). Dados de
+Módulo `mapa` (`src/mapa-atuacao.jsx`), no menu da Gerência logo abaixo de Indicadores —
+**só da Gerência**: clientes e parceiros por cidade são informação comercial. O site
+institucional tem a versão pública (`/api/nacional/mapa-publico`), ligada regional por
+regional em Rede Nacional → Regionais → "No site". Dados de
 `GET /api/nacional/mapa`: clientes (por CPF), empreendimentos e parceiros ativos por UF e por
 cidade, lidos do banco a cada consulta; a tela relê sozinha a cada minuto.
 

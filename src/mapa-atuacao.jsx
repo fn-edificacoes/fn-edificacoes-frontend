@@ -3,6 +3,8 @@
    ============================================================
    Brasil: cada estado pintado pela intensidade (clientes, empreendimentos ou parceiros).
    Regional: o estado aberto por município, com as cidades cadastradas em destaque.
+   Só a Gerência: clientes e parceiros por cidade são informação comercial. O site
+   institucional tem a sua versão pública, mais enxuta (ver /api/nacional/mapa-publico).
 
    Os números vêm de /api/nacional/mapa (ver src/nacional.js no backend), lidos do banco a
    cada consulta, e a tela se atualiza sozinha a cada minuto. O desenho do Brasil é estático
@@ -172,11 +174,6 @@ export default function AbaMapaAtuacao({ token, apiFetch, notify }) {
     const t = setInterval(() => { if (document.visibilityState === "visible") carregar(); }, ATUALIZAR_A_CADA_MS);
     return () => clearInterval(t);
   }, [periodo]);
-
-  /* Gestor regional não tem visão Brasil: abre direto na regional dele. */
-  useEffect(() => {
-    if (dados && !dados.nacional && !vista && dados.regionais[0]) setVista(dados.regionais[0].uf);
-  }, [dados]);
 
   const regionalDaUf = useMemo(() => Object.fromEntries((dados?.regionais || []).map((r) => [r.uf, r])), [dados]);
 

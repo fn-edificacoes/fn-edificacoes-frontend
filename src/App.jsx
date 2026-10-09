@@ -570,7 +570,7 @@ const MODULOS_POR_PERFIL = {
   vendas: ["vendas", "despesas"],
   gerencia: ["laudos", "documentacao", "gerencia", "usuarios", "clientes", "qualidade", "faq", "marketing", "nacional", "mapa"],
   /* FN Nacional por regional: só a Rede Nacional, filtrada pelo servidor às regionais dele. */
-  gestor_regional: ["nacional", "mapa", "despesas"],
+  gestor_regional: ["nacional", "despesas"],
 };
 const PERFIL_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação", atendimento: "Atendimento", vendas: "Vendas", gerencia: "Gerência", gestor_regional: "Gestor regional" };
 

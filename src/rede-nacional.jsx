@@ -692,13 +692,16 @@ function AbaRegionais({ token, apiFetch, notify, usuarios, recarregarEscopo }) {
     <>
       <Caixa icon={MapPin} titulo="Regionais" acoes={<button style={btnLeve} onClick={tudo}><RefreshCcw size={14} className={carregando ? "spin" : ""} /> Atualizar</button>}>
         <Tabela>
-          <thead><tr>{["Regional", "UF", "Situação", "Meta OS/mês", "SLA laudo (h)", "Cidades", "Técnicos ativos"].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <thead><tr>{["Regional", "UF", "Situação", "No site", "Meta OS/mês", "SLA laudo (h)", "Cidades", "Técnicos ativos"].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
           <tbody>
             {regionais.map((r) => (
               <tr key={r.id}>
                 <td style={td}><b>{r.nome}</b></td>
                 <td style={td}>{r.uf}</td>
                 <td style={td}><select style={inp} value={r.status} onChange={(e) => atualizar(r.id, { status: e.target.value })}>{Object.entries(ROTULO_STATUS_REGIONAL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></td>
+                {/* Aparece no mapa "Onde atuamos" do site institucional (só onde a FN atua e
+                    quantos empreendimentos atendeu — nunca clientes por cidade nem parceiros). */}
+                <td style={td}><label style={{ display: "inline-flex", gap: 6, alignItems: "center", fontSize: 12.5 }}><input type="checkbox" checked={!!r.publico_site} onChange={(e) => atualizar(r.id, { publicoSite: e.target.checked })} /> Mostrar</label></td>
                 <td style={td}><input type="number" min="0" style={{ ...inp, width: 90 }} defaultValue={r.meta_os_mes ?? ""} onBlur={(e) => String(r.meta_os_mes ?? "") !== e.target.value && atualizar(r.id, { metaOsMes: e.target.value })} /></td>
                 <td style={td}><input type="number" min="0" style={{ ...inp, width: 80 }} defaultValue={r.sla_laudo_horas ?? ""} onBlur={(e) => String(r.sla_laudo_horas ?? "") !== e.target.value && atualizar(r.id, { slaLaudoHoras: e.target.value })} /></td>
                 <td style={td}>{r.cidades_ativas}</td>
@@ -709,7 +712,7 @@ function AbaRegionais({ token, apiFetch, notify, usuarios, recarregarEscopo }) {
               <td style={td}><input style={inp} placeholder="Regional Ceará" value={nova.nome} onChange={(e) => setNova({ ...nova, nome: e.target.value })} /></td>
               <td style={td}><select style={inp} value={nova.uf} onChange={(e) => setNova({ ...nova, uf: e.target.value })}><option value="">UF</option>{UFS.map((u) => <option key={u}>{u}</option>)}</select></td>
               <td style={td}><select style={inp} value={nova.status} onChange={(e) => setNova({ ...nova, status: e.target.value })}>{Object.entries(ROTULO_STATUS_REGIONAL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></td>
-              <td style={td} colSpan={4}><button style={btn} onClick={criar} disabled={!nova.nome || !nova.uf}><Plus size={14} /> Criar regional</button></td>
+              <td style={td} colSpan={5}><button style={btn} onClick={criar} disabled={!nova.nome || !nova.uf}><Plus size={14} /> Criar regional</button></td>
             </tr>
           </tbody>
         </Tabela>
