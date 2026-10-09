@@ -171,6 +171,21 @@ o link do Mercado Pago (`POST /api/cobrancas`) e oferece copiar/WhatsApp. O clie
 card "Pagamentos" do `PainelCliente`; a volta do Mercado Pago cai em `?cobranca=<id>`
 (`PaginaRetornoCobranca`, rota pública). Quem dá baixa é o webhook no backend — a tela só lê.
 
+## Rede Nacional (FN Nacional)
+
+Módulo `nacional`, em **arquivo próprio**: `src/rede-nacional.jsx` (`AbaRedeNacional`). O
+`App.jsx` só o importa e o encaixa (menu lateral da Gerência, barra do `gestor_regional`) e lhe
+entrega o `apiFetch` por prop — continua sendo o único caminho para a API. Fala só com
+`/api/nacional/*` (ver `src/nacional.js` no backend).
+
+- Papel novo `gestor_regional`: `MODULOS_POR_PERFIL.gestor_regional = ["nacional"]`. O
+  servidor filtra tudo pelas regionais liberadas a ele; a tela só esconde as abas que dariam 403.
+- A OS é o cadastro do cliente: escalar técnico continua no Agendamento, pelo `updCliente` de
+  sempre. Quando o técnico não pode receber a OS, o backend devolve 409 com o motivo, e o
+  aviso já aparece pelo `notify` do `updCliente`.
+- Origem comercial, nível/situação do técnico e valor do técnico pedem justificativa
+  (`ModalJustificativa`, mínimo de 10 caracteres — a mesma regra do servidor).
+
 ## Rotas públicas (querystring, sem login)
 
 O app não usa router; as páginas públicas são interceptadas no começo de `App()`:

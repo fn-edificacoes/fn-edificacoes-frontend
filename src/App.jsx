@@ -2370,7 +2370,14 @@ function AppInterno({ session, onLogout }) {
     try {
       await apiFetch(`/api/clientes/${id}`, { method: "PATCH", token, body: patch });
       return true;
-    } catch (e) { notify(`Não foi possível atualizar cliente: ${e.message}`); return false; }
+    } catch (e) {
+      notify(`Não foi possível atualizar cliente: ${e.message}`);
+      /* A lista já mostrava o valor novo (atualização otimista). Recusado, ela volta ao que o
+         servidor tem — senão um técnico barrado ficava aparecendo como escalado até o
+         recarregamento automático, 20 segundos depois. */
+      carregarClientes();
+      return false;
+    }
   };
   /* ---- Carga da base antiga de clientes (Gerência → Importar base) ----
      Rota própria, e não o POST /api/clientes do portal: o cadastro público dispara o fluxo
@@ -6289,8 +6296,11 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
     }
     setTrocandoId(c.id);
     try {
-      await updCliente(c.id, { vistoriadorId: novoId });
-      notify(`Vistoria transferida para ${nomeNovo} \u2713`);
+      /* updCliente não lança: devolve false e já avisa o motivo. Sem conferir, o "transferida"
+         cobria a recusa do servidor (técnico suspenso, de outra regional…) e a pessoa saía
+         achando que tinha trocado. */
+      const ok = await updCliente(c.id, { vistoriadorId: novoId });
+      if (ok) notify(`Vistoria transferida para ${nomeNovo} \u2713`);
     } catch (e) { notify(`Não foi possível trocar o técnico: ${e.message}`); }
     setTrocandoId(null);
   };
@@ -6310,7 +6320,9 @@ function AbaQualidadeVistoria({ clientes = [], docs = [], carregando, updCliente
       return;
     }
     try {
-      await updCliente(c.id, { vistoriadorId, status: "Vistoria agendada" });
+      // Mesmo cuidado da troca de técnico: recusa do servidor não pode virar "agendada ✓".
+      const ok = await updCliente(c.id, { vistoriadorId, status: "Vistoria agendada" });
+      if (!ok) return;
       notify("Vistoria agendada ✓ — já aparece na agenda do técnico");
       aoConfirmar?.(c.dataDesejada);
     } catch (e) { notify(`Erro: ${e.message}`); }
