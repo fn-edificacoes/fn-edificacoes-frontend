@@ -15,7 +15,7 @@ export const CATEGORIAS_DESPESA = {
   "Operacional": ["Equipamentos de vistoria", "Ferramentas", "EPIs", "Materiais", "Manutenção de equipamentos", "Equipamentos eletrônicos", "Tablet", "Notebook", "Celular", "Câmeras", "Outros"],
   "Administrativo": ["Telefone", "Internet", "Sistema", "Softwares", "Assinaturas", "Domínio", "Hospedagem do site", "Contabilidade", "Serviços bancários", "Material de escritório", "Outros"],
   "Comercial e Marketing": ["Instagram", "Meta Ads", "Google Ads", "Tráfego pago", "Designer", "Social media", "Impressão", "Material gráfico", "Comissão", "Afiliados", "Parceiros", "Outros"],
-  "Profissionais e Prestadores": ["Engenheiro", "Arquiteto", "Técnico em edificações", "Vistoriador", "Prestador de serviço", "Freelancer", "Consultoria", "Outros"],
+  "Profissionais e Prestadores": ["Engenheiro", "Arquiteto", "Técnico em edificações", "Vistoriador", "Salário e extras", "Prestador de serviço", "Freelancer", "Consultoria", "Outros"],
   "Tributos e Taxas": ["DAS MEI", "ISS", "Taxas municipais", "TRT", "ART", "RRT", "Taxas de conselho profissional", "Certificados", "Licenças", "Outros"],
 };
 export const CATEGORIAS = Object.keys(CATEGORIAS_DESPESA);

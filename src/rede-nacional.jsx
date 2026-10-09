@@ -564,7 +564,7 @@ function AbaOs({ token, apiFetch, notify, ehNacional, regionais }) {
               <td style={tdN}>{ROTULO_ORIGEM[o.origem_comercial] || o.origem_comercial}{ehNacional && <button style={{ border: "none", background: "none", color: AZUL_MEDIO, cursor: "pointer", fontSize: 12 }} onClick={() => abrirOrigem(o)}>alterar</button>}</td>
               {verDinheiro && <>
                 <td style={tdN}>{brl(o.valor_cobrado ?? o.valor_cliente_tabela)}</td>
-                <td style={tdN}>{brl(o.valor_tecnico ?? o.valor_tecnico_tabela)}{o.valor_tecnico == null && o.valor_tecnico_tabela != null && <div style={{ fontSize: 11, color: "#7a889c" }}>tabela</div>}{ehNacional && <div><button style={{ border: "none", background: "none", color: AZUL_MEDIO, cursor: "pointer", fontSize: 12, padding: 0 }} onClick={() => abrirValor(o)}>definir</button></div>}</td>
+                <td style={tdN}>{brl(o.valor_tecnico ?? o.valor_tecnico_regra)}{o.valor_tecnico == null && o.valor_tecnico_regra != null && <div style={{ fontSize: 11, color: "#7a889c" }}>regra do dia</div>}{ehNacional && <div><button style={{ border: "none", background: "none", color: AZUL_MEDIO, cursor: "pointer", fontSize: 12, padding: 0 }} onClick={() => abrirValor(o)}>definir</button></div>}</td>
                 <td style={tdN}>{brl(o.margem_fn)}</td>
               </>}
               <td style={td}><button style={btnLeve} onClick={() => abrirElegiveis(o)}>Técnicos aptos</button></td>
@@ -623,7 +623,7 @@ function AbaOs({ token, apiFetch, notify, ehNacional, regionais }) {
       {valorDe && (
         <ModalJustificativa titulo={`Valor do técnico · ${valorDe.os.numero}`} aoFechar={() => setValorDe(null)}
           descricao={valorDe.sugestao?.valor != null
-            ? `Sugestão: ${brl(valorDe.sugestao.valor)} (${valorDe.sugestao.regra ? `regra “${valorDe.sugestao.regra.nome}”` : "tabela do empreendimento"}). Deixe vazio para seguir a sugestão.`
+            ? `Sugestão: ${brl(valorDe.sugestao.valor)} (${valorDe.sugestao.regra ? `regra “${valorDe.sugestao.regra.nome}”` : "regra do dia: R$ 100 a 1ª vistoria, R$ 80 as seguintes"}). Deixe vazio para seguir a sugestão.`
             : "Sem regra nem tabela para esta OS. Deixe vazio para não definir."}
           aoConfirmar={async (justificativa) => {
             try {

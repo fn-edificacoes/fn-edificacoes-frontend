@@ -98,6 +98,7 @@ src/patologias-ambiente.js  catálogo de patologias por ambiente
 src/patologias-consulta.js  busca no catálogo
 src/rascunho-local.js       vistoria em edição salva no navegador
 src/financeiro-regras.js    regras do Financeiro (despesas, MEI, exportação) — sem tela
+src/controle-financeiro.jsx ARTs de vistoria, folha de pagamento, valores dos custos
 ```
 
 Para achar algo no `App.jsx`, procure pela definição da componente
@@ -163,8 +164,39 @@ cadastro rápido (`ModalDespesa`) de qualquer tela.
 - Regra única em `src/financeiro-regras.js`: o que entra nos indicadores (pessoal e rejeitada
   não entram; parcial entra pela parte empresarial), saúde documental, limite do MEI, CSV/Excel/ZIP.
   Dashboard, relatório e planilha do contador saem dessas mesmas funções.
-- A receita **não é lançada** no módulo: vem de `resumirAtendimentos`, a mesma da aba Indicadores.
+- **A receita sai de `fichaFinanceira(cliente, doc, precoPorChave)`, e de nenhum outro lugar.**
+  Setor de cobrança, Indicadores, Receitas, Painel estratégico, Indicadores financeiros, MEI e
+  relatórios leem a ficha (direto, ou por `resumirAtendimentos`/`receitaDoPeriodo`). Antes cada
+  tela somava do seu jeito e nenhum total batia. A ficha diz:
+  - **valor**: lançado no Setor de cobrança → registro da vistoria → preço de tabela (`origemValor`);
+  - **realizado**: vistoria finalizada (existe registro em `docs`) ou documentação pronta;
+  - **faturado**: realizado **ou já pago** — o "Pago" confirmado pelo Atendimento conta na hora,
+    sem esperar vistoria nem laudo. O resto é **previsto** e não entra no MEI nem no resultado;
+  - **pago**: só `cliente.pagamento` (o backend espelha o registro da vistoria para o cadastro);
+    `divergente` aponta caso antigo em que só o registro dizia Pago;
+  - **datas**: `dataServico` (competência) e `dataPagamento` (caixa, a que bate com o extrato).
+- Baixa manual no Setor de cobrança (`LinhaCobranca`) pede **data e forma** do pagamento. Pago
+  antigo sem data nasce com o campo vazio — preencher "hoje" inventaria a data. A aba **Antes da
+  vistoria** lista o que ainda não chegou à hora da visita, para registrar pagamento antecipado.
 - Nada decide regime tributário. O limite do MEI é o configurado; os campos do Simples são só guardados.
+
+**Controle financeiro** (`src/controle-financeiro.jsx`, arquivo próprio como a Rede Nacional):
+- `AbaArtsVistoria` (módulo `arts`, Gerência e Documentação): ART múltipla de vistoria por
+  empreendimento — quem está sem ART (do pré-cadastro em diante), emitir ART (até 50 pessoas,
+  30 dias da emissão, R$ 69) ou incluir numa ART vigente com vaga. Cada ART vira despesa no servidor.
+- `AbaFolhaPagamento` (Financeiro › Folha de pagamento, só Gerência): por mês, vistoriador pela
+  regra 100/80 calculada **no servidor**, salário fixo do Atendimento (R$ 400) e extras. "Pagar"
+  vira uma despesa; o comprovante se anexa ali mesmo (`fin.anexar`). `SalariosFixos` muda o valor
+  de alguém, inclui ou tira da folha fixa. Nada disso aparece para o atendente ou o técnico.
+- Não existe mais custo fixo por empreendimento: a coluna saiu de Preços por empreendimento e a
+  Rede Nacional mostra o valor do técnico pela regra do dia (`valor_tecnico_regra`).
+- `CardValoresCustos` (Configurações Fiscais): valores do técnico, da ART e o salário fixo do Atendimento.
+- `useCustosOperacionais`: o que `CardReceitaEstimada` usa para custo de técnico e de ART — a
+  regra não se repete no front.
+- Financeiro › **Conferência de pagamentos** (`AbaConferenciaPagamentos`, no App.jsx): "Pago" só no
+  registro, pago sem data, realizado sem valor lançado e o que está a receber.
+- Despesa com `origem` foi lançada pelo sistema (técnico, ART, tarifa do Mercado Pago): o valor
+  não se edita (`ModalDespesa` trava o campo; o servidor recusa).
 
 **Link de pagamento (Setor de cobrança):** `BlocoLinkPagamento`, dentro de `LinhaCobranca`, gera
 o link do Mercado Pago (`POST /api/cobrancas`) e oferece copiar/WhatsApp. O cliente paga pelo
