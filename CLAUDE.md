@@ -188,6 +188,10 @@ cadastro rápido (`ModalDespesa`) de qualquer tela.
   regra 100/80 calculada **no servidor**, salário fixo do Atendimento (R$ 400) e extras. "Pagar"
   vira uma despesa; o comprovante se anexa ali mesmo (`fin.anexar`). `SalariosFixos` muda o valor
   de alguém, inclui ou tira da folha fixa. Nada disso aparece para o atendente ou o técnico.
+  **Fechamento do dia**: o vistoriador recebe no fim de cada dia — escolhe o dia, paga, anexa o
+  comprovante na mesma linha. "Marcar o mês todo como pago" (mês já pago fora do sistema) registra
+  um pagamento por dia para cada vistoriador. `FormPagamento` tem "Lançar como despesa" — desmarcar
+  quando o pagamento já foi lançado à mão em Despesas. `SalariosFixos` tem o mês de início ("Desde").
 - Não existe mais custo fixo por empreendimento: a coluna saiu de Preços por empreendimento e a
   Rede Nacional mostra o valor do técnico pela regra do dia (`valor_tecnico_regra`).
 - `CardValoresCustos` (Configurações Fiscais): valores do técnico, da ART e o salário fixo do Atendimento.
