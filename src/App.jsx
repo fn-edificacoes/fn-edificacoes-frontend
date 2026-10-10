@@ -4,7 +4,7 @@ import { listarAmbientes, paraItemDeLaudo, todasParaImportacao } from "./patolog
 import * as Fin from "./financeiro-regras.js";
 import AbaRedeNacional from "./rede-nacional.jsx";
 import AbaMapaAtuacao from "./mapa-atuacao.jsx";
-import { AbaArtsVistoria, AbaFolhaPagamento, CardValoresCustos, useCustosOperacionais } from "./controle-financeiro.jsx";
+import { AbaArtsVistoria, AbaFolhaPagamento, AbaDespesasFixas, CardValoresCustos, useCustosOperacionais, useFolhaEmAberto } from "./controle-financeiro.jsx";
 import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
   Building2, User, ClipboardList, ChevronDown, ChevronRight, ChevronLeft, Check,
@@ -12,7 +12,7 @@ import {
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
   ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle, Megaphone, Clock,
-  Wrench, Paperclip, Menu, Receipt, Car, FileBarChart, Gauge, Settings, Landmark, Wallet, Archive, FileSpreadsheet, FileCheck,
+  Wrench, Paperclip, Menu, Receipt, Car, FileBarChart, Gauge, Settings, Landmark, Wallet, Archive, FileSpreadsheet, FileCheck, Repeat,
   Map as IconeMapa
 } from "lucide-react";
 
@@ -2222,6 +2222,7 @@ const GERENCIA_MENU_LATERAL = [
   { titulo: "Financeiro", itens: [
     { aba: "gerencia", sub: "financeiro", label: "Receitas", Icon: DollarSign },
     { aba: "gerencia", sub: "fin-despesas", label: "Despesas", Icon: Receipt },
+    { aba: "gerencia", sub: "fin-fixas", label: "Despesas fixas", Icon: Repeat },
     { aba: "gerencia", sub: "fin-folha", label: "Folha de pagamento", Icon: Wallet },
     { aba: "gerencia", sub: "fin-conferencia", label: "Conferência de pagamentos", Icon: Check },
     { aba: "gerencia", sub: "fin-notas", label: "Notas e Comprovantes", Icon: FileCheck },
@@ -12568,8 +12569,14 @@ function receitaDoPeriodo({ clientes = [], docs = [], precos = [], receitas = []
   /* O que está agendado no período e ainda não foi realizado: mostrado à parte, nunca somado. */
   const previsto = fichas.filter((x) => x.f.previsto && dentroDoPeriodo(x.f.dataServico, periodo))
     .reduce((s, x) => s + x.f.valor, 0);
+  /* O mesmo recorte mês a mês ("AAAA-MM" → valor), para a Situação Tributária acompanhar o MEI
+     mês a mês sem repetir a conta. Registro sem data fica só no total. */
+  const porMes = {};
+  const somarNoMes = (iso, v) => { const m = String(iso || "").slice(0, 7); if (/^\d{4}-\d{2}$/.test(m)) porMes[m] = (porMes[m] || 0) + v; };
+  escolhidos.forEach((x) => somarNoMes(dataQueVale(x), valorFicha(x.f)));
+  avulsas.forEach((x) => somarNoMes(x.data, valorAvulsa(x)));
   return {
-    total: deAtendimentos + deAvulsas, deAtendimentos, deAvulsas,
+    total: deAtendimentos + deAvulsas, deAtendimentos, deAvulsas, porMes,
     atendimentos: escolhidos.map((x) => x.c), avulsas, valorDe, valorAvulsa, previsto,
     vistorias: escolhidos.filter((x) => ehTrabalhoDeVistoria(x.c)).length,
     semDataPagamento: caixa ? escolhidos.filter((x) => !x.f.dataPagamento).length : 0,
@@ -12595,6 +12602,21 @@ function intervaloDoPeriodo(periodo) {
     return `${d(ano, m0, 1)} a ${d(ano, m0 + 2, Fin.ultimoDiaDoMes(ano, m0 + 2))}`;
   }
   return `${d(ano, periodo.indice, 1)} a ${d(ano, periodo.indice, Fin.ultimoDiaDoMes(ano, periodo.indice))}`;
+}
+/* Os meses ("AAAA-MM") de um recorte, até o mês corrente: a Folha é por mês, e mês que ainda
+   não chegou não tem folha a pagar — o salário fixo apareceria devido antes da hora. "Todo o
+   período" começa em janeiro do ano mais antigo com movimento. */
+function mesesDoPeriodo(periodo, anos = []) {
+  const agora = new Date();
+  const limite = agora.getFullYear() * 12 + agora.getMonth();
+  let ini, fim;
+  if (!periodo || periodo.granularidade === "tudo") { ini = Math.min(agora.getFullYear(), ...anos) * 12; fim = limite; }
+  else if (periodo.granularidade === "ano") { ini = periodo.ano * 12; fim = ini + 11; }
+  else if (periodo.granularidade === "trimestre") { ini = periodo.ano * 12 + periodo.indice * 3; fim = ini + 2; }
+  else { ini = fim = periodo.ano * 12 + periodo.indice; }
+  const meses = [];
+  for (let m = ini; m <= Math.min(fim, limite); m++) meses.push(`${Math.floor(m / 12)}-${String((m % 12) + 1).padStart(2, "0")}`);
+  return meses;
 }
 
 /* Rótulo de um cadastro nas listas de vínculo: quem, onde e quando. */
@@ -13068,6 +13090,7 @@ function TabelaDespesas({ lista, fin, clientesPorId = {}, onEditar, vazio = "Nen
                   </div>
                   {pessoal && <div style={{ fontSize: 11, color: "#65758b" }}>Uso pessoal — fora dos indicadores</div>}
                   {d.origem && <div style={{ fontSize: 11, color: "#2C75B5", fontWeight: 600 }}>Lançada pelo sistema · {ROTULO_ORIGEM_DESPESA[d.origem] || d.origem}</div>}
+                  {d.fixaId && <div style={{ fontSize: 11, color: "#2C75B5", fontWeight: 600 }}>Despesa fixa · {String(d.fixaCompetencia || "").split("-").reverse().join("/")}</div>}
                   {d.finalidade === "parcial" && <div style={{ fontSize: 11, color: "#65758b" }}>Uso parcial — {d.percentualEmpresarial ?? 50}% empresarial</div>}
                   {d.motivoAprovacao && d.statusAprovacao !== "Aprovada" && <div style={{ fontSize: 11.5, color: "#A12020" }}>Motivo: {d.motivoAprovacao}</div>}
                 </td>
@@ -13554,7 +13577,9 @@ function TabelaRentabilidade({ linhas, rotulo, rodape, quantidade = null }) {
   );
 }
 
-/* Barra do MEI: faturamento do ano contra o limite configurado. */
+/* Situação Tributária: o faturamento do ano contra o limite configurado e, embaixo, o mesmo mês a
+   mês desde a abertura do CNPJ — com o que a contabilidade vai pedir na mudança para ME (receita
+   e folha dos últimos 12 meses, Fator R). Tudo leitura: nada aqui decide regime. */
 function PainelSituacaoTributaria({ fin, clientes, docs, precos, ano = new Date().getFullYear() }) {
   const config = fin.config || {};
   /* No ano da abertura, o faturamento começa na data de abertura — o limite proporcional já
@@ -13563,20 +13588,88 @@ function PainelSituacaoTributaria({ fin, clientes, docs, precos, ano = new Date(
      rodando desde julho). */
   const abertura = /^\d{4}-\d{2}-\d{2}$/.test(String(config.dataAbertura || "")) ? config.dataAbertura : "";
   const desde = abertura && Number(abertura.slice(0, 4)) === Number(ano) ? abertura : "";
-  const receita = receitaDoPeriodo({ clientes, docs, precos, receitas: fin.receitas, periodo: { granularidade: "ano", ano, indice: 0 }, base: config.baseFaturamento || "cobrado", aPartirDe: desde });
+  const base = config.baseFaturamento || "cobrado";
+  const receita = receitaDoPeriodo({ clientes, docs, precos, receitas: fin.receitas, periodo: { granularidade: "ano", ano, indice: 0 }, base, aPartirDe: desde });
   const limite = Fin.limiteEfetivo(config, ano);
   const s = Fin.situacaoMei(receita.total, limite);
   const regime = config.regime || "MEI";
+  const ehMei = regime === "MEI";
+
+  /* Mês a mês, só o que é do CNPJ (da abertura em diante). O que entrou antes dele no mesmo ano
+     aparece numa linha à parte: não é faturamento do MEI, mas sumir com ele faria o total do
+     ano não bater com o resto do Financeiro. */
+  const doCnpj = useMemo(
+    () => receitaDoPeriodo({ clientes, docs, precos, receitas: fin.receitas, periodo: PERIODO_TUDO, base, aPartirDe: abertura }).porMes,
+    [clientes, docs, precos, fin.receitas, base, abertura]);
+  const antesDaAbertura = useMemo(() => (desde
+    ? receitaDoPeriodo({ clientes, docs, precos, receitas: fin.receitas, periodo: { granularidade: "ano", ano, indice: 0 }, base }).total - receita.total
+    : 0), [clientes, docs, precos, fin.receitas, base, desde, ano, receita.total]);
+  /* Folha paga por mês, pela data do pagamento — é a base do Fator R ("montante pago"). Entra
+     o que o relatório chama de Folha de pagamento: vistoriador, salário, extras, pró-labore e
+     encargos. Da abertura em diante, como a receita. */
+  const folhaPorMes = useMemo(() => {
+    const m = {};
+    fin.despesas.filter((d) => Fin.contaNosIndicadores(d) && Fin.ehFolhaDePagamento(d) && (!abertura || String(d.data) >= abertura))
+      .forEach((d) => { const k = String(d.data || "").slice(0, 7); if (k) m[k] = (m[k] || 0) + Fin.valorEmpresarial(d); });
+    return m;
+  }, [fin.despesas, abertura]);
+
+  const mesAtual = Fin.hojeIso().slice(0, 7);
+  const primeiroMes = desde ? desde.slice(0, 7) : `${ano}-01`;
+  const ultimoMes = `${ano}-12` < mesAtual ? `${ano}-12` : mesAtual;
+  const mesesDeAtividade = 12 - (Number(primeiroMes.slice(5)) - 1);
+  const linhas = [];
+  let acumulado = 0;
+  for (let mes = primeiroMes, i = 1; mes <= ultimoMes; mes = Fin.somarMeses(mes, 1), i++) {
+    const faturamento = doCnpj[mes] || 0;
+    acumulado += faturamento;
+    /* O limite do ano repartido pelos meses de atividade: com limite proporcional, R$ 6.750 por mês. */
+    linhas.push({ mes, faturamento, acumulado, limiteAteMes: (limite * i) / mesesDeAtividade, folha: folhaPorMes[mes] || 0 });
+  }
+
+  /* Rumo à ME: os 12 meses que terminam no último mês da tabela, sem nada de antes da abertura.
+     Com menos de 12 meses de CNPJ, o Simples projeta a média mensal para 12 — por isso a média ×
+     12 aparece ao lado do teto da ME. */
+  const janela = [];
+  for (let i = 11; i >= 0; i--) {
+    const mes = Fin.somarMeses(ultimoMes, -i);
+    if (!abertura || mes >= abertura.slice(0, 7)) janela.push(mes);
+  }
+  const receita12 = janela.reduce((t, m) => t + (doCnpj[m] || 0), 0);
+  const folha12 = janela.reduce((t, m) => t + (folhaPorMes[m] || 0), 0);
+  const projecao12 = janela.length ? (receita12 / janela.length) * 12 : 0;
+  const fatorR = receita12 > 0 ? folha12 / receita12 : null;
+  const rotuloJanela = janela.length >= 12 ? "últimos 12 meses" : `desde a abertura (${janela.length} ${janela.length === 1 ? "mês" : "meses"})`;
+  const nomeMes = (mes) => `${Fin.MESES_NOMES[Number(mes.slice(5)) - 1]}/${mes.slice(0, 4)}`;
+  const th = { textAlign: "right", padding: "7px 10px", fontSize: 11.5, color: "#65758b", fontWeight: 700, borderBottom: `1px solid ${CINZA_BORDA}`, whiteSpace: "nowrap" };
+  const td = { textAlign: "right", padding: "7px 10px", borderBottom: `1px solid ${CINZA_CLARO}`, fontSize: 13, whiteSpace: "nowrap" };
+
   return (
     <Card icon={Landmark} titulo="Situação Tributária">
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
         <CartaoIndicador titulo="Regime atual" valor={regime} />
         <CartaoIndicador titulo={`Faturamento em ${ano}`} valor={Fin.brl(receita.total)}
-          apoio={`${config.baseFaturamento === "recebido" ? "o que já foi recebido" : "serviços realizados (faturado)"}${desde ? ` desde a abertura (${Fin.dataBr(desde)})` : ""}`} />
-        {regime === "MEI" && <CartaoIndicador titulo="Limite anual configurado" valor={Fin.brl(limite)} apoio={config.limiteProporcional ? "proporcional ao 1º ano" : null} />}
-        {regime === "MEI" && <CartaoIndicador titulo="Percentual utilizado" valor={Fin.pct(s.pct)} cor={s.faixa.cor} />}
+          apoio={`${base === "recebido" ? "o que já foi recebido" : "serviços realizados (faturado)"}${desde ? ` desde a abertura (${Fin.dataBr(desde)})` : ""}`} />
+        {ehMei && <CartaoIndicador titulo="Limite anual configurado" valor={Fin.brl(limite)} apoio={config.limiteProporcional ? "proporcional ao 1º ano" : null} />}
+        {ehMei && <CartaoIndicador titulo="Percentual utilizado" valor={Fin.pct(s.pct)} cor={s.faixa.cor} />}
       </div>
-      {regime === "MEI" ? (
+      {!abertura && (
+        <div style={{ marginBottom: 12 }}>
+          <AvisoFin tom="atencao">
+            A data de abertura do CNPJ não está em Configurações Fiscais › Empresa e regime. Sem ela, o faturamento de {ano} conta desde janeiro,
+            inclusive o que entrou antes de o CNPJ existir, e o limite não fica proporcional ao primeiro ano.
+          </AvisoFin>
+        </div>
+      )}
+      {ehMei && desde && !config.limiteProporcional && (
+        <div style={{ marginBottom: 12 }}>
+          <AvisoFin tom="atencao">
+            {ano} é o primeiro ano do CNPJ (aberto em {Fin.dataBr(desde)}), mas o limite está cheio. Com o limite proporcional ligado em
+            Configurações Fiscais, o limite de {ano} seria <strong>{Fin.brl(Fin.limiteProporcionalMei(desde, ano, Number(config.limiteAnual) || Fin.LIMITE_MEI_PADRAO))}</strong>.
+          </AvisoFin>
+        </div>
+      )}
+      {ehMei ? (
         <>
           <div style={{ height: 16, borderRadius: 9, background: CINZA_CLARO, overflow: "hidden", position: "relative" }}
             role="progressbar" aria-valuenow={Math.round(s.pct)} aria-valuemin={0} aria-valuemax={100} aria-label="Percentual do limite do MEI utilizado">
@@ -13589,15 +13682,76 @@ function PainelSituacaoTributaria({ fin, clientes, docs, precos, ano = new Date(
           </div>
           <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
             {s.alertas.map((a) => <AvisoFin key={a} tom={s.pct >= 100 ? "erro" : "atencao"}>{a}</AvisoFin>)}
+            {/* Quanto passou importa: até 20% acima ou mais de 20% acima muda a partir de quando
+                vale o desenquadramento. O sistema só mostra o número — quem enquadra é a contabilidade. */}
+            {s.pct > 100 && (
+              <p style={{ fontSize: 13, color: "#A12020", margin: 0 }}>
+                Excesso sobre o limite: <strong>{Fin.brl(receita.total - limite)}</strong> ({Fin.pct(s.pct - 100)} acima).
+                Leve este número à contabilidade: passar até 20% ou mais de 20% do limite muda a partir de quando vale o desenquadramento.
+              </p>
+            )}
             {s.pct < 100 && <p style={{ fontSize: 13, color: "#4a5a70", margin: 0 }}>Ainda cabem <strong>{Fin.brl(s.restante)}</strong> no limite deste ano.</p>}
           </div>
         </>
       ) : (
         <p style={{ fontSize: 13, color: "#4a5a70", margin: 0 }}>
-          Com o regime {regime}, o acompanhamento de limite do MEI fica desligado. Os campos do Simples Nacional estão em
-          Configurações Fiscais, sem cálculo automático nesta versão.
+          Com o regime {regime}, o acompanhamento de limite do MEI fica desligado. O mês a mês e a receita e a folha dos últimos 12 meses continuam abaixo.
         </p>
       )}
+
+      <div style={{ fontSize: 13.5, fontWeight: 700, color: AZUL_MARINHO, margin: "18px 0 8px" }}>Mês a mês{desde ? ` desde a abertura (${Fin.dataBr(desde)})` : ""}</div>
+      {linhas.length === 0 ? <p style={{ fontSize: 13, color: "#65758b", margin: 0 }}>Nenhum mês de {ano} para mostrar ainda.</p> : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: ehMei ? 560 : 420 }}>
+            <thead><tr>
+              <th style={{ ...th, textAlign: "left" }}>Mês</th><th style={th}>Faturamento</th><th style={th}>Acumulado</th>
+              {ehMei && <th style={th}>Limite até o mês</th>}
+              <th style={th}>Folha paga</th>
+            </tr></thead>
+            <tbody>
+              {antesDaAbertura > 0 && (
+                <tr style={{ color: "#8593a8" }}>
+                  <td style={{ ...td, textAlign: "left", whiteSpace: "normal" }}>Antes da abertura<div style={{ fontSize: 11 }}>operação sem CNPJ — fora do MEI</div></td>
+                  <td style={td}>{Fin.brl(antesDaAbertura)}</td><td style={td}>—</td>{ehMei && <td style={td}>—</td>}<td style={td}>—</td>
+                </tr>
+              )}
+              {linhas.map((l) => {
+                const passou = ehMei && l.acumulado > l.limiteAteMes + 0.005;
+                return (
+                  <tr key={l.mes}>
+                    <td style={{ ...td, textAlign: "left", fontWeight: 600, color: AZUL_MARINHO }}>
+                      {nomeMes(l.mes)}{l.mes === mesAtual && <span style={{ fontSize: 11, color: "#8593a8", fontWeight: 500 }}> (em andamento)</span>}
+                    </td>
+                    <td style={td}>{Fin.brl(l.faturamento)}</td>
+                    <td style={{ ...td, fontWeight: 700, color: passou ? "#C62828" : AZUL_MARINHO }}>{Fin.brl(l.acumulado)}</td>
+                    {ehMei && <td style={{ ...td, color: "#4a5a70" }}>{Fin.brl(l.limiteAteMes)}</td>}
+                    <td style={td}>{l.folha ? Fin.brl(l.folha) : "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <p style={{ fontSize: 12, color: "#65758b", margin: "8px 0 0" }}>
+            {ehMei ? `Limite até o mês: o limite de ${ano} (${Fin.brl(limite)}) repartido pelos ${mesesDeAtividade} meses de atividade — acumulado em vermelho passou do ritmo do limite. ` : ""}
+            Folha paga: pela data do pagamento, como o Fator R conta.
+          </p>
+        </div>
+      )}
+
+      <div style={{ fontSize: 13.5, fontWeight: 700, color: AZUL_MARINHO, margin: "18px 0 8px" }}>{ehMei ? "Preparação para ME (Simples Nacional)" : "Simples Nacional — últimos 12 meses"}</div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <CartaoIndicador titulo="Receita bruta" valor={Fin.brl(receita12)} apoio={rotuloJanela} />
+        <CartaoIndicador titulo="Média mensal × 12" valor={Fin.brl(projecao12)} cor={projecao12 > Fin.LIMITE_ME_PADRAO ? "#B85E10" : AZUL_MARINHO}
+          apoio={`teto da ME: ${Fin.brl(Fin.LIMITE_ME_PADRAO)}/ano`} />
+        <CartaoIndicador titulo="Folha paga" valor={Fin.brl(folha12)} apoio={rotuloJanela} />
+        <CartaoIndicador titulo="Fator R" valor={fatorR == null ? "—" : Fin.pct(fatorR * 100)} apoio={`folha ÷ receita · referência ${Fin.pct(Fin.FATOR_R_REFERENCIA * 100, 0)}`} />
+      </div>
+      <p style={{ fontSize: 12, color: "#65758b", margin: "10px 0 0" }}>
+        No Simples, o imposto do mês sai da receita do mês, com a alíquota da receita dos últimos 12 meses (no começo, a média mensal × 12).
+        Para atividade sujeita ao Fator R, folha de 28% da receita ou mais leva ao Anexo III; abaixo disso, ao V — qual vale para a FN, pelo CNAE,
+        é a contabilidade que confirma. Pró-labore e INSS/FGTS da folha entram no Fator R: lance em Despesas › Profissionais e Prestadores
+        (Pró-labore, Encargos da folha) para aparecerem aqui.
+      </p>
       <p style={{ fontSize: 12.5, color: "#8a5300", margin: "12px 0 0", fontWeight: 600 }}>
         Consulte sua contabilidade antes de alterar o regime tributário.
       </p>
@@ -13624,7 +13778,10 @@ function AbaFinIndicadores({ fin, clientes = [], docs = [], precos = [], token }
   const caixa = receitaDoPeriodo({ clientes, docs, precos, receitas: fin.receitas, periodo, base: "recebido" });
   const doPeriodo = fin.despesas.filter((d) => dentroDoPeriodo(d.data, periodo));
   const empresariais = doPeriodo.filter(Fin.contaNosIndicadores);
-  const totalDespesas = Fin.somaEmpresarial(empresariais);
+  /* A folha ainda a pagar no período entra nas despesas, como no relatório mensal — o total
+     daqui e o de lá não podem sair de contas diferentes. */
+  const folha = useFolhaEmAberto({ token, apiFetch, meses: mesesDoPeriodo(periodo, anosDasDespesas(fin.despesas, fin.receitas)), ativo: fin.ehGerencia !== false });
+  const totalDespesas = Fin.somaEmpresarial(empresariais) + folha.total;
   const r = Fin.resultado(receita.total, totalDespesas);
   /* Despesa lançada pelo próprio sistema (técnico, ART, tarifa) — para dizer quanto do custo
      já chega sozinho, sem ninguém digitar. */
@@ -13641,12 +13798,14 @@ function AbaFinIndicadores({ fin, clientes = [], docs = [], precos = [], token }
     const c = d.clienteId ? clientesPorId[d.clienteId] : null;
     return c ? ehTrabalhoDeVistoria(c) : d.vinculoTipo === "Vistoria" || d.vinculoTipo === "Revistoria";
   });
-  const custoVistorias = Fin.somaEmpresarial(ligadasAVistoria);
+  const custoVistorias = Fin.somaEmpresarial(ligadasAVistoria) + folha.vistorias;
   const mediaKm = Fin.custoMedioPorKm(empresariais.filter(Fin.ehDeslocamento));
   const custoDesl = empresariais.filter((d) => d.categoria === "Deslocamento")
     .reduce((s, d) => s + (Fin.ehDeslocamento(d) ? Fin.calculoDeslocamento(d, mediaKm).custoTotal : Fin.valorEmpresarial(d)), 0);
 
-  const porCategoria = Fin.CATEGORIAS.map((c) => ({ nome: c, valor: Fin.somaEmpresarial(empresariais.filter((d) => d.categoria === c)) }))
+  /* A folha paga já é despesa de "Profissionais e Prestadores"; a ainda a pagar soma ali, para as
+     barras fecharem com o total. */
+  const porCategoria = Fin.CATEGORIAS.map((c) => ({ nome: c, valor: Fin.somaEmpresarial(empresariais.filter((d) => d.categoria === c)) + (c === "Profissionais e Prestadores" ? folha.total : 0) }))
     .filter((x) => x.valor > 0).sort((a, b) => b.valor - a.valor);
   const maiorCat = porCategoria[0]?.valor || 1;
   /* Viagem registrada só pela quilometragem tem valor zero — não é "despesa grande". */
@@ -13663,7 +13822,8 @@ function AbaFinIndicadores({ fin, clientes = [], docs = [], precos = [], token }
           Faturado: serviços <strong>realizados ou já pagos</strong> no período (vistoria feita, documentação pronta, ou pagamento confirmado pelo Atendimento), pela data do serviço.
           Recebido: o que <strong>entrou</strong> no período, pela data do pagamento — é o número que bate com o extrato.
           A receita do resultado usa {fin.config?.baseFaturamento === "recebido" ? "o recebido" : "o faturado"} (Configurações Fiscais){receita.deAvulsas ? ", mais as outras receitas lançadas" : ""}.
-          Despesas: só a parte empresarial — pessoais e rejeitadas ficam fora.
+          Despesas: só a parte empresarial — pessoais e rejeitadas ficam fora —, mais a folha de pagamento que ainda está a pagar no período
+          {folha.carregado ? (folha.erro ? " (não carregou agora: o total tem só a folha já paga)" : folha.total > 0 ? ` (${Fin.brl(folha.total)})` : " (nada em aberto)") : " (calculando…)"}.
         </p>
       </Card>
       <AlertasFinanceiro despesas={doPeriodo} ehGerencia={fin.ehGerencia} />
@@ -13683,7 +13843,7 @@ function AbaFinIndicadores({ fin, clientes = [], docs = [], precos = [], token }
         <KpiCard label="Recebido (entrou no caixa)" valor={Fin.brl(caixa.total)} Icon={Wallet} cor="#1B7F4B" />
         <KpiCard label="Previsto (agendado, sem pagamento)" valor={Fin.brl(competencia.previsto)} Icon={CalendarDays} cor="#65758b" />
         <KpiCard label="Despesas" valor={Fin.brl(r.despesa)} Icon={Receipt} cor="#B85E10"
-          percentual={automaticas ? `${Fin.brl(automaticas)} lançados pelo sistema` : null} />
+          percentual={[automaticas ? `${Fin.brl(automaticas)} lançados pelo sistema` : "", folha.total ? `${Fin.brl(folha.total)} de folha a pagar` : ""].filter(Boolean).join(" · ") || null} />
         <KpiCard label="Resultado operacional" valor={Fin.brl(r.resultado)} Icon={DollarSign} cor={r.resultado < 0 ? "#C62828" : "#1B7F4B"} />
         <KpiCard label="Margem" valor={Fin.pct(r.margem)} Icon={Percent} />
         <KpiCard label="Despesas com documentos completos" valor={Fin.pct(pctDe(completas), 0)} Icon={FileCheck} />
@@ -13807,16 +13967,33 @@ function imprimirDocumento(titulo, corpoHtml) {
 }
 const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-function AbaFinRelatorios({ fin, clientes = [], docs = [], precos = [], notify }) {
+function AbaFinRelatorios({ fin, clientes = [], docs = [], precos = [], notify, token }) {
   const [periodo, setPeriodo] = useState(periodoMesAtual);
   const [incluirPessoais, setIncluirPessoais] = useState(false);
   const [zipando, setZipando] = useState(null); // { feito, total }
   const clientesPorId = useMemo(() => indexarClientes(clientes), [clientes]);
+  const anos = anosDasDespesas(fin.despesas, fin.receitas);
+  /* Folha de pagamento nas despesas: o que já foi pago é despesa (lançada pela Folha) e já está
+     na lista; o que a Folha ainda mostra a pagar no período entra por cima. Deixar de fora faria
+     o resultado do mês melhorar sozinho sempre que o pagamento atrasasse — a mesma razão de a
+     despesa "Aguardando conferência" contar. */
+  const folha = useFolhaEmAberto({ token, apiFetch, meses: mesesDoPeriodo(periodo, anos), ativo: fin.ehGerencia !== false });
   const receita = receitaDoPeriodo({ clientes, docs, precos, receitas: fin.receitas, periodo, base: fin.config?.baseFaturamento || "cobrado" });
   const doPeriodo = fin.despesas.filter((d) => dentroDoPeriodo(d.data, periodo) && d.statusAprovacao !== "Rejeitada");
   const empresariais = doPeriodo.filter(Fin.contaNosIndicadores);
-  const r = Fin.resultado(receita.total, Fin.somaEmpresarial(empresariais));
-  const porGrupo = Fin.GRUPOS_RELATORIO.map((g) => ({ grupo: g, valor: Fin.somaEmpresarial(empresariais.filter((d) => Fin.grupoDoRelatorio(d) === g)) }));
+  const r = Fin.resultado(receita.total, Fin.somaEmpresarial(empresariais) + folha.total);
+  const porGrupo = Fin.GRUPOS_RELATORIO.map((g) => {
+    const pago = Fin.somaEmpresarial(empresariais.filter((d) => Fin.grupoDoRelatorio(d) === g));
+    const aPagar = g === "Folha de pagamento" ? folha.total : 0;
+    return { grupo: g, valor: pago + aPagar, aPagar };
+  });
+  const valorDoGrupo = (g) => Fin.brl(g.valor) + (g.aPagar > 0 ? ` (${Fin.brl(g.aPagar)} a pagar)` : "");
+  const notaFolha = folha.erro
+    ? `Não foi possível carregar a folha a pagar (${folha.erro}) — o total de despesas tem só a folha já paga.`
+    : `Folha de pagamento: o que já foi pago (despesas da Folha e vistoriador, salário, pró-labore e encargos lançados à mão)${folha.total > 0 ? ` mais ${Fin.brl(folha.total)} que a Folha ainda mostra a pagar no período` : ""}.`;
+  /* Folha em aberto em mês que já acabou costuma ser mês pago fora do sistema, ainda não
+     registrado na Folha — o relatório avisa em vez de deixar parecer dívida. */
+  const mesesFechadosEmAberto = folha.porMes.filter((x) => x.competencia < Fin.hojeIso().slice(0, 7));
   const intervalo = intervaloDoPeriodo(periodo);
   const paraContador = (incluirPessoais ? doPeriodo : empresariais)
     .map((d) => ({ ...d, clienteNome: clientesPorId[d.clienteId]?.nome || "" }))
@@ -13832,8 +14009,8 @@ function AbaFinRelatorios({ fin, clientes = [], docs = [], precos = [], notify }
       <tr><td>Margem</td><td class="n">${Fin.pct(r.margem)}</td></tr>
     </table>
     <h2>Despesas</h2>
-    <table>${porGrupo.map((g) => `<tr><td>${esc(g.grupo)}</td><td class="n">${Fin.brl(g.valor)}</td></tr>`).join("")}</table>
-    <p class="rodape">Despesas pela parte empresarial (sem as de uso pessoal e as rejeitadas). Receita pela data do serviço${fin.config?.baseFaturamento === "recebido" ? ", só o que foi recebido" : ""}.</p>`);
+    <table>${porGrupo.map((g) => `<tr><td>${esc(g.grupo)}</td><td class="n">${esc(valorDoGrupo(g))}</td></tr>`).join("")}</table>
+    <p class="rodape">Despesas pela parte empresarial (sem as de uso pessoal e as rejeitadas). ${esc(notaFolha)} Receita pela data do serviço${fin.config?.baseFaturamento === "recebido" ? ", só o que foi recebido" : ""}.</p>`);
 
   const imprimirContador = () => imprimirDocumento("Despesas para a contabilidade", `
     <h1>Despesas — FN Edificações</h1><div>Período: ${esc(intervalo)}${fin.config?.cnpj ? ` · CNPJ ${esc(Fin.formatarCpfCnpj(fin.config.cnpj))}` : ""}</div>
@@ -13878,9 +14055,18 @@ function AbaFinRelatorios({ fin, clientes = [], docs = [], precos = [], notify }
           <div style={{ fontSize: 13, color: "#4a5a70", marginBottom: 12 }}>Período: {intervalo}</div>
           <TabelaDados rows={[["Receita", Fin.brl(r.receita)], ["Despesas", Fin.brl(r.despesa)], ["Resultado", Fin.brl(r.resultado)], ["Margem", Fin.pct(r.margem)]]} />
           <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, margin: "4px 0 6px" }}>Despesas</div>
-          <TabelaDados rows={porGrupo.map((g) => [g.grupo, Fin.brl(g.valor)])} />
+          <TabelaDados rows={porGrupo.map((g) => [g.grupo, valorDoGrupo(g)])} />
+          <p style={{ fontSize: 12, color: folha.erro ? "#A12020" : "#65758b", margin: 0 }}>
+            {folha.carregado ? notaFolha : "Calculando a folha a pagar do período…"}
+          </p>
+          {mesesFechadosEmAberto.length > 0 && (
+            <p style={{ fontSize: 12, color: "#8a5300", margin: "6px 0 0" }}>
+              Há folha em aberto em mês já fechado ({mesesFechadosEmAberto.map((x) => `${x.competencia.slice(5)}/${x.competencia.slice(0, 4)}`).join(", ")}).
+              Se já foi pago fora do sistema, registre em Folha de pagamento › "Marcar o mês todo como pago" — senão o relatório conta como dívida.
+            </p>
+          )}
         </div>
-        <button className="btn-solid" style={{ marginTop: 12 }} onClick={imprimirMensal}><Printer size={15} /> Imprimir / salvar em PDF</button>
+        <button className="btn-solid" style={{ marginTop: 12 }} onClick={imprimirMensal} disabled={!folha.carregado}><Printer size={15} /> Imprimir / salvar em PDF</button>
       </Card>
 
       <Card icon={FileSpreadsheet} titulo="Exportar para Contabilidade">
@@ -13901,7 +14087,8 @@ function AbaFinRelatorios({ fin, clientes = [], docs = [], precos = [], notify }
           </button>
         </div>
         <p style={{ fontSize: 12, color: "#65758b", margin: "10px 0 0" }}>
-          O ZIP organiza os comprovantes por ano → mês → grupo (Combustível, Prestadores, Marketing, Equipamentos, Tributos…).
+          O ZIP organiza os comprovantes por ano → mês → grupo (Combustível, Folha de pagamento, Prestadores, Marketing, Equipamentos, Tributos…).
+          {folha.total > 0 && " A folha ainda a pagar não entra na exportação: aqui vai só a despesa paga, que tem comprovante."}
         </p>
       </Card>
     </div>
@@ -14040,7 +14227,8 @@ function AbaFinConfig({ fin, clientes = [], docs = [], precos = [] }) {
       </Card>
       <Card icon={Landmark} titulo="Simples Nacional — preparação (sem cálculo nesta versão)">
         <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 12px" }}>
-          Campos guardados para a futura migração MEI → ME. Nenhum deles gera cálculo automático agora.
+          Campos guardados para a futura migração MEI → ME, com o que a contabilidade informar. A receita e a folha dos últimos 12 meses e o
+          Fator R que o sistema calcula estão em Situação Tributária, acima, para comparar.
         </p>
         <Grid>
           <Field label="Anexo do Simples" value={f.anexoSimples || ""} onChange={(v) => set("anexoSimples", v)} placeholder="Ex.: III ou V" />
@@ -14234,10 +14422,12 @@ function AbaFinanceiroDespesas({ sub, fin, clientes = [], docs = [], precos = []
   /* Folha: vistoriadores, salário fixo e extras. O comprovante se anexa na despesa do
      pagamento, por isso a folha recebe o "fin" inteiro. */
   if (sub === "fin-folha") return <AbaFolhaPagamento token={token} apiFetch={apiFetch} notify={notify} fin={fin} usuarios={usuarios} />;
+  /* Despesas fixas (telefone, marketing, DAS…): cada pagamento é uma despesa, com o comprovante nela. */
+  if (sub === "fin-fixas") return <AbaDespesasFixas token={token} apiFetch={apiFetch} notify={notify} fin={fin} />;
   if (sub === "fin-conferencia") return <AbaConferenciaPagamentos clientes={clientes} docs={docs} precos={precos} updCliente={updCliente} notify={notify} />;
   if (sub === "fin-notas") return <AbaFinNotas {...comum} />;
   if (sub === "fin-deslocamentos") return <AbaFinDeslocamentos {...comum} docs={docs} precos={precos} />;
-  if (sub === "fin-relatorios") return <AbaFinRelatorios fin={fin} clientes={clientes} docs={docs} precos={precos} notify={notify} />;
+  if (sub === "fin-relatorios") return <AbaFinRelatorios fin={fin} clientes={clientes} docs={docs} precos={precos} notify={notify} token={token} />;
   if (sub === "fin-indicadores") return <AbaFinIndicadores fin={fin} clientes={clientes} docs={docs} precos={precos} token={token} />;
   if (sub === "fin-config") return (
     <div style={{ display: "grid", gap: 16 }}>
