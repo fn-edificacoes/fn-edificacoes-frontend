@@ -201,6 +201,10 @@ cadastro rápido (`ModalDespesa`) de qualquer tela.
   comprovante na mesma linha. "Marcar o mês todo como pago" (mês já pago fora do sistema) registra
   um pagamento por dia para cada vistoriador. `FormPagamento` tem "Lançar como despesa" — desmarcar
   quando o pagamento já foi lançado à mão em Despesas. `SalariosFixos` tem o mês de início ("Desde").
+- `AbaDespesasFixas` (Financeiro › Despesas fixas, só Gerência): o que se paga todo mês — telefone, marketing, DAS…
+  Por mês do vencimento: paga / a pagar / vencida, "Pagar" com valor, data, forma e o comprovante (`CampoComprovante`,
+  na hora ou depois, na mesma linha) e "Desfazer" (exclui a despesa). Cadastro com modelos prontos (`MODELOS_FIXA`).
+  O pagamento é despesa comum (`fixaId` na lista de Despesas mostra "Despesa fixa · mês").
 - Não existe mais custo fixo por empreendimento: a coluna saiu de Preços por empreendimento e a
   Rede Nacional mostra o valor do técnico pela regra do dia (`valor_tecnico_regra`).
 - `CardValoresCustos` (Configurações Fiscais): valores do técnico, da ART e o salário fixo do Atendimento.

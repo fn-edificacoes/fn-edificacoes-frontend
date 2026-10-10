@@ -4,7 +4,7 @@ import { listarAmbientes, paraItemDeLaudo, todasParaImportacao } from "./patolog
 import * as Fin from "./financeiro-regras.js";
 import AbaRedeNacional from "./rede-nacional.jsx";
 import AbaMapaAtuacao from "./mapa-atuacao.jsx";
-import { AbaArtsVistoria, AbaFolhaPagamento, CardValoresCustos, useCustosOperacionais, useFolhaEmAberto } from "./controle-financeiro.jsx";
+import { AbaArtsVistoria, AbaFolhaPagamento, AbaDespesasFixas, CardValoresCustos, useCustosOperacionais, useFolhaEmAberto } from "./controle-financeiro.jsx";
 import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
   Building2, User, ClipboardList, ChevronDown, ChevronRight, ChevronLeft, Check,
@@ -12,7 +12,7 @@ import {
   ClipboardCheck, BarChart3, DollarSign, Users, Edit3, RefreshCcw, Filter, LayoutGrid, Star,
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
   ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle, Megaphone, Clock,
-  Wrench, Paperclip, Menu, Receipt, Car, FileBarChart, Gauge, Settings, Landmark, Wallet, Archive, FileSpreadsheet, FileCheck,
+  Wrench, Paperclip, Menu, Receipt, Car, FileBarChart, Gauge, Settings, Landmark, Wallet, Archive, FileSpreadsheet, FileCheck, Repeat,
   Map as IconeMapa
 } from "lucide-react";
 
@@ -2222,6 +2222,7 @@ const GERENCIA_MENU_LATERAL = [
   { titulo: "Financeiro", itens: [
     { aba: "gerencia", sub: "financeiro", label: "Receitas", Icon: DollarSign },
     { aba: "gerencia", sub: "fin-despesas", label: "Despesas", Icon: Receipt },
+    { aba: "gerencia", sub: "fin-fixas", label: "Despesas fixas", Icon: Repeat },
     { aba: "gerencia", sub: "fin-folha", label: "Folha de pagamento", Icon: Wallet },
     { aba: "gerencia", sub: "fin-conferencia", label: "Conferência de pagamentos", Icon: Check },
     { aba: "gerencia", sub: "fin-notas", label: "Notas e Comprovantes", Icon: FileCheck },
@@ -13089,6 +13090,7 @@ function TabelaDespesas({ lista, fin, clientesPorId = {}, onEditar, vazio = "Nen
                   </div>
                   {pessoal && <div style={{ fontSize: 11, color: "#65758b" }}>Uso pessoal — fora dos indicadores</div>}
                   {d.origem && <div style={{ fontSize: 11, color: "#2C75B5", fontWeight: 600 }}>Lançada pelo sistema · {ROTULO_ORIGEM_DESPESA[d.origem] || d.origem}</div>}
+                  {d.fixaId && <div style={{ fontSize: 11, color: "#2C75B5", fontWeight: 600 }}>Despesa fixa · {String(d.fixaCompetencia || "").split("-").reverse().join("/")}</div>}
                   {d.finalidade === "parcial" && <div style={{ fontSize: 11, color: "#65758b" }}>Uso parcial — {d.percentualEmpresarial ?? 50}% empresarial</div>}
                   {d.motivoAprovacao && d.statusAprovacao !== "Aprovada" && <div style={{ fontSize: 11.5, color: "#A12020" }}>Motivo: {d.motivoAprovacao}</div>}
                 </td>
@@ -14420,6 +14422,8 @@ function AbaFinanceiroDespesas({ sub, fin, clientes = [], docs = [], precos = []
   /* Folha: vistoriadores, salário fixo e extras. O comprovante se anexa na despesa do
      pagamento, por isso a folha recebe o "fin" inteiro. */
   if (sub === "fin-folha") return <AbaFolhaPagamento token={token} apiFetch={apiFetch} notify={notify} fin={fin} usuarios={usuarios} />;
+  /* Despesas fixas (telefone, marketing, DAS…): cada pagamento é uma despesa, com o comprovante nela. */
+  if (sub === "fin-fixas") return <AbaDespesasFixas token={token} apiFetch={apiFetch} notify={notify} fin={fin} />;
   if (sub === "fin-conferencia") return <AbaConferenciaPagamentos clientes={clientes} docs={docs} precos={precos} updCliente={updCliente} notify={notify} />;
   if (sub === "fin-notas") return <AbaFinNotas {...comum} />;
   if (sub === "fin-deslocamentos") return <AbaFinDeslocamentos {...comum} docs={docs} precos={precos} />;

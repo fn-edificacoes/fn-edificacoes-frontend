@@ -13,7 +13,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   FileCheck, Users, Plus, X, Check, RefreshCcw, Search, Trash2, ChevronDown, ChevronRight, Save, Wallet, Settings,
+  Repeat, Paperclip, RotateCcw, Edit3, Power,
 } from "lucide-react";
+import { CATEGORIAS, CATEGORIAS_DESPESA, FORMAS_PAGAMENTO } from "./financeiro-regras.js";
 
 const AZUL_MEDIO = "#2C75B5";
 const AZUL_MARINHO = "#12335B";
@@ -917,6 +919,342 @@ function SalariosFixos({ token, apiFetch, notify, usuarios, config, personalizad
         </button>
       </div>
     </Caixa>
+  );
+}
+
+/* ============================================================
+   DESPESAS FIXAS (Financeiro › Despesas fixas, só Gerência)
+   ============================================================
+   O que se paga todo mês: crédito de telefone, marketing, DAS… O cadastro diz o valor previsto
+   (vazio = varia) e o dia do vencimento. "Pagar" vira uma despesa comum no Financeiro — entra
+   nos relatórios e no ZIP do contador — e o comprovante fica anexado nela, na hora do pagamento
+   ou depois, na mesma linha. O vínculo mês a mês mora no servidor (src/despesas-fixas.js). */
+const MODELOS_FIXA = [
+  { nome: "Crédito de telefone", categoria: "Administrativo", subcategoria: "Telefone", diaVencimento: 10, formaPagamento: "Pix" },
+  { nome: "Marketing (tráfego pago)", categoria: "Comercial e Marketing", subcategoria: "Tráfego pago", diaVencimento: 10, formaPagamento: "Cartão de crédito" },
+  { nome: "DAS MEI", categoria: "Tributos e Taxas", subcategoria: "DAS MEI", diaVencimento: 20, formaPagamento: "Boleto" },
+  { nome: "Internet", categoria: "Administrativo", subcategoria: "Internet", diaVencimento: 10, formaPagamento: "Débito automático" },
+  { nome: "Contabilidade", categoria: "Administrativo", subcategoria: "Contabilidade", diaVencimento: 10, formaPagamento: "Pix" },
+];
+const FIXA_VAZIA = { nome: "", categoria: "Administrativo", subcategoria: "", valor: "", diaVencimento: 10, fornecedor: "", formaPagamento: "Pix", inicio: "", observacoes: "" };
+const SITUACAO_FIXA = { paga: [VERDE, "#E6F4EC"], "a pagar": [AMBAR, "#FFF4E0"], vencida: [VERMELHO, "#FDECEC"] };
+/* Valor como se digita no Brasil: "1.412,50". Vazio = null (varia todo mês). */
+const lerValor = (v) => {
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+  const n = Number(s.replace(/\./g, "").replace(",", "."));
+  return Number.isFinite(n) ? n : NaN;
+};
+const valorNaTela = (v) => (v == null || v === "" ? "" : Number(v).toFixed(2).replace(".", ","));
+const ACEITA_COMPROVANTE = "application/pdf,image/*";
+
+/* O lugar do comprovante: escolher um ou mais arquivos (PDF ou foto), ver o que foi escolhido. */
+function CampoComprovante({ arquivos, aoMudar }) {
+  return (
+    <label style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", border: `1.5px dashed ${CINZA_BORDA}`, borderRadius: 10, padding: "10px 12px", cursor: "pointer", background: "#fff", fontSize: 13, color: "#4a5a70" }}>
+      <Paperclip size={15} color={AZUL_MEDIO} />
+      {arquivos.length
+        ? <span><strong style={{ color: AZUL_MARINHO }}>{arquivos.map((a) => a.name).join(", ")}</strong> · trocar</span>
+        : <span><strong style={{ color: AZUL_MARINHO }}>Anexar comprovante</strong> (PDF ou foto) — pode ser agora ou depois</span>}
+      <input type="file" accept={ACEITA_COMPROVANTE} multiple style={{ display: "none" }}
+        onChange={(e) => { aoMudar([...e.target.files]); e.target.value = ""; }} />
+    </label>
+  );
+}
+
+function FormPagarFixa({ fixa, mes, enviando, onConfirmar, onCancelar }) {
+  /* Mês que já passou: a data sugerida é a do vencimento; mês corrente ou futuro, hoje. */
+  const dataPadrao = mes < hoje().slice(0, 7) ? fixa.vencimento : hoje();
+  const [f, setF] = useState({ valor: valorNaTela(fixa.valor), data: dataPadrao, formaPagamento: fixa.formaPagamento || "Pix", numeroNf: "", observacoes: "", arquivos: [] });
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  const valor = lerValor(f.valor);
+  const valido = valor > 0 && !!f.data;
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: AZUL_MARINHO }}>
+        Pagar {fixa.nome} — vencimento {dataBr(fixa.vencimento)}{fixa.valor == null ? " (valor varia: informe o que foi pago)" : ""}
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div style={{ display: "grid", gap: 4 }}><label style={lab}>Valor pago (R$)</label>
+          <input style={{ ...inp, width: 120 }} inputMode="decimal" value={f.valor} placeholder="0,00" autoFocus={fixa.valor == null}
+            onChange={(e) => set("valor", e.target.value.replace(/[^\d,.]/g, ""))} /></div>
+        <div style={{ display: "grid", gap: 4 }}><label style={lab}>Data do pagamento</label>
+          <input style={inp} type="date" value={f.data} max={hoje()} onChange={(e) => set("data", e.target.value)} /></div>
+        <div style={{ display: "grid", gap: 4 }}><label style={lab}>Forma</label>
+          <select style={inp} value={f.formaPagamento} onChange={(e) => set("formaPagamento", e.target.value)}>
+            {FORMAS_PAGAMENTO.map((x) => <option key={x}>{x}</option>)}
+          </select></div>
+        <div style={{ display: "grid", gap: 4, width: 130 }}><label style={lab}>Nº da nota (se tiver)</label>
+          <input style={inp} value={f.numeroNf} onChange={(e) => set("numeroNf", e.target.value)} /></div>
+        <div style={{ display: "grid", gap: 4, flex: 1, minWidth: 160 }}><label style={lab}>Observação</label>
+          <input style={inp} value={f.observacoes} onChange={(e) => set("observacoes", e.target.value)} /></div>
+      </div>
+      <CampoComprovante arquivos={f.arquivos} aoMudar={(a) => set("arquivos", a)} />
+      <div style={{ display: "flex", gap: 8 }}>
+        <button style={btn} disabled={enviando || !valido} onClick={() => onConfirmar({ ...f, valor })}>
+          <Check size={14} /> {enviando ? "Registrando…" : `Registrar pagamento${valor > 0 ? ` de ${brl(valor)}` : ""}`}
+        </button>
+        <button style={btnLeve} onClick={onCancelar}>Cancelar</button>
+      </div>
+    </div>
+  );
+}
+
+function FormFixa({ inicial, enviando, onSalvar, onCancelar }) {
+  const [f, setF] = useState(() => ({ ...FIXA_VAZIA, ...inicial, valor: valorNaTela(inicial.valor), inicio: inicial.inicio || hoje().slice(0, 7) }));
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  const subcategorias = CATEGORIAS_DESPESA[f.categoria] || [];
+  return (
+    <div style={{ border: `1px dashed ${AZUL_MEDIO}`, background: "#F6F9FD", borderRadius: 10, padding: 12, marginBottom: 14, display: "grid", gap: 10 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: AZUL_MARINHO }}>{inicial.id ? `Editar ${inicial.nome}` : "Nova despesa fixa"}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>
+        <div style={{ display: "grid", gap: 4 }}><label style={lab}>Nome</label>
+          <input style={inp} value={f.nome} placeholder="Ex.: Crédito de telefone" onChange={(e) => set("nome", e.target.value)} /></div>
+        <div style={{ display: "grid", gap: 4 }}><label style={lab}>Categoria</label>
+          <select style={inp} value={f.categoria} onChange={(e) => setF((x) => ({ ...x, categoria: e.target.value, subcategoria: "" }))}>
+            {CATEGORIAS.map((c) => <option key={c}>{c}</option>)}
+          </select></div>
+        <div style={{ display: "grid", gap: 4 }}><label style={lab}>Subcategoria</label>
+          <select style={inp} value={f.subcategoria} onChange={(e) => set("subcategoria", e.target.value)}>
+            <option value="">—</option>
+            {subcategorias.map((s) => <option key={s}>{s}</option>)}
+          </select></div>
+        <div style={{ display: "grid", gap: 4 }}><label style={lab}>Valor previsto (R$)</label>
+          <input style={inp} inputMode="decimal" value={f.valor} placeholder="vazio = varia todo mês" onChange={(e) => set("valor", e.target.value.replace(/[^\d,.]/g, ""))} /></div>
+        <div style={{ display: "grid", gap: 4 }}><label style={lab}>Vence todo dia</label>
+          <input style={inp} type="number" min={1} max={31} value={f.diaVencimento} onChange={(e) => set("diaVencimento", e.target.value)} /></div>
+        <div style={{ display: "grid", gap: 4 }}><label style={lab}>Forma de pagamento</label>
+          <select style={inp} value={f.formaPagamento} onChange={(e) => set("formaPagamento", e.target.value)}>
+            {FORMAS_PAGAMENTO.map((x) => <option key={x}>{x}</option>)}
+          </select></div>
+        <div style={{ display: "grid", gap: 4 }}><label style={lab}>Fornecedor</label>
+          <input style={inp} value={f.fornecedor} placeholder="Ex.: operadora, Meta, Receita Federal" onChange={(e) => set("fornecedor", e.target.value)} /></div>
+        <div style={{ display: "grid", gap: 4 }}><label style={lab}>Desde (mês)</label>
+          <input style={inp} type="month" value={f.inicio} onChange={(e) => set("inicio", e.target.value)} /></div>
+      </div>
+      {f.subcategoria === "DAS MEI" && (
+        <Aviso tom="atencao">O DAS do MEI vence no dia 20, e o valor muda quando o salário mínimo muda — confira no boleto e corrija o valor na hora de pagar.</Aviso>
+      )}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button style={btn} disabled={enviando || !f.nome.trim()} onClick={() => onSalvar(f)}><Save size={14} /> Salvar</button>
+        <button style={btnLeve} onClick={onCancelar}>Cancelar</button>
+      </div>
+    </div>
+  );
+}
+
+export function AbaDespesasFixas({ token, apiFetch, notify, fin }) {
+  const [mes, setMes] = useState(() => hoje().slice(0, 7));
+  const [dados, setDados] = useState({ fixas: [], cadastro: [] });
+  const [carregando, setCarregando] = useState(false);
+  const [carregado, setCarregado] = useState(false);
+  const [pagando, setPagando] = useState(null); // id da despesa fixa com o formulário de pagamento aberto
+  const [editando, setEditando] = useState(null); // cadastro em edição (sem id = nova)
+  const [enviando, setEnviando] = useState(false);
+
+  const carregar = async () => {
+    setCarregando(true);
+    try { setDados(await apiFetch(`/api/financeiro/fixas?competencia=${mes}`, { token })); setCarregado(true); }
+    catch (e) { notify(`Não foi possível carregar as despesas fixas: ${e.message}`); }
+    setCarregando(false);
+  };
+  useEffect(() => { carregar(); setPagando(null); }, [mes]);
+
+  const despesaPorId = useMemo(() => Object.fromEntries((fin?.despesas || []).map((d) => [d.id, d])), [fin?.despesas]);
+  const anexosDe = (despesaId) => (despesaId ? despesaPorId[despesaId]?.anexos || [] : []);
+  const anexar = async (despesaId, arquivos) => {
+    let ok = 0;
+    for (const arquivo of arquivos) if (await fin.anexar(despesaId, arquivo)) ok += 1;
+    if (ok) notify(ok > 1 ? `${ok} comprovantes anexados ✓` : "Comprovante anexado ✓");
+    return ok;
+  };
+
+  const pagar = async (fixa, form) => {
+    setEnviando(true);
+    try {
+      const r = await apiFetch(`/api/financeiro/fixas/${fixa.id}/pagar`, {
+        method: "POST", token,
+        body: { competencia: mes, valor: form.valor, data: form.data, formaPagamento: form.formaPagamento, numeroNf: form.numeroNf, observacoes: form.observacoes },
+      });
+      notify(`${fixa.nome}: pagamento de ${brl(r.valor)} registrado ✓${form.arquivos.length ? "" : " — anexe o comprovante quando tiver"}`);
+      setPagando(null);
+      /* O pagamento já está gravado: se o comprovante falhar, a linha mostra "sem comprovante" e
+         o botão de anexar continua ali. */
+      if (form.arquivos.length) await anexar(r.despesaId, form.arquivos);
+      await Promise.all([carregar(), fin?.carregar?.()]);
+    } catch (e) { notify(`Não foi possível registrar o pagamento: ${e.message}`); }
+    setEnviando(false);
+  };
+  const desfazer = async (fixa) => {
+    const n = anexosDe(fixa.pagamento.despesaId).length;
+    if (!window.confirm(`Desfazer o pagamento de ${fixa.nome} (${brl(fixa.pagamento.valor)})? A despesa sai do Financeiro${n ? ` e ${n > 1 ? "os comprovantes são apagados" : "o comprovante é apagado"}` : ""}, e o mês volta para "a pagar".`)) return;
+    await fin.excluir(fixa.pagamento.despesaId);
+    await carregar();
+  };
+
+  const salvarCadastro = async (f) => {
+    const valor = lerValor(f.valor);
+    if (Number.isNaN(valor) || valor === 0) { notify("Valor previsto inválido — deixe vazio se ele muda todo mês."); return; }
+    setEnviando(true);
+    try {
+      const corpo = { ...f, valor, diaVencimento: Number(f.diaVencimento) };
+      if (f.id) await apiFetch(`/api/financeiro/fixas/${f.id}`, { method: "PATCH", token, body: corpo });
+      else await apiFetch("/api/financeiro/fixas", { method: "POST", token, body: corpo });
+      notify(`${f.nome} salva ✓`);
+      setEditando(null);
+      await carregar();
+    } catch (e) { notify(`Não foi possível salvar: ${e.message}`); }
+    setEnviando(false);
+  };
+  const alternarAtivo = async (f) => {
+    try { await apiFetch(`/api/financeiro/fixas/${f.id}`, { method: "PATCH", token, body: { ativo: !f.ativo } }); await carregar(); }
+    catch (e) { notify(e.message); }
+  };
+  const excluirCadastro = async (f) => {
+    if (!window.confirm(`Excluir a despesa fixa ${f.nome}?`)) return;
+    try { await apiFetch(`/api/financeiro/fixas/${f.id}`, { method: "DELETE", token }); notify("Despesa fixa excluída"); await carregar(); }
+    catch (e) { notify(e.message); }
+  };
+
+  const fixas = dados.fixas || [];
+  const cadastro = dados.cadastro || [];
+  const pagas = fixas.filter((f) => f.pagamento);
+  const abertas = fixas.filter((f) => !f.pagamento);
+  const totalPago = pagas.reduce((s, f) => s + f.pagamento.valor, 0);
+  const totalAberto = abertas.reduce((s, f) => s + (f.valor || 0), 0);
+  const variaveisAbertas = abertas.filter((f) => f.valor == null).length;
+  const vencidas = fixas.filter((f) => f.situacao === "vencida");
+  const semComprovante = fin?.carregado ? pagas.filter((f) => anexosDe(f.pagamento.despesaId).length === 0).length : 0;
+  const modelosLivres = MODELOS_FIXA.filter((m) => !cadastro.some((c) => c.nome.toLowerCase() === m.nome.toLowerCase()));
+
+  return (
+    <div>
+      <Caixa icon={Repeat} titulo={`Despesas fixas — ${mesBr(mes)}`}
+        acoes={<button style={btnLeve} onClick={carregar}><RefreshCcw size={14} className={carregando ? "spin" : ""} /> Atualizar</button>}>
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
+          O que a FN paga todo mês — crédito de telefone, marketing, DAS… <strong>Pagar</strong> lança a despesa no Financeiro (entra nos
+          relatórios e no ZIP do contador) e o <strong>comprovante</strong> fica anexado nela, na hora ou depois, na mesma linha.
+        </p>
+        <div style={{ display: "grid", gap: 4, marginBottom: 14, width: "fit-content" }}><label style={lab}>Mês do vencimento</label>
+          <input style={inp} type="month" value={mes} onChange={(e) => setMes(e.target.value || hoje().slice(0, 7))} /></div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10, marginBottom: 14 }}>
+          <Kpi rotulo="Pago" valor={brl(totalPago)} cor={VERDE} apoio={`${pagas.length} de ${fixas.length}`} />
+          <Kpi rotulo="A pagar" valor={brl(totalAberto)} cor={abertas.length ? AMBAR : VERDE}
+            apoio={variaveisAbertas ? `+ ${variaveisAbertas} com valor que varia` : `${abertas.length} em aberto`} />
+          <Kpi rotulo="Vencidas" valor={vencidas.length} cor={vencidas.length ? VERMELHO : VERDE} apoio={vencidas.length ? brl(vencidas.reduce((s, f) => s + (f.valor || 0), 0)) : "nenhuma"} />
+          <Kpi rotulo="Sem comprovante" valor={semComprovante} cor={semComprovante ? VERMELHO : VERDE} apoio="pagas sem arquivo" />
+        </div>
+
+        {carregado && cadastro.length === 0 && (
+          <Aviso tom="atencao">Nenhuma despesa fixa cadastrada ainda. Comece por um modelo em "Cadastro", logo abaixo — telefone, marketing, DAS…</Aviso>
+        )}
+        {carregado && cadastro.length > 0 && fixas.length === 0 && <Aviso tom="ok">Nenhuma despesa fixa vence em {mesBr(mes)}.</Aviso>}
+        {fixas.length > 0 && (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 640 }}>
+              <thead><tr>{["Despesa", "Vence", "Valor", "Situação", "Comprovante"].map((h, i) => <th key={h} style={{ ...th, textAlign: i === 2 ? "right" : "left" }}>{h}</th>)}</tr></thead>
+              <tbody>
+                {fixas.map((f) => {
+                  const [cor, fundo] = SITUACAO_FIXA[f.situacao] || SITUACAO_FIXA["a pagar"];
+                  const anexos = f.pagamento ? anexosDe(f.pagamento.despesaId) : [];
+                  return (
+                    <React.Fragment key={f.id}>
+                      <tr>
+                        <td style={td}>
+                          <div style={{ fontWeight: 700, color: AZUL_MARINHO }}>{f.nome}</div>
+                          <div style={{ fontSize: 11.5, color: "#8593a8" }}>{[f.subcategoria ? `${f.categoria} › ${f.subcategoria}` : f.categoria, f.fornecedor].filter(Boolean).join(" · ")}</div>
+                        </td>
+                        <td style={{ ...td, whiteSpace: "nowrap" }}>{dataBr(f.vencimento)}</td>
+                        <td style={tdN}>
+                          {f.pagamento ? <strong>{brl(f.pagamento.valor)}</strong> : f.valor != null ? brl(f.valor) : <span style={{ color: "#8593a8" }}>varia</span>}
+                          {f.pagamento && f.valor != null && Math.abs(f.valor - f.pagamento.valor) > 0.009 && <div style={{ fontSize: 11, color: "#8593a8" }}>previsto {brl(f.valor)}</div>}
+                        </td>
+                        <td style={td}>
+                          <Pilula cor={cor} fundo={fundo}>{f.situacao}</Pilula>
+                          {f.pagamento && <div style={{ fontSize: 11.5, color: "#8593a8", marginTop: 3 }}>{dataBr(f.pagamento.data)} · {f.pagamento.formaPagamento || "—"}</div>}
+                        </td>
+                        <td style={td}>
+                          {!f.pagamento && pagando !== f.id && (
+                            <button style={btn} onClick={() => { setPagando(f.id); setEditando(null); }}><Wallet size={14} /> Pagar</button>
+                          )}
+                          {f.pagamento && (
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                              {anexos.map((a) => (
+                                <button key={a.id} style={{ ...btnLeve, padding: "3px 8px", fontSize: 12 }} onClick={() => fin.abrirAnexo(a)}>
+                                  <FileCheck size={12} /> {a.nomeArquivo}
+                                </button>
+                              ))}
+                              {fin?.carregado && anexos.length === 0 && <Pilula cor={VERMELHO} fundo="#FDECEC">sem comprovante</Pilula>}
+                              <label style={{ ...btnLeve, padding: "3px 8px", fontSize: 12 }}>
+                                <Paperclip size={12} /> Anexar
+                                <input type="file" accept={ACEITA_COMPROVANTE} multiple style={{ display: "none" }}
+                                  onChange={(e) => { const arquivos = [...e.target.files]; e.target.value = ""; if (arquivos.length) anexar(f.pagamento.despesaId, arquivos); }} />
+                              </label>
+                              <button style={{ ...btnLeve, padding: "3px 8px", fontSize: 12, color: VERMELHO }} onClick={() => desfazer(f)}><RotateCcw size={12} /> Desfazer</button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                      {pagando === f.id && (
+                        <tr><td colSpan={5} style={{ ...td, background: "#F6F9FD" }}>
+                          <FormPagarFixa fixa={f} mes={mes} enviando={enviando} onConfirmar={(form) => pagar(f, form)} onCancelar={() => setPagando(null)} />
+                        </td></tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Caixa>
+
+      <Caixa icon={Settings} titulo="Cadastro das despesas fixas"
+        acoes={!editando && <button style={btn} onClick={() => { setEditando({ ...FIXA_VAZIA, inicio: mes }); setPagando(null); }}><Plus size={14} /> Nova despesa fixa</button>}>
+        {!editando && modelosLivres.length > 0 && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
+            <span style={{ fontSize: 12.5, color: "#65758b" }}>Começar por um modelo:</span>
+            {modelosLivres.map((m) => (
+              <button key={m.nome} style={{ ...btnLeve, padding: "4px 10px", fontSize: 12.5 }} onClick={() => { setEditando({ ...FIXA_VAZIA, ...m, inicio: mes }); setPagando(null); }}>
+                <Plus size={12} /> {m.nome}
+              </button>
+            ))}
+          </div>
+        )}
+        {editando && <FormFixa key={editando.id || editando.nome || "nova"} inicial={editando} enviando={enviando} onSalvar={salvarCadastro} onCancelar={() => setEditando(null)} />}
+        {cadastro.length > 0 && (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 620 }}>
+              <thead><tr>{["Nome", "Categoria", "Valor previsto", "Vence", "Desde", ""].map((h, i) => <th key={i} style={{ ...th, textAlign: i === 2 ? "right" : "left" }}>{h}</th>)}</tr></thead>
+              <tbody>
+                {cadastro.map((f) => (
+                  <tr key={f.id} style={{ opacity: f.ativo ? 1 : 0.55 }}>
+                    <td style={{ ...td, fontWeight: 700, color: AZUL_MARINHO }}>
+                      {f.nome}{!f.ativo && <span style={{ fontSize: 11, color: "#8593a8", fontWeight: 500 }}> · desativada</span>}
+                    </td>
+                    <td style={td}>{f.subcategoria ? `${f.categoria} › ${f.subcategoria}` : f.categoria}</td>
+                    <td style={tdN}>{f.valor != null ? brl(f.valor) : <span style={{ color: "#8593a8" }}>varia</span>}</td>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>dia {f.diaVencimento}</td>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>{mesBr(f.inicio)}</td>
+                    <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>
+                      <button title="Editar" style={{ ...btnLeve, padding: "3px 8px", fontSize: 12 }} onClick={() => { setEditando(f); setPagando(null); }}><Edit3 size={12} /> Editar</button>{" "}
+                      <button title={f.ativo ? "Tirar dos próximos meses" : "Voltar a cobrar todo mês"} style={{ ...btnLeve, padding: "3px 8px", fontSize: 12 }} onClick={() => alternarAtivo(f)}>
+                        <Power size={12} /> {f.ativo ? "Desativar" : "Reativar"}
+                      </button>{" "}
+                      <button title="Excluir" style={{ ...btnLeve, padding: "3px 8px", fontSize: 12, color: VERMELHO }} onClick={() => excluirCadastro(f)}><Trash2 size={12} /></button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p style={{ fontSize: 12, color: "#65758b", margin: "10px 0 0" }}>
+          Mudar o valor previsto ou o vencimento vale daqui para a frente — o que já foi pago guarda o valor da época. Despesa fixa com pagamento
+          registrado não se exclui: desative, e o histórico continua.
+        </p>
+      </Caixa>
+    </div>
   );
 }
 
