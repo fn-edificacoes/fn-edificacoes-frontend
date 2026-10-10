@@ -179,6 +179,15 @@ cadastro rápido (`ModalDespesa`) de qualquer tela.
   antigo sem data nasce com o campo vazio — preencher "hoje" inventaria a data. A aba **Antes da
   vistoria** lista o que ainda não chegou à hora da visita, para registrar pagamento antecipado.
 - Nada decide regime tributário. O limite do MEI é o configurado; os campos do Simples são só guardados.
+- **Folha de pagamento nas despesas** (Relatórios e Indicadores financeiros): grupo próprio no relatório
+  (`Fin.ehFolhaDePagamento`: origem `folha`/`tecnico`, ou Vistoriador, Salário e extras, Pró-labore e Encargos
+  lançados à mão) — também é a pasta do ZIP do contador. O que a Folha ainda mostra **a pagar** no período soma
+  às despesas (`useFolhaEmAberto`, um `GET /api/folha` por mês, só até o mês corrente); o pago já é despesa e
+  não entra de novo. A exportação para a contabilidade continua só com despesa paga.
+- **Situação Tributária mês a mês** (`PainelSituacaoTributaria`): faturamento por mês desde a data de abertura do
+  CNPJ (o que veio antes fica numa linha à parte, fora do MEI), acumulado contra o limite repartido pelos meses
+  de atividade, e a preparação para ME: receita e folha paga dos últimos 12 meses (ou desde a abertura), média
+  × 12 contra o teto da ME e Fator R. Referências em `LIMITE_ME_PADRAO` e `FATOR_R_REFERENCIA` — só mostradas.
 
 **Controle financeiro** (`src/controle-financeiro.jsx`, arquivo próprio como a Rede Nacional):
 - `AbaArtsVistoria` (módulo `arts`, Gerência e Documentação): ART múltipla de vistoria por

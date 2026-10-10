@@ -983,3 +983,45 @@ export function useCustosOperacionais({ token, apiFetch, ativo = true }) {
   return estado;
 }
 
+/* O que a Folha ainda mostra em aberto num mês: vistorias feitas e não pagas, salário do mês e
+   extras — a mesma conta do "A pagar" da tela da Folha. O que já foi pago virou despesa
+   (origem "folha") e já está na lista de despesas: somar aqui de novo contaria duas vezes. */
+export function folhaEmAberto(folha) {
+  let vistorias = 0, salarios = 0, extras = 0;
+  (folha?.pessoas || []).forEach((p) => {
+    vistorias += Number(p.vistorias?.aPagar) || 0;
+    if (p.salario && !p.salario.pago) salarios += Number(p.salario.valor) || 0;
+    extras += (p.extras || []).filter((x) => !x.pago).reduce((s, x) => s + (Number(x.valor) || 0), 0);
+  });
+  const c = (n) => Math.round(n * 100) / 100;
+  return { vistorias: c(vistorias), salarios: c(salarios), extras: c(extras), total: c(vistorias + salarios + extras) };
+}
+
+/* A folha em aberto nos meses de um período, para os relatórios do Financeiro somarem às
+   despesas. Um GET /api/folha por mês: a regra 100/80 e o salário continuam só no servidor, e o
+   "a pagar" do relatório nunca diverge do que a tela da Folha mostra. */
+const FOLHA_VAZIA = { vistorias: 0, salarios: 0, extras: 0, total: 0, porMes: [] };
+export function useFolhaEmAberto({ token, apiFetch, meses = [], ativo = true }) {
+  const chave = meses.join(",");
+  const [estado, setEstado] = useState({ ...FOLHA_VAZIA, carregado: false, erro: null });
+  useEffect(() => {
+    if (!ativo || !token) return;
+    let vivo = true;
+    /* Zera ao trocar de período: mostrar o total do recorte anterior enquanto carrega seria
+       um número errado com cara de certo. */
+    setEstado({ ...FOLHA_VAZIA, carregado: false, erro: null });
+    Promise.all(meses.map((m) => apiFetch(`/api/folha?competencia=${m}`, { token }).then((f) => ({ competencia: m, ...folhaEmAberto(f) }))))
+      .then((porMes) => {
+        if (!vivo) return;
+        const soma = (k) => Math.round(porMes.reduce((s, x) => s + x[k], 0) * 100) / 100;
+        setEstado({
+          vistorias: soma("vistorias"), salarios: soma("salarios"), extras: soma("extras"), total: soma("total"),
+          porMes: porMes.filter((x) => x.total > 0), carregado: true, erro: null,
+        });
+      })
+      .catch((e) => { if (vivo) setEstado({ ...FOLHA_VAZIA, carregado: true, erro: e.message }); });
+    return () => { vivo = false; };
+  }, [ativo, token, chave]);
+  return estado;
+}
+
