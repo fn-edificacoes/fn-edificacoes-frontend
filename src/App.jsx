@@ -5811,7 +5811,8 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
 /* Painel lateral: agenda completa do dia clicado + atalho pra agendar uma nova vistoria. */
 function PainelDiaAgendamento({ diaISO, clientes = [], todosClientes = [], vistoriadores = [], onFechar, onAgendarNovo, podeAgir, ehGerencia = false, updCliente, notify }) {
   const [confirmandoCancelamento, setConfirmandoCancelamento] = useState(null);
-  const [trocandoId, setTrocandoId] = useState(null);
+  const [trocandoIds, setTrocandoIds] = useState([]);
+  const [propondoTroca, setPropondoTroca] = useState(null);
   const dataFmt = new Date(`${diaISO}T00:00:00`).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
   // Mostra todo cliente já cadastrado com vistoria desejada nesse dia, não só os que já
   // têm técnico confirmado — "Cancelado" fica de fora por não ser mais um compromisso ativo.
@@ -5822,9 +5823,10 @@ function PainelDiaAgendamento({ diaISO, clientes = [], todosClientes = [], visto
      olhando a agenda inteira da data. Vale para qualquer cadastro do dia, não só os já
      agendados: em quem ainda está em análise ou aprovado, escolher o técnico também agenda,
      que é o mesmo gesto do "Aprovar e agendar" da Análise, só que decidido olhando o dia
-     cheio. Não desmarca nada e recusa quem já tem outra vistoria no mesmo horário — o
+     cheio. Não desmarca nada e não deixa ninguém com duas vistorias no mesmo horário — o
      conflito é conferido contra a agenda completa (todosClientes), porque o painel pode
-     estar filtrado por etapa. */
+     estar filtrado por etapa. Quando o escolhido já está ocupado naquele horário, oferece
+     trocar os dois entre si (ver motivoSemTroca e trocarEntreSi), que é o remanejo mais comum do dia. */
   const definirTecnico = async (c, novoId) => {
     if (!novoId || String(novoId) === String(c.vistoriadorId)) return;
     const universo = todosClientes.length ? todosClientes : clientes;
@@ -5833,11 +5835,13 @@ function PainelDiaAgendamento({ diaISO, clientes = [], todosClientes = [], visto
     });
     const nomeNovo = vistoriadores.find((v) => String(v.id) === String(novoId))?.nome || "O técnico";
     if (conflito) {
-      notify(`${nomeNovo} já tem vistoria às ${c.horarioDesejado} nesse dia (${conflito.nome}). Escolha outro.`);
+      const motivo = motivoSemTroca(universo, c, conflito);
+      if (motivo) notify(`${nomeNovo} já tem vistoria às ${c.horarioDesejado} nesse dia (${conflito.nome}). ${motivo}`);
+      else setPropondoTroca({ alvo: c, outro: conflito, novoId });
       return;
     }
     const jaEstaNaAgenda = c.status === "Vistoria agendada" || c.status === "Em vistoria";
-    setTrocandoId(c.id);
+    setTrocandoIds([c.id]);
     try {
       const ok = await updCliente(c.id, jaEstaNaAgenda
         ? { vistoriadorId: novoId }
@@ -5848,7 +5852,41 @@ function PainelDiaAgendamento({ diaISO, clientes = [], todosClientes = [], visto
           : `${ehRevistoria(c) ? "Revistoria" : "Vistoria"} agendada com ${nomeNovo} ✓ — já entrou na agenda`);
       }
     } catch (e) { notify(`Não foi possível definir o técnico: ${e.message}`); }
-    setTrocandoId(null);
+    setTrocandoIds([]);
+  };
+
+  /* Troca entre si: c (alvo) passa para o técnico escolhido e a vistoria que ocupava esse
+     horário (outro) fica com o técnico que era do alvo. Só faz sentido quando o alvo já tem
+     técnico — senão o outro ficaria agendado sem ninguém — e quando nenhum dos dois está em
+     campo. Devolve o porquê de não dar, ou null quando a troca pode ser oferecida. */
+  const motivoSemTroca = (universo, alvo, outro) => {
+    if (!alvo.vistoriadorId) return "Escolha outro.";
+    if (alvo.status === "Em vistoria" || outro.status === "Em vistoria") return "Uma das duas já está em andamento — não dá para trocar agora.";
+    // O técnico atual do alvo não pode ter uma terceira vistoria nesse mesmo horário.
+    const terceira = vistoriaNoMesmoHorario(universo.filter((o) => o.id !== alvo.id), {
+      clienteId: outro.id, vistoriadorId: alvo.vistoriadorId, data: alvo.dataDesejada, horario: alvo.horarioDesejado,
+    });
+    return terceira ? "Escolha outro." : null;
+  };
+
+  /* Sem rota de troca no backend, são dois PATCH. Se o segundo falha, o primeiro é desfeito:
+     parar no meio deixaria o técnico novo com as duas vistorias no mesmo horário. */
+  const trocarEntreSi = async ({ alvo, outro, novoId }) => {
+    const antigoId = alvo.vistoriadorId;
+    const nome = (id) => vistoriadores.find((v) => String(v.id) === String(id))?.nome || "o técnico";
+    setTrocandoIds([alvo.id, outro.id]);
+    try {
+      if (await updCliente(alvo.id, { vistoriadorId: novoId })) {
+        if (await updCliente(outro.id, { vistoriadorId: antigoId })) {
+          notify(`Técnicos trocados ✓ — ${alvo.nome} com ${nome(novoId)}, ${outro.nome} com ${nome(antigoId)}`);
+        } else if (await updCliente(alvo.id, { vistoriadorId: antigoId })) {
+          notify(`A troca não foi feita: o servidor recusou. ${alvo.nome} continua com ${nome(antigoId)}.`);
+        } else {
+          notify(`Atenção: ${nome(novoId)} ficou com duas vistorias às ${alvo.horarioDesejado}. Confira o dia.`);
+        }
+      }
+    } catch (e) { notify(`Não foi possível trocar os técnicos: ${e.message}`); }
+    setTrocandoIds([]);
   };
   /* Cancelar continua fora de quem já está em campo: a vistoria começou, e desmarcar por aqui
      deixaria o técnico dentro do imóvel sem nada no sistema. */
@@ -5905,12 +5943,12 @@ function PainelDiaAgendamento({ diaISO, clientes = [], todosClientes = [], visto
                       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
                         <span style={{ fontSize: 12, color: "#65758b" }}>Técnico:</span>
                         <select style={{ ...inp, width: "auto", minWidth: 165, padding: "5px 8px", fontSize: 12.5 }}
-                          value={c.vistoriadorId || ""} disabled={trocandoId === c.id}
+                          value={c.vistoriadorId || ""} disabled={trocandoIds.includes(c.id)}
                           onChange={(e) => definirTecnico(c, e.target.value)}>
                           <option value="">ainda não atribuído</option>
                           {vistoriadores.map((v) => <option key={v.id} value={v.id}>{rotuloTecnico(v)}</option>)}
                         </select>
-                        {trocandoId === c.id && <Loader2 size={13} className="spin" />}
+                        {trocandoIds.includes(c.id) && <Loader2 size={13} className="spin" />}
                       </div>
                     ) : (
                       <div style={{ fontSize: 12, color: "#65758b" }}>Técnico: {nomeTecnico || "ainda não atribuído"}</div>
@@ -5959,6 +5997,19 @@ function PainelDiaAgendamento({ diaISO, clientes = [], todosClientes = [], visto
         }}
         onCancel={() => setConfirmandoCancelamento(null)} />
       </div>
+
+      <ConfirmModal aberto={!!propondoTroca}
+        titulo="Trocar os técnicos?"
+        mensagem={propondoTroca
+          ? `${nomeVistoriador(propondoTroca.novoId) || "O técnico"} já tem vistoria às ${propondoTroca.alvo.horarioDesejado} com "${propondoTroca.outro.nome}". Trocar os dois: "${propondoTroca.alvo.nome}" fica com ${nomeVistoriador(propondoTroca.novoId) || "o técnico escolhido"} e "${propondoTroca.outro.nome}" passa para ${nomeVistoriador(propondoTroca.alvo.vistoriadorId) || "o técnico atual"}.`
+          : ""}
+        rotuloConfirmar="Trocar" corConfirmar={AZUL_MARINHO}
+        onConfirm={async () => {
+          const troca = propondoTroca;
+          setPropondoTroca(null);
+          await trocarEntreSi(troca);
+        }}
+        onCancel={() => setPropondoTroca(null)} />
     </div>
   );
 }
@@ -7472,7 +7523,7 @@ function SeloRevistoria({ seq = 1 }) {
 }
 
 /* ================= Confirmação de exclusão (reutilizável) ================= */
-function ConfirmModal({ aberto, titulo = "Confirmar exclusão", mensagem = "Tem certeza que deseja excluir? Essa ação não pode ser desfeita.", onConfirm, onCancel }) {
+function ConfirmModal({ aberto, titulo = "Confirmar exclusão", mensagem = "Tem certeza que deseja excluir? Essa ação não pode ser desfeita.", onConfirm, onCancel, rotuloConfirmar = "Excluir", corConfirmar = "#c62828" }) {
   if (!aberto) return null;
   return (
     <div className="no-print" style={overlay} onClick={onCancel}>
@@ -7484,7 +7535,7 @@ function ConfirmModal({ aberto, titulo = "Confirmar exclusão", mensagem = "Tem 
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 18px" }}>{mensagem}</p>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={onCancel}>Cancelar</button>
-          <button className="btn-solid" style={{ background: "#c62828" }} onClick={onConfirm}>Excluir</button>
+          <button className="btn-solid" style={{ background: corConfirmar }} onClick={onConfirm}>{rotuloConfirmar}</button>
         </div>
       </div>
     </div>
