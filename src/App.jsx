@@ -3888,6 +3888,18 @@ function RascunhoLinha({ r, onLoad, onDel }) {
 }
 
 
+/* A mesma regra do servidor (dataDesejadaValida, em validacao.js do backend): AAAA-MM-DD de
+   um dia que existe, entre 2020 e 2100. Vazio é "sem data", não data inválida. */
+function dataDesejadaValida(valor) {
+  if (!valor) return true;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(valor));
+  if (!m) return false;
+  const [ano, mes, dia] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (ano < 2020 || ano > 2100) return false;
+  const d = new Date(Date.UTC(ano, mes - 1, dia));
+  return d.getUTCMonth() === mes - 1 && d.getUTCDate() === dia;
+}
+
 /* ================= Notificações: solicitações de clientes pendentes ================= */
 function NotificacoesClientes({ clientes, preencherComCliente, usuarioAtualId, style }) {
   /* Só o que já está na agenda dele, e nada mais:
@@ -3907,6 +3919,26 @@ function NotificacoesClientes({ clientes, preencherComCliente, usuarioAtualId, s
       && (!c.vistoriadorId || !usuarioAtualId || String(c.vistoriadorId) === String(usuarioAtualId)))
     .sort((a, b) => `${a.dataDesejada}${a.horarioDesejado}`.localeCompare(`${b.dataDesejada}${b.horarioDesejado}`));
 
+  /* Abas por quando é a vistoria. A lista misturava o dia de hoje com as semanas seguintes
+     (passava de 19 cartões) e a vistoria do dia ficava perdida no meio. "Anteriores" junta o
+     que pede ação: dia que já passou e ainda não virou laudo, cadastro sem data e data
+     inválida. */
+  const hojeISO = paraChaveISO(new Date());
+  const porAba = { hoje: [], proximas: [], anteriores: [] };
+  pendentes.forEach((c) => {
+    const valida = c.dataDesejada && dataDesejadaValida(c.dataDesejada);
+    porAba[!valida || c.dataDesejada < hojeISO ? "anteriores" : c.dataDesejada === hojeISO ? "hoje" : "proximas"].push(c);
+  });
+  const [abaEscolhida, setAbaEscolhida] = useState(null);
+  // Sem escolha, abre no que é de hoje; sem nada hoje, no que ficou para trás.
+  const aba = abaEscolhida || (porAba.hoje.length ? "hoje" : porAba.anteriores.length ? "anteriores" : "proximas");
+  const ABAS = [
+    { chave: "hoje", rotulo: "Hoje", vazio: "Nenhuma vistoria para hoje." },
+    { chave: "proximas", rotulo: "Próximas", vazio: "Nenhuma vistoria marcada para os próximos dias." },
+    { chave: "anteriores", rotulo: "Anteriores", vazio: "Nada pendente de dias anteriores." },
+  ];
+  const abaAtual = ABAS.find((a) => a.chave === aba);
+
   if (pendentes.length === 0) return null;
 
   return (
@@ -3915,8 +3947,24 @@ function NotificacoesClientes({ clientes, preencherComCliente, usuarioAtualId, s
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
           Esses clientes já preencheram o cadastro com todos os dados e o horário desejado. Escolha um para carregar os dados automaticamente e ir direto para a vistoria do dia.
         </p>
+        <div style={{ display: "inline-flex", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, overflow: "hidden", marginBottom: 12, maxWidth: "100%", flexWrap: "wrap" }}>
+          {ABAS.map((a) => (
+            <button key={a.chave} onClick={() => setAbaEscolhida(a.chave)}
+              style={{ padding: "8px 14px", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, background: aba === a.chave ? AZUL_MEDIO : "#fff", color: aba === a.chave ? "#fff" : "#4a5a70" }}>
+              {a.rotulo} ({porAba[a.chave].length})
+            </button>
+          ))}
+        </div>
+        {aba === "anteriores" && porAba.anteriores.length > 0 && (
+          <p style={{ fontSize: 12.5, color: "#65758b", margin: "0 0 10px" }}>
+            Dias que já passaram e ainda não viraram laudo, e cadastros sem data ou com data inválida.
+          </p>
+        )}
+        {porAba[aba].length === 0 && (
+          <p style={{ fontSize: 13.5, color: "#8593a8", margin: "4px 0" }}>{abaAtual.vazio}</p>
+        )}
         <div style={{ display: "grid", gap: 10 }}>
-          {pendentes.map((c) => (
+          {porAba[aba].map((c) => (
             <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
               {/* minWidth precisa ser 0 aqui: com o padrão (auto) o item flex nunca encolhe
                   abaixo do próprio conteúdo, e um nome muito longo empurrava a tela toda. */}
@@ -3926,9 +3974,19 @@ function NotificacoesClientes({ clientes, preencherComCliente, usuarioAtualId, s
                   {c.servico} {c.empreendimento ? `· ${c.empreendimento}` : ""}{c.blocoTorre ? ` (${c.blocoTorre})` : ""}
                 </div>
               </div>
-              <div style={{ fontSize: 12.5, color: AZUL_MARINHO, fontWeight: 700, whiteSpace: "nowrap" }}>
-                {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` às ${c.horarioDesejado}` : ""}
-              </div>
+              {/* Data com ano fora de 2020–2100 é digitação pela metade (já apareceu 0001-01-01):
+                  mostrar "01/01/0001" parecia defeito do sistema e não dizia o que fazer. O
+                  servidor passou a recusar essas datas; as que já estavam gravadas avisam aqui. */}
+              {dataDesejadaValida(c.dataDesejada) ? (
+                <div style={{ fontSize: 12.5, color: AZUL_MARINHO, fontWeight: 700, whiteSpace: "nowrap" }}>
+                  {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` às ${c.horarioDesejado}` : ""}
+                </div>
+              ) : (
+                <div style={{ fontSize: 12.5, color: "#C62828", fontWeight: 700, whiteSpace: "nowrap" }}
+                  title="A data gravada no cadastro não existe. Peça ao Atendimento para corrigir.">
+                  data inválida — corrigir no cadastro
+                </div>
+              )}
               <button className="btn-solid" style={{ width: "auto", padding: "8px 14px" }}
                 onClick={() => preencherComCliente(c, { irParaItens: true })}>
                 <Check size={14} /> Iniciar vistoria
