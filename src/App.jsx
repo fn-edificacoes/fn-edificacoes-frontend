@@ -2880,10 +2880,14 @@ function AppInterno({ session, onLogout }) {
     setLaudosPendentesCarregando(false);
   };
   useEffect(() => { carregarLaudosPendentes(); }, []);
-  const aprovarLaudo = async (docId) => {
+  /* jaEntregue: o cliente já recebeu o laudo por outro caminho — aprova e arquiva sem mandar
+     e-mail (ver a rota /api/docs/:id/aprovar). */
+  const aprovarLaudo = async (docId, { jaEntregue = false } = {}) => {
     try {
-      const r = await apiFetch(`/api/docs/${docId}/aprovar`, { method: "POST", token });
-      notify(`Laudo aprovado e enviado para ${r.emailEnviadoPara} ✓`);
+      const r = await apiFetch(`/api/docs/${docId}/aprovar`, { method: "POST", token, body: jaEntregue ? { jaEntregue: true } : undefined });
+      notify(r.jaEntregue
+        ? "Laudo aprovado e marcado como já enviado ✓ — nenhum e-mail foi mandado"
+        : `Laudo aprovado e enviado para ${r.emailEnviadoPara} ✓`);
       setLaudosPendentes((atual) => atual.filter((p) => p.doc_id !== docId));
       carregarDocs();
       return true;
@@ -8776,13 +8780,15 @@ function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, d
   const [enviandoDevolucao, setEnviandoDevolucao] = useState(false);
   const [editando, setEditando] = useState(false);
   const [salvandoEdicao, setSalvandoEdicao] = useState(false);
+  // Laudo esperando confirmação de "Já foi enviado" (aprovar sem mandar e-mail).
+  const [confirmandoEntregue, setConfirmandoEntregue] = useState(null);
   const laudoPreview = laudosPendentes.find((l) => l.doc_id === previewId);
 
   const abrirPreview = (docId) => { setPreviewId(docId); setEditando(false); marcarEmAnalise?.(docId); };
 
-  const aprovar = async (docId) => {
+  const aprovar = async (docId, opcoes) => {
     setAprovandoId(docId);
-    await aprovarLaudo(docId);
+    await aprovarLaudo(docId, opcoes);
     setAprovandoId(null);
     if (previewId === docId) setPreviewId(null);
   };
@@ -8857,12 +8863,31 @@ function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, d
             <button className="btn-ghost" style={{ color: "#B26A00", background: "#FFF4E0" }} onClick={() => abrirDevolucao(l.doc_id)}>
               <Undo2 size={14} /> Devolver para correção
             </button>
+            {/* Para o laudo que o cliente já recebeu por fora: sem isto ele ficava na fila para
+                sempre, porque "Aprovar" mandaria o e-mail de novo. */}
+            <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: "#EAF2FB" }}
+              onClick={() => setConfirmandoEntregue(l)} disabled={aprovandoId === l.doc_id}>
+              <Check size={14} /> Já foi enviado
+            </button>
             <button className="btn-solid" onClick={() => aprovar(l.doc_id)} disabled={aprovandoId === l.doc_id}>
               {aprovandoId === l.doc_id ? <Loader2 size={14} className="spin" /> : <Mail size={14} />} Aprovar e enviar por e-mail
             </button>
           </div>
         ))}
       </div>
+
+      <ConfirmModal aberto={!!confirmandoEntregue}
+        titulo="Marcar como já enviado?"
+        mensagem={confirmandoEntregue
+          ? `O laudo de "${confirmandoEntregue.cliente}" sai da fila como enviado ao cliente, sem mandar e-mail. O PDF final é gerado e guardado no Drive, e o cliente continua podendo baixar pelo portal. Use só se ele já recebeu o laudo.`
+          : ""}
+        rotuloConfirmar="Marcar como enviado" corConfirmar={AZUL_MARINHO}
+        onConfirm={async () => {
+          const alvo = confirmandoEntregue;
+          setConfirmandoEntregue(null);
+          await aprovar(alvo.doc_id, { jaEntregue: true });
+        }}
+        onCancel={() => setConfirmandoEntregue(null)} />
 
       {laudoPreview && (
         <div className="no-print" style={overlay} onClick={() => setPreviewId(null)}>
