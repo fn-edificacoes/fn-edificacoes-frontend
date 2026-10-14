@@ -3888,6 +3888,18 @@ function RascunhoLinha({ r, onLoad, onDel }) {
 }
 
 
+/* A mesma regra do servidor (dataDesejadaValida, em validacao.js do backend): AAAA-MM-DD de
+   um dia que existe, entre 2020 e 2100. Vazio é "sem data", não data inválida. */
+function dataDesejadaValida(valor) {
+  if (!valor) return true;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(valor));
+  if (!m) return false;
+  const [ano, mes, dia] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (ano < 2020 || ano > 2100) return false;
+  const d = new Date(Date.UTC(ano, mes - 1, dia));
+  return d.getUTCMonth() === mes - 1 && d.getUTCDate() === dia;
+}
+
 /* ================= Notificações: solicitações de clientes pendentes ================= */
 function NotificacoesClientes({ clientes, preencherComCliente, usuarioAtualId, style }) {
   /* Só o que já está na agenda dele, e nada mais:
@@ -3926,9 +3938,19 @@ function NotificacoesClientes({ clientes, preencherComCliente, usuarioAtualId, s
                   {c.servico} {c.empreendimento ? `· ${c.empreendimento}` : ""}{c.blocoTorre ? ` (${c.blocoTorre})` : ""}
                 </div>
               </div>
-              <div style={{ fontSize: 12.5, color: AZUL_MARINHO, fontWeight: 700, whiteSpace: "nowrap" }}>
-                {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` às ${c.horarioDesejado}` : ""}
-              </div>
+              {/* Data com ano fora de 2020–2100 é digitação pela metade (já apareceu 0001-01-01):
+                  mostrar "01/01/0001" parecia defeito do sistema e não dizia o que fazer. O
+                  servidor passou a recusar essas datas; as que já estavam gravadas avisam aqui. */}
+              {dataDesejadaValida(c.dataDesejada) ? (
+                <div style={{ fontSize: 12.5, color: AZUL_MARINHO, fontWeight: 700, whiteSpace: "nowrap" }}>
+                  {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` às ${c.horarioDesejado}` : ""}
+                </div>
+              ) : (
+                <div style={{ fontSize: 12.5, color: "#C62828", fontWeight: 700, whiteSpace: "nowrap" }}
+                  title="A data gravada no cadastro não existe. Peça ao Atendimento para corrigir.">
+                  data inválida — corrigir no cadastro
+                </div>
+              )}
               <button className="btn-solid" style={{ width: "auto", padding: "8px 14px" }}
                 onClick={() => preencherComCliente(c, { irParaItens: true })}>
                 <Check size={14} /> Iniciar vistoria
