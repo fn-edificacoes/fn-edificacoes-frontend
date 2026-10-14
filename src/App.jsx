@@ -4287,6 +4287,18 @@ function KanbanClientes({ clientes, docs, onAbrir }) {
 /* Os campos do cadastro do cliente, num lugar só. Estavam escritos à mão dentro do modal de
    "Editar cliente"; a Gerência agora edita o mesmo cadastro pela aba de perfil, e duas cópias
    dos mesmos campos divergiriam na primeira mudança. */
+/* O que salvar desses formulários: só o que a pessoa mexeu. Os dois mandavam o cadastro
+   inteiro no PATCH, inclusive os campos de cobrança, que nem aparecem aqui. Quando o servidor
+   passou a validar a forma de pagamento, o "" de quem ainda não pagou começou a ser recusado
+   e nenhuma edição salvava, nem a troca de data. O cadastro inteiro também desfazia o que
+   outra pessoa tivesse gravado enquanto o formulário estava aberto. */
+function camposAlterados(original = {}, editado = {}) {
+  const patch = {};
+  for (const campo of Object.keys(editado)) {
+    if (editado[campo] !== original[campo]) patch[campo] = editado[campo];
+  }
+  return patch;
+}
 function CamposCadastroCliente({ dados, onChange }) {
   const set = (patch) => onChange({ ...dados, ...patch });
   return (
@@ -4420,13 +4432,17 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
       return (a.nome || "").localeCompare(b.nome || "", "pt-BR");
     });
 
-  const abrirEdicao = (c) => setEditando({ ...c });
+  // Como o cadastro estava ao abrir — é contra ele que se acha o que mudou (ver camposAlterados).
+  const originalEdicao = useRef(null);
+  const abrirEdicao = (c) => { originalEdicao.current = c; setEditando({ ...c }); };
   const salvar = async () => {
+    const patch = camposAlterados(originalEdicao.current, editando);
+    if (Object.keys(patch).length === 0) { setEditando(null); return; }
     try {
       /* Fechar o modal e dizer "atualizado ✓" sem o servidor ter aceitado escondia a falha:
          a lista já mostra o valor novo (atualização otimista), e a pessoa só descobria na
          próxima vez que abrisse a tela. */
-      const ok = await atualizarCliente(editando.id, editando);
+      const ok = await atualizarCliente(editando.id, patch);
       if (!ok) return;
       setEditando(null);
       notify("Cliente atualizado ✓");
@@ -9863,11 +9879,14 @@ function AbaPerfilCliente({ clientes = [], token, notify, atualizarCliente, rese
   useEffect(() => { if (abertoId) carregar(abertoId); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [abertoId]);
 
   const salvar = async () => {
+    // perfil.cliente é o cadastro como veio do servidor ao abrir (ver camposAlterados).
+    const patch = camposAlterados(mapClienteDaApi(perfil.cliente), form);
+    if (Object.keys(patch).length === 0) { notify("Nada mudou no cadastro."); return; }
     setSalvando(true);
     try {
       /* Só recarrega e comemora se o servidor aceitou — a lista de clientes é atualizada de
          forma otimista, então "salvo ✓" sem confirmação viraria um dado errado na tela. */
-      const ok = await atualizarCliente(form.id, form);
+      const ok = await atualizarCliente(form.id, patch);
       if (ok) {
         notify("Cadastro atualizado ✓");
         await carregar(form.id);
