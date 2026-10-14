@@ -3919,6 +3919,26 @@ function NotificacoesClientes({ clientes, preencherComCliente, usuarioAtualId, s
       && (!c.vistoriadorId || !usuarioAtualId || String(c.vistoriadorId) === String(usuarioAtualId)))
     .sort((a, b) => `${a.dataDesejada}${a.horarioDesejado}`.localeCompare(`${b.dataDesejada}${b.horarioDesejado}`));
 
+  /* Abas por quando é a vistoria. A lista misturava o dia de hoje com as semanas seguintes
+     (passava de 19 cartões) e a vistoria do dia ficava perdida no meio. "Anteriores" junta o
+     que pede ação: dia que já passou e ainda não virou laudo, cadastro sem data e data
+     inválida. */
+  const hojeISO = paraChaveISO(new Date());
+  const porAba = { hoje: [], proximas: [], anteriores: [] };
+  pendentes.forEach((c) => {
+    const valida = c.dataDesejada && dataDesejadaValida(c.dataDesejada);
+    porAba[!valida || c.dataDesejada < hojeISO ? "anteriores" : c.dataDesejada === hojeISO ? "hoje" : "proximas"].push(c);
+  });
+  const [abaEscolhida, setAbaEscolhida] = useState(null);
+  // Sem escolha, abre no que é de hoje; sem nada hoje, no que ficou para trás.
+  const aba = abaEscolhida || (porAba.hoje.length ? "hoje" : porAba.anteriores.length ? "anteriores" : "proximas");
+  const ABAS = [
+    { chave: "hoje", rotulo: "Hoje", vazio: "Nenhuma vistoria para hoje." },
+    { chave: "proximas", rotulo: "Próximas", vazio: "Nenhuma vistoria marcada para os próximos dias." },
+    { chave: "anteriores", rotulo: "Anteriores", vazio: "Nada pendente de dias anteriores." },
+  ];
+  const abaAtual = ABAS.find((a) => a.chave === aba);
+
   if (pendentes.length === 0) return null;
 
   return (
@@ -3927,8 +3947,24 @@ function NotificacoesClientes({ clientes, preencherComCliente, usuarioAtualId, s
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
           Esses clientes já preencheram o cadastro com todos os dados e o horário desejado. Escolha um para carregar os dados automaticamente e ir direto para a vistoria do dia.
         </p>
+        <div style={{ display: "inline-flex", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, overflow: "hidden", marginBottom: 12, maxWidth: "100%", flexWrap: "wrap" }}>
+          {ABAS.map((a) => (
+            <button key={a.chave} onClick={() => setAbaEscolhida(a.chave)}
+              style={{ padding: "8px 14px", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, background: aba === a.chave ? AZUL_MEDIO : "#fff", color: aba === a.chave ? "#fff" : "#4a5a70" }}>
+              {a.rotulo} ({porAba[a.chave].length})
+            </button>
+          ))}
+        </div>
+        {aba === "anteriores" && porAba.anteriores.length > 0 && (
+          <p style={{ fontSize: 12.5, color: "#65758b", margin: "0 0 10px" }}>
+            Dias que já passaram e ainda não viraram laudo, e cadastros sem data ou com data inválida.
+          </p>
+        )}
+        {porAba[aba].length === 0 && (
+          <p style={{ fontSize: 13.5, color: "#8593a8", margin: "4px 0" }}>{abaAtual.vazio}</p>
+        )}
         <div style={{ display: "grid", gap: 10 }}>
-          {pendentes.map((c) => (
+          {porAba[aba].map((c) => (
             <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
               {/* minWidth precisa ser 0 aqui: com o padrão (auto) o item flex nunca encolhe
                   abaixo do próprio conteúdo, e um nome muito longo empurrava a tela toda. */}
