@@ -441,33 +441,67 @@ function LinhaArt({ art, perfil, clientePorId, tirar, excluir, salvar }) {
 /* ============================================================
    FOLHA DE PAGAMENTO (só a Gerência)
    ============================================================
-   Quem a FN paga no mês, num lugar só, com o comprovante de cada pagamento:
+   Quem a FN paga, num lugar só, com o comprovante de cada pagamento:
    - vistoriador: as vistorias que ELE fez, pela regra do dia (calculada no servidor — R$ 100 a
      1ª do dia, R$ 80 as seguintes, revistoria R$ 80). Vistoria sem técnico (base antiga, feita
-     pela Gerência) não custa nada;
-   - salário fixo: quem é do Atendimento recebe o salário configurado (R$ 400/mês hoje); dá para
-     mudar o valor de alguém, tirar da folha fixa ou incluir outra pessoa;
+     pela Gerência) não custa nada. A FN paga o vistoriador no FIM DE CADA DIA: o "Fechamento do
+     dia" mostra o que cada um fez no dia e paga só aquilo;
+   - salário fixo: o Atendimento recebe o salário configurado (R$ 400/mês hoje) a partir do mês
+     em que entrou; dá para mudar valor e mês de início, tirar ou incluir alguém;
    - extras: hora extra, bônus — lançados à mão no mês.
-   "Pagar" junta tudo o que está em aberto da pessoa numa despesa só, e o comprovante se anexa
-   ali mesmo. Nada disso aparece para o atendente ou para o técnico. */
+   Pagamento feito antes da folha existir (setembro, por exemplo) se registra como pago com a
+   data em que foi feito, escolhendo se lança ou não a despesa — se já foi lançado à mão em
+   Despesas, lançar de novo contaria duas vezes. Nada disso aparece para o atendente ou o técnico. */
 const ROTULO_REGRA = { primeira: "1ª do dia", seguinte: "demais do dia", revistoria: "revistoria" };
 const FORMAS = ["Pix", "Transferência", "Dinheiro", "Boleto", "Outro"];
 const ROTULO_PAPEL = {
   vistoriador: "Vistoriador", atendimento: "Atendimento", documentacao: "Documentação", qualidade: "Qualidade",
   vendas: "Vendas", gerencia: "Gerência", gestor_regional: "Gestor regional",
 };
-const mesBr = (mes) => { const [a, m] = mes.split("-"); return `${m}/${a}`; };
+const mesBr = (mes) => { const [a, m] = String(mes || "").split("-"); return m ? `${m}/${a}` : "—"; };
+
+/* O formulário de um pagamento — do dia, do mês ou do mês inteiro de todo mundo. */
+function FormPagamento({ titulo, dataPadrao, enviando, onConfirmar, onCancelar, rotuloBotao }) {
+  const [f, setF] = useState({ dataPagamento: dataPadrao || hoje(), formaPagamento: "Pix", observacoes: "", lancarDespesa: true });
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      {titulo && <div style={{ fontSize: 12.5, fontWeight: 700, color: AZUL_MARINHO }}>{titulo}</div>}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div style={{ display: "grid", gap: 4 }}><label style={lab}>Data em que foi pago</label>
+          <input style={inp} type="date" value={f.dataPagamento} max={hoje()} onChange={(e) => setF({ ...f, dataPagamento: e.target.value })} /></div>
+        <div style={{ display: "grid", gap: 4 }}><label style={lab}>Forma</label>
+          <select style={inp} value={f.formaPagamento} onChange={(e) => setF({ ...f, formaPagamento: e.target.value })}>
+            {FORMAS.map((x) => <option key={x}>{x}</option>)}
+          </select></div>
+        <div style={{ display: "grid", gap: 4, flex: 1, minWidth: 160 }}><label style={lab}>Observação</label>
+          <input style={inp} value={f.observacoes} onChange={(e) => setF({ ...f, observacoes: e.target.value })} /></div>
+      </div>
+      <label style={{ display: "flex", alignItems: "flex-start", gap: 7, fontSize: 12.5, color: "#4a5a70" }}>
+        <input type="checkbox" checked={f.lancarDespesa} onChange={(e) => setF({ ...f, lancarDespesa: e.target.checked })} style={{ marginTop: 2 }} />
+        <span>
+          <strong>Lançar como despesa no Financeiro</strong> (é onde se anexa o comprovante).
+          {" "}Desmarque se este pagamento <strong>já foi lançado à mão em Despesas</strong> — senão ele conta duas vezes.
+        </span>
+      </label>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button style={btn} disabled={enviando || !f.dataPagamento} onClick={() => onConfirmar(f)}><Check size={14} /> {rotuloBotao}</button>
+        <button style={btnLeve} onClick={onCancelar}>Cancelar</button>
+      </div>
+    </div>
+  );
+}
 
 export function AbaFolhaPagamento({ token, apiFetch, notify, fin, usuarios = [] }) {
   const [mes, setMes] = useState(() => hoje().slice(0, 7));
-  const [dados, setDados] = useState({ pessoas: [], vistorias: [], config: null, salariosPersonalizados: [] });
+  const [dados, setDados] = useState({ pessoas: [], vistorias: [], config: null, salariosPersonalizados: [], inicioPadrao: [] });
   const [carregando, setCarregando] = useState(false);
   const [aberto, setAberto] = useState(null);
+  /* Qual formulário de pagamento está aberto: { usuarioId, dia } (dia vazio = o mês), ou "todos". */
   const [pagando, setPagando] = useState(null);
-  const [formPag, setFormPag] = useState({ dataPagamento: hoje(), formaPagamento: "Pix", observacoes: "" });
   const [extraDe, setExtraDe] = useState(null);
   const [formExtra, setFormExtra] = useState({ descricao: "", valor: "" });
   const [enviando, setEnviando] = useState(false);
+  const [diaFechamento, setDiaFechamento] = useState(hoje());
 
   const carregar = async () => {
     setCarregando(true);
@@ -476,22 +510,57 @@ export function AbaFolhaPagamento({ token, apiFetch, notify, fin, usuarios = [] 
     setCarregando(false);
   };
   useEffect(() => { carregar(); }, [mes]);
+  /* O dia do fechamento acompanha o mês aberto: hoje, se for deste mês; senão o último dia. */
+  useEffect(() => {
+    if (diaFechamento.slice(0, 7) !== mes) setDiaFechamento(hoje().slice(0, 7) === mes ? hoje() : ultimoDia(mes));
+  }, [mes]);
 
-  /* O comprovante mora na despesa do pagamento (Drive) — a lista de despesas do Financeiro já
-     está carregada e é atualizada quando se anexa. */
   const despesaPorId = useMemo(() => Object.fromEntries((fin?.despesas || []).map((d) => [d.id, d])), [fin?.despesas]);
-  const anexosDe = (despesaId) => despesaPorId[despesaId]?.anexos || [];
+  const anexosDe = (despesaId) => (despesaId ? despesaPorId[despesaId]?.anexos || [] : []);
 
-  const pagar = async (p) => {
+  const pagar = async (p, form, dia = null) => {
     setEnviando(true);
     try {
-      const r = await apiFetch(`/api/folha/${p.usuarioId}/pagar`, { method: "POST", token, body: { competencia: mes, ...formPag } });
-      notify(`Pagamento de ${p.nome} registrado: ${brl(r.total)} ✓ — anexe o comprovante abaixo`);
-      setPagando(null); setAberto(p.usuarioId);
-      setFormPag({ dataPagamento: hoje(), formaPagamento: "Pix", observacoes: "" });
-      await Promise.all([carregar(), fin?.carregar?.()]);
-    } catch (e) { notify(`Não foi possível registrar: ${e.message}`); }
-    setEnviando(false);
+      const r = await apiFetch(`/api/folha/${p.usuarioId}/pagar`, { method: "POST", token, body: { competencia: mes, ...form, ...(dia ? { dia } : {}) } });
+      notify(`Pagamento de ${p.nome} registrado: ${brl(r.total)} ✓${r.despesaId ? " — anexe o comprovante" : " (sem despesa)"}`);
+      setPagando(null);
+      await Promise.all([carregar(), r.despesaId ? fin?.carregar?.() : null]);
+      return true;
+    } catch (e) { notify(`Não foi possível registrar ${p.nome}: ${e.message}`); return false; }
+    finally { setEnviando(false); }
+  };
+  /* Mês inteiro como pago, de todo mundo que tem algo em aberto (para fechar setembro, por
+     exemplo). Vistoriador recebe no fim de cada dia, então vira UM pagamento por dia, com a data
+     do próprio dia — é nele que se anexa o comprovante daquele dia depois. Salário e extras
+     viram um pagamento na data escolhida. */
+  const pagarTodos = async (form) => {
+    const abertos = (dados.pessoas || []).filter((p) => p.aPagar > 0);
+    const registrar = (p, corpo) => apiFetch(`/api/folha/${p.usuarioId}/pagar`, { method: "POST", token, body: { competencia: mes, ...form, ...corpo } });
+    setEnviando(true);
+    let ok = 0;
+    for (const p of abertos) {
+      const dias = [...new Set((dados.vistorias || []).filter((v) => v.tecnicoId === p.usuarioId && !v.pago && v.valor > 0).map((v) => v.dia))].sort();
+      for (const dia of dias) {
+        try { await registrar(p, { dia, dataPagamento: dia }); ok += 1; }
+        catch (e) { notify(`${p.nome} (${dataBr(dia)}): ${e.message}`); }
+      }
+      const resto = (p.salario && !p.salario.pago ? p.salario.valor : 0) + p.extras.filter((e) => !e.pago).reduce((s, e) => s + e.valor, 0);
+      if (resto > 0) {
+        try { await registrar(p, {}); ok += 1; }
+        catch (e) { notify(`${p.nome}: ${e.message}`); }
+      }
+    }
+    setEnviando(false); setPagando(null);
+    notify(`${ok} pagamento(s) registrado(s) em ${mesBr(mes)} ✓${form.lancarDespesa ? " — anexe os comprovantes quando tiver" : ""}`);
+    await Promise.all([carregar(), form.lancarDespesa ? fin?.carregar?.() : null]);
+  };
+  const desfazer = async (pagamento) => {
+    if (!window.confirm(`Desfazer o pagamento de ${brl(pagamento.valor)} de ${dataBr(pagamento.pagoEm)}? O que ele pagou volta para "a pagar".`)) return;
+    try {
+      await apiFetch(`/api/folha/pagamentos/${pagamento.id}`, { method: "DELETE", token });
+      notify("Pagamento desfeito");
+      await Promise.all([carregar(), pagamento.despesaId ? fin?.carregar?.() : null]);
+    } catch (e) { notify(e.message); }
   };
   const lancarExtra = async (p) => {
     setEnviando(true);
@@ -511,39 +580,127 @@ export function AbaFolhaPagamento({ token, apiFetch, notify, fin, usuarios = [] 
     for (const arquivo of arquivos) await fin.anexar(despesaId, arquivo);
     notify("Comprovante anexado ✓");
   };
+  /* Os comprovantes de um pagamento e o botão de anexar — o mesmo no Fechamento do dia e na
+     lista de pagamentos da pessoa. Pagamento registrado sem despesa não tem onde anexar. */
+  const comprovantes = (x) => {
+    if (!x.despesaId) return <Pilula cor="#4a5a70" fundo={CINZA_CLARO}>registrado sem despesa</Pilula>;
+    const anexos = anexosDe(x.despesaId);
+    return (
+      <>
+        {anexos.map((a) => (
+          <button key={a.id} style={{ ...btnLeve, padding: "3px 8px", fontSize: 12 }} onClick={() => fin.abrirAnexo(a)}>
+            <FileCheck size={12} /> {a.nomeArquivo}
+          </button>
+        ))}
+        {fin?.carregado && anexos.length === 0 && <Pilula cor={VERMELHO} fundo="#FDECEC">sem comprovante</Pilula>}
+        <label style={{ ...btnLeve, padding: "3px 8px", fontSize: 12 }}>
+          <Plus size={12} /> Anexar comprovante
+          <input type="file" accept="application/pdf,image/*" multiple style={{ display: "none" }}
+            onChange={(e) => { const arquivos = [...e.target.files]; e.target.value = ""; if (arquivos.length) anexar(x.despesaId, arquivos); }} />
+        </label>
+      </>
+    );
+  };
 
   const pessoas = dados.pessoas || [];
+  const vistorias = dados.vistorias || [];
   const totalDevido = pessoas.reduce((s, p) => s + p.devido, 0);
   const totalPago = pessoas.reduce((s, p) => s + p.pago, 0);
   const totalAPagar = pessoas.reduce((s, p) => s + p.aPagar, 0);
   const pagamentos = pessoas.flatMap((p) => p.pagamentos);
-  const semComprovante = fin?.carregado ? pagamentos.filter((x) => anexosDe(x.despesaId).length === 0).length : 0;
+  const semComprovante = fin?.carregado ? pagamentos.filter((x) => x.despesaId && anexosDe(x.despesaId).length === 0).length : 0;
   const extrasDe = (p) => p.extras.reduce((s, e) => s + e.valor, 0);
+  const pessoaPorId = Object.fromEntries(pessoas.map((p) => [p.usuarioId, p]));
+
+  /* Fechamento do dia: o que cada vistoriador fez no dia escolhido. */
+  const doDia = {};
+  vistorias.filter((v) => v.dia === diaFechamento).forEach((v) => {
+    const t = (doDia[v.tecnicoId] ||= { usuarioId: v.tecnicoId, nome: v.tecnicoNome, qtd: 0, valor: 0, aberto: 0 });
+    t.qtd += 1; t.valor += v.valor; if (!v.pago) t.aberto += v.valor;
+  });
+  const fechamento = Object.values(doDia).sort((a, b) => b.aberto - a.aberto || a.nome.localeCompare(b.nome, "pt-BR"));
+  const ehForm = (usuarioId, dia = null) => pagando && pagando !== "todos" && pagando.usuarioId === usuarioId && (pagando.dia || null) === dia;
 
   return (
     <div>
       <Caixa icon={Wallet} titulo={`Folha de pagamento — ${mesBr(mes)}`}
         acoes={<button style={btnLeve} onClick={carregar}><RefreshCcw size={14} className={carregando ? "spin" : ""} /> Atualizar</button>}>
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
-          Vistoriador recebe pelas vistorias que <strong>ele fez</strong> no mês: {brl(dados.config?.tecnicoPrimeiraDoDia ?? 100)} a 1ª do dia,
-          {" "}{brl(dados.config?.tecnicoDemaisDoDia ?? 80)} as seguintes (em qualquer empreendimento), {brl(dados.config?.tecnicoRevistoria ?? 80)} cada
-          revistoria. Vistoria feita pela Gerência ou da base antiga, sem técnico, não tem custo. O Atendimento recebe o salário fixo de
-          {" "}<strong>{brl(dados.config?.salarioFixoAtendimento ?? 400)}</strong> por mês, mais os extras que você lançar. Ao pagar, tudo o que está em
-          aberto da pessoa vira uma despesa — anexe o comprovante no próprio pagamento.
+          Vistoriador recebe pelas vistorias que <strong>ele fez</strong>: {brl(dados.config?.tecnicoPrimeiraDoDia ?? 100)} a 1ª do dia,
+          {" "}{brl(dados.config?.tecnicoDemaisDoDia ?? 80)} as seguintes, {brl(dados.config?.tecnicoRevistoria ?? 80)} cada revistoria — pague no
+          {" "}<strong>Fechamento do dia</strong>. Vistoria feita pela Gerência ou da base antiga, sem técnico, não tem custo. O Atendimento recebe
+          {" "}<strong>{brl(dados.config?.salarioFixoAtendimento ?? 400)}</strong> por mês a partir do mês em que entrou, mais os extras.
         </p>
         <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 14 }}>
           <div style={{ display: "grid", gap: 4 }}><label style={lab}>Mês</label>
             <input style={inp} type="month" value={mes} onChange={(e) => setMes(e.target.value || hoje().slice(0, 7))} /></div>
+          {totalAPagar > 0 && pagando !== "todos" && (
+            <button style={btnLeve} onClick={() => setPagando("todos")} title="Para registrar um mês que já foi pago fora do sistema">
+              <Check size={14} /> Marcar o mês todo como pago
+            </button>
+          )}
         </div>
+        {pagando === "todos" && (
+          <div style={{ border: `1px dashed ${AZUL_MEDIO}`, background: "#F6F9FD", borderRadius: 10, padding: 12, marginBottom: 14 }}>
+            <FormPagamento titulo={`Registrar ${mesBr(mes)} como pago para ${pessoas.filter((p) => p.aPagar > 0).length} pessoa(s) — ${brl(totalAPagar)}. `
+              + "Vistoriadores: um pagamento por dia, com a data do próprio dia (para anexar o comprovante de cada dia). Salário e extras: um pagamento na data abaixo."}
+              dataPadrao={hoje().slice(0, 7) === mes ? hoje() : ultimoDia(mes)} enviando={enviando}
+              rotuloBotao="Marcar todos como pagos" onConfirmar={pagarTodos} onCancelar={() => setPagando(null)} />
+          </div>
+        )}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
           <Kpi rotulo="Total da folha" valor={brl(totalDevido)} apoio={`${pessoas.length} pessoa(s)`} />
           <Kpi rotulo="Já pago" valor={brl(totalPago)} cor={VERDE} apoio={`${pagamentos.length} pagamento(s)`} />
           <Kpi rotulo="A pagar" valor={brl(totalAPagar)} cor={totalAPagar ? AMBAR : VERDE} />
-          <Kpi rotulo="Sem comprovante" valor={semComprovante} cor={semComprovante ? VERMELHO : VERDE} apoio="pagamentos sem arquivo" />
+          <Kpi rotulo="Sem comprovante" valor={semComprovante} cor={semComprovante ? VERMELHO : VERDE} apoio="pagamentos com despesa e sem arquivo" />
         </div>
       </Caixa>
 
-      {pessoas.length === 0 && <Aviso tom="ok">{carregando ? "Carregando…" : "Ninguém a pagar neste mês."}</Aviso>}
+      <Caixa icon={Users} titulo="Fechamento do dia — vistoriadores">
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 10 }}>
+          <div style={{ display: "grid", gap: 4 }}><label style={lab}>Dia</label>
+            <input style={inp} type="date" value={diaFechamento} min={`${mes}-01`} max={ultimoDia(mes)}
+              onChange={(e) => setDiaFechamento(e.target.value || diaFechamento)} /></div>
+          <span style={{ fontSize: 12.5, color: "#65758b", paddingBottom: 8 }}>O pagamento do dia já vem com a data do dia — mude se pagou em outra data.</span>
+        </div>
+        {fechamento.length === 0 ? <Aviso tom="ok">Nenhuma vistoria de técnico em {dataBr(diaFechamento)}.</Aviso> : (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr>{["Vistoriador", "Vistorias", "Valor do dia", "Situação", ""].map((h, i) => <th key={i} style={{ ...th, textAlign: i === 1 || i === 2 ? "right" : "left" }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {fechamento.map((t) => (
+                <React.Fragment key={t.usuarioId}>
+                  <tr>
+                    <td style={{ ...td, fontWeight: 700, color: AZUL_MARINHO }}>{t.nome}</td>
+                    <td style={tdN}>{t.qtd}</td>
+                    <td style={{ ...tdN, fontWeight: 700 }}>{brl(t.valor)}</td>
+                    <td style={td}>{t.aberto > 0 ? <Pilula cor={AMBAR} fundo="#FFF4E0">a pagar {brl(t.aberto)}</Pilula> : <Pilula cor={VERDE} fundo="#E6F4EC">pago</Pilula>}</td>
+                    <td style={{ ...td, textAlign: "right" }}>
+                      {t.aberto > 0 && !ehForm(t.usuarioId, diaFechamento) && (
+                        <button style={btn} onClick={() => setPagando({ usuarioId: t.usuarioId, dia: diaFechamento })}><Wallet size={14} /> Pagar {brl(t.aberto)}</button>
+                      )}
+                      {/* Pago no dia: o comprovante do dia se anexa aqui mesmo. */}
+                      {(pessoaPorId[t.usuarioId]?.pagamentos || []).filter((x) => x.dia === diaFechamento).map((x) => (
+                        <div key={x.id} style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap", marginTop: 4 }}>
+                          {comprovantes(x)}
+                        </div>
+                      ))}
+                    </td>
+                  </tr>
+                  {ehForm(t.usuarioId, diaFechamento) && (
+                    <tr><td colSpan={5} style={{ ...td, background: "#F6F9FD" }}>
+                      <FormPagamento dataPadrao={diaFechamento} enviando={enviando} rotuloBotao={`Pagar ${brl(t.aberto)}`}
+                        onConfirmar={(f) => pagar(pessoaPorId[t.usuarioId] || { usuarioId: t.usuarioId, nome: t.nome }, f, diaFechamento)}
+                        onCancelar={() => setPagando(null)} />
+                    </td></tr>
+                  )}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Caixa>
+
+      {pessoas.length === 0 && <Aviso tom="ok">{carregando ? "Carregando…" : "Ninguém na folha deste mês."}</Aviso>}
       {pessoas.length > 0 && (
         <section style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 14, padding: 14, overflowX: "auto", marginBottom: 16 }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -564,26 +721,17 @@ export function AbaFolhaPagamento({ token, apiFetch, notify, fin, usuarios = [] 
                     <td style={{ ...tdN, color: VERDE }}>{brl(p.pago)}</td>
                     <td style={{ ...tdN, fontWeight: 800, color: p.aPagar ? AMBAR : "#8593a8" }}>{brl(p.aPagar)}</td>
                     <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>
-                      {p.aPagar > 0 && pagando !== p.usuarioId && (
-                        <button style={btn} onClick={() => { setPagando(p.usuarioId); setExtraDe(null); }}><Wallet size={14} /> Pagar</button>
+                      {p.aPagar > 0 && !ehForm(p.usuarioId) && (
+                        <button style={btn} onClick={() => { setPagando({ usuarioId: p.usuarioId, dia: null }); setExtraDe(null); }}><Wallet size={14} /> Pagar o mês</button>
                       )}{" "}
                       <button style={btnLeve} onClick={() => { setExtraDe(p.usuarioId); setPagando(null); }}><Plus size={14} /> Extra</button>
                     </td>
                   </tr>
-                  {pagando === p.usuarioId && (
+                  {ehForm(p.usuarioId) && (
                     <tr><td colSpan={8} style={{ ...td, background: "#F6F9FD" }}>
-                      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-                        <div style={{ display: "grid", gap: 4 }}><label style={lab}>Data do pagamento</label>
-                          <input style={inp} type="date" value={formPag.dataPagamento} max={hoje()} onChange={(e) => setFormPag({ ...formPag, dataPagamento: e.target.value })} /></div>
-                        <div style={{ display: "grid", gap: 4 }}><label style={lab}>Forma</label>
-                          <select style={inp} value={formPag.formaPagamento} onChange={(e) => setFormPag({ ...formPag, formaPagamento: e.target.value })}>
-                            {FORMAS.map((f) => <option key={f}>{f}</option>)}
-                          </select></div>
-                        <div style={{ display: "grid", gap: 4, flex: 1, minWidth: 180 }}><label style={lab}>Observação</label>
-                          <input style={inp} value={formPag.observacoes} onChange={(e) => setFormPag({ ...formPag, observacoes: e.target.value })} /></div>
-                        <button style={btn} disabled={enviando} onClick={() => pagar(p)}><Check size={14} /> Pagar {brl(p.aPagar)}</button>
-                        <button style={btnLeve} onClick={() => setPagando(null)}>Cancelar</button>
-                      </div>
+                      <FormPagamento titulo={`Tudo o que está em aberto de ${p.nome} em ${mesBr(mes)}: ${brl(p.aPagar)}`}
+                        dataPadrao={hoje().slice(0, 7) === mes ? hoje() : ultimoDia(mes)} enviando={enviando}
+                        rotuloBotao={`Pagar ${brl(p.aPagar)}`} onConfirmar={(f) => pagar(p, f)} onCancelar={() => setPagando(null)} />
                     </td></tr>
                   )}
                   {extraDe === p.usuarioId && (
@@ -602,7 +750,14 @@ export function AbaFolhaPagamento({ token, apiFetch, notify, fin, usuarios = [] 
                   {aberto === p.usuarioId && (
                     <tr><td colSpan={8} style={{ ...td, background: "#FAFBFD" }}>
                       <div style={{ display: "grid", gap: 12 }}>
-                        {p.vistorias && <DiasDoTecnico vistorias={(dados.vistorias || []).filter((v) => v.tecnicoId === p.usuarioId)} />}
+                        {p.vistorias && (
+                          <DiasDoTecnico vistorias={vistorias.filter((v) => v.tecnicoId === p.usuarioId)}
+                            pagarDia={(dia) => setPagando({ usuarioId: p.usuarioId, dia })}
+                            formDoDia={(dia, abertoNoDia) => ehForm(p.usuarioId, dia) && (
+                              <FormPagamento dataPadrao={dia} enviando={enviando} rotuloBotao={`Pagar ${brl(abertoNoDia)}`}
+                                onConfirmar={(f) => pagar(p, f, dia)} onCancelar={() => setPagando(null)} />
+                            )} />
+                        )}
                         {p.extras.length > 0 && (
                           <div>
                             <div style={{ fontSize: 12.5, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 3 }}>Extras</div>
@@ -621,21 +776,14 @@ export function AbaFolhaPagamento({ token, apiFetch, notify, fin, usuarios = [] 
                           <div style={{ fontSize: 12.5, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 3 }}>Pagamentos e comprovantes</div>
                           {p.pagamentos.length === 0 && <div style={{ fontSize: 12.5, color: "#8593a8", paddingLeft: 12 }}>Nenhum pagamento registrado neste mês.</div>}
                           {p.pagamentos.map((x) => {
-                            const anexos = anexosDe(x.despesaId);
                             return (
                               <div key={x.id} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", fontSize: 12.5, padding: "4px 0 4px 12px", borderTop: `1px dashed ${CINZA_BORDA}` }}>
-                                <span style={{ minWidth: 190 }}>{dataBr(x.pagoEm)} · {x.formaPagamento || "—"} · <strong>{brl(x.valor)}</strong></span>
-                                {anexos.map((a) => (
-                                  <button key={a.id} style={{ ...btnLeve, padding: "3px 8px", fontSize: 12 }} onClick={() => fin.abrirAnexo(a)}>
-                                    <FileCheck size={12} /> {a.nomeArquivo}
-                                  </button>
-                                ))}
-                                {fin?.carregado && anexos.length === 0 && <Pilula cor={VERMELHO} fundo="#FDECEC">sem comprovante</Pilula>}
-                                <label style={{ ...btnLeve, padding: "3px 8px", fontSize: 12 }}>
-                                  <Plus size={12} /> Anexar comprovante
-                                  <input type="file" accept="application/pdf,image/*" multiple style={{ display: "none" }}
-                                    onChange={(e) => { const arquivos = [...e.target.files]; e.target.value = ""; if (arquivos.length) anexar(x.despesaId, arquivos); }} />
-                                </label>
+                                <span style={{ minWidth: 210 }}>
+                                  {dataBr(x.pagoEm)} · {x.formaPagamento || "—"} · <strong>{brl(x.valor)}</strong>
+                                  {x.dia && <span style={{ color: "#8593a8" }}> · vistorias de {dataBr(x.dia)}</span>}
+                                </span>
+                                {comprovantes(x)}
+                                <button style={{ ...btnLeve, padding: "3px 8px", fontSize: 12, color: VERMELHO }} onClick={() => desfazer(x)}>Desfazer</button>
                               </div>
                             );
                           })}
@@ -651,28 +799,64 @@ export function AbaFolhaPagamento({ token, apiFetch, notify, fin, usuarios = [] 
       )}
 
       <SalariosFixos token={token} apiFetch={apiFetch} notify={notify} usuarios={usuarios} config={dados.config}
-        personalizados={dados.salariosPersonalizados || []} recarregar={carregar} />
+        personalizados={dados.salariosPersonalizados || []} inicioPadrao={dados.inicioPadrao || []} recarregar={carregar} />
     </div>
   );
 }
 
-/* Quem tem salário fixo e quanto. Sem ajuste, todo o Atendimento ativo recebe o valor padrão
-   (Configurações Fiscais › Valores dos custos); aqui se muda o valor de alguém, se inclui
-   outra pessoa ou se tira alguém da folha fixa. */
-function SalariosFixos({ token, apiFetch, notify, usuarios, config, personalizados, recarregar }) {
-  const [form, setForm] = useState({ usuarioId: "", valor: "" });
+/* Vistorias do técnico no mês, dia a dia, cada dia com a sua situação e o botão de pagar. */
+function DiasDoTecnico({ vistorias, pagarDia, formDoDia }) {
+  const porDia = {};
+  vistorias.forEach((v) => { (porDia[v.dia] ||= []).push(v); });
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      {Object.entries(porDia).sort((a, b) => a[0].localeCompare(b[0])).map(([dia, lista]) => {
+        const abertoNoDia = lista.filter((v) => !v.pago).reduce((s, v) => s + v.valor, 0);
+        const form = formDoDia?.(dia, abertoNoDia);
+        return (
+          <div key={dia}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 3 }}>
+              <span>{dataBr(dia)} · {lista.length} vistoria(s) · {brl(lista.reduce((s, v) => s + v.valor, 0))}</span>
+              {abertoNoDia > 0
+                ? (!form && pagarDia && <button style={{ ...btnLeve, padding: "2px 8px", fontSize: 12 }} onClick={() => pagarDia(dia)}><Wallet size={12} /> Pagar o dia ({brl(abertoNoDia)})</button>)
+                : <Pilula cor={VERDE} fundo="#E6F4EC">dia pago</Pilula>}
+            </div>
+            {form && <div style={{ background: "#F6F9FD", borderRadius: 8, padding: 10, margin: "4px 0 6px" }}>{form}</div>}
+            {lista.map((v) => (
+              <div key={v.docId} style={{ display: "flex", gap: 8, fontSize: 12.5, color: "#4a5a70", padding: "2px 0 2px 12px", flexWrap: "wrap" }}>
+                <span style={{ flex: 1, minWidth: 180 }}>{v.cliente} · {v.empreendimento || "—"}</span>
+                <span style={{ color: "#8593a8" }}>{ROTULO_REGRA[v.regra]}</span>
+                <strong style={{ width: 80, textAlign: "right" }}>{brl(v.valor)}</strong>
+                <span style={{ width: 54 }}>{v.pago ? <Pilula cor={VERDE} fundo="#E6F4EC">pago</Pilula> : <Pilula cor={AMBAR} fundo="#FFF4E0">aberto</Pilula>}</span>
+              </div>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* Quem tem salário fixo, quanto e desde quando. Sem ajuste, o Atendimento ativo recebe o valor
+   padrão (Configurações Fiscais › Valores dos custos) a partir do mês em que o usuário foi
+   criado; aqui se muda o valor, o mês de início (quem entrou em setembro), se inclui outra
+   pessoa ou se tira alguém da folha fixa. */
+function SalariosFixos({ token, apiFetch, notify, usuarios, config, personalizados, inicioPadrao, recarregar }) {
+  const [form, setForm] = useState({ usuarioId: "", valor: "", inicio: "" });
   const padrao = Number(config?.salarioFixoAtendimento ?? 400);
   const porId = Object.fromEntries(personalizados.map((s) => [s.usuarioId, s]));
+  const inicioDe = Object.fromEntries(inicioPadrao.map((x) => [x.usuarioId, x.inicio]));
   const equipe = usuarios.filter((u) => ROTULO_PAPEL[u.role] && u.role !== "gerencia");
   const linhas = equipe.map((u) => {
     const s = porId[u.id];
-    const valor = s ? (s.ativo ? s.valor : 0) : (u.role === "atendimento" && u.ativo !== false ? padrao : 0);
-    return { u, s, valor };
+    const ativo = s ? s.ativo : u.role === "atendimento" && u.ativo !== false;
+    const valor = !ativo ? 0 : s && s.valor != null ? s.valor : (u.role === "atendimento" ? padrao : 0);
+    return { u, s, valor, ativo, inicio: s?.inicio || inicioDe[u.id] || "" };
   }).filter((l) => l.valor > 0 || l.s);
 
-  const salvar = async (usuarioId, corpo) => {
-    try { await apiFetch(`/api/folha/salarios/${usuarioId}`, { method: "PUT", token, body: corpo }); notify("Salário fixo atualizado ✓"); await recarregar(); }
-    catch (e) { notify(e.message); }
+  const salvar = async (usuarioId, corpo, aviso = "Salário fixo atualizado ✓") => {
+    try { await apiFetch(`/api/folha/salarios/${usuarioId}`, { method: "PUT", token, body: corpo }); notify(aviso); await recarregar(); return true; }
+    catch (e) { notify(e.message); return false; }
   };
   const voltarAoPadrao = async (usuarioId) => {
     try { await apiFetch(`/api/folha/salarios/${usuarioId}`, { method: "DELETE", token }); await recarregar(); }
@@ -682,19 +866,28 @@ function SalariosFixos({ token, apiFetch, notify, usuarios, config, personalizad
   return (
     <Caixa icon={Users} titulo="Salários fixos">
       <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
-        Todo o Atendimento recebe {brl(padrao)} por mês (o valor padrão fica em Configurações Fiscais › Valores dos custos). Aqui você muda o
-        salário de uma pessoa, inclui alguém de outro setor ou tira da folha fixa. Vale do mês aberto em diante — salário já pago não muda.
+        Todo o Atendimento recebe {brl(padrao)} por mês (o padrão fica em Configurações Fiscais › Valores dos custos), a partir do mês em que entrou.
+        Ajuste aqui o mês de entrada ("Desde"), o valor de alguém, inclua outra pessoa ou tire da folha fixa. Salário já pago não muda.
       </p>
       {linhas.length === 0 && <div style={{ fontSize: 13, color: "#8593a8", marginBottom: 10 }}>Ninguém com salário fixo.</div>}
       {linhas.length > 0 && (
         <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 12 }}>
-          <thead><tr>{["Pessoa", "Setor", "Salário/mês", ""].map((h, i) => <th key={i} style={{ ...th, textAlign: i === 2 ? "right" : "left" }}>{h}</th>)}</tr></thead>
+          <thead><tr>{["Pessoa", "Setor", "Salário/mês", "Desde", ""].map((h, i) => <th key={i} style={{ ...th, textAlign: i === 2 ? "right" : "left" }}>{h}</th>)}</tr></thead>
           <tbody>
-            {linhas.map(({ u, s, valor }) => (
+            {linhas.map(({ u, s, valor, ativo, inicio }) => (
               <tr key={u.id}>
                 <td style={{ ...td, fontWeight: 600 }}>{u.nome}</td>
                 <td style={td}>{ROTULO_PAPEL[u.role] || u.role}</td>
-                <td style={tdN}>{valor > 0 ? brl(valor) : <span style={{ color: "#8593a8" }}>fora da folha fixa</span>}{s && valor > 0 && <div style={{ fontSize: 11, color: "#8593a8" }}>valor próprio</div>}</td>
+                <td style={tdN}>
+                  {valor > 0 ? brl(valor) : <span style={{ color: "#8593a8" }}>fora da folha fixa</span>}
+                  {s && s.valor != null && valor > 0 && <div style={{ fontSize: 11, color: "#8593a8" }}>valor próprio</div>}
+                </td>
+                <td style={td}>
+                  {ativo ? (
+                    <input type="month" style={{ ...inp, padding: "4px 8px" }} value={inicio}
+                      onChange={(e) => e.target.value && salvar(u.id, { inicio: e.target.value, ativo: true }, `Início de ${u.nome}: ${mesBr(e.target.value)} ✓`)} />
+                  ) : "—"}
+                </td>
                 <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>
                   {s && <button style={{ ...btnLeve, padding: "3px 8px", fontSize: 12 }} onClick={() => voltarAoPadrao(u.id)}>Voltar ao padrão</button>}{" "}
                   {valor > 0 && <button style={{ ...btnLeve, padding: "3px 8px", fontSize: 12 }} onClick={() => salvar(u.id, { ativo: false })}>Tirar da folha fixa</button>}
@@ -713,36 +906,17 @@ function SalariosFixos({ token, apiFetch, notify, usuarios, config, personalizad
         <div style={{ display: "grid", gap: 4 }}><label style={lab}>Salário/mês (R$)</label>
           <input style={{ ...inp, width: 130 }} inputMode="decimal" value={form.valor} placeholder={String(padrao)}
             onChange={(e) => setForm({ ...form, valor: e.target.value.replace(/[^\d,.]/g, "") })} /></div>
-        <button style={btn} disabled={!form.usuarioId || !form.valor}
-          onClick={async () => { await salvar(form.usuarioId, { valor: form.valor, ativo: true }); setForm({ usuarioId: "", valor: "" }); }}>
-          <Save size={14} /> Definir salário
+        <div style={{ display: "grid", gap: 4 }}><label style={lab}>Desde (mês)</label>
+          <input style={inp} type="month" value={form.inicio} onChange={(e) => setForm({ ...form, inicio: e.target.value })} /></div>
+        <button style={btn} disabled={!form.usuarioId || (!form.valor && !form.inicio)}
+          onClick={async () => {
+            const corpo = { ativo: true, ...(form.valor ? { valor: form.valor } : {}), ...(form.inicio ? { inicio: form.inicio } : {}) };
+            if (await salvar(form.usuarioId, corpo)) setForm({ usuarioId: "", valor: "", inicio: "" });
+          }}>
+          <Save size={14} /> Definir
         </button>
       </div>
     </Caixa>
-  );
-}
-
-function DiasDoTecnico({ vistorias }) {
-  const porDia = {};
-  vistorias.forEach((v) => { (porDia[v.dia] ||= []).push(v); });
-  return (
-    <div style={{ display: "grid", gap: 8 }}>
-      {Object.entries(porDia).sort((a, b) => a[0].localeCompare(b[0])).map(([dia, lista]) => (
-        <div key={dia}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 3 }}>
-            {dataBr(dia)} · {lista.length} vistoria(s) · {brl(lista.reduce((s, v) => s + v.valor, 0))}
-          </div>
-          {lista.map((v) => (
-            <div key={v.docId} style={{ display: "flex", gap: 8, fontSize: 12.5, color: "#4a5a70", padding: "2px 0 2px 12px", flexWrap: "wrap" }}>
-              <span style={{ flex: 1, minWidth: 180 }}>{v.cliente} · {v.empreendimento || "—"}</span>
-              <span style={{ color: "#8593a8" }}>{ROTULO_REGRA[v.regra]}</span>
-              <strong style={{ width: 80, textAlign: "right" }}>{brl(v.daGerencia ? v.valorReferencia : v.valor)}</strong>
-              <span style={{ width: 54 }}>{v.daGerencia ? "" : v.pago ? <Pilula cor={VERDE} fundo="#E6F4EC">pago</Pilula> : <Pilula cor={AMBAR} fundo="#FFF4E0">aberto</Pilula>}</span>
-            </div>
-          ))}
-        </div>
-      ))}
-    </div>
   );
 }
 
