@@ -186,6 +186,20 @@ cadastro rápido (`ModalDespesa`) de qualquer tela.
 - Baixa manual no Setor de cobrança (`LinhaCobranca`) pede **data e forma** do pagamento. Pago
   antigo sem data nasce com o campo vazio — preencher "hoje" inventaria a data. A aba **Antes da
   vistoria** lista o que ainda não chegou à hora da visita, para registrar pagamento antecipado.
+- **A sugestão de valor também é a ficha.** `sugestaoDeCobranca(cliente, doc, precoPorChave)` devolve
+  o que a ficha usaria sem lançamento — registro da vistoria → preço de tabela (vistoria e revistoria
+  pelo preço da vistoria, ART/TRT pelo da documentação) — e a origem, que a linha mostra embaixo do
+  campo. O campo já nasce preenchido e **Lançar** confirma sem editar; campo vazio não grava R$ 0
+  (cortesia se lança digitando 0). Os totais da tela (cobrado, recebido, a receber) saem da ficha
+  completa, com registro e tabela (`indexarPrecos`, nome normalizado).
+- O **Atendimento lê a tabela de preços** (`carregarPrecos`, `GET /api/precos-empreendimento`).
+  Se o servidor recusar, a tela só fica sem a sugestão (aviso no console, nada na tela). Como ele
+  recebe de `/api/docs` só os registros de documentação, a sugestão dele nas vistorias vem da
+  tabela; a da Gerência, que tem os registros, pode vir do registro da vistoria.
+- **Base antiga** (`ehHistorico`) sem valor fica num filtro próprio do Setor de cobrança, fora do
+  "Falta lançar" e do sino — não é fila do Atendimento. Selo cinza "Base antiga · sem valor".
+- **ART/TRT** se lança no card da Documentação (`CardDocumentosArt`), com a mesma `LinhaCobranca` em
+  modo `compacto`: valor sugerido, situação, data e forma. Antes era só o seletor Pendente/Pago.
 - Nada decide regime tributário. O limite do MEI é o configurado; os campos do Simples são só guardados.
 
 **Controle financeiro** (`src/controle-financeiro.jsx`, arquivo próprio como a Rede Nacional):
