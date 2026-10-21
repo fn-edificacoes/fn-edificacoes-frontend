@@ -1399,6 +1399,10 @@ function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], ava
     const aguardandoCobranca = clientes.filter((c) => {
       if (!ehTrabalhoDeVistoria(c) || c.status === "Cancelado" || c.status === "Cancelamento solicitado") return false;
       if (c.valorCobrado != null) return false;
+      /* Base antiga importada: serviço de anos atrás, já recebido. Não é tarefa do Atendimento
+         e inflava o aviso (38 dos 57 "esperando valor" em out/2026 eram dela). Ela tem filtro
+         próprio no Setor de cobrança ("Base antiga"), para a Gerência completar quando quiser. */
+      if (ehHistorico(c)) return false;
       const quando = momentoDeCobrar(c);
       return quando && quando <= new Date();
     });
@@ -2804,13 +2808,20 @@ function AppInterno({ session, onLogout }) {
   useEffect(() => { carregarEmpreendimentosRef(); }, []);
   const carregarPrecos = async () => {
     /* Documentação e Atendimento também leem (só leitura): o valor fixado pela Gerência aparece
-       na TRT de reforma e é o sugerido no Setor de cobrança (ver precoSugerido). */
+       na TRT de reforma e é o sugerido no Setor de cobrança (ver sugestaoDeCobranca). Sem a
+       tabela, todo card do Atendimento dizia "Sem preço cadastrado", até nos empreendimentos com
+       preço (out/2026). Gravar preço continua sendo só da Gerência, no servidor. */
     if (perfil !== "gerencia" && perfil !== "documentacao" && perfil !== "atendimento") return;
     setPrecosCarregando(true);
     try {
       const r = await apiFetch("/api/precos-empreendimento", { token });
       setPrecos((r.precos || []).map(mapPrecoDaApi));
-    } catch (e) { notify(`Não foi possível carregar preços por empreendimento: ${e.message}`); }
+    } catch (e) {
+      /* Servidor ainda sem a liberação de leitura para o Atendimento: a cobrança só fica sem a
+         sugestão, como era antes. Aviso na tela a cada abertura não ajudaria ninguém. */
+      if (perfil === "atendimento") console.warn("Tabela de preços indisponível para este perfil:", e.message);
+      else notify(`Não foi possível carregar preços por empreendimento: ${e.message}`);
+    }
     setPrecosCarregando(false);
   };
   useEffect(() => { carregarPrecos(); }, []);
@@ -4836,7 +4847,7 @@ function AbaQualidade({ sub = "analise", setSub, token, clientes, clientesCarreg
       <CardIndicadoresQualidade clientes={clientes} docs={docs} avaliacoes={avaliacoes}
         filtroEtapa={filtroEtapa} aoTrocarEtapa={setFiltroEtapa} />
       {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} abrirAutomaticoId={agendarAgoraId} aoAbrirAutomatico={() => setAgendarAgoraId(null)} aoConfirmar={aoConfirmarVistoria} filtroEtapa={filtroEtapa} />}
-      {sub === "cobranca" && <AbaQualidadeCobranca clientes={clientes} carregando={clientesCarregando} updCliente={updCliente}
+      {sub === "cobranca" && <AbaQualidadeCobranca clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente}
         usuarios={usuarios} precos={precos} notify={notify} podeAgir={podeAgir} token={token} />}
       {sub === "acompanhamento" && <AbaQualidadeAcompanhamento clientes={clientes} clientesCarregando={clientesCarregando}
         docs={docs} avaliacoes={avaliacoes} filtroEtapa={filtroEtapa} />}
@@ -4870,18 +4881,39 @@ function momentoDeCobrar(c) {
   const [hora, minuto] = String(c.horarioDesejado || "00:00").split(":").map(Number);
   return new Date(ano, mes - 1, dia, (hora || 0) + HORAS_ATE_COBRAR, minuto || 0);
 }
-/* O valor sugerido é o preço do empreendimento cadastrado pela Gerência em "Preços por
-   empreendimento" — a mesma tabela que o Financeiro usa. Sugestão, não imposição: quem fecha
-   o valor é quem atende o cliente. */
-function precoSugerido(cliente, precos = []) {
-  const chave = normalizarChaveEmpreendimento(cliente?.empreendimento || "");
-  const preco = precos.find((p) => normalizarChaveEmpreendimento(p.empreendimento) === chave);
-  return Number(preco?.precoVistoria) || 0;
+/* O valor sugerido é o mesmo que o Financeiro já conta para este atendimento enquanto ninguém
+   lança (ver fichaFinanceira): o do registro da vistoria, quando a Gerência gravou um lá, e, sem
+   ele, o preço do empreendimento em "Preços por empreendimento" — vistoria e revistoria pelo
+   preço da vistoria, ART/TRT pelo da documentação. Antes a sugestão olhava só a tabela da
+   vistoria: o Financeiro somava os R$ 250 do registro e esta tela dizia "Sem preço" para o mesmo
+   serviço (16 dos 57 "Falta lançar" em out/2026). Sugestão, não imposição: quem fecha o valor é
+   quem atende o cliente. */
+function sugestaoDeCobranca(cliente, doc, precoPorChave = {}) {
+  const f = fichaFinanceira({ ...cliente, valorCobrado: null }, doc, precoPorChave);
+  return f.origemValor === "registro" || f.origemValor === "tabela"
+    ? { valor: f.valor, origem: f.origemValor }
+    : { valor: 0, origem: null };
+}
+/* "Preços por empreendimento" pelo nome normalizado — o mesmo casamento da ficha
+   (normalizarChaveEmpreendimento): "RESIDENCIAL VIENNA" e "Vienna" acham o mesmo preço. */
+function indexarPrecos(precos = []) {
+  const mapa = {};
+  precos.forEach((p) => { mapa[normalizarChaveEmpreendimento(p.empreendimento)] = p; });
+  return mapa;
 }
 
-function LinhaCobranca({ cliente, sugerido, tecnico, podeAgir, onSalvar, cobranca = null, gerarLink }) {
+/* "compacto": sem o cabeçalho do cliente, para morar dentro de um card que já o mostra (o da
+   Documentação ART/TRT). */
+function LinhaCobranca({ cliente, sugerido, origemSugestao = null, tecnico, podeAgir, onSalvar, cobranca = null, gerarLink, compacto = false }) {
   const lancado = cliente.valorCobrado != null;
-  const [valor, setValor] = useState(lancado ? String(cliente.valorCobrado) : (sugerido ? String(sugerido) : ""));
+  const textoSugerido = sugerido > 0 ? String(sugerido) : "";
+  const [valor, setValor] = useState(lancado ? String(cliente.valorCobrado) : textoSugerido);
+  /* A sugestão pode chegar depois da linha: a tabela de preços e os registros carregam em
+     paralelo com os cadastros. Enquanto ninguém mexeu no campo, ele acompanha a sugestão. */
+  const [mexeuNoValor, setMexeuNoValor] = useState(false);
+  useEffect(() => {
+    if (!lancado && !mexeuNoValor) setValor(textoSugerido);
+  }, [textoSugerido, lancado]);
   const [pagamento, setPagamento] = useState(cliente.pagamento || "Pendente");
   const [recebido, setRecebido] = useState(cliente.valorRecebido != null ? String(cliente.valorRecebido) : "");
   /* Quando e como o dinheiro entrou. É o que faz o "Recebido" do Financeiro cair no mês certo e
@@ -4902,12 +4934,19 @@ function LinhaCobranca({ cliente, sugerido, tecnico, podeAgir, onSalvar, cobranc
   }, [cliente.pagamento, cliente.valorRecebido, cliente.pagoEm, cliente.formaPagamento]);
 
   const entrouDinheiro = pagamento !== "Pendente";
-  const mudou = String(valor) !== (lancado ? String(cliente.valorCobrado) : (sugerido ? String(sugerido) : ""))
+  const mudou = String(valor) !== (lancado ? String(cliente.valorCobrado) : textoSugerido)
     || pagamento !== (cliente.pagamento || "Pendente")
     || String(recebido) !== (cliente.valorRecebido != null ? String(cliente.valorRecebido) : "")
     || (entrouDinheiro && (pagoEm !== pagoEmInicial || forma !== (cliente.formaPagamento || "Pix")));
+  /* Ainda não lançado, o botão fica aceso mesmo sem mexer em nada: confirmar a sugestão como ela
+     veio é justamente o trabalho. Antes ele só acendia depois de alguma alteração, e quem queria
+     lançar os R$ 250 sugeridos precisava apagar e redigitar o mesmo número. */
+  const podeSalvar = !lancado || mudou;
 
   const salvar = async () => {
+    /* Campo em branco não é R$ 0: Number("") dá 0, e um "Pago" escolhido sem valor gravava o
+       serviço como cortesia. Cortesia de verdade se lança digitando 0. */
+    if (String(valor).trim() === "") { onSalvar.notify("Informe o valor cobrado. Se foi cortesia, lance 0."); return; }
     const numero = Number(String(valor).replace(",", "."));
     if (!Number.isFinite(numero) || numero < 0) { onSalvar.notify("Informe um valor válido."); return; }
     /* "Pago" quita o que foi cobrado — guardar um recebido diferente do cobrado num pagamento
@@ -4939,8 +4978,31 @@ function LinhaCobranca({ cliente, sugerido, tecnico, podeAgir, onSalvar, cobranc
     setSalvando(false);
   };
 
+  /* Base antiga sem valor não é pendência de ninguém (já foi recebida): o selo diz o que ela é,
+     em cinza, em vez do laranja de "Falta lançar" que marca o trabalho do dia. */
+  const seloFaltaLancar = !lancado && (ehHistorico(cliente) ? (
+    <span style={{ background: CINZA_CLARO, color: "#65758b", borderRadius: 20, padding: "3px 10px", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" }}
+      title="Cadastro da base antiga importada, sem valor lançado. Lance quando souber o valor.">
+      Base antiga · sem valor
+    </span>
+  ) : (
+    <span style={{ background: "#FFF4E0", color: "#B26A00", borderRadius: 20, padding: "3px 10px", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" }}>
+      Falta lançar
+    </span>
+  ));
+  /* Data com ano fora de 2020–2100 é digitação pela metade (já apareceu 0001-01-01): mostrar
+     "01/01/0001" parecia defeito do sistema. A mesma regra do servidor (dataDesejadaValida). */
+  const dataValida = !cliente.dataDesejada || dataDesejadaValida(cliente.dataDesejada);
+
   return (
-    <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, display: "grid", gap: 10 }}>
+    <div style={compacto ? { display: "grid", gap: 10 } : { border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, display: "grid", gap: 10 }}>
+      {compacto ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <strong style={{ fontSize: 13, color: AZUL_MARINHO }}>Cobrança</strong>
+          <Selo valor={cliente.pagamento || "Pendente"} />
+          {seloFaltaLancar}
+        </div>
+      ) : (
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <div style={{ flex: 1, minWidth: 180 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -4950,28 +5012,33 @@ function LinhaCobranca({ cliente, sugerido, tecnico, podeAgir, onSalvar, cobranc
           </div>
           <div style={{ fontSize: 12.5, color: "#65758b" }}>
             {cliente.empreendimento || "(sem empreendimento)"}{cliente.blocoTorre ? ` · ${cliente.blocoTorre}` : ""}
-            {cliente.dataDesejada ? ` · ${cliente.dataDesejada.split("-").reverse().join("/")}` : ""}
-            {cliente.horarioDesejado ? ` às ${cliente.horarioDesejado}` : ""}
+            {cliente.dataDesejada && dataValida ? ` · ${cliente.dataDesejada.split("-").reverse().join("/")}` : ""}
+            {cliente.horarioDesejado && dataValida ? ` às ${cliente.horarioDesejado}` : ""}
             {tecnico ? ` · ${tecnico}` : ""}
+            {!dataValida && (
+              <span style={{ color: "#C62828", fontWeight: 700 }} title="A data gravada no cadastro não existe. Corrija em Clientes › Editar cliente.">
+                {" · data inválida — corrigir no cadastro"}
+              </span>
+            )}
           </div>
         </div>
-        {!lancado && (
-          <span style={{ background: "#FFF4E0", color: "#B26A00", borderRadius: 20, padding: "3px 10px", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" }}>
-            Falta lançar
-          </span>
-        )}
+        {seloFaltaLancar}
       </div>
+      )}
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
         <div style={{ ...cell(), minWidth: 150 }}>
           <label style={lab}>Valor cobrado (R$)</label>
           <input style={inp} type="number" min="0" step="0.01" value={valor} disabled={!podeAgir}
-            onChange={(e) => setValor(e.target.value)} placeholder={sugerido ? String(sugerido) : "0,00"} />
+            onChange={(e) => { setMexeuNoValor(true); setValor(e.target.value); }} placeholder={textoSugerido || "0,00"} />
+          {/* De onde vem o número: é o mesmo que o Financeiro está contando enquanto ninguém lança. */}
           {sugerido > 0 && (
-            <span style={{ fontSize: 11.5, color: "#8593a8" }}>Tabela do empreendimento: {fmtReal(sugerido)}</span>
+            <span style={{ fontSize: 11.5, color: "#8593a8" }}>
+              {origemSugestao === "registro" ? "Registro da vistoria" : "Tabela do empreendimento"}: {fmtReal(sugerido)}
+            </span>
           )}
-          {sugerido === 0 && (
-            <span style={{ fontSize: 11.5, color: "#B26A00" }}>Sem preço cadastrado para este empreendimento</span>
+          {!(sugerido > 0) && !lancado && (
+            <span style={{ fontSize: 11.5, color: "#B26A00" }}>Sem preço na tabela — digite o valor combinado</span>
           )}
         </div>
         <div style={{ ...cell(), minWidth: 130 }}>
@@ -5004,8 +5071,9 @@ function LinhaCobranca({ cliente, sugerido, tecnico, podeAgir, onSalvar, cobranc
         )}
         {podeAgir && (
           <button className="btn-solid" style={{ width: "auto", padding: "9px 14px" }}
-            onClick={salvar} disabled={salvando || !mudou}>
-            {salvando ? <Loader2 size={14} className="spin" /> : <Save size={14} />} Salvar
+            onClick={salvar} disabled={salvando || !podeSalvar}
+            title={lancado ? undefined : "Lança o valor e a situação do pagamento — o Financeiro conta na hora"}>
+            {salvando ? <Loader2 size={14} className="spin" /> : <Save size={14} />} {lancado ? "Salvar" : "Lançar"}
           </button>
         )}
       </div>
@@ -5088,8 +5156,8 @@ function BlocoLinkPagamento({ cliente, cobranca, gerarLink, notify }) {
   );
 }
 
-function AbaQualidadeCobranca({ clientes = [], carregando, updCliente, usuarios = [], precos = [], notify, podeAgir = false, token }) {
-  const [filtro, setFiltro] = useState("lancar"); // lancar | aberto | quitadas | todas
+function AbaQualidadeCobranca({ clientes = [], docs = [], carregando, updCliente, usuarios = [], precos = [], notify, podeAgir = false, token }) {
+  const [filtro, setFiltro] = useState("lancar"); // lancar | aberto | quitadas | todas | antecipar | antiga
   /* Links de pagamento (Mercado Pago) já gerados — o mais recente de cada cadastro. Recarrega
      junto com a lista de clientes (a cada 20s no AppInterno), que é quando um pagamento
      confirmado pelo webhook aparece como "Pago". */
@@ -5112,19 +5180,44 @@ function AbaQualidadeCobranca({ clientes = [], carregando, updCliente, usuarios 
 
   const nomeTecnico = (id) => usuarios.find((u) => String(u.id) === String(id))?.nome || "";
 
-  /* Só o que já foi a campo: ART/TRT não passa por vistoria (o pagamento dela continua na aba
-     Documentação) e cadastro cancelado não se cobra. */
+  /* A ficha de cada atendimento com o registro da vistoria e a tabela de preços: a MESMA conta das
+     Receitas, dos Indicadores e da Conferência de pagamentos. Antes os totais desta tela saíam da
+     ficha sem registro e sem tabela, e a sugestão de uma regra à parte — os números desta tela e os
+     do Financeiro não tinham como bater. O Atendimento recebe de /api/docs só os registros de
+     documentação: nas vistorias a ficha dele usa a tabela, que é o que ele precisa para cobrar. */
+  const precoPorChave = useMemo(() => indexarPrecos(precos), [precos]);
+  const fichas = useMemo(() => {
+    const mapa = {};
+    clientes.forEach((c) => {
+      const doc = docDoCliente(c, docs);
+      mapa[c.id] = { f: fichaFinanceira(c, doc, precoPorChave), sugestao: sugestaoDeCobranca(c, doc, precoPorChave) };
+    });
+    return mapa;
+  }, [clientes, docs, precoPorChave]);
+  const fichaDe = (c) => fichas[c.id]?.f || fichaFinanceira(c, docDoCliente(c, docs), precoPorChave);
+  const sugestaoDe = (c) => fichas[c.id]?.sugestao || { valor: 0, origem: null };
+
+  /* Só o que já foi a campo: ART/TRT não passa por vistoria (o pagamento dela se lança no card da
+     Documentação, com a mesma linha de cobrança) e cadastro cancelado não se cobra. */
   const cobravel = (c) => ehTrabalhoDeVistoria(c) && c.status !== "Cancelado" && c.status !== "Cancelamento solicitado";
   const passouDaHora = (c) => { const quando = momentoDeCobrar(c); return !!quando && quando <= agora; };
   /* Pagamento antecipado: o cliente que paga antes da vistoria (no agendamento, pelo Pix) não
      pode esperar a visita para aparecer — assim que o Atendimento confirma, o Financeiro e os
      Indicadores já contam (ver fichaFinanceira). Ficam em "Antecipar" as vistorias que ainda
-     não chegaram à hora; as que já têm valor lançado ou pagamento entram nas contas normais. */
-  const antecipaveis = clientes.filter((c) => cobravel(c) && !passouDaHora(c));
+     não chegaram à hora; as que já têm valor lançado ou pagamento entram nas contas normais.
+     Base antiga não se antecipa: é serviço de anos atrás. */
+  const antecipaveis = clientes.filter((c) => cobravel(c) && !ehHistorico(c) && !passouDaHora(c));
   const naJanela = clientes.filter((c) => cobravel(c)
     && (passouDaHora(c) || c.valorCobrado != null || (c.pagamento && c.pagamento !== "Pendente")));
 
-  const faltaLancar = naJanela.filter((c) => c.valorCobrado == null);
+  /* Base antiga importada (origem "importacao"): serviço de antes do sistema, já recebido — a
+     Gerência confirmou que não há pendência nela. Sem valor lançado ela caía em "Falta lançar",
+     que é a fila do Atendimento, e ocupava 38 das 57 linhas (out/2026) com algo que ninguém ali
+     tem como saber. Fica num filtro próprio, já com a sugestão do registro quando houver, para a
+     Gerência completar quando quiser — a mesma separação da Conferência de pagamentos. */
+  const semLancamento = naJanela.filter((c) => c.valorCobrado == null);
+  const faltaLancar = semLancamento.filter((c) => !ehHistorico(c));
+  const baseAntiga = semLancamento.filter((c) => ehHistorico(c));
   const emAberto = naJanela.filter((c) => c.valorCobrado != null && c.pagamento !== "Pago");
   const quitadas = naJanela.filter((c) => c.valorCobrado != null && c.pagamento === "Pago");
 
@@ -5132,6 +5225,7 @@ function AbaQualidadeCobranca({ clientes = [], carregando, updCliente, usuarios 
     : filtro === "aberto" ? emAberto
     : filtro === "quitadas" ? quitadas
     : filtro === "antecipar" ? antecipaveis
+    : filtro === "antiga" ? baseAntiga
     : naJanela;
 
   const termo = busca.trim().toLowerCase();
@@ -5141,10 +5235,15 @@ function AbaQualidadeCobranca({ clientes = [], carregando, updCliente, usuarios 
   ).sort((a, b) => `${a.dataDesejada}${a.horarioDesejado}`.localeCompare(`${b.dataDesejada}${b.horarioDesejado}`));
 
   const soma = (arr, f) => arr.reduce((s, c) => s + f(c), 0);
-  const totalCobrado = soma(naJanela, (c) => Number(c.valorCobrado) || 0);
-  /* Recebido pela mesma ficha do Financeiro (fichaFinanceira): o total desta tela e o do
-     Financeiro não podem sair de duas contas. */
-  const totalRecebido = soma(naJanela, (c) => fichaFinanceira(c, null).recebido);
+  const centavos = (n) => Math.round(n * 100) / 100;
+  /* Os três números falam do mesmo conjunto — o que já foi lançado — e saem da ficha do
+     Financeiro (fichaFinanceira): cobrado = recebido + a receber, sempre. O que ainda falta lançar
+     aparece à parte, pelo valor sugerido, que é o mesmo que o Financeiro já está contando. */
+  const lancados = naJanela.filter((c) => c.valorCobrado != null);
+  const totalCobrado = soma(lancados, (c) => fichaDe(c).valor);
+  const totalRecebido = soma(lancados, (c) => fichaDe(c).recebido);
+  const totalAReceber = soma(emAberto, (c) => Math.max(0, centavos(fichaDe(c).valor - fichaDe(c).recebido)));
+  const totalSugerido = soma(faltaLancar, (c) => sugestaoDe(c).valor);
 
   const salvar = async (id, patch) => {
     const ok = await updCliente(id, patch);
@@ -5157,22 +5256,26 @@ function AbaQualidadeCobranca({ clientes = [], carregando, updCliente, usuarios 
     ["quitadas", "Quitadas", quitadas.length],
     ["todas", "Todas", naJanela.length],
     ["antecipar", "Antes da vistoria", antecipaveis.length],
+    ...(baseAntiga.length || filtro === "antiga" ? [["antiga", "Base antiga", baseAntiga.length]] : []),
   ];
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <Card icon={DollarSign} titulo="Setor de cobrança">
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-          Cada vistoria entra aqui uma hora depois do horário agendado. Confirme o valor cobrado — vem
-          sugerido pela tabela de preços do empreendimento, e pode ser alterado — e diga como ficou o
-          pagamento, com a data e a forma. Assim que você marcar <strong>Pago</strong>, o Financeiro e os
-          Indicadores já contam — não precisa esperar o laudo. Cliente que pagou antes da vistoria: use a
-          aba <strong>Antes da vistoria</strong>.
+          Cada vistoria entra aqui uma hora depois do horário agendado. O valor já vem preenchido com o
+          que o Financeiro está contando para ela — o do registro da vistoria ou, sem ele, o da tabela de
+          preços do empreendimento. Confira (pode alterar), diga como ficou o pagamento, com a data e a
+          forma, e clique em <strong>Lançar</strong>. Na hora o Financeiro e os Indicadores passam a usar o
+          valor lançado — não precisa esperar o laudo. Cliente que pagou antes da vistoria: use a aba
+          <strong> Antes da vistoria</strong>.
         </p>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 14 }}>
-          <KpiCard label="Falta lançar" valor={faltaLancar.length} cor={faltaLancar.length ? "#B26A00" : "#2E7D32"} Icon={ClipboardList} />
-          <KpiCard label="Em aberto" valor={emAberto.length} cor={emAberto.length ? "#C62828" : "#65758b"} Icon={AlertTriangle} />
+          <KpiCard label="Falta lançar" valor={faltaLancar.length} cor={faltaLancar.length ? "#B26A00" : "#2E7D32"} Icon={ClipboardList}
+            percentual={totalSugerido > 0 ? `${fmtReal(totalSugerido)} sugeridos` : null} />
+          <KpiCard label="Em aberto" valor={emAberto.length} cor={emAberto.length ? "#C62828" : "#65758b"} Icon={AlertTriangle}
+            percentual={totalAReceber > 0 ? `${fmtReal(totalAReceber)} a receber` : null} />
           <KpiCard label="Total cobrado" valor={fmtReal(totalCobrado)} Icon={DollarSign} />
           <KpiCard label="Já recebido" valor={fmtReal(totalRecebido)} cor="#2E7D32" Icon={Check} />
         </div>
@@ -5189,6 +5292,14 @@ function AbaQualidadeCobranca({ clientes = [], carregando, updCliente, usuarios 
         <input style={{ ...inp, width: "100%", marginBottom: 14 }} placeholder="Buscar por cliente, empreendimento ou bloco…"
           value={busca} onChange={(e) => setBusca(e.target.value)} />
 
+        {filtro === "antiga" && (
+          <p style={{ fontSize: 12.5, color: "#65758b", margin: "0 0 12px" }}>
+            Serviços da base antiga importada, já recebidos, que entraram sem valor. Não são fila do Atendimento:
+            lance quando souber o valor. Enquanto isso o Financeiro conta o valor do registro da vistoria, quando
+            existe (é o que vem preenchido), ou zero.
+          </p>
+        )}
+
         {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
         {!carregando && lista.length === 0 && (
           <p style={{ color: "#8593a8", fontSize: 14 }}>
@@ -5200,7 +5311,7 @@ function AbaQualidadeCobranca({ clientes = [], carregando, updCliente, usuarios 
 
         <div style={{ display: "grid", gap: 10 }}>
           {lista.map((c) => (
-            <LinhaCobranca key={c.id} cliente={c} sugerido={precoSugerido(c, precos)}
+            <LinhaCobranca key={c.id} cliente={c} sugerido={sugestaoDe(c).valor} origemSugestao={sugestaoDe(c).origem}
               tecnico={nomeTecnico(c.vistoriadorId)} podeAgir={podeAgir}
               onSalvar={{ salvar, notify }} cobranca={cobrancaDe(c.id)} gerarLink={gerarLink} />
           ))}
@@ -7710,7 +7821,10 @@ function DadosParaDocumentacao({ cliente, notify }) {
   );
 }
 
-function CardDocumentosArt({ cliente, documentos = [], precoDocumentacao = 0, enviarDocumento, excluirDocumento, atualizarPagamento, atualizarEmpreendimento, empreendimentosComPreco = [], notify, onExcluirCadastro }) {
+/* sugestao: o valor da documentação que o Financeiro já conta enquanto ninguém lança
+   (sugestaoDeCobranca — tabela do empreendimento, pelo nome normalizado). onSalvarCobranca:
+   { salvar(id, patch), notify }, o mesmo contrato da LinhaCobranca do Setor de cobrança. */
+function CardDocumentosArt({ cliente, documentos = [], sugestao = { valor: 0, origem: null }, enviarDocumento, excluirDocumento, onSalvarCobranca = null, atualizarEmpreendimento, empreendimentosComPreco = [], notify, onExcluirCadastro }) {
   const [enviandoTipo, setEnviandoTipo] = useState(null);
   const [editandoEmpreendimento, setEditandoEmpreendimento] = useState(false);
   const [novoEmpreendimento, setNovoEmpreendimento] = useState(cliente.empreendimento || "");
@@ -7771,11 +7885,13 @@ function CardDocumentosArt({ cliente, documentos = [], precoDocumentacao = 0, en
           )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          {/* Valor fixado pela Gerência para o empreendimento deste cliente. */}
+          {/* O valor lançado manda; sem ele, o fixado pela Gerência para o empreendimento (o mesmo
+              casamento de nome do Financeiro — antes este card comparava a grafia exata e podia dizer
+              "sem preço" para um preço que o Financeiro estava contando). */}
           <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: 11, color: "#8593a8" }}>Valor do serviço</div>
-            <div style={{ fontSize: 14, fontWeight: 800, color: precoDocumentacao ? AZUL_MARINHO : "#B26A00" }}>
-              {precoDocumentacao ? fmtReal(precoDocumentacao) : "sem preço fixado"}
+            <div style={{ fontSize: 11, color: "#8593a8" }}>{cliente.valorCobrado != null ? "Valor cobrado" : "Valor do serviço"}</div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: cliente.valorCobrado != null || sugestao.valor ? AZUL_MARINHO : "#B26A00" }}>
+              {cliente.valorCobrado != null ? fmtReal(cliente.valorCobrado) : sugestao.valor ? fmtReal(sugestao.valor) : "sem preço fixado"}
             </div>
           </div>
           <Selo valor={completo ? STATUS_DOC_CONCLUIDA : STATUS_DOC_PROCESSANDO} />
@@ -7816,14 +7932,14 @@ function CardDocumentosArt({ cliente, documentos = [], precoDocumentacao = 0, en
         })}
       </div>
 
-      {/* Pagamento é responsabilidade deste setor — por isso fica editável aqui. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${CINZA_BORDA}` }}>
-        <label style={{ ...lab, margin: 0 }}>Pagamento</label>
-        <select style={{ ...inp, width: "auto", padding: "6px 10px" }} value={cliente.pagamento || "Pendente"}
-          onChange={(e) => atualizarPagamento(cliente.id, e.target.value)}>
-          {PAGAMENTO_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
-        </select>
-        <Selo valor={cliente.pagamento || "Pendente"} />
+      {/* Pagamento é responsabilidade deste setor — por isso fica editável aqui. É a mesma linha do
+          Setor de cobrança (LinhaCobranca): valor sugerido, situação, data e forma. Antes havia só o
+          seletor Pendente/Pago, e a ART/TRT entrava no Financeiro pelo preço de tabela — sem tabela
+          (reforma, cadastro sem empreendimento), por zero, com o custo da ART contando do mesmo jeito:
+          era o "-R$ 4.071" da linha "(sem empreendimento)" em Receitas (out/2026). */}
+      <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${CINZA_BORDA}` }}>
+        <LinhaCobranca compacto cliente={cliente} sugerido={sugestao.valor} origemSugestao={sugestao.origem}
+          podeAgir={!!onSalvarCobranca} onSalvar={onSalvarCobranca || { salvar: async () => {}, notify }} />
       </div>
 
       {!completo && (
@@ -7842,6 +7958,14 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, cli
   /* Cadastros de "Documentação ART/TRT" vêm direto do portal do cliente pra cá (pulam o
      Agendamento, porque não têm vistoria). É aqui que a equipe anexa os dois documentos. */
   const clientesArt = clientes.filter((c) => ehServicoDocumentacao(c) && c.status !== "Cancelado");
+  /* Cobrança da ART/TRT pela mesma regra da vistoria: sugestão da ficha (tabela de documentação
+     do empreendimento), e o lançamento grava valor, situação, data e forma no cadastro — é dali
+     que Receitas, Indicadores e o MEI leem. */
+  const precoPorChave = useMemo(() => indexarPrecos(precos), [precos]);
+  const salvarCobranca = async (id, patch) => {
+    const ok = await updCliente(id, patch);
+    if (ok) notify("Pagamento lançado ✓ — já entrou no Financeiro");
+  };
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -7855,9 +7979,9 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, cli
             {clientesArt.map((c) => (
               <CardDocumentosArt key={c.id} cliente={c}
                 documentos={documentosArt.filter((d) => d.clienteId === c.id)}
-                precoDocumentacao={precos.find((p) => p.empreendimento === (c.empreendimento || "").trim())?.precoDocumentacao || 0}
+                sugestao={sugestaoDeCobranca(c, docDoCliente(c, docs), precoPorChave)}
                 enviarDocumento={enviarDocumentoArt} excluirDocumento={excluirDocumentoArt}
-                atualizarPagamento={(id, pagamento) => updCliente(id, { pagamento })}
+                onSalvarCobranca={updCliente ? { salvar: salvarCobranca, notify } : null}
                 atualizarEmpreendimento={(id, empreendimento) => updCliente(id, { empreendimento })}
                 empreendimentosComPreco={precos.filter((p) => p.precoDocumentacao > 0).map((p) => p.empreendimento)}
                 notify={notify}
@@ -12289,10 +12413,11 @@ function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [], perio
         Vistoria feita pela própria Gerência não entra como custo: não há pagamento a fazer, e o valor que
         caberia ao técnico aparece como <strong>lucro extra</strong>.
         {custos && !custos.carregado && <em> Carregando os custos…</em>}
-        Os valores vêm do <strong>Setor de cobrança</strong> (Agendamento → Cobrança), onde o Atendimento
-        lança o que foi cobrado e como ficou o pagamento; o ponto verde marca as linhas que já têm valor
-        lançado. O que ainda não passou por lá entra pelo preço de tabela do empreendimento. "Recebido"
-        soma o que está como Pago (valor cheio) e o que está como Parcial (só o que já entrou).
+        Os valores vêm do <strong>Setor de cobrança</strong> (Agendamento → Cobrança) e, na ART/TRT, do card
+        da Documentação, onde se lança o que foi cobrado e como ficou o pagamento; o ponto verde marca as
+        linhas que já têm valor lançado. O que ainda não foi lançado entra pelo valor do registro da vistoria
+        ou, sem ele, pelo preço de tabela do empreendimento — o mesmo número que aparece sugerido na
+        cobrança. "Recebido" soma o que está como Pago (valor cheio) e o que está como Parcial (só o que já entrou).
       </p>
 
       {semData > 0 && (
@@ -13825,7 +13950,7 @@ function AbaFinIndicadores({ fin, clientes = [], docs = [], precos = [], token }
       <AlertasFinanceiro despesas={doPeriodo} ehGerencia={fin.ehGerencia} />
       {competencia.semValorLancado > 0 && (
         <AvisoFin tom="atencao">
-          {competencia.semValorLancado} serviço(s) realizado(s) no período ainda sem valor lançado no Setor de cobrança — entram pelo preço de tabela até alguém lançar.
+          {competencia.semValorLancado} serviço(s) realizado(s) no período ainda sem valor lançado no Setor de cobrança — entram pelo registro da vistoria ou pelo preço de tabela até alguém lançar.
         </AvisoFin>
       )}
       {caixa.semDataPagamento > 0 && (
@@ -14222,7 +14347,7 @@ function AbaFinConfig({ fin, clientes = [], docs = [], precos = [] }) {
      antigo contava como recebido e o Setor de cobrança como em aberto — é a primeira coisa que
      fazia as contas não baterem. Marcar aqui grava no cadastro (sem inventar data);
    - pago sem data: baixa antiga, não dá para achar no extrato — informe o dia, se souber;
-   - realizado sem valor lançado: entra pelo preço de tabela até alguém lançar;
+   - realizado sem valor lançado: entra pelo registro da vistoria ou pelo preço de tabela até alguém lançar;
    - realizado e não pago: o que está para receber, do mais antigo para o mais novo. */
 function AbaConferenciaPagamentos({ clientes = [], docs = [], precos = [], updCliente, notify }) {
   const precoPorChave = useMemo(() => {
@@ -14338,8 +14463,9 @@ function AbaConferenciaPagamentos({ clientes = [], docs = [], precos = [], updCl
 
       <Card icon={DollarSign} titulo={`Realizado sem valor lançado (${semValor.length})`}>
         <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
-          Serviço feito e ninguém lançou o valor combinado no Setor de cobrança (Agendamento › Cobrança). Até lá ele entra pelo preço de
-          tabela do empreendimento — e, sem preço de tabela, por zero.
+          Serviço feito e ninguém lançou o valor combinado no Setor de cobrança (Agendamento › Cobrança) — ou, na ART/TRT, no card da
+          Documentação. Até lá ele entra pelo valor do registro da vistoria ou pelo preço de tabela do empreendimento — e, sem nenhum
+          dos dois, por zero. Esse mesmo valor já aparece preenchido na cobrança, é só conferir e lançar.
         </p>
         {semValor.length === 0 ? <p style={{ fontSize: 13, color: "#1B7F4B", margin: 0 }}>Tudo lançado. ✓</p> : (
           <div style={{ overflowX: "auto" }}>
@@ -14653,7 +14779,7 @@ function AbaGerenciaIndicadores({ clientes = [], docs = [], precos = [], carrega
       </div>
       {(resumo.semValorLancado > 0 || resumo.divergentes > 0) && (
         <div style={{ marginTop: 10, background: "#FFF4E0", color: "#8a5300", padding: "8px 11px", borderRadius: 8, fontSize: 12.5, display: "grid", gap: 3 }}>
-          {resumo.semValorLancado > 0 && <span>{resumo.semValorLancado} realizado(s) sem valor lançado no Setor de cobrança — contados pelo preço de tabela.</span>}
+          {resumo.semValorLancado > 0 && <span>{resumo.semValorLancado} realizado(s) sem valor lançado no Setor de cobrança — contados pelo registro da vistoria ou pelo preço de tabela.</span>}
           {resumo.divergentes > 0 && <span>{resumo.divergentes} com "Pago" só no registro da vistoria — confira em Financeiro › Conferência de pagamentos.</span>}
         </div>
       )}
@@ -19624,6 +19750,9 @@ const estilos = `
   .btn-ghost { background:rgba(255,255,255,.1); color:#fff; border:none; padding:8px 13px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:6px; }
   .btn-ghost:hover { background:rgba(255,255,255,.2); }
   .btn-solid { background:${AZUL_MEDIO}; color:#fff; border:none; padding:8px 14px; border-radius:8px; font-size:13px; font-weight:700; cursor:pointer; display:flex; align-items:center; gap:6px; }
+  /* Desligado precisa parecer desligado: sem isto o "Salvar" travado da cobrança tinha a mesma
+     cara do ativo, e o clique simplesmente não fazia nada. */
+  .btn-solid:disabled { opacity:.55; cursor:default; }
   .btn-add { width:100%; padding:14px; border:1.5px dashed ${AZUL_MEDIO}; background:#f6f9fd; color:${AZUL_MEDIO}; border-radius:12px; font-size:15px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; }
   .btn-add:hover { background:#eef4fb; }
   .btn-mini { background:${AZUL_MEDIO}; color:#fff; border:none; padding:5px 12px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; }
