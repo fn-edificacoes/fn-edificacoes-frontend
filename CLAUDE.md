@@ -114,8 +114,16 @@ O papel vem do backend no login, nunca é escolhido na tela. `App()` despacha po
 - `afiliado` → `PainelParceiro`
 - `cliente` → `PainelCliente`
 - os demais → `AppInterno`, filtrado por `MODULOS_POR_PERFIL`:
-  `vistoriador` (laudos), `documentacao`, `atendimento` (clientes, agendamento, parceiros),
-  `qualidade` (agendamento, só leitura), `vendas` (parceiros), `gerencia` (tudo).
+  `vistoriador` (laudos), `documentacao`, `atendimento` (clientes, agendamento, documentação,
+  parceiros), `qualidade` (agendamento, só leitura), `vendas` (parceiros), `gerencia` (tudo).
+
+**Aba Documentação (Atendimento e Documentação):** duas sub-abas — **TRTs de reforma**
+(`AbaDocumentacao`, os cadastros de "Documentação ART/TRT" com os dois anexos, pagamento e o
+controle de produção) e **ARTs de vistoria** (`AbaArtsVistoria`, módulo `arts`). "arts" não tem
+aba própria na barra de cima: `abaTop === "arts"` acende a aba Documentação. A Gerência chega às
+duas pelo menu lateral, como antes. O Atendimento recebe de `/api/docs` **só os registros de
+documentação** (o servidor filtra; os de vistoria continuam fora e as telas dele seguem no
+`temLaudo`), e o servidor recusa que ele altere registro de vistoria.
 
 A tela de login é uma só para os três públicos — equipe, cliente e parceiro/filiado.
 Cliente sem senha usa "primeiro acesso"; parceiro se cadastra pelo botão do rodapé, que
@@ -181,7 +189,7 @@ cadastro rápido (`ModalDespesa`) de qualquer tela.
 - Nada decide regime tributário. O limite do MEI é o configurado; os campos do Simples são só guardados.
 
 **Controle financeiro** (`src/controle-financeiro.jsx`, arquivo próprio como a Rede Nacional):
-- `AbaArtsVistoria` (módulo `arts`, Gerência e Documentação): ART múltipla de vistoria por
+- `AbaArtsVistoria` (módulo `arts`, Gerência, Documentação e Atendimento): ART múltipla de vistoria por
   empreendimento — quem está sem ART (do pré-cadastro em diante), emitir ART (até 50 pessoas,
   30 dias da emissão, R$ 69) ou incluir numa ART vigente com vaga. Cada ART vira despesa no servidor.
 - `AbaFolhaPagamento` (Financeiro › Folha de pagamento, só Gerência): por mês, vistoriador pela

@@ -558,7 +558,8 @@ const STATUS_INTERNO_OPCOES = ["Agendado", "Em vistoria", "Laudo em elaboração
                     "qualidade" -> "atendimento" logo no início de AppInterno). Enxerga Clientes
                     (cadastro, agendamento, acompanhamento, aprovação), Agendamento (aprova
                     agendamento/feedback — item 3.24; substitui o antigo perfil "comercial"),
-                    FAQ, Marketing e Vendas/Fornecedores.
+                    Documentação (TRTs de reforma e ARTs de vistoria, em sub-abas), FAQ,
+                    Marketing e Vendas/Fornecedores.
    vendas        -> só enxerga Fornecedores (a antiga tela "Parceiros e Afiliados", que deixou
                     de existir como destino solto): analisa/aprova cadastros, acompanha
                     cupons (vales) e cadastra parceiro/fornecedor manualmente. NÃO calcula nem
@@ -569,10 +570,13 @@ const STATUS_INTERNO_OPCOES = ["Agendado", "Em vistoria", "Laudo em elaboração
 ------------------------------------------------------------------ */
 /* "despesas" é o lançamento de despesa e comprovante (Financeiro): toda a equipe lança o que
    gastou pela FN e vê só o que lançou. A Gerência tem o módulo inteiro no menu lateral. */
+/* "arts" (ARTs de vistoria) não tem aba própria na barra de cima: é sub-aba de Documentação, ao
+   lado das TRTs de reforma — quem organiza uma organiza a outra. Continua aqui porque é o que
+   libera a tela. */
 const MODULOS_POR_PERFIL = {
   vistoriador: ["laudos", "despesas"],
   documentacao: ["documentacao", "arts", "despesas"],
-  atendimento: ["clientes", "qualidade", "faq", "marketing", "vendas", "despesas"],
+  atendimento: ["clientes", "qualidade", "documentacao", "arts", "faq", "marketing", "vendas", "despesas"],
   vendas: ["vendas", "despesas"],
   gerencia: ["laudos", "documentacao", "arts", "gerencia", "usuarios", "clientes", "qualidade", "faq", "marketing", "nacional", "mapa"],
   /* FN Nacional por regional: só a Rede Nacional, filtrada pelo servidor às regionais dele. */
@@ -1407,8 +1411,8 @@ function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], ava
     }
   }
 
-  // --- Documentação: ART/TRT sem os dois anexos ---
-  if (perfil === "documentacao" || perfil === "gerencia") {
+  // --- Documentação: ART/TRT sem os dois anexos (o Atendimento também organiza as TRTs de reforma) ---
+  if (perfil === "documentacao" || perfil === "gerencia" || perfil === "atendimento") {
     const art = clientes.filter((c) => ehServicoDocumentacao(c) && c.status !== "Cancelado");
     const incompletos = art.filter((c) => {
       const meus = documentosArt.filter((d) => d.clienteId === c.id);
@@ -2320,8 +2324,10 @@ function AppInterno({ session, onLogout }) {
     ativo: novaDespesaAberta || abaTop === "despesas" || (abaTop === "gerencia" && (abaGerencia === "financeiro" || String(abaGerencia).startsWith("fin-"))),
   });
 
-  /* ---- Documentação/Gerência: carregar e persistir via API real ---- */
-  const podeVerDocs = perfil === "gerencia" || perfil === "documentacao" || perfil === "atendimento";
+  /* ---- Documentação/Gerência: carregar e persistir via API real ----
+     O Atendimento recebe só os registros de Documentação ART/TRT (o servidor filtra): os de
+     vistoria continuam fora, e as telas dele seguem usando o temLaudo do cadastro. */
+  const podeVerDocs =perfil === "gerencia" || perfil === "documentacao" || perfil === "atendimento";
   const carregarDocs = async () => {
     if (!podeVerDocs) return;
     setDocsCarregando(true);
@@ -2797,8 +2803,9 @@ function AppInterno({ session, onLogout }) {
   };
   useEffect(() => { carregarEmpreendimentosRef(); }, []);
   const carregarPrecos = async () => {
-    // Documentação também lê (só leitura), pra ver o valor fixado pela Gerência.
-    if (perfil !== "gerencia" && perfil !== "documentacao") return;
+    /* Documentação e Atendimento também leem (só leitura): o valor fixado pela Gerência aparece
+       na TRT de reforma e é o sugerido no Setor de cobrança (ver precoSugerido). */
+    if (perfil !== "gerencia" && perfil !== "documentacao" && perfil !== "atendimento") return;
     setPrecosCarregando(true);
     try {
       const r = await apiFetch("/api/precos-empreendimento", { token });
@@ -3625,7 +3632,11 @@ function AppInterno({ session, onLogout }) {
               )}
             </>
           )}
-          {abaTop === "documentacao" && (
+          {/* Este atalho grava um registro em branco, sem CPF — que não casa com cadastro nenhum e
+              por isso não aparece na lista de ART/TRT. Para o Atendimento seria pior: o servidor
+              só deixa ele mexer em registro ligado a cadastro de documentação, e o registro
+              ficaria órfão. Ele usa o "Novo registro" da tabela, que abre o formulário. */}
+          {abaTop === "documentacao" && perfil !== "atendimento" && (
             <button className="btn-solid" onClick={() => addDoc(novoRegistroDoc())}><Plus size={15} /> Novo registro</button>
           )}
           {abaTop === "gerencia" && (
@@ -3634,16 +3645,33 @@ function AppInterno({ session, onLogout }) {
         </div>
 
         {/* Navegação de módulos (filtrada pelo perfil de acesso) — a Gerência não usa mais
-            esta barra, ela tem o menu lateral com tudo já agrupado. */}
+            esta barra, ela tem o menu lateral com tudo já agrupado. ARTs de vistoria não está
+            aqui: é sub-aba de Documentação (abaTop "arts" acende a aba Documentação). */}
         {perfil !== "gerencia" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, borderTop: "1px solid rgba(255,255,255,.12)", overflowX: "auto" }}>
-            {[["laudos", "Laudos", FileText], ["documentacao", "Documentação", ClipboardCheck], ["arts", "ARTs de vistoria", FileCheck], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Fornecedores", Wrench], ["despesas", "Despesas", Receipt], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog], ["nacional", "Rede Nacional", Landmark], ["mapa", "Mapa de atuação", IconeMapa]]
+            {[["laudos", "Laudos", FileText], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["documentacao", "Documentação", ClipboardCheck], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Fornecedores", Wrench], ["despesas", "Despesas", Receipt], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog], ["nacional", "Rede Nacional", Landmark], ["mapa", "Mapa de atuação", IconeMapa]]
               .filter(([k]) => modulosPermitidos.includes(k))
-              .map(([k, label, Icon]) => (
-                <button key={k} onClick={() => setAbaTop(k)} className="tab" style={{ borderBottomColor: abaTop === k ? "#fff" : "transparent", color: abaTop === k ? "#fff" : "rgba(255,255,255,.55)", whiteSpace: "nowrap", flexShrink: 0 }}>
-                  <Icon size={15} /> {label}
-                </button>
-              ))}
+              .map(([k, label, Icon]) => {
+                const ativa = abaTop === k || (k === "documentacao" && abaTop === "arts");
+                return (
+                  <button key={k} onClick={() => setAbaTop(k)} className="tab" style={{ borderBottomColor: ativa ? "#fff" : "transparent", color: ativa ? "#fff" : "rgba(255,255,255,.55)", whiteSpace: "nowrap", flexShrink: 0 }}>
+                    <Icon size={15} /> {label}
+                  </button>
+                );
+              })}
+          </nav>
+        )}
+
+        {/* Sub-navegação do módulo Documentação: TRTs de reforma (os cadastros de Documentação
+            ART/TRT, com os dois anexos) e ARTs de vistoria (ART múltipla por empreendimento).
+            Ficam juntas porque quem organiza uma organiza a outra. */}
+        {perfil !== "gerencia" && (abaTop === "documentacao" || abaTop === "arts") && modulosPermitidos.includes("arts") && (
+          <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
+            {[["documentacao", "TRTs de reforma", ClipboardCheck], ["arts", "ARTs de vistoria", FileCheck]].map(([k, label, Icon]) => (
+              <button key={k} onClick={() => setAbaTop(k)} className="tab" style={{ borderBottomColor: abaTop === k ? AZUL_MEDIO : "transparent", color: abaTop === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
+                <Icon size={15} /> {label}
+              </button>
+            ))}
           </nav>
         )}
 
@@ -15618,7 +15646,7 @@ const ROLE_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação",
 const ROLE_DESCRICAO = {
   vistoriador: "Só acessa Laudos. Sem acesso a Documentação nem Gerência.",
   documentacao: "Só acessa Documentação/TRT. Sem acesso a Laudos nem Gerência.",
-  atendimento: "Acessa Clientes (cadastro, agendamento, aprovação e encaminhamento ao técnico), Agendamento (aprova avaliações que entram na vitrine), FAQ, Marketing e Vendas/Fornecedores.",
+  atendimento: "Acessa Clientes (cadastro, agendamento, aprovação e encaminhamento ao técnico), Agendamento (aprova avaliações que entram na vitrine), Documentação (TRTs de reforma e ARTs de vistoria), FAQ, Marketing e Vendas/Fornecedores.",
   vendas: "Só acessa Fornecedores: analisa/aprova cadastros de parceiros/fornecedores, cadastra fornecedor manualmente e acompanha cupons. Recebe salário fixo — o sistema não calcula comissão individual.",
   gerencia: "Acesso completo: Laudos, Documentação, Clientes, Agendamento, Vendas, Gerência e financeiro.",
   gestor_regional: "Só acessa a Rede Nacional, e só das regionais liberadas para ele (Rede Nacional → Regionais → Gestores). Sem regional liberada, não vê nada.",
