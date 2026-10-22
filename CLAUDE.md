@@ -99,6 +99,7 @@ src/patologias-consulta.js  busca no catálogo
 src/rascunho-local.js       vistoria em edição salva no navegador
 src/financeiro-regras.js    regras do Financeiro (despesas, MEI, exportação) — sem tela
 src/controle-financeiro.jsx ARTs de vistoria, folha de pagamento, valores dos custos
+src/prospeccao-levantamentos.jsx  levantamentos .md por estado; prioridades da carteira de Prospecção
 ```
 
 Para achar algo no `App.jsx`, procure pela definição da componente
@@ -257,6 +258,27 @@ cidade, lidos do banco a cada consulta; a tela relê sozinha a cada minuto.
 - Cores: calor amarelo → vermelho em até 5 faixas com legenda, e cinza-azulado para "sem
   atuação" (validados para daltonismo). A legenda do mapa regional fica **embaixo**: por cima
   ela cobria a região metropolitana.
+- Aba **Empreendimentos prospectados**: a carteira de Prospecção (`GET /api/prospeccao`) no
+  mesmo mapa — estado e município pela quantidade de empreendimentos, ponto azul onde há
+  parceiro técnico ativo (a contagem `parceiros` por cidade do `/api/nacional/mapa`). Filtros
+  de prioridade e "com/sem parceiro na cidade"; clicar num município filtra a lista. O
+  empreendimento cai no mapa pelo `municipio` (nas linhas antigas, pela `regiao`); o que não
+  casar com o IBGE aparece em "Fora do mapa". Desenho, zoom e rótulos são os mesmos da aba
+  Atuação (`DesenhoBrasil`, `DesenhoMunicipios`, `useQuadro`).
+
+## Levantamentos de prospecção (.md)
+
+`src/prospeccao-levantamentos.jsx` (`CardLevantamentosProspeccao`): o anexo onde a Gerência
+envia o .md de prospecção de cada estado — o primeiro e as atualizações. Aparece no topo de
+Gerência → Prospecção e embaixo da aba Empreendimentos prospectados do Mapa. Os arquivos ficam
+separados por estado, com a regional da Rede Nacional daquele estado ao lado.
+
+- **Quem lê o .md é o servidor** (`src/prospeccao-levantamentos.js` no backend). A tela manda
+  o texto com `simular: true`, mostra a prévia que volta (novos, atualizados, % antes → depois,
+  avisos) e só grava no "Importar para a carteira".
+- O levantamento manda no que é da pesquisa (situação/% da obra, endereço, município, fonte);
+  prioridade mudada à mão, ação, observações e contato do parceiro adm continuam da carteira.
+- `PRIORIDADES_PROSPECCAO` e `COR_PRIORIDADE` moram nesse arquivo; o `App.jsx` importa de lá.
 
 ## Rotas públicas (querystring, sem login)
 
