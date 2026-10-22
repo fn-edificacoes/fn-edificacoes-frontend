@@ -4,6 +4,7 @@ import { listarAmbientes, paraItemDeLaudo, todasParaImportacao } from "./patolog
 import * as Fin from "./financeiro-regras.js";
 import AbaRedeNacional from "./rede-nacional.jsx";
 import AbaMapaAtuacao from "./mapa-atuacao.jsx";
+import { CardLevantamentosProspeccao, PRIORIDADES_PROSPECCAO, COR_PRIORIDADE, NOME_UF } from "./prospeccao-levantamentos.jsx";
 import { AbaArtsVistoria, AbaFolhaPagamento, CardValoresCustos, useCustosOperacionais } from "./controle-financeiro.jsx";
 import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
@@ -3847,7 +3848,7 @@ function AppInterno({ session, onLogout }) {
             precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
             padronizarEmpreendimento={padronizarEmpreendimento} excluirCliente={delCliente}
             prospeccao={prospeccao} prospeccaoCarregando={prospeccaoCarregando} atualizarProspeccao={atualizarProspeccao}
-            publicarProspeccaoDrive={publicarProspeccaoDrive}
+            publicarProspeccaoDrive={publicarProspeccaoDrive} recarregarProspeccao={carregarProspeccao}
             adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento}
             laudosPendentes={laudosPendentes} laudosPendentesCarregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} editarLaudo={editarLaudo} reenviarDrive={reenviarDrive} marcarEmAnalise={marcarEmAnalise}
       painel={painel} painelCarregando={painelCarregando} carregarPainel={carregarPainel}
@@ -3858,7 +3859,7 @@ function AppInterno({ session, onLogout }) {
             criarPatologia={criarPatologia} atualizarPatologia={atualizarPatologia} excluirPatologia={excluirPatologia}
             importarPatologiasEstaticas={importarPatologiasEstaticas} />
         )}
-        {abaTop === "mapa" && <AbaMapaAtuacao token={token} apiFetch={apiFetch} notify={notify} />}
+        {abaTop === "mapa" && <AbaMapaAtuacao token={token} apiFetch={apiFetch} notify={notify} aoMudarProspeccao={carregarProspeccao} />}
         {abaTop === "nacional" && (
           <AbaRedeNacional token={token} perfil={perfil} apiFetch={apiFetch} notify={notify} usuarios={usuarios} />
         )}
@@ -9355,21 +9356,9 @@ function CardPadronizarEmpreendimentos({ clientes = [], empreendimentosRef = [],
   );
 }
 
-/* Carteira de prospecção — quais empreendimentos entram no funil comercial, com que
-   prioridade e qual a ação recomendada. Base: pesquisa "Mapa Total de Empreendimentos".
-   A prioridade é editável, porque a realidade muda mais rápido que a pesquisa. */
-const PRIORIDADES_PROSPECCAO = ["Imediata", "Alta", "Média", "Baixa", "Futura", "Pós-entrega", "Fora do escopo", "A confirmar"];
-
-const COR_PRIORIDADE = {
-  "Imediata": { cor: "#C62828", bg: "#FCEAEA" },
-  "Alta": { cor: "#C25E00", bg: "#FFEDD9" },
-  "Média": { cor: "#B26A00", bg: "#FFF4E0" },
-  "Baixa": { cor: "#65758b", bg: "#EEF1F5" },
-  "Futura": { cor: "#2C75B5", bg: "#EAF2FB" },
-  "Pós-entrega": { cor: "#0F766E", bg: "#E3F3F1" },
-  "Fora do escopo": { cor: "#8593a8", bg: "#F4F6F8" },
-  "A confirmar": { cor: "#8593a8", bg: "#F4F6F8" },
-};
+/* PRIORIDADES_PROSPECCAO e COR_PRIORIDADE (a carteira de prospecção) moram em
+   src/prospeccao-levantamentos.jsx, junto com o envio dos levantamentos .md: o Mapa de
+   atuação usa as mesmas. */
 
 /* ================= Laudos realizados pelo técnico =================
    Duas coisas que o vistoriador não tinha como acompanhar: o que aconteceu com o laudo
@@ -9746,8 +9735,9 @@ function AbaLaudosRealizados({ laudos: laudosRecebidos = [], carregando, recarre
 
 // Ordem geográfica norte→sul da carteira "Litoral PE/PB": Cabedelo e João Pessoa (PB) ficam
 // ao norte de Ipojuca e Tamandaré/Carneiros/Campas (PE) — é essa ordem que dá o "mapa" visual
-// de cima pra baixo no indicador, sem precisar de biblioteca de mapa nenhuma.
-const ESTADO_LABEL = { PE: "Pernambuco", PB: "Paraíba" };
+// de cima pra baixo no indicador, sem precisar de biblioteca de mapa nenhuma. Os demais
+// estados (levantamentos .md) vêm depois, por estado e pelo tamanho de cada região.
+const ESTADO_LABEL = NOME_UF;
 const ORDEM_GEOGRAFICA = [
   { estado: "PB", regiao: "Cabedelo" },
   { estado: "PB", regiao: "João Pessoa" },
@@ -9765,9 +9755,14 @@ function IndicadorMapaProspeccao({ prospeccao, regiaoAtiva, onEscolherRegiao, es
     porRegiao[chave].itens.push(p);
   });
 
+  /* O agrupamento por estado abaixo depende de os grupos do mesmo estado virem juntos. */
   const ordemChaves = [
     ...ORDEM_GEOGRAFICA.map((o) => `${o.estado}||${o.regiao}`).filter((k) => porRegiao[k]),
-    ...Object.keys(porRegiao).filter((k) => !ORDEM_GEOGRAFICA.some((o) => `${o.estado}||${o.regiao}` === k)),
+    ...Object.keys(porRegiao).filter((k) => !ORDEM_GEOGRAFICA.some((o) => `${o.estado}||${o.regiao}` === k))
+      .sort((a, b) => (a === "outras") - (b === "outras")
+        || String(porRegiao[a].estado).localeCompare(String(porRegiao[b].estado), "pt-BR")
+        || porRegiao[b].itens.length - porRegiao[a].itens.length
+        || porRegiao[a].regiao.localeCompare(porRegiao[b].regiao, "pt-BR")),
   ];
   if (ordemChaves.length === 0) return null;
 
@@ -9777,7 +9772,7 @@ function IndicadorMapaProspeccao({ prospeccao, regiaoAtiva, onEscolherRegiao, es
     <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: "14px 16px", marginBottom: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
         <LayoutGrid size={15} color={AZUL_MARINHO} />
-        <strong style={{ fontSize: 13, color: AZUL_MARINHO }}>Onde vamos entrar (norte → sul do litoral)</strong>
+        <strong style={{ fontSize: 13, color: AZUL_MARINHO }}>Onde vamos entrar</strong>
       </div>
       <div style={{ display: "grid", gap: 8 }}>
         {ordemChaves.map((chave) => {
@@ -9874,7 +9869,7 @@ function CardProspeccao({ prospeccao = [], carregando, atualizar, publicarNoDriv
       const chave = p.estado && p.regiao ? `${p.estado}||${p.regiao}` : "outras";
       return chave === regiaoAtiva;
     })
-    .filter((p) => !termo || `${p.empreendimento} ${p.acao} ${p.observacoes} ${p.local} ${p.construtora}`.toLowerCase().includes(termo))
+    .filter((p) => !termo || `${p.empreendimento} ${p.acao} ${p.observacoes} ${p.local} ${p.construtora} ${p.municipio} ${p.endereco}`.toLowerCase().includes(termo))
     .sort((a, b) => PRIORIDADES_PROSPECCAO.indexOf(a.prioridade) - PRIORIDADES_PROSPECCAO.indexOf(b.prioridade)
       || a.empreendimento.localeCompare(b.empreendimento, "pt-BR"));
 
@@ -9970,12 +9965,17 @@ function CardProspeccao({ prospeccao = [], carregando, atualizar, publicarNoDriv
                 </span>
                 <span style={{ flex: 1, minWidth: 150 }}>
                   <strong style={{ fontSize: 13.5, display: "block" }}>{p.empreendimento}</strong>
-                  {(p.local || p.previsaoEntrega) && (
+                  {(p.construtora || p.municipio || p.local || p.previsaoEntrega) && (
                     <span style={{ fontSize: 11.5, color: "#8593a8" }}>
-                      {p.local}{p.local && p.previsaoEntrega ? " · " : ""}{p.previsaoEntrega}
+                      {[p.construtora, p.municipio, p.local, p.previsaoEntrega].filter(Boolean).join(" · ")}
                     </span>
                   )}
                 </span>
+                {p.percentual != null && (
+                  <span style={{ fontSize: 12, fontWeight: 700, color: AZUL_MARINHO, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                    {p.percentual.toLocaleString("pt-BR")}% da obra
+                  </span>
+                )}
                 {convertido && (
                   <span style={{ fontSize: 11, color: "#2E7D32", fontWeight: 700, whiteSpace: "nowrap" }}>✓ já é cliente</span>
                 )}
@@ -9987,6 +9987,22 @@ function CardProspeccao({ prospeccao = [], carregando, atualizar, publicarNoDriv
                   {p.estrutura && (
                     <div style={{ fontSize: 12.5, color: "#4a5a70" }}>
                       <strong style={{ color: "#65758b" }}>Obra: </strong>{p.estrutura}
+                      {p.referencia && <span style={{ color: "#8593a8" }}> (ref. {p.referencia})</span>}
+                    </div>
+                  )}
+                  {p.obsLevantamento && (
+                    <div style={{ fontSize: 12.5, color: "#4a5a70" }}>
+                      <strong style={{ color: "#65758b" }}>No levantamento: </strong>{p.obsLevantamento}
+                    </div>
+                  )}
+                  {(p.levantamento || p.fonteUrl) && (
+                    <div style={{ fontSize: 12, color: "#8593a8", display: "flex", gap: 12, flexWrap: "wrap" }}>
+                      {p.levantamento && <span>Do levantamento {p.levantamento.nomeArquivo}{p.levantamento.dataBase ? ` (data-base ${p.levantamento.dataBase})` : ""}</span>}
+                      {p.fonteUrl && (
+                        <a href={p.fonteUrl} target="_blank" rel="noopener noreferrer" style={{ color: AZUL_MEDIO, fontWeight: 700, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                          <ExternalLink size={12} /> Fonte
+                        </a>
+                      )}
                     </div>
                   )}
                   <Grid>
@@ -9994,8 +10010,13 @@ function CardProspeccao({ prospeccao = [], carregando, atualizar, publicarNoDriv
                       onChange={(v) => atualizar(p.id, { estado: v }, { silencioso: true })} />
                     <Field label="Região" value={p.regiao} placeholder="Ex.: Ipojuca"
                       onChange={(v) => atualizar(p.id, { regiao: v }, { silencioso: true })} />
+                    {/* Município é o que põe o empreendimento no Mapa de atuação (grafia do IBGE). */}
+                    <Field label="Município" value={p.municipio} placeholder="Ex.: Ipojuca"
+                      onChange={(v) => atualizar(p.id, { municipio: v }, { silencioso: true })} />
                     <Field label="Local / bairro" value={p.local} full
                       onChange={(v) => atualizar(p.id, { local: v }, { silencioso: true })} />
+                    <Field label="Endereço" value={p.endereco} full
+                      onChange={(v) => atualizar(p.id, { endereco: v }, { silencioso: true })} />
                     <Field label="Construtora" value={p.construtora}
                       onChange={(v) => atualizar(p.id, { construtora: v }, { silencioso: true })} />
                     <Field label="Previsão de entrega" value={p.previsaoEntrega} placeholder="Ex.: 06/2026"
@@ -15711,7 +15732,7 @@ function AbaGerenciaImportacao({ clientes = [], precos = [], empreendimentosRef 
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, decidirComissaoItem, importarClientesHistorico, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
+function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, decidirComissaoItem, importarClientesHistorico, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, recarregarProspeccao, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
   if (sub === "painel") {
     return <AbaGerenciaPainelEstrategico clientes={clientes} docs={docs} usuarios={usuarios} precos={precos}
       avaliacoes={avaliacoes} prospeccao={prospeccao} prospeccaoParceiros={prospeccaoParceiros}
@@ -15744,9 +15765,14 @@ function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, de
       onImportar={importarPatologiasEstaticas} notify={notify} />;
   }
   if (sub === "prospeccao") {
-    return <CardProspeccao prospeccao={prospeccao} carregando={prospeccaoCarregando} atualizar={atualizarProspeccao}
-      publicarNoDrive={publicarProspeccaoDrive}
-      clientes={clientes} notify={notify} token={token} />;
+    return (
+      <div style={{ display: "grid", gap: 16 }}>
+        <CardLevantamentosProspeccao token={token} apiFetch={apiFetch} notify={notify} aoImportar={recarregarProspeccao} />
+        <CardProspeccao prospeccao={prospeccao} carregando={prospeccaoCarregando} atualizar={atualizarProspeccao}
+          publicarNoDrive={publicarProspeccaoDrive}
+          clientes={clientes} notify={notify} token={token} />
+      </div>
+    );
   }
   if (sub === "financeiro") {
     return (
