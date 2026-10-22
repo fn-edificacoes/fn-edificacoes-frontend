@@ -14533,20 +14533,24 @@ function AbaFinanceiroDespesas({ sub, fin, clientes = [], docs = [], precos = []
 /* ============================================================
    GERÊNCIA › REFORMAS  —  o FN Projetos embutido
    ============================================================
-   O FN Projetos é um módulo separado (outro repositório, outro endereço) que
-   cuida de reforma de apartamento: levantamento a partir da planta, orçamento,
-   cronograma e acompanhamento de obra. Ele NÃO tem login próprio — quem entra
-   é quem já está autenticado aqui.
+   O FN Projetos é um módulo separado (repositório fn-reformas, serviço próprio
+   na mesma máquina) com o processo completo de reforma: projetos, orçamento,
+   cronograma, agenda, financeiro, materiais, documentos e plantas, e o FN Casa
+   Pronta (fornecedores, homologação, pacotes, pedidos e portais de cliente e
+   parceiro). Ele NÃO tem login próprio — quem entra é quem já está
+   autenticado aqui.
 
-   A identidade vai por postMessage, não por querystring. Endereço com
-   "?perfil=gerencia" é editável na barra do navegador: qualquer pessoa
-   promoveria a si mesma. Por postMessage a mensagem sai daqui para uma origem
-   declarada, e o módulo confere de onde ela veio.
+   Vai o TOKEN de login, por postMessage. O módulo não acredita em nome nem em
+   perfil vindos do navegador: confere o token no backend (/api/auth/me), que
+   olha o banco, e só então o guarda num cookie HttpOnly dele. Nome e perfil
+   seguem na mensagem só como informação. Por postMessage e não por
+   querystring: endereço fica no histórico e no log do nginx; a mensagem sai
+   daqui para uma origem declarada, e o módulo confere de onde ela veio.
 
    Mesmo domínio, então a origem do postMessage é a própria janela — mas o
    endereço continua passando por new URL() com base, para o caso de alguém
    apontar VITE_FN_PROJETOS_URL para outro host em desenvolvimento. */
-function AbaGerenciaReformas({ usuarioAtual, perfil }) {
+function AbaGerenciaReformas({ usuarioAtual, perfil, token }) {
   const [pronto, setPronto] = useState(false);
   const [falhou, setFalhou] = useState(false);
   const iframeRef = useRef(null);
@@ -14563,11 +14567,12 @@ function AbaGerenciaReformas({ usuarioAtual, perfil }) {
 
     const identidade = {
       tipo: "fn-projetos:identidade",
+      token: token || "",
       userId: usuarioAtual?.id ? String(usuarioAtual.id) : "",
       nome: usuarioAtual?.nome || "",
       email: usuarioAtual?.email || "",
-      /* O módulo só conhece dois perfis. Quem não é da Gerência entra como
-         acompanhamento: leitura, sem lançar e sem ver custo interno. */
+      /* Informativo. Quem decide o acesso é o módulo, pelo papel que o
+         backend devolve para o token — hoje, só a Gerência. */
       perfil: perfil === "gerencia" ? "gerencia" : "acompanhamento",
     };
 
@@ -14581,7 +14586,7 @@ function AbaGerenciaReformas({ usuarioAtual, perfil }) {
 
     window.addEventListener("message", aoReceber);
     return () => window.removeEventListener("message", aoReceber);
-  }, [origemModulo, usuarioAtual, perfil]);
+  }, [origemModulo, usuarioAtual, perfil, token]);
 
   /* Sem resposta em 12s é serviço fora do ar ou endereço errado. O iframe não
      avisa nada: ele fica em branco para sempre. */
@@ -14613,8 +14618,7 @@ function AbaGerenciaReformas({ usuarioAtual, perfil }) {
         <div>
           <strong style={{ fontSize: 15, color: AZUL_MARINHO }}>Reformas de apartamento</strong>
           <p style={{ margin: "2px 0 0", fontSize: 12.5, color: "#6b7c93" }}>
-            Levantamento pela planta, orçamento, cronograma e acompanhamento de obra.
-            {perfil !== "gerencia" && " Seu perfil é de acompanhamento: leitura apenas."}
+            Projetos, orçamento, cronograma, financeiro, documentos e FN Casa Pronta.
           </p>
         </div>
         <a href={FN_PROJETOS_URL} target="_blank" rel="noreferrer"
@@ -14639,14 +14643,15 @@ function AbaGerenciaReformas({ usuarioAtual, perfil }) {
         )}
         <iframe
           ref={iframeRef}
-          src={`${FN_PROJETOS_URL}/projetos`}
+          src={`${FN_PROJETOS_URL}/`}
           title="FN Projetos — reformas de apartamento"
           onLoad={() => iframeRef.current?.contentWindow?.postMessage({ tipo: "fn-projetos:ola" }, origemModulo)}
           /* allow-same-origin junto de allow-scripts só é aceitável porque a
              origem é nossa e declarada; com origem de terceiro isso anularia a
              sandbox inteira. */
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
-          style={{ width: "100%", height: "calc(100vh - 260px)", minHeight: 560, border: "none", display: "block" }}
+          /* O módulo é um app inteiro, com menu próprio: quase toda a altura da tela. */
+          style={{ width: "100%", height: "calc(100vh - 170px)", minHeight: 640, border: "none", display: "block" }}
         />
       </div>
     </div>
@@ -15732,7 +15737,7 @@ function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, de
       carregando={carregando} notify={notify} clientes={clientes} precos={precos} />;
   }
   if (sub === "reformas") {
-    return <AbaGerenciaReformas usuarioAtual={usuarioAtual} perfil={perfil} />;
+    return <AbaGerenciaReformas usuarioAtual={usuarioAtual} perfil={perfil} token={token} />;
   }
   if (sub === "perfil-cliente") {
     return <AbaPerfilCliente clientes={clientes} token={token} notify={notify}
