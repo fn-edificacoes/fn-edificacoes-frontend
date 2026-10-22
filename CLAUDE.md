@@ -160,12 +160,24 @@ sempre. Os campos do cadastro moram em `CamposCadastroCliente`, compartilhado co
 
 ## Financeiro — Despesas e Controle Fiscal
 
-Menu lateral da Gerência → Financeiro: Receitas (a tela de preços/receita que já existia,
-mais "outras receitas"), Despesas, Notas e Comprovantes, Deslocamentos, Relatórios,
-Indicadores financeiros e Configurações Fiscais (itens `fin-*`, despachados por
-`AbaFinanceiroDespesas`). Os outros perfis da equipe têm o módulo **Despesas**
-(`AbaMinhasDespesas`): lançam e veem só o que lançaram. O botão "+ Despesa" do cabeçalho abre o
-cadastro rápido (`ModalDespesa`) de qualquer tela.
+Menu lateral da Gerência → Financeiro: Preços e outras receitas (sub `financeiro`: preços por
+empreendimento e "outras receitas"), Despesas, Folha de pagamento, Conferência de pagamentos,
+Notas e Comprovantes, Deslocamentos, Relatórios, Indicadores financeiros e Configurações Fiscais
+(itens `fin-*`, despachados por `AbaFinanceiroDespesas`). Os outros perfis da equipe têm o módulo
+**Despesas** (`AbaMinhasDespesas`): lançam e veem só o que lançaram. O botão "+ Despesa" do
+cabeçalho abre o cadastro rápido (`ModalDespesa`) de qualquer tela.
+
+**Cada número tem uma casa só** (enxugado em out/2026 — telas repetidas mostravam totais que não
+batiam entre si):
+- quantidade de atendimentos (realizados, laudos entregues, por empreendimento/construtora, base
+  antiga × operação atual): **Indicadores de atendimento** (`AbaGerenciaIndicadores`), sem dinheiro;
+- dinheiro do período (faturado, recebido, previsto, despesas, resultado, rentabilidade por serviço
+  e por empreendimento): **Indicadores financeiros** (`AbaFinIndicadores`);
+- cobrar cliente a cliente: Setor de cobrança e Conferência de pagamentos; pagar técnico: Folha.
+- Saíram: a "Receita por empreendimento e serviço" e o "Pagamento aos vistoriadores" da antiga tela
+  Receitas (`CardReceitaEstimada` — um segundo cálculo de lucro, sem as despesas ligadas, e uma
+  cópia da Folha); o Acompanhamento da Gerência (ver abaixo); e a sub-aba Acompanhamento do
+  Agendamento, que repetia o quadro por etapa da aba Clientes.
 
 - Estado e chamadas em `useFinanceiro`; API em `/api/financeiro/*` (`src/financeiro.js` no
   backend). Comprovante vai para o Drive, nunca para o banco.
@@ -173,7 +185,7 @@ cadastro rápido (`ModalDespesa`) de qualquer tela.
   não entram; parcial entra pela parte empresarial), saúde documental, limite do MEI, CSV/Excel/ZIP.
   Dashboard, relatório e planilha do contador saem dessas mesmas funções.
 - **A receita sai de `fichaFinanceira(cliente, doc, precoPorChave)`, e de nenhum outro lugar.**
-  Setor de cobrança, Indicadores, Receitas, Painel estratégico, Indicadores financeiros, MEI e
+  Setor de cobrança, Conferência de pagamentos, Painel estratégico, Indicadores financeiros, MEI e
   relatórios leem a ficha (direto, ou por `resumirAtendimentos`/`receitaDoPeriodo`). Antes cada
   tela somava do seu jeito e nenhum total batia. A ficha diz:
   - **valor**: lançado no Setor de cobrança → registro da vistoria → preço de tabela (`origemValor`);
@@ -183,6 +195,15 @@ cadastro rápido (`ModalDespesa`) de qualquer tela.
   - **pago**: só `cliente.pagamento` (o backend espelha o registro da vistoria para o cadastro);
     `divergente` aponta caso antigo em que só o registro dizia Pago;
   - **datas**: `dataServico` (competência) e `dataPagamento` (caixa, a que bate com o extrato).
+- **Valor e pagamento se lançam num lugar só**: o Setor de cobrança (vistorias) e a cobrança do
+  card do pedido (ART/TRT) — os dois gravam no cadastro. A tela **Acompanhamento** da Gerência (os
+  registros de vistoria com Pagamento e Valor editáveis) saiu do menu em out/2026: era um segundo
+  lugar de lançar, e os números se desencontravam. `TabelaRegistrosVistoriaDoc` (controle das TRTs)
+  mostra Pagamento e Valor **só para leitura, pela ficha**, e o "Salvar registro" não manda
+  `pagamento`/`valorVistoria`/`valorTrt`: a lista de registros só carrega ao abrir o sistema, e o
+  servidor espelha o pagamento do registro para o cadastro — a cópia velha desfazia a baixa da
+  cobrança (data, forma e recebido apagados). `updCliente` acompanha o pagamento nos registros em
+  memória, como o servidor faz no banco.
 - Baixa manual no Setor de cobrança (`LinhaCobranca`) pede **data e forma** do pagamento. Pago
   antigo sem data nasce com o campo vazio — preencher "hoje" inventaria a data. A aba **Antes da
   vistoria** lista o que ainda não chegou à hora da visita, para registrar pagamento antecipado.
@@ -206,6 +227,7 @@ cadastro rápido (`ModalDespesa`) de qualquer tela.
 - `AbaArtsVistoria` (módulo `arts`, Gerência, Documentação e Atendimento): ART múltipla de vistoria por
   empreendimento — quem está sem ART (do pré-cadastro em diante), emitir ART (até 50 pessoas,
   30 dias da emissão, R$ 69) ou incluir numa ART vigente com vaga. Cada ART vira despesa no servidor.
+  O indicador "Economia vs. individual" é só da Gerência.
 - `AbaFolhaPagamento` (Financeiro › Folha de pagamento, só Gerência): por mês, vistoriador pela
   regra 100/80 calculada **no servidor**, salário fixo do Atendimento (R$ 400) e extras. "Pagar"
   vira uma despesa; o comprovante se anexa ali mesmo (`fin.anexar`). `SalariosFixos` muda o valor
@@ -213,10 +235,12 @@ cadastro rápido (`ModalDespesa`) de qualquer tela.
 - Não existe mais custo fixo por empreendimento: a coluna saiu de Preços por empreendimento e a
   Rede Nacional mostra o valor do técnico pela regra do dia (`valor_tecnico_regra`).
 - `CardValoresCustos` (Configurações Fiscais): valores do técnico, da ART e o salário fixo do Atendimento.
-- `useCustosOperacionais`: o que `CardReceitaEstimada` usa para custo de técnico e de ART — a
-  regra não se repete no front.
+- `useCustosOperacionais`: o que os Indicadores financeiros usam para o custo do técnico de cada
+  vistoria — a regra não se repete no front.
 - Financeiro › **Conferência de pagamentos** (`AbaConferenciaPagamentos`, no App.jsx): "Pago" só no
-  registro, pago sem data, realizado sem valor lançado e o que está a receber.
+  registro, pago sem data, realizado sem valor lançado e o que está a receber. No "Pago só no
+  registro", **Entrou** marca o cadastro (sem inventar data) e **Não entrou** grava no registro a
+  situação do cadastro — pelo registro, porque os antigos casam só pelo CPF.
 - Despesa com `origem` foi lançada pelo sistema (técnico, ART, tarifa do Mercado Pago): o valor
   não se edita (`ModalDespesa` trava o campo; o servidor recusa).
 
@@ -242,7 +266,7 @@ entrega o `apiFetch` por prop — continua sendo o único caminho para a API. Fa
 
 ## Mapa de atuação
 
-Módulo `mapa` (`src/mapa-atuacao.jsx`), no menu da Gerência logo abaixo de Indicadores —
+Módulo `mapa` (`src/mapa-atuacao.jsx`), no menu da Gerência logo abaixo de Indicadores de atendimento —
 **só da Gerência**: clientes e parceiros por cidade são informação comercial. O site
 institucional tem a versão pública (`/api/nacional/mapa-publico`), ligada regional por
 regional em Rede Nacional → Regionais → "No site". Dados de

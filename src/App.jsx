@@ -2218,17 +2218,20 @@ const GERENCIA_MENU_LATERAL = [
   ] },
   { titulo: "Visão geral & Indicadores", itens: [
     { aba: "gerencia", sub: "visao-geral", label: "Visão geral", Icon: LayoutGrid },
-    { aba: "gerencia", sub: "indicadores", label: "Indicadores", Icon: PieChart },
+    { aba: "gerencia", sub: "indicadores", label: "Indicadores de atendimento", Icon: PieChart },
     { aba: "mapa", label: "Mapa de atuação", Icon: IconeMapa },
     { aba: "gerencia", sub: "painel", label: "Painel estratégico", Icon: BarChart3 },
-    { aba: "gerencia", sub: "acompanhamento", label: "Acompanhamento", Icon: ClipboardList },
+    /* "Acompanhamento" (os registros de vistoria com Pagamento e Valor editáveis) saiu daqui:
+       era um segundo lugar de lançar cobrança. Valor e pagamento ficam no Setor de cobrança
+       (Atendimento › Agendamento › Cobrança); o controle das TRTs, em Documentação. */
   ] },
-  /* Os itens "fin-*" são o módulo Despesas e Controle Fiscal; "financeiro" é a tela de receita
-     e preços que já existia, e continua com a mesma chave para não quebrar atalhos do sino.
-     "Indicadores financeiros", e não só "Indicadores": o menu já tem um "Indicadores" (o de
-     atendimentos), e dois itens com o mesmo nome na mesma barra é clique no lugar errado. */
+  /* Os itens "fin-*" são o módulo Despesas e Controle Fiscal; "financeiro" é a tela de preços e
+     outras receitas, e continua com a mesma chave para não quebrar atalhos do sino.
+     Cada número tem uma casa só: quantidade de atendimentos em "Indicadores de atendimento",
+     dinheiro do período em "Indicadores financeiros", cobrar cliente a cliente no Setor de
+     cobrança e na Conferência. */
   { titulo: "Financeiro", itens: [
-    { aba: "gerencia", sub: "financeiro", label: "Receitas", Icon: DollarSign },
+    { aba: "gerencia", sub: "financeiro", label: "Preços e outras receitas", Icon: DollarSign },
     { aba: "gerencia", sub: "fin-despesas", label: "Despesas", Icon: Receipt },
     { aba: "gerencia", sub: "fin-folha", label: "Folha de pagamento", Icon: Wallet },
     { aba: "gerencia", sub: "fin-conferencia", label: "Conferência de pagamentos", Icon: Check },
@@ -2389,6 +2392,12 @@ function AppInterno({ session, onLogout }) {
      mostrava o valor novo, porque a atualização local é otimista. */
   const updCliente = async (id, patch) => {
     setClientes((atual) => atual.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+    /* O servidor acerta o registro da vistoria junto com o cadastro (depoisDeMudarPagamento). A
+       lista de registros só carrega ao abrir o sistema; sem acompanhar aqui, a Conferência e o
+       Painel continuavam vendo o "Pago" antigo do registro até alguém dar F5. */
+    if (patch.pagamento !== undefined) {
+      setDocs((atual) => atual.map((d) => (d.clienteId === id ? { ...d, pagamento: patch.pagamento } : d)));
+    }
     try {
       await apiFetch(`/api/clientes/${id}`, { method: "PATCH", token, body: patch });
       return true;
@@ -3711,7 +3720,7 @@ function AppInterno({ session, onLogout }) {
         {/* Sub-navegação (somente dentro do módulo Qualidade) */}
         {abaTop === "qualidade" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
-            {[["analise", "Análise", ClipboardCheck], ["fila", "Fila de espera", Clock], ["vistoria", "Vistoria", CalendarDays], ["cobranca", "Cobrança", DollarSign], ["feedback", "Feedback", Star], ["acompanhamento", "Acompanhamento", ClipboardList]].map(([k, label, Icon]) => (
+            {[["analise", "Análise", ClipboardCheck], ["fila", "Fila de espera", Clock], ["vistoria", "Vistoria", CalendarDays], ["cobranca", "Cobrança", DollarSign], ["feedback", "Feedback", Star]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setAbaQualidade(k)} className="tab" style={{ borderBottomColor: abaQualidade === k ? AZUL_MEDIO : "transparent", color: abaQualidade === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
                 <Icon size={15} /> {label}
               </button>
@@ -3827,7 +3836,7 @@ function AppInterno({ session, onLogout }) {
         )}
         {abaTop === "gerencia" && String(abaGerencia).startsWith("fin-") && (
           <AbaFinanceiroDespesas sub={abaGerencia} fin={fin} clientes={clientes} docs={docs} precos={precos} usuarios={usuarios}
-            usuarioAtual={session.usuario} telaEstreita={telaEstreita} notify={notify} token={token} updCliente={updCliente} />
+            usuarioAtual={session.usuario} telaEstreita={telaEstreita} notify={notify} token={token} updCliente={updCliente} updDoc={updDoc} />
         )}
         {abaTop === "gerencia" && !String(abaGerencia).startsWith("fin-") && (
           <AbaGerencia sub={abaGerencia} fin={fin} usuarioAtual={session.usuario} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem}
@@ -4724,28 +4733,6 @@ function EtapaTempo({ label, cor, ativa }) {
     </div>
   );
 }
-/* Linha do tempo com as mesmas 4 etapas dos "Indicadores do Agendamento" (ETAPAS_VISTORIA),
-   pra que o acompanhamento conte a mesma história que os números lá de cima. As etapas já
-   percorridas ficam acesas; as que faltam, apagadas. */
-function LinhaDoTempo({ etapaAtual }) {
-  const indiceAtual = ETAPAS_VISTORIA.indexOf(etapaAtual);
-  const etapas = ETAPAS_VISTORIA.map((label, i) => ({
-    label,
-    cor: STATUS_COR[label]?.cor || AZUL_MEDIO,
-    ativa: indiceAtual >= 0 && i <= indiceAtual,
-  }));
-  return (
-    <div style={{ display: "flex", alignItems: "flex-start", gap: 0, marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${CINZA_BORDA}` }}>
-      {etapas.map((e, i) => (
-        <React.Fragment key={e.label}>
-          <EtapaTempo {...e} />
-          {i < etapas.length - 1 && <div style={{ height: 2, background: "#D8DEE7", flex: 0.6, marginTop: 6 }} />}
-        </React.Fragment>
-      ))}
-    </div>
-  );
-}
-
 /* Dispatcher das 3 sub-abas do setor Qualidade (mesmo padrão de "sub" já usado em AbaGerencia). */
 /* Dashboard de indicadores visível nas 3 sub-abas de Qualidade: etapa do fluxo dos
    clientes, status do bloco ART Documentações, e média das avaliações dos clientes. */
@@ -4849,8 +4836,6 @@ function AbaQualidade({ sub = "analise", setSub, token, clientes, clientesCarreg
       {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} abrirAutomaticoId={agendarAgoraId} aoAbrirAutomatico={() => setAgendarAgoraId(null)} aoConfirmar={aoConfirmarVistoria} filtroEtapa={filtroEtapa} />}
       {sub === "cobranca" && <AbaQualidadeCobranca clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente}
         usuarios={usuarios} precos={precos} notify={notify} podeAgir={podeAgir} token={token} />}
-      {sub === "acompanhamento" && <AbaQualidadeAcompanhamento clientes={clientes} clientesCarregando={clientesCarregando}
-        docs={docs} avaliacoes={avaliacoes} filtroEtapa={filtroEtapa} />}
       {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} clientes={clientes} clientesCarregando={clientesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
         solicitarExclusaoAvaliacao={solicitarExclusaoAvaliacao} manterAvaliacao={manterAvaliacao} excluirAvaliacao={excluirAvaliacao} podeAgir={podeAgir} ehGerencia={ehGerencia} filtroEtapa={filtroEtapa} />}
       {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} onAgendarAgora={irParaAgendamento} diaParaAbrir={diaParaAbrir} aoAbrirDia={() => setDiaParaAbrir(null)} filtroEtapa={filtroEtapa} aoTrocarEtapa={setFiltroEtapa} />}
@@ -5321,11 +5306,6 @@ function AbaQualidadeCobranca({ clientes = [], docs = [], carregando, updCliente
   );
 }
 
-/* ================= Acompanhamento do atendimento =================
-   Saiu de dentro do Feedback e virou aba própria. Era a lista mais consultada do
-   Agendamento e ficava enterrada embaixo das avaliações: quem queria só ver em que pé
-   está cada cliente precisava rolar a página inteira. As duas coisas não têm relação —
-   uma é a satisfação de quem já foi atendido, a outra é a fila de quem está sendo. */
 /* Rótulo curto de cada critério, para a equipe ler a nota detalhada sem decorar chave. */
 const ROTULO_CRITERIO = {
   pontualidade: "Pontualidade", atendimento: "Atendimento",
@@ -5346,75 +5326,6 @@ function NotasPorCriterio({ notas }) {
           <Star size={11} color="#E8A317" fill="#E8A317" />
         </span>
       ))}
-    </div>
-  );
-}
-
-function AbaQualidadeAcompanhamento({ clientes = [], clientesCarregando, docs = [], avaliacoes = [], filtroEtapa = null }) {
-  const [busca, setBusca] = useState("");
-
-  const avaliacaoPorDoc = {};
-  avaliacoes.forEach((a) => { if (a.doc_id) avaliacaoPorDoc[a.doc_id] = a; });
-  const docDoCadastro = (c) => docDoCliente(c, docs);
-
-  const termo = busca.trim().toLowerCase();
-  const clientesPorEtapa = {};
-  clientes.forEach((c) => {
-    if (termo && !`${c.nome} ${c.empreendimento}`.toLowerCase().includes(termo)) return;
-    const etapa = etapaVistoriaCliente(c, docs);
-    if (!etapa) return;
-    if (filtroEtapa && etapa !== filtroEtapa) return; // filtro vindo do clique nos indicadores
-    (clientesPorEtapa[etapa] = clientesPorEtapa[etapa] || []).push(c);
-  });
-  const totalAcompanhamento = Object.values(clientesPorEtapa).reduce((s, l) => s + l.length, 0);
-
-  return (
-    <div style={{ display: "grid", gap: 16 }}>
-        <Card icon={ClipboardCheck} titulo="Acompanhamento do atendimento — do início ao fim">
-          <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
-            Cada cliente separado pela etapa em que está agora — as mesmas etapas contadas nos indicadores acima.
-          </p>
-          <input style={{ ...inp, marginBottom: 14 }} placeholder="Buscar por cliente ou empreendimento…" value={busca} onChange={(e) => setBusca(e.target.value)} />
-
-          {clientesCarregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
-          {!clientesCarregando && totalAcompanhamento === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum atendimento encontrado.</p>}
-
-          <div style={{ display: "grid", gap: 20 }}>
-            {ETAPAS_VISTORIA.map((etapa) => {
-              const daEtapa = clientesPorEtapa[etapa] || [];
-              if (daEtapa.length === 0) return null;
-              return (
-                <div key={etapa}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, borderBottom: `2px solid ${CINZA_CLARO}`, paddingBottom: 6 }}>
-                    <Selo valor={etapa} />
-                    <strong style={{ fontSize: 13, color: AZUL_MARINHO }}>{daEtapa.length}</strong>
-                  </div>
-                  <div style={{ display: "grid", gap: 14 }}>
-                    {daEtapa.map((c) => {
-                      const doc = docDoCadastro(c);
-                      const avaliacao = doc ? avaliacaoPorDoc[doc.id] : null;
-                      return (
-                        <div key={c.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-                            <strong style={{ fontSize: 14 }}>{c.nome || "—"}</strong>
-                            <span style={{ fontSize: 12, color: "#65758b" }}>{c.empreendimento}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}</span>
-                          </div>
-                          <LinhaDoTempo etapaAtual={etapa} />
-                          {avaliacao && (
-                            <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
-                              <Estrelas valor={avaliacao.nota} tamanho={13} />
-                              {avaliacao.comentario && <span style={{ fontSize: 12.5, color: "#65758b" }}>"{avaliacao.comentario}"</span>}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
     </div>
   );
 }
@@ -7991,12 +7902,8 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, cli
         </Card>
       )}
 
-      {/* Esta tela é só de Documentação: mostra apenas os registros do serviço "Documentação
-          ART/TRT" (via somenteDocumentacao), mesmo para Gerência. O acompanhamento cruzado com
-          vistoria fica na aba própria da Gerência (AbaGerenciaAcompanhamento), que reaproveita
-          este mesmo componente sem esse filtro. */}
       <TabelaRegistrosVistoriaDoc docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={carregando}
-        notify={notify} clientes={clientes} somenteDocumentacao precos={precos} />
+        notify={notify} clientes={clientes} precos={precos} />
 
       <ConfirmModal aberto={!!removendoCliente} titulo="Apagar cadastro do pedido"
         mensagem={removendoCliente ? `Tem certeza que deseja apagar o cadastro de "${removendoCliente.nome || "cliente sem nome"}"? Os documentos já anexados também somem. Essa ação não pode ser desfeita.` : ""}
@@ -8005,22 +7912,25 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, cli
   );
 }
 
-/* Tabela de registros de vistoria/TRT (tabela "docs"), reaproveitada em dois lugares:
-   - AbaDocumentacao: só documentação (somenteDocumentacao=true), inclusive para Gerência.
-   - AbaGerenciaAcompanhamento: os dois juntos (somenteDocumentacao=false) — visão cruzada
-     que só a Gerência tem, pensada pra acompanhar vistoria e documentação lado a lado. */
-function TabelaRegistrosVistoriaDoc({ docs, addDoc, updDoc, delDoc, carregando, notify, clientes = [], somenteDocumentacao = false, precos = [] }) {
+/* Controle de produção das TRTs de reforma (registros da tabela "docs" ligados a um cadastro de
+   Documentação ART/TRT). Era também a tela "Acompanhamento" da Gerência, com as vistorias
+   junto — e lá o Pagamento e o Valor se editavam no registro, um segundo lugar além do Setor de
+   cobrança. Os dois números se desencontravam (out/2026: "o acompanhamento é a mesma coisa que a
+   cobrança"), e o Acompanhamento saiu do menu. Aqui Pagamento e Valor são só leitura e saem da
+   ficha financeira do cadastro: quem lança é a cobrança do card do pedido, logo acima. */
+function TabelaRegistrosVistoriaDoc({ docs, addDoc, updDoc, delDoc, carregando, notify, clientes = [], precos = [] }) {
   const [editando, setEditando] = useState(null); // registro (cópia) em edição, ou null
   const [filtroVistoria, setFiltroVistoria] = useState("");
   const [busca, setBusca] = useState("");
   const [removendo, setRemovendo] = useState(null);
+  const precoPorChave = useMemo(() => indexarPrecos(precos), [precos]);
 
-  /* Na tela da Documentação entra só o que é dela. Registro sem cadastro correspondente
-     (cliente apagado, ou criado à mão aqui) também fica de fora: não dá para saber a que
-     serviço pertence, e "na dúvida, mostra" enchia a tela de vistoria — que é justamente o
-     que a Documentação não tem o que fazer com. Na Gerência nada é escondido. */
+  /* Entra só o que é da Documentação. Registro sem cadastro correspondente (cliente apagado, ou
+     criado à mão aqui) também fica de fora: não dá para saber a que serviço pertence, e "na
+     dúvida, mostra" enchia a tela de vistoria — que é justamente o que a Documentação não tem o
+     que fazer com. */
   const filtrados = docs.filter((d) => {
-    if (somenteDocumentacao && !ehServicoDocumentacao(clienteDoDoc(d, clientes))) return false;
+    if (!ehServicoDocumentacao(clienteDoDoc(d, clientes))) return false;
     if (filtroVistoria && d.vistoria !== filtroVistoria) return false;
     if (busca && !(`${d.cliente} ${d.empreendimento}`.toLowerCase().includes(busca.toLowerCase()))) return false;
     return true;
@@ -8031,15 +7941,19 @@ function TabelaRegistrosVistoriaDoc({ docs, addDoc, updDoc, delDoc, carregando, 
   const salvar = () => {
     if (!editando.cliente.trim()) { notify("Informe o nome do cliente"); return; }
     const existe = docs.some((d) => d.id === editando.id);
-    if (existe) updDoc(editando.id, editando); else addDoc(editando);
+    /* Pagamento e valor não viajam daqui. O servidor espelha o "pagamento" do registro para o
+       cadastro, e a cópia em memória podia estar velha: corrigir uma observação mandava junto o
+       "Pendente" de antes e desfazia a baixa que o Setor de cobrança (ou o Mercado Pago) acabara
+       de dar — com data e forma do pagamento apagadas. */
+    const { pagamento, valorVistoria, valorTrt, ...registro } = editando;
+    if (existe) updDoc(editando.id, registro); else addDoc(registro);
     setEditando(null);
-    /* Nesta tela a lista só mostra o que pertence a um cadastro de ART/TRT. Um registro
-       avulso salvo aqui sairia da vista na hora seguinte — dizer isso é melhor do que deixar
-       a pessoa procurando o que acabou de gravar. */
-    const ficaVisivel = !somenteDocumentacao || ehServicoDocumentacao(clienteDoDoc(editando, clientes));
-    notify(ficaVisivel
+    /* A lista só mostra o que pertence a um cadastro de ART/TRT. Um registro avulso salvo aqui
+       sairia da vista na hora seguinte — dizer isso é melhor do que deixar a pessoa procurando
+       o que acabou de gravar. */
+    notify(ehServicoDocumentacao(clienteDoDoc(editando, clientes))
       ? "Registro salvo ✓"
-      : "Registro salvo ✓ Ele não aparece nesta lista por não estar ligado a um cadastro de ART/TRT — a Gerência vê em Acompanhamento.");
+      : "Registro salvo ✓ Ele não aparece nesta lista porque o CPF não bate com nenhum cadastro de ART/TRT.");
   };
   const avancarStatusProducao = (d) => {
     const i = STATUS_PRODUCAO_OPCOES.indexOf(d.statusProducao);
@@ -8049,7 +7963,7 @@ function TabelaRegistrosVistoriaDoc({ docs, addDoc, updDoc, delDoc, carregando, 
 
   return (
     <>
-      <Card icon={ClipboardCheck} titulo={somenteDocumentacao ? "Controle de Documentação ART/TRT" : "Acompanhamento — vistorias e documentação"}>
+      <Card icon={ClipboardCheck} titulo="Controle de Documentação ART/TRT">
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
           <input style={{ ...inp, flex: 1, minWidth: 200 }} placeholder="Buscar por cliente ou empreendimento…" value={busca} onChange={(e) => setBusca(e.target.value)} />
           <select style={inp} value={filtroVistoria} onChange={(e) => setFiltroVistoria(e.target.value)}>
@@ -8081,6 +7995,7 @@ function TabelaRegistrosVistoriaDoc({ docs, addDoc, updDoc, delDoc, carregando, 
                   const cliDoRegistro = clienteDoDoc(d, clientes);
                   const seqRevistoria = Number(d.revistoria_seq) || Number(cliDoRegistro?.revistoriaSeq) || 0;
                   const marcarRevistoria = seqRevistoria > 0 || ehRevistoria(cliDoRegistro);
+                  const ficha = fichaFinanceira(cliDoRegistro, d, precoPorChave);
                   return (
                   <tr key={d.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
                     <td style={{ padding: "8px 10px", fontWeight: 600 }}>
@@ -8091,9 +8006,10 @@ function TabelaRegistrosVistoriaDoc({ docs, addDoc, updDoc, delDoc, carregando, 
                     </td>
                     <td style={{ padding: "8px 10px" }}>{d.empreendimento || "—"}{d.blocoTorre ? ` · ${d.blocoTorre}` : ""}</td>
                     <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{d.data ? d.data.split("-").reverse().join("/") : "—"}</td>
-                    <td style={{ padding: "8px 10px" }}><Selo valor={d.pagamento} /></td>
+                    <td style={{ padding: "8px 10px" }}><Selo valor={ficha.situacao} /></td>
                     <td style={{ padding: "8px 10px", whiteSpace: "nowrap", fontSize: 12, color: "#4a5a70" }}>
-                      {((Number(d.valorVistoria) || 0) + (Number(d.valorTrt) || 0)).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                      {fmtReal(ficha.valor)}
+                      {ficha.origemValor !== "lancado" && <div style={{ fontSize: 11, color: "#B26A00" }}>falta lançar</div>}
                     </td>
                     <td style={{ padding: "8px 10px" }}><Selo valor={d.vistoria} /></td>
                     <td style={{ padding: "8px 10px" }}>
@@ -8124,31 +8040,10 @@ function TabelaRegistrosVistoriaDoc({ docs, addDoc, updDoc, delDoc, carregando, 
             <Grid>
               <Field label="Cliente" value={editando.cliente} onChange={(v) => setEditando({ ...editando, cliente: v })} full />
               <Field label="CPF" value={editando.cpf} onChange={(v) => setEditando({ ...editando, cpf: v })} />
-              <Field label="Empreendimento" value={editando.empreendimento}
-                onChange={(v) => {
-                  /* O valor da vistoria/TRT some da tabela de preços por empreendimento assim que
-                     o nome bate certinho com um cadastro lá — poupa o gerente de digitar de novo
-                     o que já está definido. Se o empreendimento não tiver preço definido, ou o
-                     nome não bater, o campo de valor não muda: continua editável na mão. */
-                  const preco = precos.find((p) => p.empreendimento === v.trim());
-                  setEditando((ed) => ({
-                    ...ed,
-                    empreendimento: v,
-                    ...(preco?.precoVistoria ? { valorVistoria: preco.precoVistoria } : {}),
-                    ...(preco?.precoDocumentacao ? { valorTrt: preco.precoDocumentacao } : {}),
-                  }));
-                }} />
+              <Field label="Empreendimento" value={editando.empreendimento} onChange={(v) => setEditando({ ...editando, empreendimento: v })} />
               <Field label="Bloco / Apto / Complemento" value={editando.blocoTorre} onChange={(v) => setEditando({ ...editando, blocoTorre: v })} />
               <Field label="Data" type="date" value={editando.data} onChange={(v) => setEditando({ ...editando, data: v })} />
               <Field label="Hora" type="time" value={editando.hora} onChange={(v) => setEditando({ ...editando, hora: v })} />
-              <div style={cell()}>
-                <label style={lab}>Pagamento</label>
-                <select style={inp} value={editando.pagamento} onChange={(e) => setEditando({ ...editando, pagamento: e.target.value })}>
-                  {PAGAMENTO_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
-                </select>
-              </div>
-              <Field label="Valor da vistoria (R$)" type="number" value={editando.valorVistoria} onChange={(v) => setEditando({ ...editando, valorVistoria: v })} />
-              <Field label="Valor do TRT/documentação (R$)" type="number" value={editando.valorTrt} onChange={(v) => setEditando({ ...editando, valorTrt: v })} />
               <div style={cell()}>
                 <label style={lab}>Status da vistoria</label>
                 <select style={inp} value={editando.vistoria} onChange={(e) => setEditando({ ...editando, vistoria: e.target.value })}>
@@ -8169,6 +8064,9 @@ function TabelaRegistrosVistoriaDoc({ docs, addDoc, updDoc, delDoc, carregando, 
               </div>
             </Grid>
             <Area label="Observações" value={editando.observacoes} onChange={(v) => setEditando({ ...editando, observacoes: v })} rows={2} />
+            <p style={{ fontSize: 12.5, color: "#65758b", margin: "10px 0 0" }}>
+              Valor e pagamento se lançam na cobrança do card do pedido, acima — é o lançamento que o Financeiro lê.
+            </p>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
               <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setEditando(null)}>Cancelar</button>
               <button className="btn-solid" onClick={salvar}><Save size={15} /> Salvar registro</button>
@@ -12179,9 +12077,6 @@ function CardPrecoEmpreendimento({ precos, carregando, salvarPreco, empreendimen
     </Card>
   );
 }
-/* Receita cruzando empreendimento x tipo de serviço: uma linha por combinação, com o valor
-   unitário ao lado, o total da linha e o total geral no rodapé. Conta só o que foi
-   efetivamente entregue — vistoria atendida e documentação concluída. */
 /* "Vila das Palmeiras", "VILA DAS PALMEIRAS" e "Residencial Vila das Palmeiras" são o mesmo
    prédio digitado de formas diferentes — sem isso, cada variação virava uma linha própria no
    relatório, duplicando quantidade e diluindo o total. Além de ignorar maiúscula/minúscula,
@@ -12196,461 +12091,15 @@ function normalizarChaveEmpreendimento(s) {
   return semAcento.replace(/^(residencial|condominio|edificio|cond\.?|ed\.?|res\.?)\s+/, "").trim();
 }
 
-/* Custos desta tela vêm do servidor (useCustosOperacionais → src/custos.js no backend), os
-   mesmos que viram despesa: técnico pela regra 100/80 (revistoria 80, Gerência não recebe),
-   ART da documentação por serviço concluído e ART múltipla de vistoria por ART emitida. Antes o
-   técnico saía de um "custo por empreendimento" e a ART de um número fixo aqui no front — e o
-   lucro desta tela não batia com o resultado do Financeiro. */
-function CardReceitaEstimada({ precos, clientes, docs = [], usuarios = [], periodo = PERIODO_TUDO, custos = null }) {
-  const [busca, setBusca] = useState("");
-  const [ordem, setOrdem] = useState({ chave: "total", dir: "desc" });
-  const [metricaGrafico, setMetricaGrafico] = useState("total");
-
-  const nomeVistoriadorPorId = {};
-  /* A Gerência também vai a campo, mas não recebe por vistoria: o pagamento dela seria a
-     empresa pagando a si mesma. O valor que caberia ao técnico fica em casa e entra no lucro
-     (ver "lucro extra", abaixo). */
-  const ehGerenciaPorId = {};
-  usuarios.forEach((u) => {
-    if (!fazVistoria(u)) return;
-    nomeVistoriadorPorId[u.id] = u.nome;
-    ehGerenciaPorId[u.id] = u.role === "gerencia";
-  });
-
-  const precoPorChave = {};
-  const nomeCanonicoPorChave = {};
-  precos.forEach((p) => {
-    const chave = normalizarChaveEmpreendimento(p.empreendimento);
-    precoPorChave[chave] = p;
-    nomeCanonicoPorChave[chave] = p.empreendimento;
-  });
-
-  /* O que conta como serviço entregue.
-     Antes a vistoria entrava na receita quando o cadastro estava marcado como "atendido" —
-     só que essa marca é ligada automaticamente ao ABRIR o cadastro na tela, mesmo sem
-     ninguém ter ido ao imóvel. Consultar um cliente somava dinheiro no relatório.
-     Agora o marco é o laudo aprovado e enviado ao cliente, que é quando o serviço de fato
-     terminou (e é o mesmo momento em que o sistema já grava a data de aprovação). */
-  /* Hoje o marco é o da ficha financeira (fichaFinanceira): vistoria REALIZADA — o registro
-     nasce quando o técnico finaliza, e é também quando ele passa a ter o que receber —, e
-     documentação pronta. O laudo de um cadastro continua se achando por cliente_id
-     (docDoCliente), nunca por CPF: casando por CPF, quem comprou duas unidades contava duas vezes. */
-  const artValor = Number(custos?.config?.artValor ?? 69);
-  const custoTecnicoPorCliente = {};
-  (custos?.vistorias || []).forEach((v) => { if (v.clienteId) custoTecnicoPorCliente[v.clienteId] = v; });
-
-  const SERVICOS = [
-    { chave: "vistoria", rotulo: "Vistoria de entrega de chaves", campoPreco: "precoVistoria" },
-    { chave: "documentacao", rotulo: SERVICO_DOCUMENTACAO, campoPreco: "precoDocumentacao" },
-  ];
-
-  // chave "empreendimento-normalizado||servico" -> { qtd, cobrado, recebido, custo… }
-  const cruzamento = {};
-  const linhaDe = (bruto, servico) => {
-    const chaveEmp = normalizarChaveEmpreendimento(bruto);
-    const k = `${chaveEmp}||${servico}`;
-    if (!cruzamento[k]) {
-      // Nome exibido: prioriza a grafia cadastrada em "Preço por empreendimento" (é a que a
-      // Gerência definiu como padrão); sem isso, a primeira grafia que aparecer decide.
-      cruzamento[k] = { chaveEmp, empreendimento: nomeCanonicoPorChave[chaveEmp] || bruto, servico,
-        qtd: 0, qtdPagos: 0, qtdGerencia: 0, qtdLancados: 0, cobrado: 0, recebido: 0,
-        custo: 0, custoArt: 0, qtdArts: 0, lucroExtra: 0 };
-    }
-    return cruzamento[k];
-  };
-  let vistoriasSemCustoDefinido = 0;
-  const registrar = (c, servico, f) => {
-    const l = linhaDe(c.empreendimento?.trim() || "(sem empreendimento)", servico);
-    l.qtd += 1;
-    if (f.situacao === "Pago") l.qtdPagos += 1;
-    l.cobrado += f.valor;
-    if (f.origemValor === "lancado") l.qtdLancados += 1;
-    l.recebido += f.recebido;
-    /* A ART da documentação custa quando é emitida (documentação pronta); paga antes disso,
-       a receita já entra e o custo vem depois. */
-    if (servico === "documentacao") { if (f.realizado) l.custo += artValor; return; }
-    /* Vistoria: o custo é o que o técnico recebe por ela (regra 100/80). Feita pela Gerência
-       não custa nada — o que caberia ao técnico fica em casa e aparece como lucro extra. */
-    const t = custoTecnicoPorCliente[c.id];
-    /* Pago e ainda não vistoriado: o técnico ainda não tem o que receber. */
-    if (!t) { if (f.realizado) vistoriasSemCustoDefinido += 1; return; }
-    if (t.daGerencia) { l.qtdGerencia += 1; l.lucroExtra += t.valorReferencia; } else l.custo += t.valor;
-  };
-
-
-  let foraDoRelatorio = 0;
-  /* Mesmo recorte de período do resto da Gerência (ver FiltroPeriodo/dentroDoPeriodo): a data
-     que vale é a do serviço prestado, não a do cadastro. Quem fica de fora por não ter essa
-     data é dito na tela — sumir calado é o que fazia o total de um recorte não bater com o
-     total de "Todo o período". */
-  const semData = periodo.granularidade !== "tudo"
-    ? clientes.filter((c) => c.status !== "Cancelado" && !partesDaData(dataDeReferencia(c, docs))).length
-    : 0;
-  clientes.forEach((c) => {
-    if (c.status === "Cancelado") return;
-    if (!dentroDoPeriodo(dataDeReferencia(c, docs), periodo)) return;
-    const f = fichaFinanceira(c, docDoCliente(c, docs), precoPorChave);
-    if (!f.faturado) return;
-    if (ehServicoDocumentacao(c)) registrar(c, "documentacao", f);
-    else if (ehTrabalhoDeVistoria(c)) registrar(c, "vistoria", f);
-    // Serviço "Outro" não tem preço de tabela e sumia daqui sem avisar ninguém.
-    else if (c.servico) foraDoRelatorio += 1;
-  });
-  /* ART múltipla de vistoria: custo do empreendimento no mês em que foi emitida, uma vez por
-     ART — e não por pessoa. É a economia que a ART múltipla existe para dar. */
-  (custos?.arts || []).forEach((a) => {
-    if (!dentroDoPeriodo(a.emitidaEm, periodo)) return;
-    const l = linhaDe(a.empreendimento, "vistoria");
-    l.custo += a.valor; l.custoArt += a.valor; l.qtdArts += 1;
-  });
-
-  /* Pagamento aos técnicos: o mesmo cálculo da tela Financeiro › Pagamento de técnicos. */
-  const porTecnico = {};
-  (custos?.vistorias || []).filter((v) => dentroDoPeriodo(v.dia, periodo)).forEach((v) => {
-    const t = (porTecnico[v.tecnicoId] ||= { id: v.tecnicoId, nome: v.tecnicoNome || nomeVistoriadorPorId[v.tecnicoId] || "(técnico removido)",
-      ehGerencia: v.daGerencia, qtd: 0, valor: 0, pago: 0 });
-    t.qtd += 1;
-    t.valor += v.daGerencia ? v.valorReferencia : v.valor;
-    if (v.pago) t.pago += v.valorPago ?? v.valor;
-  });
-  const pagamentosTecnicos = Object.values(porTecnico).sort((a, b) => b.valor - a.valor);
-  /* Só sai dinheiro para quem não é a casa: o valor da Gerência aparece na tabela para dar a
-     medida do trabalho, mas fora do total a pagar. */
-  const totalPagamentosTecnicos = pagamentosTecnicos.filter((x) => !x.ehGerencia).reduce((s, p) => s + p.valor, 0);
-  const totalPagoTecnicos = pagamentosTecnicos.filter((x) => !x.ehGerencia).reduce((s, p) => s + p.pago, 0);
-  const totalTrabalhoGerencia = pagamentosTecnicos.filter((x) => x.ehGerencia).reduce((s, p) => s + p.valor, 0);
-
-  const linhas = Object.values(cruzamento)
-    .map((l) => {
-      const def = SERVICOS.find((s) => s.chave === l.servico);
-      const unitario = Number(precoPorChave[l.chaveEmp]?.[def.campoPreco]) || 0;
-      const custo = l.custo;
-      const lucroExtra = l.lucroExtra;
-      const total = l.cobrado;
-      /* O "valor unitário" da tela vira a média do que foi cobrado nesta linha — assim
-         unitário × quantidade continua batendo com o total, que é a conta que o olho faz. */
-      const unitarioExibido = l.qtd ? total / l.qtd : unitario;
-      return { ...l, rotulo: def.rotulo, unitario: unitarioExibido, precoTabela: unitario,
-        total, recebido: l.recebido, custo, lucroExtra, lucro: total - custo };
-    })
-    .sort((a, b) => b.total - a.total || a.empreendimento.localeCompare(b.empreendimento, "pt-BR"));
-
-  const termoBusca = busca.trim().toLowerCase();
-  const linhasFiltradas = termoBusca
-    ? linhas.filter((l) => `${l.empreendimento} ${l.rotulo}`.toLowerCase().includes(termoBusca))
-    : linhas;
-
-  const totalGeral = linhasFiltradas.reduce((s, l) => s + l.total, 0);
-  const totalRecebido = linhasFiltradas.reduce((s, l) => s + l.recebido, 0);
-  const totalServicos = linhasFiltradas.reduce((s, l) => s + l.qtd, 0);
-  const totalCusto = linhasFiltradas.reduce((s, l) => s + l.custo, 0);
-  const totalLucro = totalGeral - totalCusto;
-  /* Quanto do lucro veio de vistoria que a própria Gerência fez — trabalho que a empresa não
-     precisou pagar. Vem do mesmo cálculo das linhas, para bater com o rodapé da tabela. */
-  const totalLucroExtra = linhasFiltradas.reduce((s, l) => s + (l.lucroExtra || 0), 0);
-  /* Linha sem dinheiro nenhum: nem valor lançado na cobrança, nem preço de tabela. */
-  const semPreco = linhasFiltradas.filter((l) => l.total === 0 && l.qtd > 0); // linha só com custo de ART não é "sem preço"
-
-  const num = { textAlign: "right", whiteSpace: "nowrap" };
-
-  /* Ordenação clicável da tabela: clicar de novo no mesmo cabeçalho inverte a direção;
-     trocar de coluna começa decrescente pra número (maior primeiro) e crescente pra texto. */
-  const COLUNAS_TABELA = [
-    { chave: "empreendimento", rotulo: "Empreendimento", tipo: "texto" },
-    { chave: "rotulo", rotulo: "Serviço", tipo: "texto" },
-    { chave: "qtd", rotulo: "Qtd", tipo: "numero" },
-    { chave: "unitario", rotulo: "Valor unitário", tipo: "numero" },
-    { chave: "total", rotulo: "Total", tipo: "numero" },
-    { chave: "custo", rotulo: "Custo", tipo: "numero" },
-    { chave: "recebido", rotulo: "Recebido", tipo: "numero" },
-    { chave: "lucro", rotulo: "Lucro", tipo: "numero" },
-  ];
-  const alternarOrdem = (chave) => setOrdem((o) => {
-    if (o.chave === chave) return { chave, dir: o.dir === "desc" ? "asc" : "desc" };
-    return { chave, dir: COLUNAS_TABELA.find((c) => c.chave === chave).tipo === "texto" ? "asc" : "desc" };
-  });
-  const linhasVisiveis = [...linhasFiltradas].sort((a, b) => {
-    const tipo = COLUNAS_TABELA.find((c) => c.chave === ordem.chave).tipo;
-    const dir = ordem.dir === "asc" ? 1 : -1;
-    return tipo === "texto"
-      ? dir * String(a[ordem.chave]).localeCompare(String(b[ordem.chave]), "pt-BR")
-      : dir * ((Number(a[ordem.chave]) || 0) - (Number(b[ordem.chave]) || 0));
-  });
-
-  // Painel "por empreendimento": soma os serviços de cada um pra dar uma leitura visual rápida.
-  const METRICAS_GRAFICO = {
-    total: { rotulo: "Total", cor: AZUL_MARINHO },
-    custo: { rotulo: "Custo", cor: "#C62828" },
-    recebido: { rotulo: "Recebido", cor: "#2E7D32" },
-    lucro: { rotulo: "Lucro", cor: "#6A4C93" },
-  };
-  const porEmpreendimento = {};
-  linhasFiltradas.forEach((l) => {
-    if (!porEmpreendimento[l.empreendimento]) {
-      porEmpreendimento[l.empreendimento] = { empreendimento: l.empreendimento, total: 0, custo: 0, recebido: 0, lucro: 0 };
-    }
-    const acc = porEmpreendimento[l.empreendimento];
-    acc.total += l.total; acc.custo += l.custo; acc.recebido += l.recebido; acc.lucro += l.lucro;
-  });
-  const todosEmpreendimentos = Object.values(porEmpreendimento);
-  const somaMetricaTotal = todosEmpreendimentos.reduce((s, b) => s + b[metricaGrafico], 0);
-  const barras = todosEmpreendimentos
-    .sort((a, b) => b[metricaGrafico] - a[metricaGrafico])
-    .slice(0, 8);
-  const maxBarra = Math.max(...barras.map((b) => b[metricaGrafico]), 1);
-
-  return (
-    <>
-    <Card icon={TrendingUp} titulo={`Receita por empreendimento e serviço — ${rotuloPeriodo(periodo)}`}>
-      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-        Uma linha por empreendimento e tipo de serviço. Entram os serviços <strong>realizados ou já pagos</strong>:
-        vistoria feita (o técnico finalizou), documentação pronta, ou pagamento confirmado pelo Atendimento — que conta
-        na hora, sem esperar o laudo. É a mesma regra dos Indicadores e do Financeiro.
-        Custos: técnico pela regra do dia ({fmtReal(custos?.config?.tecnicoPrimeiraDoDia ?? 100)} a 1ª vistoria,
-        {" "}{fmtReal(custos?.config?.tecnicoDemaisDoDia ?? 80)} as seguintes, {fmtReal(custos?.config?.tecnicoRevistoria ?? 80)} a revistoria),
-        {" "}{fmtReal(artValor)} por ART da documentação e {fmtReal(artValor)} por ART múltipla de vistoria emitida no
-        período (uma por grupo de até {custos?.config?.artCapacidade ?? 50} pessoas) — a coluna "Lucro" já desconta tudo isso.
-        Vistoria feita pela própria Gerência não entra como custo: não há pagamento a fazer, e o valor que
-        caberia ao técnico aparece como <strong>lucro extra</strong>.
-        {custos && !custos.carregado && <em> Carregando os custos…</em>}
-        Os valores vêm do <strong>Setor de cobrança</strong> (Agendamento → Cobrança) e, na ART/TRT, do card
-        da Documentação, onde se lança o que foi cobrado e como ficou o pagamento; o ponto verde marca as
-        linhas que já têm valor lançado. O que ainda não foi lançado entra pelo valor do registro da vistoria
-        ou, sem ele, pelo preço de tabela do empreendimento — o mesmo número que aparece sugerido na
-        cobrança. "Recebido" soma o que está como Pago (valor cheio) e o que está como Parcial (só o que já entrou).
-      </p>
-
-      {semData > 0 && (
-        <p style={{ fontSize: 12.5, color: "#B26A00", margin: "0 0 14px" }}>
-          {semData} cadastro(s) sem data de referência ficam fora deste recorte — visíveis só em "Todo o período".
-        </p>
-      )}
-
-      {linhas.length === 0 && (
-        <p style={{ color: "#8593a8", fontSize: 14 }}>
-          {periodo.granularidade === "tudo" ? "Nenhum serviço concluído ainda." : "Nenhum serviço concluído neste período."}
-        </p>
-      )}
-
-      {linhas.length > 0 && (
-        <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 16 }}>
-            <KpiCard label="Receita total" valor={fmtReal(totalGeral)} cor={AZUL_MARINHO} percentual={fmtPct(totalGeral, totalGeral)} />
-            <KpiCard label="Custo" valor={fmtReal(totalCusto)} cor="#C62828" percentual={fmtPct(totalCusto, totalGeral)} />
-            <KpiCard label="Recebido" valor={fmtReal(totalRecebido)} cor="#2E7D32" percentual={fmtPct(totalRecebido, totalGeral)} />
-            <KpiCard label="Lucro" valor={fmtReal(totalLucro)} cor="#6A4C93" percentual={fmtPct(totalLucro, totalGeral)} />
-            {totalLucroExtra > 0 && (
-              <KpiCard label="Lucro extra (vistoria da Gerência)" valor={fmtReal(totalLucroExtra)} cor="#2E7D32"
-                percentual={fmtPct(totalLucroExtra, totalLucro)} />
-            )}
-            <KpiCard label="A receber" valor={fmtReal(totalGeral - totalRecebido)} cor="#B26A00" percentual={fmtPct(totalGeral - totalRecebido, totalGeral)} />
-          </div>
-
-          {barras.length > 0 && (
-            <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: "14px 16px", marginBottom: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
-                <strong style={{ fontSize: 13, color: AZUL_MARINHO }}>Por empreendimento</strong>
-                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                  {Object.entries(METRICAS_GRAFICO).map(([k, m]) => (
-                    <button key={k} type="button" onClick={() => setMetricaGrafico(k)}
-                      style={{ padding: "4px 10px", borderRadius: 20, fontSize: 11.5, fontWeight: 600, cursor: "pointer",
-                        border: `1.5px solid ${metricaGrafico === k ? m.cor : CINZA_BORDA}`,
-                        background: metricaGrafico === k ? m.cor : "#fff", color: metricaGrafico === k ? "#fff" : "#4a5a70" }}>
-                      {m.rotulo}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div style={{ display: "grid", gap: 8 }}>
-                {barras.map((b) => (
-                  <div key={b.empreendimento} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{ width: 140, fontSize: 12, color: "#4a5a70", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 0 }} title={b.empreendimento}>
-                      {b.empreendimento}
-                    </div>
-                    <div style={{ flex: 1, height: 16, borderRadius: 8, background: CINZA_CLARO, overflow: "hidden" }}>
-                      <div style={{ width: `${b[metricaGrafico] > 0 ? Math.max((b[metricaGrafico] / maxBarra) * 100, 2) : 0}%`, height: "100%", background: METRICAS_GRAFICO[metricaGrafico].cor, borderRadius: 8, transition: "width .3s" }} />
-                    </div>
-                    <div style={{ width: 128, textAlign: "right", fontSize: 12, fontWeight: 700, color: METRICAS_GRAFICO[metricaGrafico].cor, flexShrink: 0 }}>
-                      {fmtReal(b[metricaGrafico])} <span style={{ fontWeight: 600, opacity: 0.75 }}>({fmtPct(b[metricaGrafico], somaMetricaTotal)})</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <input style={{ ...inp, marginBottom: 14, width: "100%" }} placeholder="Buscar por empreendimento ou serviço…"
-            value={busca} onChange={(e) => setBusca(e.target.value)} />
-
-          {linhasFiltradas.length === 0 && (
-            <p style={{ color: "#8593a8", fontSize: 14 }}>Nada encontrado para "{busca}".</p>
-          )}
-
-          {linhasFiltradas.length > 0 && (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr style={{ background: CINZA_CLARO }}>
-                  {COLUNAS_TABELA.map((c, i) => (
-                    <th key={c.chave} onClick={() => alternarOrdem(c.chave)} title="Clique para ordenar"
-                      style={{ textAlign: i >= 2 ? "right" : "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}`, whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }}>
-                      {c.rotulo}{ordem.chave === c.chave && (ordem.dir === "asc" ? " ▲" : " ▼")}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {linhasVisiveis.map((l) => (
-                  <tr key={`${l.empreendimento}||${l.servico}`} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
-                    <td style={{ padding: "8px 10px", fontWeight: 600 }}>{l.empreendimento}</td>
-                    <td style={{ padding: "8px 10px", color: "#4a5a70" }}>{l.rotulo}</td>
-                    <td style={{ padding: "8px 10px", ...num }}>{l.qtd}</td>
-                    <td style={{ padding: "8px 10px", ...num, color: l.unitario ? "#4a5a70" : "#B26A00" }}
-                      title={l.qtdLancados ? `${l.qtdLancados} de ${l.qtd} com valor lançado no Setor de cobrança` : "Preço de tabela do empreendimento"}>
-                      {l.unitario ? fmtReal(l.unitario) : "sem preço"}
-                      {l.qtdLancados > 0 && (
-                        <span style={{ marginLeft: 5, color: "#2E7D32", fontWeight: 700 }} title="valor vindo do Setor de cobrança">•</span>
-                      )}
-                    </td>
-                    <td style={{ padding: "8px 10px", ...num, fontWeight: 700, color: AZUL_MARINHO }}>{fmtReal(l.total)}</td>
-                    <td style={{ padding: "8px 10px", ...num, color: l.custo ? "#C62828" : "#8593a8" }}>
-                      {l.custo ? fmtReal(l.custo) : "—"}
-                    </td>
-                    <td style={{ padding: "8px 10px", ...num, color: l.recebido >= l.total && l.total > 0 ? "#2E7D32" : "#65758b" }}>
-                      {fmtReal(l.recebido)}
-                    </td>
-                    <td style={{ padding: "8px 10px", ...num, fontWeight: 700, color: "#2E7D32" }}>{fmtReal(l.lucro)}</td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr style={{ borderTop: `2px solid ${CINZA_BORDA}`, background: CINZA_CLARO }}>
-                  <td style={{ padding: "9px 10px", fontWeight: 800, color: AZUL_MARINHO }} colSpan={2}>Total</td>
-                  <td style={{ padding: "9px 10px", ...num, fontWeight: 700 }}>{totalServicos}</td>
-                  <td />
-                  <td style={{ padding: "9px 10px", ...num, fontWeight: 800, color: AZUL_MARINHO }}>{fmtReal(totalGeral)}</td>
-                  <td style={{ padding: "9px 10px", ...num, fontWeight: 800, color: "#C62828" }}>{fmtReal(totalCusto)}</td>
-                  <td style={{ padding: "9px 10px", ...num, fontWeight: 800, color: "#2E7D32" }}>{fmtReal(totalRecebido)}</td>
-                  <td style={{ padding: "9px 10px", ...num, fontWeight: 800, color: "#2E7D32" }}>{fmtReal(totalLucro)}</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-          )}
-
-          <div style={{ marginTop: 12, fontSize: 12.5, color: "#65758b" }}>
-            A receber: <strong style={{ color: "#B26A00" }}>{fmtReal(totalGeral - totalRecebido)}</strong>
-          </div>
-
-          {semPreco.length > 0 && (
-            <div style={{ marginTop: 10, background: "#FFF4E0", color: "#B26A00", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>
-              {semPreco.length} combinação(ões) sem preço cadastrado — esses serviços não entram no total.
-            </div>
-          )}
-
-          {foraDoRelatorio > 0 && (
-            <div style={{ marginTop: 10, background: "#FFF4E0", color: "#B26A00", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>
-              {foraDoRelatorio} cadastro(s) com serviço "Outro" ficam fora deste relatório: esse tipo não
-              tem preço de tabela. Combine o valor com o cliente e registre em Documentação.
-            </div>
-          )}
-        </>
-      )}
-    </Card>
-
-    {pagamentosTecnicos.length > 0 && (
-      <Card icon={Users} titulo={`Pagamento aos vistoriadores — ${rotuloPeriodo(periodo)}`}>
-        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-          Pela regra do dia: a 1ª vistoria do técnico vale {fmtReal(custos?.config?.tecnicoPrimeiraDoDia ?? 100)}, as seguintes
-          {" "}{fmtReal(custos?.config?.tecnicoDemaisDoDia ?? 80)}, e cada revistoria {fmtReal(custos?.config?.tecnicoRevistoria ?? 80)}. Quem recebe é
-          <strong> quem finalizou a vistoria</strong>. Já pago: <strong>{fmtReal(totalPagoTecnicos)}</strong> — o pagamento se registra em
-          Financeiro › Folha de pagamento, com o comprovante, e vira despesa.
-        </p>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead>
-              <tr style={{ background: CINZA_CLARO }}>
-                {["Vistoriador", "Vistorias", "Devido"].map((h, i) => (
-                  <th key={h} style={{ textAlign: i >= 1 ? "right" : "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}`, whiteSpace: "nowrap" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {pagamentosTecnicos.map((p) => (
-                <tr key={p.id} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
-                  <td style={{ padding: "8px 10px", fontWeight: 600 }}>
-                    {p.nome}
-                    {p.ehGerencia && (
-                      <span style={{ marginLeft: 8, background: "#E6F4EA", color: "#2E7D32", borderRadius: 20, padding: "2px 8px", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>
-                        Gerência · vira lucro
-                      </span>
-                    )}
-                  </td>
-                  <td style={{ padding: "8px 10px", ...num }}>{p.qtd}</td>
-                  <td style={{ padding: "8px 10px", ...num, fontWeight: 700, color: p.ehGerencia ? "#2E7D32" : AZUL_MARINHO }}>
-                    {fmtReal(p.valor)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr style={{ borderTop: `2px solid ${CINZA_BORDA}`, background: CINZA_CLARO }}>
-                <td style={{ padding: "9px 10px", fontWeight: 800, color: AZUL_MARINHO }}>Total devido</td>
-                <td style={{ padding: "9px 10px", ...num, fontWeight: 700 }}>{pagamentosTecnicos.reduce((s, p) => s + p.qtd, 0)}</td>
-                <td style={{ padding: "9px 10px", ...num, fontWeight: 800, color: AZUL_MARINHO }}>{fmtReal(totalPagamentosTecnicos)}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-        {totalTrabalhoGerencia > 0 && (
-          <div style={{ marginTop: 10, background: "#E6F4EA", color: "#1B6B51", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>
-            {fmtReal(totalTrabalhoGerencia)} são de vistoria feita pela própria Gerência e ficam fora do total a
-            pagar — a empresa não paga a si mesma. Esse valor entra como <strong>lucro extra</strong> no card
-            "Receita por empreendimento e serviço".
-          </div>
-        )}
-        {vistoriasSemCustoDefinido > 0 && (
-          <div style={{ marginTop: 10, background: "#FFF4E0", color: "#B26A00", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>
-            {vistoriasSemCustoDefinido} vistoria(s) sem técnico registrado — base antiga, feitas pela Gerência antes do
-            sistema: não têm custo de técnico.
-          </div>
-        )}
-      </Card>
-    )}
-    </>
-  );
-}
-
-function AbaGerenciaFinanceiro({ docs, clientes, precos, precosCarregando, salvarPreco, empreendimentosRef = [], adicionarEmpreendimento, removerEmpreendimento, notify, usuarios = [], token }) {
-  const custos = useCustosOperacionais({ token, apiFetch });
-  /* Mesmo recorte de período do resto da Gerência (ver FiltroPeriodo, na aba Indicadores): sem
-     ele a receita, o custo e os pagamentos somavam a base inteira desde o primeiro cadastro, e
-     "fechar o mês" virava separar a planilha na mão. Os anos saem do que existe na base, não de
-     uma lista fixa — o histórico importado começa bem antes de o sistema existir. */
-  const [periodo, setPeriodo] = useState(PERIODO_TUDO);
-  const anos = useMemo(() => {
-    const encontrados = new Set();
-    clientes.forEach((c) => {
-      if (c.status === "Cancelado") return;
-      const p = partesDaData(dataDeReferencia(c, docs));
-      if (p) encontrados.add(p.ano);
-    });
-    encontrados.add(new Date().getFullYear());
-    return [...encontrados].sort((a, b) => b - a);
-  }, [clientes, docs]);
-
+/* Financeiro › Preços e outras receitas. Aqui ficam só os preços por empreendimento (de onde sai a
+   sugestão de cobrança) — as outras receitas entram logo abaixo, em AbaGerencia. A "Receita por
+   empreendimento e serviço" e o "Pagamento aos vistoriadores" que moravam aqui saíram em out/2026:
+   o lucro por empreendimento era uma segunda conta, diferente da Rentabilidade dos Indicadores
+   financeiros (que soma também as despesas ligadas), e o devido aos vistoriadores repetia a Folha
+   de pagamento. Dinheiro do período: Indicadores financeiros; pagar técnico: Folha. */
+function AbaGerenciaFinanceiro({ clientes, precos, precosCarregando, salvarPreco, empreendimentosRef = [], adicionarEmpreendimento, removerEmpreendimento, notify }) {
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <Card icon={CalendarDays} titulo="Recorte por período">
-        <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
-          Escolha o período e a receita, o custo e o pagamento aos vistoriadores abaixo passam a
-          falar só dele — a data que vale é a do serviço prestado, a mesma usada em Indicadores.
-        </p>
-        <FiltroPeriodo periodo={periodo} aoMudar={setPeriodo} anos={anos} />
-      </Card>
-
-      <CardReceitaEstimada precos={precos} clientes={clientes} docs={docs} usuarios={usuarios} periodo={periodo} custos={custos} />
-
       <CardPrecoEmpreendimento precos={precos} carregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef} clientes={clientes}
         adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento} notify={notify} />
     </div>
@@ -14349,7 +13798,7 @@ function AbaFinConfig({ fin, clientes = [], docs = [], precos = [] }) {
    - pago sem data: baixa antiga, não dá para achar no extrato — informe o dia, se souber;
    - realizado sem valor lançado: entra pelo registro da vistoria ou pelo preço de tabela até alguém lançar;
    - realizado e não pago: o que está para receber, do mais antigo para o mais novo. */
-function AbaConferenciaPagamentos({ clientes = [], docs = [], precos = [], updCliente, notify }) {
+function AbaConferenciaPagamentos({ clientes = [], docs = [], precos = [], updCliente, updDoc, notify }) {
   const precoPorChave = useMemo(() => {
     const mapa = {};
     precos.forEach((p) => { mapa[normalizarChaveEmpreendimento(p.empreendimento)] = p; });
@@ -14384,6 +13833,16 @@ function AbaConferenciaPagamentos({ clientes = [], docs = [], precos = [], updCl
     setTrabalhando(false);
     notify(`${ok} cadastro(s) marcado(s) como pago ✓`);
   };
+  /* O caminho contrário: o extrato não mostra o dinheiro, então quem está certo é o cadastro, e o
+     registro da vistoria recebe a situação dele. Vai pelo registro, e não pelo cadastro, porque os
+     antigos casam só pelo CPF (sem cliente_id) e o servidor não os alcança pelo cadastro. Antes
+     isso se fazia editando o registro na tela Acompanhamento, que saiu do menu. */
+  const manterCadastro = async (x) => {
+    const doc = docDoCliente(x.c, docs);
+    if (!doc) return;
+    await updDoc(doc.id, { pagamento: x.f.situacao });
+    notify(`Registro acertado para "${x.f.situacao}", como no cadastro ✓`);
+  };
   const gravarData = async (x) => {
     const dia = datas[x.c.id];
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dia || ""))) { notify("Escolha a data do pagamento."); return; }
@@ -14409,7 +13868,8 @@ function AbaConferenciaPagamentos({ clientes = [], docs = [], precos = [], updCl
       <Card icon={AlertTriangle} titulo={`"Pago" só no registro da vistoria (${divergentes.length})`}>
         <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
           O registro da vistoria diz Pago, o cadastro (onde o Setor de cobrança e o Financeiro leem) não. Confira no extrato e, se entrou,
-          marque como pago — a data fica em branco até alguém informar, para o dinheiro não cair no mês errado.
+          marque como pago — a data fica em branco até alguém informar, para o dinheiro não cair no mês errado. Se não entrou, "Não entrou"
+          deixa o cadastro como está e acerta o registro.
         </p>
         {divergentes.length === 0 ? <p style={{ fontSize: 13, color: "#1B7F4B", margin: 0 }}>Nada a conferir. ✓</p> : (
           <>
@@ -14422,8 +13882,9 @@ function AbaConferenciaPagamentos({ clientes = [], docs = [], precos = [], updCl
                     <td style={td}>{fmtData(x.f.dataServico)}</td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtReal(x.f.valor)}</td>
                     <td style={td}><Selo valor={x.f.situacao} /></td>
-                    <td style={{ ...td, textAlign: "right" }}>
-                      <button className="btn-mini" disabled={trabalhando} onClick={() => marcarPago([x])}><Check size={12} /> Entrou — marcar pago</button>
+                    <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>
+                      <button className="btn-mini" disabled={trabalhando} onClick={() => marcarPago([x])}><Check size={12} /> Entrou — marcar pago</button>{" "}
+                      <button className="btn-mini" disabled={trabalhando} onClick={() => manterCadastro(x)}><X size={12} /> Não entrou</button>
                     </td>
                   </tr>
                 ))}</tbody>
@@ -14511,12 +13972,12 @@ function AbaConferenciaPagamentos({ clientes = [], docs = [], precos = [], updCl
   );
 }
 
-function AbaFinanceiroDespesas({ sub, fin, clientes = [], docs = [], precos = [], usuarios = [], usuarioAtual, telaEstreita, notify, token, updCliente }) {
+function AbaFinanceiroDespesas({ sub, fin, clientes = [], docs = [], precos = [], usuarios = [], usuarioAtual, telaEstreita, notify, token, updCliente, updDoc }) {
   const comum = { fin, clientes, usuarios, usuarioAtual, telaEstreita, notify };
   /* Folha: vistoriadores, salário fixo e extras. O comprovante se anexa na despesa do
      pagamento, por isso a folha recebe o "fin" inteiro. */
   if (sub === "fin-folha") return <AbaFolhaPagamento token={token} apiFetch={apiFetch} notify={notify} fin={fin} usuarios={usuarios} />;
-  if (sub === "fin-conferencia") return <AbaConferenciaPagamentos clientes={clientes} docs={docs} precos={precos} updCliente={updCliente} notify={notify} />;
+  if (sub === "fin-conferencia") return <AbaConferenciaPagamentos clientes={clientes} docs={docs} precos={precos} updCliente={updCliente} updDoc={updDoc} notify={notify} />;
   if (sub === "fin-notas") return <AbaFinNotas {...comum} />;
   if (sub === "fin-deslocamentos") return <AbaFinDeslocamentos {...comum} docs={docs} precos={precos} />;
   if (sub === "fin-relatorios") return <AbaFinRelatorios fin={fin} clientes={clientes} docs={docs} precos={precos} notify={notify} />;
@@ -14654,10 +14115,12 @@ function AbaGerenciaReformas({ usuarioAtual, perfil }) {
 }
 
 /* ============================================================
-   GERÊNCIA · INDICADORES
+   GERÊNCIA · INDICADORES DE ATENDIMENTO
    Os mesmos números que a Visão geral já mostrava, agora separados nos três eixos que antes
    ficavam somados num total só: histórico importado × operação de hoje, vistoria × ART/TRT, e
    por empreendimento/construtora. O recorte de período (mês, trimestre, ano) vale para os três.
+   Só quantidade: o faturado, o recebido e o previsto desta tela repetiam os Indicadores
+   financeiros com outro total (lá entram as outras receitas), e saíram em out/2026.
    ============================================================ */
 function AbaGerenciaIndicadores({ clientes = [], docs = [], precos = [], carregando }) {
   const [periodo, setPeriodo] = useState(PERIODO_TUDO);
@@ -14716,21 +14179,18 @@ function AbaGerenciaIndicadores({ clientes = [], docs = [], precos = [], carrega
          obra diferente quebra justamente o indicador de concentração. */
       const bruto = (c.empreendimento || "").trim() || "(sem empreendimento)";
       const chave = normalizarChaveEmpreendimento(bruto);
-      const g = mapa[chave] || (mapa[chave] = { chave, nomes: {}, construtoras: {}, vistorias: 0, documentacoes: 0, cobrado: 0, previsto: 0, recebido: 0 });
+      const g = mapa[chave] || (mapa[chave] = { chave, nomes: {}, construtoras: {}, vistorias: 0, documentacoes: 0 });
       g.nomes[bruto] = (g.nomes[bruto] || 0) + 1;
       const construtora = (c.construtora || "").trim();
       if (construtora) g.construtoras[construtora] = (g.construtoras[construtora] || 0) + 1;
-      const f = fichaFinanceira(c, docDoCliente(c, docs), precoPorChave);
-      if (f.faturado) g.cobrado += f.valor; else if (!f.cancelado) g.previsto += f.valor;
-      if (!f.cancelado) g.recebido += f.recebido;
       if (ehServicoDocumentacao(c)) g.documentacoes += 1;
       else if (ehTrabalhoDeVistoria(c)) g.vistorias += 1;
     });
     const maisComum = (obj) => Object.entries(obj).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
     return Object.values(mapa)
       .map((g) => ({ ...g, nome: maisComum(g.nomes) || g.chave, construtora: maisComum(g.construtoras) }))
-      .sort((a, b) => b.cobrado - a.cobrado || (b.vistorias + b.documentacoes) - (a.vistorias + a.documentacoes));
-  }, [daOrigem, docs, periodo, precoPorChave]);
+      .sort((a, b) => (b.vistorias + b.documentacoes) - (a.vistorias + a.documentacoes) || a.nome.localeCompare(b.nome, "pt-BR"));
+  }, [daOrigem, docs, periodo]);
 
   const termo = buscaObra.trim().toLowerCase();
   const carteiraVisivel = termo
@@ -14739,10 +14199,7 @@ function AbaGerenciaIndicadores({ clientes = [], docs = [], precos = [], carrega
   const totalCarteira = carteiraVisivel.reduce((acc, g) => ({
     vistorias: acc.vistorias + g.vistorias,
     documentacoes: acc.documentacoes + g.documentacoes,
-    cobrado: acc.cobrado + g.cobrado,
-    previsto: acc.previsto + g.previsto,
-    recebido: acc.recebido + g.recebido,
-  }), { vistorias: 0, documentacoes: 0, cobrado: 0, previsto: 0, recebido: 0 });
+  }), { vistorias: 0, documentacoes: 0 });
 
   const pilulaOrigem = (chave, rotulo, quantos) => {
     const ativo = origem === chave;
@@ -14766,32 +14223,21 @@ function AbaGerenciaIndicadores({ clientes = [], docs = [], precos = [], carrega
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
         <KpiPeriodo label="Atendimentos" valor={resumo.qtd} anterior={resumoAntes?.qtd} cor={cor} Icon={ClipboardList} />
+        <KpiPeriodo label="Realizados" valor={resumo.realizados} anterior={resumoAntes?.realizados} cor={AZUL_MARINHO} Icon={ClipboardCheck}
+          apoio={fmtPct(resumo.realizados, resumo.qtd) + " do período"} />
         <KpiPeriodo label={rotuloConcluido} valor={resumo.concluidos} anterior={resumoAntes?.concluidos} cor="#2E7D32" Icon={Check}
           apoio={fmtPct(resumo.concluidos, resumo.qtd) + " do período"} />
-        <KpiPeriodo label="Faturado (realizado ou pago)" valor={resumo.faturado} anterior={resumoAntes?.faturado} formatar={fmtReal} cor={AZUL_MARINHO} Icon={DollarSign}
-          apoio={`${resumo.realizados} realizado(s) · ticket médio ${fmtReal(resumo.ticket)}`} />
-        <KpiPeriodo label="Recebido" valor={resumo.recebido} anterior={resumoAntes?.recebido} formatar={fmtReal} cor="#2E7D32" Icon={Percent}
-          apoio={fmtPct(resumo.recebido, resumo.faturado) + " do faturado"} />
-        <KpiPeriodo label="A receber" valor={resumo.aReceber} anterior={resumoAntes?.aReceber} formatar={fmtReal} cor="#B26A00" Icon={Clock}
-          apoio="faturado e ainda não quitado" />
-        <KpiPeriodo label="Previsto" valor={resumo.previsto} anterior={resumoAntes?.previsto} formatar={fmtReal} cor="#65758b" Icon={CalendarDays}
-          apoio="agendado, ainda não realizado nem pago" />
       </div>
-      {(resumo.semValorLancado > 0 || resumo.divergentes > 0) && (
-        <div style={{ marginTop: 10, background: "#FFF4E0", color: "#8a5300", padding: "8px 11px", borderRadius: 8, fontSize: 12.5, display: "grid", gap: 3 }}>
-          {resumo.semValorLancado > 0 && <span>{resumo.semValorLancado} realizado(s) sem valor lançado no Setor de cobrança — contados pelo registro da vistoria ou pelo preço de tabela.</span>}
-          {resumo.divergentes > 0 && <span>{resumo.divergentes} com "Pago" só no registro da vistoria — confira em Financeiro › Conferência de pagamentos.</span>}
-        </div>
-      )}
     </div>
   );
 
   return (
     <>
-      <Card icon={PieChart} titulo="Indicadores por período">
+      <Card icon={PieChart} titulo="Indicadores de atendimento por período">
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
           Vistoria e ART/TRT contados separadamente, com o histórico importado apartado da operação
           de hoje. Escolha o recorte e todos os blocos abaixo passam a falar do mesmo período.
+          Valores (faturado, recebido, previsto) ficam em Financeiro › Indicadores financeiros.
         </p>
 
         <div style={{ display: "grid", gap: 10, marginBottom: 14 }}>
@@ -14833,7 +14279,7 @@ function AbaGerenciaIndicadores({ clientes = [], docs = [], precos = [], carrega
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: CINZA_CLARO }}>
-                  {["Empreendimento", "Construtora", "Vistorias", "ART/TRT", "Faturado", "Previsto", "Recebido"].map((h, i) => (
+                  {["Empreendimento", "Construtora", "Vistorias", "ART/TRT"].map((h, i) => (
                     <th key={h} style={{ textAlign: i > 1 ? "right" : "left", padding: "8px 10px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}`, whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
@@ -14845,18 +14291,12 @@ function AbaGerenciaIndicadores({ clientes = [], docs = [], precos = [], carrega
                     <td style={{ padding: "8px 10px", color: "#4a5a70" }}>{g.construtora || "—"}</td>
                     <td style={{ padding: "8px 10px", textAlign: "right" }}>{g.vistorias || "—"}</td>
                     <td style={{ padding: "8px 10px", textAlign: "right" }}>{g.documentacoes || "—"}</td>
-                    <td style={{ padding: "8px 10px", textAlign: "right", whiteSpace: "nowrap" }}>{fmtReal(g.cobrado)}</td>
-                    <td style={{ padding: "8px 10px", textAlign: "right", whiteSpace: "nowrap", color: "#65758b" }}>{fmtReal(g.previsto)}</td>
-                    <td style={{ padding: "8px 10px", textAlign: "right", whiteSpace: "nowrap", color: "#2E7D32" }}>{fmtReal(g.recebido)}</td>
                   </tr>
                 ))}
                 <tr style={{ background: CINZA_CLARO, fontWeight: 700 }}>
                   <td style={{ padding: "8px 10px" }} colSpan={2}>Total ({carteiraVisivel.length} empreendimento(s))</td>
                   <td style={{ padding: "8px 10px", textAlign: "right" }}>{totalCarteira.vistorias}</td>
                   <td style={{ padding: "8px 10px", textAlign: "right" }}>{totalCarteira.documentacoes}</td>
-                  <td style={{ padding: "8px 10px", textAlign: "right", whiteSpace: "nowrap" }}>{fmtReal(totalCarteira.cobrado)}</td>
-                  <td style={{ padding: "8px 10px", textAlign: "right", whiteSpace: "nowrap", color: "#65758b" }}>{fmtReal(totalCarteira.previsto)}</td>
-                  <td style={{ padding: "8px 10px", textAlign: "right", whiteSpace: "nowrap", color: "#2E7D32" }}>{fmtReal(totalCarteira.recebido)}</td>
                 </tr>
               </tbody>
             </table>
@@ -15702,7 +15142,7 @@ function AbaGerenciaImportacao({ clientes = [], precos = [], empreendimentosRef 
             </div>
           )}
           <p style={{ fontSize: 12.5, color: "#65758b", margin: "12px 0 0" }}>
-            Os cadastros importados já aparecem em <strong>Gerência → Indicadores</strong>, no filtro
+            Os cadastros importados já aparecem em <strong>Indicadores de atendimento</strong>, no filtro
             "Base antiga importada", e no Perfil do cliente.
           </p>
         </Card>
@@ -15727,10 +15167,6 @@ function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, de
     return <AbaGerenciaImportacao clientes={clientes} precos={precos} empreendimentosRef={empreendimentosRef}
       importarClientesHistorico={importarClientesHistorico} notify={notify} />;
   }
-  if (sub === "acompanhamento") {
-    return <TabelaRegistrosVistoriaDoc docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc}
-      carregando={carregando} notify={notify} clientes={clientes} precos={precos} />;
-  }
   if (sub === "reformas") {
     return <AbaGerenciaReformas usuarioAtual={usuarioAtual} perfil={perfil} />;
   }
@@ -15751,8 +15187,8 @@ function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, de
   if (sub === "financeiro") {
     return (
       <div style={{ display: "grid", gap: 16 }}>
-        <AbaGerenciaFinanceiro docs={docs} clientes={clientes} precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
-          adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento} notify={notify} usuarios={usuarios} token={token} />
+        <AbaGerenciaFinanceiro clientes={clientes} precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
+          adicionarEmpreendimento={adicionarEmpreendimento} removerEmpreendimento={removerEmpreendimento} notify={notify} />
         {fin && <CardOutrasReceitas fin={fin} />}
       </div>
     );
@@ -18253,8 +17689,8 @@ function ModalPedirRevistoria({ atendimento, onFechar, onEnviar }) {
   );
 }
 
-/* Fluxograma visual do atendimento no portal do cliente — mesma ideia de LinhaDoTempo (uso
-   interno da equipe, sobre ETAPAS_VISTORIA), mas com o vocabulário mais simples que o cliente
+/* Fluxograma visual do atendimento no portal do cliente — mesma ideia da linha do tempo do
+   técnico (LinhaDoTempoTecnico), mas com o vocabulário mais simples que o cliente
    já recebe em STATUS_ATENDIMENTO_INFO. Documentação ART/TRT tem fluxo próprio de 2 passos
    (Elaborando/Documentação pronta) e não entra aqui — o texto explicativo já dá conta disso;
    status fora da lista (ex.: "Cancelado") também não mostra a linha, só o texto de sempre. */
