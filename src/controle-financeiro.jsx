@@ -173,7 +173,11 @@ export function AbaArtsVistoria({ token, apiFetch, notify, perfil, clientes = []
           <Kpi rotulo="Pessoas cobertas" valor={cobertas} apoio="em todas as ARTs" cor={VERDE} />
           <Kpi rotulo="Sem ART" valor={totalSemArt} apoio={`vistorias desde ${dataBr(aPartirDe)}`} cor={totalSemArt ? AMBAR : VERDE} />
           <Kpi rotulo="Vistoria feita sem ART" valor={totalFeitasSemArt} apoio="precisam entrar numa ART" cor={totalFeitasSemArt ? VERMELHO : VERDE} />
-          <Kpi rotulo="Economia vs. individual" valor={brl(economia)} apoio={`${cobertas} pessoas em ${arts.length} ART(s)`} cor={VERDE} />
+          {/* Indicador de gestão: o Atendimento e a Documentação organizam as ARTs, mas o
+              quanto a ART múltipla poupou é número da Gerência (pedido de out/2026). */}
+          {perfil === "gerencia" && (
+            <Kpi rotulo="Economia vs. individual" valor={brl(economia)} apoio={`${cobertas} pessoas em ${arts.length} ART(s)`} cor={VERDE} />
+          )}
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <div style={{ display: "grid", gap: 4, flex: 1, minWidth: 200 }}>
@@ -791,8 +795,8 @@ export function CardValoresCustos({ token, apiFetch, notify }) {
   );
 }
 
-/* Carrega os custos calculados pelo servidor — usado pela Receita por empreendimento, que
-   precisa do custo do técnico de cada vistoria sem repetir a regra 100/80 aqui no front. */
+/* Carrega os custos calculados pelo servidor — usado pelos Indicadores financeiros, que
+   precisam do custo do técnico de cada vistoria sem repetir a regra 100/80 aqui no front. */
 export function useCustosOperacionais({ token, apiFetch, ativo = true }) {
   const [estado, setEstado] = useState({ vistorias: [], arts: [], config: null, carregado: false });
   useEffect(() => {
