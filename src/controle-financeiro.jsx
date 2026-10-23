@@ -410,7 +410,8 @@ function LinhaArt({ art, perfil, clientePorId, tirar, excluir, salvar }) {
           ) : (
             <>
               <button style={{ ...btnLeve, padding: "4px 8px", fontSize: 12 }} onClick={() => { setForm({ numero: art.numero, emitidaEm: art.emitidaEm }); setEditando(true); }}>Editar</button>{" "}
-              {perfil === "gerencia" && <button style={{ ...btnLeve, padding: "4px 8px" }} title="Excluir (lançada por engano)" onClick={() => excluir(art)}><Trash2 size={13} color={VERMELHO} /></button>}
+              {/* O Atendimento cuida da tela inteira, inclusive da ART lançada por engano. */}
+              {(perfil === "gerencia" || perfil === "atendimento") && <button style={{ ...btnLeve, padding: "4px 8px" }} title="Excluir (lançada por engano)" onClick={() => excluir(art)}><Trash2 size={13} color={VERMELHO} /></button>}
             </>
           )}
         </td>
