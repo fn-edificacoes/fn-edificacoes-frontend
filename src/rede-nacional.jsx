@@ -81,7 +81,7 @@ function ModalJustificativa({ titulo, descricao, children, aoConfirmar, aoFechar
   const [enviando, setEnviando] = useState(false);
   const pronto = texto.trim().length >= 10;
   return (
-    <div onClick={aoFechar} style={{ position: "fixed", inset: 0, background: "rgba(10,25,45,.45)", display: "grid", placeItems: "center", zIndex: 1000, padding: 16 }}>
+    <div onClick={aoFechar} style={{ position: "fixed", inset: 0, background: "rgba(10,25,45,.45)", display: "grid", placeItems: "center", zIndex: 1000, padding: 16, overflowY: "auto", overscrollBehavior: "contain" }}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: 20, width: "min(520px, 100%)", maxHeight: "90vh", overflowY: "auto" }}>
         <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
           <h3 style={{ margin: 0, fontSize: 16, color: AZUL_MARINHO, flex: 1 }}>{titulo}</h3>
@@ -575,7 +575,7 @@ function AbaOs({ token, apiFetch, notify, ehNacional, regionais }) {
       </Tabela>
 
       {elegiveis && (
-        <div onClick={() => setElegiveis(null)} style={{ position: "fixed", inset: 0, background: "rgba(10,25,45,.45)", display: "grid", placeItems: "center", zIndex: 1000, padding: 16 }}>
+        <div onClick={() => setElegiveis(null)} style={{ position: "fixed", inset: 0, background: "rgba(10,25,45,.45)", display: "grid", placeItems: "center", zIndex: 1000, padding: 16, overflowY: "auto", overscrollBehavior: "contain" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: 20, width: "min(720px, 100%)", maxHeight: "85vh", overflowY: "auto" }}>
             <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
               <h3 style={{ margin: 0, fontSize: 16, color: AZUL_MARINHO, flex: 1 }}>Quem pode receber {elegiveis.os.numero}</h3>
