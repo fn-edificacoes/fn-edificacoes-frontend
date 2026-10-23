@@ -3,6 +3,8 @@ import * as Rascunho from "./rascunho-local.js";
 import { listarAmbientes, paraItemDeLaudo, todasParaImportacao } from "./patologias-consulta.js";
 import * as Fin from "./financeiro-regras.js";
 import AbaRedeNacional from "./rede-nacional.jsx";
+import AbaEmpreendimentosCadastro from "./empreendimentos-lista.jsx";
+import { Building as IconeEmpreendimento } from "lucide-react";
 import AbaMapaAtuacao from "./mapa-atuacao.jsx";
 import { AbaArtsVistoria, AbaFolhaPagamento, CardValoresCustos, useCustosOperacionais } from "./controle-financeiro.jsx";
 import {
@@ -2212,6 +2214,8 @@ const GERENCIA_MENU_LATERAL = [
     { aba: "marketing", label: "Marketing", Icon: Megaphone },
     { aba: "gerencia", sub: "perfil-cliente", label: "Perfil do cliente", Icon: User },
     { aba: "gerencia", sub: "prospeccao", label: "Prospecção", Icon: TrendingUp },
+    /* A lista de construtora/empreendimento que o cliente vê no "Cadastre-se". */
+    { aba: "gerencia", sub: "empreendimentos", label: "Empreendimentos", Icon: IconeEmpreendimento },
   ] },
   { titulo: "FN Nacional", itens: [
     { aba: "nacional", label: "Rede Nacional", Icon: Landmark },
@@ -2431,7 +2435,8 @@ function AppInterno({ session, onLogout }) {
   };
   const removerEmpreendimento = async (empreendimento) => {
     try {
-      const r = await apiFetch("/api/empreendimentos-ref", { method: "DELETE", token, body: { empreendimento } });
+      // Na querystring: o servidor não lê corpo de DELETE, e no corpo o nome nunca chegava lá.
+      const r = await apiFetch(`/api/empreendimentos-ref?empreendimento=${encodeURIComponent(empreendimento)}`, { method: "DELETE", token });
       notify(r.cadastrosUsando
         ? `Removido da lista. Atenção: ${r.cadastrosUsando} cadastro(s) ainda usam esse nome — trate em "Padronização".`
         : "Empreendimento removido ✓");
@@ -2796,8 +2801,9 @@ function AppInterno({ session, onLogout }) {
   /* ---- Preço de vistoria por empreendimento (alimenta o Financeiro) ---- */
   const [precos, setPrecos] = useState([]);
   const [precosCarregando, setPrecosCarregando] = useState(false);
-  /* Lista oficial de empreendimentos (vem da planilha do Drive, tabela empreendimentos_ref).
-     É ela que a Gerência usa para fixar os preços — em vez de digitar o nome na mão. */
+  /* Lista oficial de empreendimentos: a da planilha do Drive mais os que a Gerência adiciona em
+     Gerência → Empreendimentos (a mesma do formulário público). É ela que a Gerência usa para
+     fixar os preços — em vez de digitar o nome na mão. */
   const [empreendimentosRef, setEmpreendimentosRef] = useState([]);
   const carregarEmpreendimentosRef = async () => {
     try {
@@ -3844,7 +3850,7 @@ function AppInterno({ session, onLogout }) {
             salvarItemCatalogo={salvarItemCatalogoAdmin} excluirItemCatalogo={excluirItemCatalogoAdmin}
             vales={vales} valesCarregando={valesCarregando}
             vendas={vendas} vendasCarregando={vendasCarregando} atualizarVenda={atualizarVenda}
-            precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
+            precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef} carregarEmpreendimentosRef={carregarEmpreendimentosRef}
             padronizarEmpreendimento={padronizarEmpreendimento} excluirCliente={delCliente}
             prospeccao={prospeccao} prospeccaoCarregando={prospeccaoCarregando} atualizarProspeccao={atualizarProspeccao}
             publicarProspeccaoDrive={publicarProspeccaoDrive}
@@ -12103,7 +12109,7 @@ function CardPrecoEmpreendimento({ precos, carregando, salvarPreco, empreendimen
   return (
     <Card icon={DollarSign} titulo="Preços por empreendimento">
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-        Empreendimentos da lista oficial (planilha do Drive). Defina o valor da vistoria e o da documentação ART/TRT —
+        Empreendimentos da lista oficial (planilha do Drive e os adicionados em Gerência → Empreendimentos). Defina o valor da vistoria e o da documentação ART/TRT —
         o setor de Documentação vê o preço fixado aqui ao trabalhar no serviço, e os valores alimentam a receita no Financeiro.
       </p>
 
@@ -15716,7 +15722,7 @@ function AbaGerenciaImportacao({ clientes = [], precos = [], empreendimentosRef 
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, decidirComissaoItem, importarClientesHistorico, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
+function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, decidirComissaoItem, importarClientesHistorico, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], carregarEmpreendimentosRef, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
   if (sub === "painel") {
     return <AbaGerenciaPainelEstrategico clientes={clientes} docs={docs} usuarios={usuarios} precos={precos}
       avaliacoes={avaliacoes} prospeccao={prospeccao} prospeccaoParceiros={prospeccaoParceiros}
@@ -15747,6 +15753,9 @@ function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, de
     return <CardBancoPatologias patologias={patologiasBanco} carregando={patologiasBancoCarregando}
       onCriar={criarPatologia} onAtualizar={atualizarPatologia} onExcluir={excluirPatologia}
       onImportar={importarPatologiasEstaticas} notify={notify} />;
+  }
+  if (sub === "empreendimentos") {
+    return <AbaEmpreendimentosCadastro token={token} apiFetch={apiFetch} notify={notify} aoMudar={carregarEmpreendimentosRef} />;
   }
   if (sub === "prospeccao") {
     return <CardProspeccao prospeccao={prospeccao} carregando={prospeccaoCarregando} atualizar={atualizarProspeccao}
@@ -16481,7 +16490,7 @@ function AbaCliente({ notify, onLogin, onIrParaLogin }) {
       } catch { /* dropdown vira "Outros" direto se a lista não carregar */ }
     })();
   }, []);
-  const construtorasDisponiveis = [...new Set(refEmpreendimentos.map((e) => e.construtora))].sort();
+  const construtorasDisponiveis = [...new Set(refEmpreendimentos.map((e) => e.construtora).filter(Boolean))].sort();
   const empreendimentosDisponiveis = [...new Set(
     refEmpreendimentos.filter((e) => e.construtora === construtoraSel).map((e) => e.empreendimento)
   )].sort();
