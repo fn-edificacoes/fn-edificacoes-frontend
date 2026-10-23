@@ -193,6 +193,9 @@ function mapClienteDaApi(c) {
     valorCobrado: c.valor_cobrado == null ? null : Number(c.valor_cobrado),
     valorRecebido: c.valor_recebido == null ? null : Number(c.valor_recebido),
     cobrancaEm: c.cobranca_em || null,
+    /* Quem fez o último lançamento (id do usuário). A lista "Lançados" da Gerência mostra o nome:
+       é o que diz a quem perguntar quando um valor não bate. */
+    cobrancaPor: c.cobranca_por || null,
     /* Quando o dinheiro entrou — gravado pelo link de pagamento (Mercado Pago). null quando o
        pagamento foi marcado à mão: aí a data real só vem da conciliação com o extrato. */
     pagoEm: c.pago_em || null,
@@ -558,8 +561,9 @@ const STATUS_INTERNO_OPCOES = ["Agendado", "Em vistoria", "Laudo em elaboração
                     "qualidade" -> "atendimento" logo no início de AppInterno). Enxerga Clientes
                     (cadastro, agendamento, acompanhamento, aprovação), Agendamento (aprova
                     agendamento/feedback — item 3.24; substitui o antigo perfil "comercial"),
-                    Documentação (TRTs de reforma e ARTs de vistoria, em sub-abas), FAQ,
-                    Marketing e Vendas/Fornecedores.
+                    Documentação (TRTs de reforma e ARTs de vistoria, em sub-abas), FAQ e
+                    Marketing. Fornecedores saiu do Atendimento (outubro/2026): a tela nem
+                    carregava os parceiros para ele, e quem cuida disso é Vendas e Gerência.
    vendas        -> só enxerga Fornecedores (a antiga tela "Parceiros e Afiliados", que deixou
                     de existir como destino solto): analisa/aprova cadastros, acompanha
                     cupons (vales) e cadastra parceiro/fornecedor manualmente. NÃO calcula nem
@@ -576,7 +580,7 @@ const STATUS_INTERNO_OPCOES = ["Agendado", "Em vistoria", "Laudo em elaboração
 const MODULOS_POR_PERFIL = {
   vistoriador: ["laudos", "despesas"],
   documentacao: ["documentacao", "arts", "despesas"],
-  atendimento: ["clientes", "qualidade", "documentacao", "arts", "faq", "marketing", "vendas", "despesas"],
+  atendimento: ["clientes", "qualidade", "documentacao", "arts", "faq", "marketing", "despesas"],
   vendas: ["vendas", "despesas"],
   gerencia: ["laudos", "documentacao", "arts", "gerencia", "usuarios", "clientes", "qualidade", "faq", "marketing", "nacional", "mapa"],
   /* FN Nacional por regional: só a Rede Nacional, filtrada pelo servidor às regionais dele. */
@@ -1380,7 +1384,7 @@ function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], ava
 
   // --- Parceiros novos aguardando homologação: sem isto, ninguém era avisado — o cadastro
   // só aparecia se alguém abrisse a aba "Parceiros" por conta própria e reparasse na tabela. ---
-  if (["vendas", "atendimento"].includes(perfil)) {
+  if (perfil === "vendas") {
     const aguardandoHomologacao = parceiros.filter((p) => p.status === "em_analise");
     if (aguardandoHomologacao.length) {
       itens.push({
@@ -4848,7 +4852,7 @@ function AbaQualidade({ sub = "analise", setSub, token, clientes, clientesCarreg
         filtroEtapa={filtroEtapa} aoTrocarEtapa={setFiltroEtapa} />
       {sub === "vistoria" && <AbaQualidadeVistoria clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} abrirAutomaticoId={agendarAgoraId} aoAbrirAutomatico={() => setAgendarAgoraId(null)} aoConfirmar={aoConfirmarVistoria} filtroEtapa={filtroEtapa} />}
       {sub === "cobranca" && <AbaQualidadeCobranca clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente}
-        usuarios={usuarios} precos={precos} notify={notify} podeAgir={podeAgir} token={token} />}
+        usuarios={usuarios} precos={precos} notify={notify} podeAgir={podeAgir} token={token} ehGerencia={ehGerencia} />}
       {sub === "acompanhamento" && <AbaQualidadeAcompanhamento clientes={clientes} clientesCarregando={clientesCarregando}
         docs={docs} avaliacoes={avaliacoes} filtroEtapa={filtroEtapa} />}
       {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} clientes={clientes} clientesCarregando={clientesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
@@ -5156,8 +5160,10 @@ function BlocoLinkPagamento({ cliente, cobranca, gerarLink, notify }) {
   );
 }
 
-function AbaQualidadeCobranca({ clientes = [], docs = [], carregando, updCliente, usuarios = [], precos = [], notify, podeAgir = false, token }) {
+function AbaQualidadeCobranca({ clientes = [], docs = [], carregando, updCliente, usuarios = [], precos = [], notify, podeAgir = false, token, ehGerencia = false }) {
   const [filtro, setFiltro] = useState("lancar"); // lancar | aberto | quitadas | todas | antecipar | antiga
+  /* "cobrar" é a fila do dia; "lancados" é a lista de tudo o que já foi lançado, só da Gerência. */
+  const [vista, setVista] = useState("cobrar");
   /* Links de pagamento (Mercado Pago) já gerados — o mais recente de cada cadastro. Recarrega
      junto com a lista de clientes (a cada 20s no AppInterno), que é quando um pagamento
      confirmado pelo webhook aparece como "Pago". */
@@ -5250,6 +5256,28 @@ function AbaQualidadeCobranca({ clientes = [], docs = [], carregando, updCliente
     if (ok) notify("Cobrança lançada ✓ — já entrou no Financeiro");
   };
 
+  /* Sub-abas do Setor de cobrança. Só a Gerência tem a segunda, então o Atendimento continua
+     vendo a tela de sempre, sem botão nenhum a mais. */
+  const seletorVista = ehGerencia && (
+    <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${CINZA_BORDA}` }}>
+      {[["cobrar", "Cobrança", DollarSign], ["lancados", "Lançados", History]].map(([chave, rotulo, Icone]) => (
+        <button key={chave} onClick={() => setVista(chave)}
+          style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", borderBottom: `2px solid ${vista === chave ? AZUL_MEDIO : "transparent"}`, color: vista === chave ? AZUL_MARINHO : "#65758b", fontWeight: vista === chave ? 700 : 500, padding: "8px 12px", fontSize: 13.5, cursor: "pointer", marginBottom: -1 }}>
+          <Icone size={15} /> {rotulo}
+        </button>
+      ))}
+    </div>
+  );
+  if (ehGerencia && vista === "lancados") {
+    return (
+      <div style={{ display: "grid", gap: 16 }}>
+        {seletorVista}
+        <ListaCobrancasLancadas clientes={clientes} usuarios={usuarios} carregando={carregando} fichaDe={fichaDe}
+          sugestaoDe={sugestaoDe} updCliente={updCliente} notify={notify} />
+      </div>
+    );
+  }
+
   const CHIPS = [
     ["lancar", "Falta lançar", faltaLancar.length],
     ["aberto", "Em aberto", emAberto.length],
@@ -5261,6 +5289,7 @@ function AbaQualidadeCobranca({ clientes = [], docs = [], carregando, updCliente
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
+      {seletorVista}
       <Card icon={DollarSign} titulo="Setor de cobrança">
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
           Cada vistoria entra aqui uma hora depois do horário agendado. O valor já vem preenchido com o
@@ -5318,6 +5347,159 @@ function AbaQualidadeCobranca({ clientes = [], docs = [], carregando, updCliente
         </div>
       </Card>
     </div>
+  );
+}
+
+/* ================= Setor de cobrança · Lançados (só Gerência) =================
+   Depois do Lançar, a cobrança sumia na lista do dia: "Quitadas" e "Todas" mostram só vistoria,
+   só a partir da hora de cobrar, e a ART/TRT se lança no card da Documentação. Quem precisava
+   corrigir um valor ou uma data lançada errado tinha que caçar o cadastro tela por tela.
+   Aqui fica tudo o que já tem valor lançado, vistoria e ART/TRT juntas, do lançamento mais
+   recente para o mais antigo. Corrigir abre a mesma linha de cobrança do Atendimento, com as
+   mesmas validações — a correção grava pelo mesmo PATCH e o Financeiro acompanha na hora. */
+function ListaCobrancasLancadas({ clientes = [], usuarios = [], carregando, fichaDe, sugestaoDe, updCliente, notify }) {
+  const [busca, setBusca] = useState("");
+  const [situacao, setSituacao] = useState("todas"); // todas | Pago | Parcial | Pendente
+  const [tipo, setTipo] = useState("todos"); // todos | vistoria | documentacao
+  const [mes, setMes] = useState(""); // AAAA-MM do lançamento; vazio = todos
+  const [corrigindo, setCorrigindo] = useState(null); // id do cadastro com a linha aberta
+
+  const nomeUsuario = (id) => usuarios.find((u) => String(u.id) === String(id))?.nome || "";
+  const lancados = clientes.filter((c) => c.valorCobrado != null);
+  /* Lançamento antigo sem cobrancaEm (anterior à coluna) vai para o fim da lista e só fica de
+     fora no filtro de mês — nunca da lista inteira. */
+  const mesDe = (c) => diaLocalDe(c.cobrancaEm).slice(0, 7);
+  const meses = [...new Set(lancados.map(mesDe).filter(Boolean))].sort().reverse();
+
+  const termo = busca.trim().toLowerCase();
+  const lista = lancados
+    .filter((c) => situacao === "todas" || (c.pagamento || "Pendente") === situacao)
+    .filter((c) => tipo === "todos" || (tipo === "vistoria" ? ehTrabalhoDeVistoria(c) : !ehTrabalhoDeVistoria(c)))
+    .filter((c) => !mes || mesDe(c) === mes)
+    .filter((c) => !termo || `${c.nome} ${c.cpf} ${c.empreendimento} ${c.blocoTorre}`.toLowerCase().includes(termo))
+    .sort((a, b) => String(b.cobrancaEm || "").localeCompare(String(a.cobrancaEm || "")));
+
+  const totalCobrado = lista.reduce((s, c) => s + fichaDe(c).valor, 0);
+  const totalRecebido = lista.reduce((s, c) => s + fichaDe(c).recebido, 0);
+
+  const salvar = async (id, patch) => {
+    const ok = await updCliente(id, patch);
+    if (ok) { notify("Cobrança corrigida ✓ — o Financeiro já usa o valor novo"); setCorrigindo(null); }
+  };
+
+  const th = { textAlign: "left", padding: "8px 10px", fontSize: 11.5, color: "#65758b", fontWeight: 700, borderBottom: `1px solid ${CINZA_BORDA}`, whiteSpace: "nowrap" };
+  const td = { padding: "9px 10px", borderBottom: `1px solid ${CINZA_CLARO}`, fontSize: 13, verticalAlign: "top" };
+  const chip = (ativo) => ({ background: ativo ? AZUL_MEDIO : "#fff", color: ativo ? "#fff" : "#4a5a70", border: `1px solid ${ativo ? AZUL_MEDIO : CINZA_BORDA}`, borderRadius: 20, padding: "5px 12px", fontSize: 12.5, cursor: "pointer" });
+
+  return (
+    <Card icon={History} titulo="Cobranças lançadas">
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
+        Tudo o que já teve valor lançado — vistoria, revistoria e ART/TRT —, do lançamento mais recente para o mais
+        antigo. Para acertar o valor, a situação, a data ou a forma do pagamento, clique em <strong>Corrigir</strong>.
+        A correção vale na hora para o Financeiro e os Indicadores.
+      </p>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 14 }}>
+        <KpiCard label="Lançamentos" valor={lista.length} Icon={ClipboardList} />
+        <KpiCard label="Total cobrado" valor={fmtReal(totalCobrado)} Icon={DollarSign} />
+        <KpiCard label="Já recebido" valor={fmtReal(totalRecebido)} cor="#2E7D32" Icon={Check} />
+      </div>
+
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+        {[["todas", "Todas"], ["Pago", "Pagas"], ["Parcial", "Parciais"], ["Pendente", "Pendentes"]].map(([chave, rotulo]) => (
+          <button key={chave} onClick={() => setSituacao(chave)} style={chip(situacao === chave)}>
+            {rotulo} <strong>{chave === "todas" ? lancados.length : lancados.filter((c) => (c.pagamento || "Pendente") === chave).length}</strong>
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+        <input style={{ ...inp, flex: "2 1 220px" }} placeholder="Buscar por cliente, CPF, empreendimento ou bloco…"
+          value={busca} onChange={(e) => setBusca(e.target.value)} />
+        <select style={{ ...inp, flex: "1 1 150px" }} value={tipo} onChange={(e) => setTipo(e.target.value)}>
+          <option value="todos">Todos os serviços</option>
+          <option value="vistoria">Vistoria e revistoria</option>
+          <option value="documentacao">ART/TRT e outros</option>
+        </select>
+        <select style={{ ...inp, flex: "1 1 150px" }} value={mes} onChange={(e) => setMes(e.target.value)}>
+          <option value="">Lançados em qualquer mês</option>
+          {meses.map((m) => {
+            const [ano, mm] = m.split("-");
+            return <option key={m} value={m}>Lançados em {MESES_CURTOS[Number(mm) - 1]}/{ano}</option>;
+          })}
+        </select>
+      </div>
+
+      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {!carregando && lista.length === 0 && (
+        <p style={{ color: "#8593a8", fontSize: 14 }}>
+          {lancados.length === 0 ? "Nenhuma cobrança lançada ainda." : "Nenhum lançamento com esses filtros."}
+        </p>
+      )}
+
+      {lista.length > 0 && (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
+            <thead>
+              <tr>
+                <th style={th}>Lançado em</th><th style={th}>Cliente</th><th style={th}>Serviço</th>
+                <th style={{ ...th, textAlign: "right" }}>Cobrado</th><th style={th}>Pagamento</th>
+                <th style={th}>Lançado por</th><th style={th}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {lista.map((c) => {
+                const aberto = corrigindo === c.id;
+                return (
+                  <React.Fragment key={c.id}>
+                    <tr style={aberto ? { background: "#F6F9FD" } : undefined}>
+                      <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtDataHora(c.cobrancaEm)}</td>
+                      <td style={td}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          <strong style={{ color: AZUL_MARINHO }}>{c.nome}</strong>
+                          {ehRevistoria(c) && <SeloRevistoria seq={c.revistoriaSeq || 1} />}
+                        </div>
+                        <div style={{ fontSize: 11.5, color: "#65758b" }}>
+                          {c.empreendimento || "(sem empreendimento)"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}
+                        </div>
+                      </td>
+                      <td style={td}>{c.servico || "—"}</td>
+                      <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>
+                        <strong>{fmtReal(c.valorCobrado)}</strong>
+                        {c.pagamento === "Parcial" && <div style={{ fontSize: 11.5, color: "#65758b" }}>recebido {fmtReal(fichaDe(c).recebido)}</div>}
+                      </td>
+                      <td style={td}>
+                        <Selo valor={c.pagamento || "Pendente"} />
+                        {(c.pagamento || "Pendente") !== "Pendente" && (
+                          <div style={{ fontSize: 11.5, color: "#65758b", marginTop: 3 }}>
+                            {c.pagoEm ? fmtData(diaLocalDe(c.pagoEm)) : "sem data"}{c.formaPagamento ? ` · ${c.formaPagamento}` : ""}
+                          </div>
+                        )}
+                      </td>
+                      <td style={td}>{nomeUsuario(c.cobrancaPor) || "—"}</td>
+                      <td style={{ ...td, textAlign: "right" }}>
+                        <button className="btn-mini" onClick={() => setCorrigindo(aberto ? null : c.id)}
+                          style={aberto ? { background: "#fff", color: AZUL_MEDIO, border: `1px solid ${AZUL_MEDIO}` } : undefined}>
+                          {aberto ? <><X size={12} /> Fechar</> : <><Edit3 size={12} /> Corrigir</>}
+                        </button>
+                      </td>
+                    </tr>
+                    {aberto && (
+                      <tr style={{ background: "#F6F9FD" }}>
+                        <td colSpan={7} style={{ ...td, padding: "4px 10px 14px" }}>
+                          <LinhaCobranca cliente={c} sugerido={sugestaoDe(c).valor} origemSugestao={sugestaoDe(c).origem}
+                            podeAgir onSalvar={{ salvar, notify }} compacto />
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -15777,7 +15959,7 @@ const ROLE_LABEL = { vistoriador: "Vistoriador", documentacao: "Documentação",
 const ROLE_DESCRICAO = {
   vistoriador: "Só acessa Laudos. Sem acesso a Documentação nem Gerência.",
   documentacao: "Só acessa Documentação/TRT. Sem acesso a Laudos nem Gerência.",
-  atendimento: "Acessa Clientes (cadastro, agendamento, aprovação e encaminhamento ao técnico), Agendamento (aprova avaliações que entram na vitrine), Documentação (TRTs de reforma e ARTs de vistoria), FAQ, Marketing e Vendas/Fornecedores.",
+  atendimento: "Acessa Clientes (cadastro, agendamento, aprovação e encaminhamento ao técnico), Agendamento (aprova avaliações que entram na vitrine), Documentação (TRTs de reforma e ARTs de vistoria), FAQ e Marketing.",
   vendas: "Só acessa Fornecedores: analisa/aprova cadastros de parceiros/fornecedores, cadastra fornecedor manualmente e acompanha cupons. Recebe salário fixo — o sistema não calcula comissão individual.",
   gerencia: "Acesso completo: Laudos, Documentação, Clientes, Agendamento, Vendas, Gerência e financeiro.",
   gestor_regional: "Só acessa a Rede Nacional, e só das regionais liberadas para ele (Rede Nacional → Regionais → Gestores). Sem regional liberada, não vê nada.",
