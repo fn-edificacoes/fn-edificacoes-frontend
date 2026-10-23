@@ -3595,8 +3595,8 @@ function AppInterno({ session, onLogout }) {
             </div>
           </div>
           <div style={{ flex: 1 }} />
-          <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
-            <div style={{ textAlign: "right", lineHeight: 1.2 }}>
+          <div className="cabecalho-usuario" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
+            <div style={{ textAlign: "right", lineHeight: 1.2, minWidth: 0 }}>
               <div style={{ fontWeight: 700 }}>{session.usuario.nome}</div>
               <div style={{ opacity: 0.7 }}>{PERFIL_LABEL[perfil] || perfil}</div>
             </div>
@@ -3610,13 +3610,13 @@ function AppInterno({ session, onLogout }) {
               }} />
             {/* Atalho do pedido: lançar a despesa na hora, de qualquer tela — no celular é foto,
                 valor, categoria, vistoria e salvar. */}
-            <button className="btn-ghost" onClick={() => setNovaDespesaAberta(true)} title="Lançar uma despesa">
-              <Plus size={14} /> Despesa
+            <button className="btn-ghost" onClick={() => setNovaDespesaAberta(true)} title="Lançar uma despesa" aria-label="Lançar uma despesa">
+              <Plus size={14} /> <span className="rotulo-cabecalho">Despesa</span>
             </button>
-            <button className="btn-ghost" onClick={() => setTrocandoSenha(true)} title="Alterar minha senha">
-              <Lock size={14} /> Senha
+            <button className="btn-ghost" onClick={() => setTrocandoSenha(true)} title="Alterar minha senha" aria-label="Alterar minha senha">
+              <Lock size={14} /> <span className="rotulo-cabecalho">Senha</span>
             </button>
-            <button className="btn-ghost" onClick={onLogout} title="Sair"><X size={14} /> Sair</button>
+            <button className="btn-ghost" onClick={onLogout} title="Sair" aria-label="Sair"><X size={14} /> <span className="rotulo-cabecalho">Sair</span></button>
           </div>
           {trocandoSenha && <ModalTrocarSenha token={token} notify={notify} onFechar={() => setTrocandoSenha(false)} />}
           {abaTop === "laudos" && (
@@ -4665,10 +4665,10 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
               <button className="icon-btn" onClick={() => setEditando(null)}><X size={16} /></button>
             </div>
             <CamposCadastroCliente dados={editando} onChange={setEditando} />
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
-              <div style={{ display: "flex", gap: 8 }}>
+            <div className="modal-acoes">
+              <div>
                 {podeExcluir && (
-                  <button className="btn-ghost" style={{ color: "#C62828" }} onClick={() => setConfirmandoExclusao(editando)}>
+                  <button className="btn-ghost" style={{ color: "#C62828", background: "#FDECEC" }} onClick={() => setConfirmandoExclusao(editando)}>
                     <Trash2 size={15} /> Excluir cliente
                   </button>
                 )}
@@ -4678,7 +4678,7 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
                   </button>
                 )}
               </div>
-              <div style={{ display: "flex", gap: 8 }}>
+              <div>
                 <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setEditando(null)}>Cancelar</button>
                 <button className="btn-solid" onClick={salvar}><Save size={15} /> Salvar</button>
               </div>
@@ -18535,12 +18535,12 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
             </div>
           </div>
           <div style={{ flex: 1 }} />
-          <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
-            <div style={{ textAlign: "right", lineHeight: 1.2 }}>
+          <div className="cabecalho-usuario" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
+            <div style={{ textAlign: "right", lineHeight: 1.2, minWidth: 0 }}>
               <div style={{ fontWeight: 700 }}>{session.usuario.nome}</div>
               <div style={{ opacity: 0.7 }}>{cliente?.cpfMascarado || ""}</div>
             </div>
-            <button className="btn-ghost" onClick={onLogout} title="Sair"><X size={14} /> Sair</button>
+            <button className="btn-ghost" onClick={onLogout} title="Sair" aria-label="Sair"><X size={14} /> <span className="rotulo-cabecalho">Sair</span></button>
           </div>
         </div>
       </header>
@@ -18910,12 +18910,12 @@ function PainelParceiro({ session, onLogout }) {
             </div>
           </div>
           <div style={{ flex: 1 }} />
-          <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
-            <div style={{ textAlign: "right", lineHeight: 1.2 }}>
+          <div className="cabecalho-usuario" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
+            <div style={{ textAlign: "right", lineHeight: 1.2, minWidth: 0 }}>
               <div style={{ fontWeight: 700 }}>{session.usuario.nome || session.usuario.email}</div>
               <div style={{ opacity: 0.7 }}>Parceiro FN</div>
             </div>
-            <button className="btn-ghost" onClick={onLogout} title="Sair"><X size={14} /> Sair</button>
+            <button className="btn-ghost" onClick={onLogout} title="Sair" aria-label="Sair"><X size={14} /> <span className="rotulo-cabecalho">Sair</span></button>
           </div>
         </div>
       </header>
@@ -19736,8 +19736,12 @@ function TabelaDados({ rows }) {
 }
 
 /* ================= estilos globais ================= */
-const overlay = { position: "fixed", inset: 0, background: "rgba(18,51,91,.45)", display: "grid", placeItems: "center", zIndex: 50, padding: 20 };
-const modal = { background: "#fff", borderRadius: 14, padding: 22, width: "100%", maxWidth: 440 };
+/* O fundo do modal é quem rola. Antes ele só centralizava: no celular, um formulário mais alto
+   que a tela (o "Editar cliente", por exemplo) ficava cortado embaixo e não havia como descer
+   até o Salvar. Com overflowY no fundo, a grade cresce junto com o conteúdo — o modal continua
+   centralizado quando cabe e começa do topo quando não cabe, sem cortar nada. */
+const overlay = { position: "fixed", inset: 0, background: "rgba(18,51,91,.45)", display: "grid", placeItems: "center", zIndex: 50, padding: "clamp(10px, 3vw, 20px)", overflowY: "auto", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch" };
+const modal = { background: "#fff", borderRadius: 14, padding: "clamp(16px, 4.5vw, 22px)", width: "100%", maxWidth: 440, minWidth: 0 };
 const toastStyle = { position: "fixed", bottom: 22, left: "50%", transform: "translateX(-50%)", background: AZUL_MARINHO, color: "#fff", padding: "10px 18px", borderRadius: 30, display: "flex", alignItems: "center", gap: 8, fontSize: 14, zIndex: 60, boxShadow: "0 8px 24px rgba(0,0,0,.2)" };
 
 const estilos = `
@@ -19749,8 +19753,18 @@ const estilos = `
   /* overflow-wrap:anywhere é herdado, então vale para toda a tela de uma vez. Diferente de
      break-word, ele também deixa o bloco ENCOLHER abaixo do tamanho da palavra — que é o
      que faz um item flex parar de empurrar a página inteira para a direita. */
-  body { overflow-wrap: anywhere; }
+  /* break-word, e não anywhere: anywhere também encolhe a largura mínima de cada palavra,
+     e no celular os botões e cabeçalhos de tabela se partiam letra por letra ("S ai r",
+     "Cli ente"). break-word só quebra a palavra que sozinha não cabe na linha inteira — um
+     e-mail ou nome colado continua sem estourar a tela. */
+  body { overflow-wrap: break-word; }
   .quebra-texto { overflow-wrap: anywhere; min-width: 0; }
+  /* Rótulos de interface nunca se partem no meio da palavra. */
+  button, label, th, select, option, .tab { overflow-wrap: normal; word-break: normal; }
+  .btn-ghost, .btn-solid, .btn-mini { justify-content: center; text-align: center; line-height: 1.25; }
+  /* Rodapé de ações dos modais: no celular os botões ocupam a linha toda, do mesmo tamanho. */
+  .modal-acoes { display: flex; justify-content: space-between; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+  .modal-acoes > div { display: flex; gap: 8px; flex-wrap: wrap; }
   .tab { background:none; border:none; border-bottom:3px solid transparent; padding:11px 14px; font-size:14px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:7px; }
   .btn-ghost { background:rgba(255,255,255,.1); color:#fff; border:none; padding:8px 13px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:6px; }
   .btn-ghost:hover { background:rgba(255,255,255,.2); }
@@ -19825,5 +19839,13 @@ const estilos = `
     .tab { padding:10px 11px; font-size:13px; }
     table { font-size:12.5px; }
     input, select, textarea { font-size:16px; } /* evita zoom automático em iOS ao focar o campo */
+    /* Cabeçalho no celular: só os ícones (o texto fica no title/aria-label) e a linha do
+       usuário pode descer para baixo do logo sem empurrar o "Sair" para fora da tela. */
+    .rotulo-cabecalho { display: none; }
+    .cabecalho-usuario { flex-wrap: wrap; justify-content: flex-end; max-width: 100%; }
+    .cabecalho-usuario .btn-ghost { padding: 9px 10px; min-width: 40px; min-height: 40px; }
+    .modal-acoes, .modal-acoes > div { flex-direction: column-reverse; width: 100%; }
+    .modal-acoes button { width: 100%; min-height: 44px; }
+    th { white-space: nowrap; }
   }
 `;
