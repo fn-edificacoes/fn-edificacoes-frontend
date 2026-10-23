@@ -207,6 +207,7 @@ cadastro rápido (`ModalDespesa`) de qualquer tela.
 - `AbaArtsVistoria` (módulo `arts`, Gerência, Documentação e Atendimento): ART múltipla de vistoria por
   empreendimento — quem está sem ART (do pré-cadastro em diante), emitir ART (até 50 pessoas,
   30 dias da emissão, R$ 69) ou incluir numa ART vigente com vaga. Cada ART vira despesa no servidor.
+  Excluir a ART lançada por engano (some junto a despesa): Gerência e Atendimento.
 - `AbaFolhaPagamento` (Financeiro › Folha de pagamento, só Gerência): por mês, vistoriador pela
   regra 100/80 calculada **no servidor**, salário fixo do Atendimento (R$ 400) e extras. "Pagar"
   vira uma despesa; o comprovante se anexa ali mesmo (`fin.anexar`). `SalariosFixos` muda o valor
