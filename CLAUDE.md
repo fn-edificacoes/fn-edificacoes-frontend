@@ -99,6 +99,7 @@ src/patologias-consulta.js  busca no catálogo
 src/rascunho-local.js       vistoria em edição salva no navegador
 src/financeiro-regras.js    regras do Financeiro (despesas, MEI, exportação) — sem tela
 src/controle-financeiro.jsx ARTs de vistoria, folha de pagamento, valores dos custos
+src/empreendimentos-lista.jsx Gerência → Empreendimentos: a lista do "Cadastre-se"
 ```
 
 Para achar algo no `App.jsx`, procure pela definição da componente
@@ -224,6 +225,17 @@ cadastro rápido (`ModalDespesa`) de qualquer tela.
 o link do Mercado Pago (`POST /api/cobrancas`) e oferece copiar/WhatsApp. O cliente paga pelo
 card "Pagamentos" do `PainelCliente`; a volta do Mercado Pago cai em `?cobranca=<id>`
 (`PaginaRetornoCobranca`, rota pública). Quem dá baixa é o webhook no backend — a tela só lê.
+
+## Empreendimentos do cadastro público
+
+Gerência → Empreendimentos (`src/empreendimentos-lista.jsx`, `AbaEmpreendimentosCadastro`): onde a
+Gerência adiciona, corrige e desativa o que o cliente escolhe no "Cadastre-se" (`AbaCliente`, que lê
+`GET /api/empreendimentos-ref`). Salvou, aparece no formulário. A lista junta a planilha do Drive e os
+adicionados aqui; os da planilha só se desativam e ganham tipologias aqui — nome e construtora se
+corrigem na planilha, senão a sincronização desfaria. Toda gravação recarrega `empreendimentosRef` do
+App, a mesma lista de Preços por empreendimento e Importar base. O "Remover" de Preços manda o nome
+na querystring: o servidor não lê corpo de DELETE, e por isso ele nunca tinha funcionado. Regras no
+backend: `src/empreendimentos-cadastro.js`.
 
 ## Rede Nacional (FN Nacional)
 
