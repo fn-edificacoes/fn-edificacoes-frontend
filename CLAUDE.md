@@ -228,9 +228,12 @@ cadastro rápido (`ModalDespesa`) de qualquer tela.
   registro, pago sem data, realizado sem valor lançado e o que está a receber.
 - Financeiro › **Conciliação Mercado Pago** (`AbaConciliacaoMercadoPago`, item `fin-conciliacao`, no
   App.jsx): por mês, o extrato da conta do Mercado Pago (`GET /api/financeiro/conciliacao`) contra os
-  cadastros. Primeiro o que pede ação: **entrou sem link** (Pix na chave — sugestão pelo CPF do
-  pagador, por baixa à mão de mesmo valor e pelo valor em aberto da ficha, ou busca por nome/CPF;
-  "Vincular" manda só o id do pagamento e o cadastro), **link pago sem baixa** ("Dar baixa"),
+  cadastros. Primeiro o que pede ação: **entrou sem link** (Pix na chave — o Mercado Pago **não manda
+  o nome** de quem paga Pix na chave, só o banco; a sugestão vem, nesta ordem, do CPF do pagador (só
+  no link), da baixa à mão no **mesmo dia e valor** (qualquer forma, fora quem já tem pagamento do
+  Mercado Pago — `clientesComPagamento`), da baixa à mão como "Mercado Pago" de mesmo valor e do valor
+  em aberto da ficha, ou busca por nome/CPF; "Vincular" manda só o id do pagamento e o cadastro),
+  **link pago sem baixa** ("Dar baixa"),
   estornos com cadastro ainda Pago, link pago duas vezes e baixa à mão como "Mercado Pago" sem
   pagamento. Conferidos ficam recolhidos. **Planilha do mês para o contador**: `receitaDoPeriodo` em
   caixa (tudo o que entrou, qualquer forma, mais outras receitas recebidas) com tarifa, líquido e

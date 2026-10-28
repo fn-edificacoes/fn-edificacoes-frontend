@@ -14650,23 +14650,37 @@ function AbaConciliacaoMercadoPago({ token, fin, clientes = [], docs = [], preco
   const porForma = {};
   pagamentos.filter((p) => p.status === "approved").forEach((p) => { const k = formaDoMercadoPago(p); porForma[k] = (porForma[k] || 0) + p.valor; });
 
-  /* De quem é este dinheiro? CPF do pagador primeiro (é a prova mais forte), depois a baixa à mão
-     com o mesmo valor (o Pix que alguém já baixou) e, por último, o valor em aberto igual — que
-     num empreendimento de preço único pode bater com muita gente, por isso vem ordenado pela
-     data do serviço mais próxima do pagamento. */
-  const manuaisSemPagamento = new Set(soNoSistema.filter((x) => x.tipo === "baixa_manual").map((x) => x.clienteId));
+  /* De quem é este dinheiro? O Mercado Pago não informa o nome de quem paga Pix direto na chave
+     (conferido num Pix real: os campos vêm vazios, e o "documento" é o CNPJ do próprio Mercado
+     Pago — ver pagadorDe, no backend). A sugestão sai do que o sistema sabe, nesta ordem:
+     0. CPF do pagador — só vem em pagamento pelo link;
+     1. baixa à mão no mesmo dia e com o mesmo valor — o Pix que o Atendimento já conferiu pelo
+        comprovante, com qualquer forma marcada (quase sempre "Pix");
+     2. baixa à mão como "Mercado Pago" com o mesmo valor, em outro dia;
+     3. valor em aberto igual — num empreendimento de preço único bate com muita gente, por isso
+        vem ordenado pela data do serviço mais próxima do pagamento.
+     Cadastro que já tem pagamento do Mercado Pago registrado não entra como baixa à mão: o valor
+     e o dia bateriam com outro Pix por coincidência. */
+  const comPagamentoMp = new Set(dados?.clientesComPagamento || []);
+  const manuaisMercadoPago = new Set(soNoSistema.filter((x) => x.tipo === "baixa_manual").map((x) => x.clienteId));
   const sugestoes = (p) => {
     const doc = p.pagador?.documento || "";
     const quando = new Date(p.aprovadoEm || Date.now()).getTime();
+    const diaDoPix = diaLocalDe(p.aprovadoEm);
+    const distanciaAte = (iso) => (iso ? Math.abs(new Date(`${iso}T12:00:00`).getTime() - quando) : Infinity);
     const lista = [];
     fichas.forEach(({ c, f }) => {
-      let motivo = null, peso = 9;
+      const baixaAMao = ["Pago", "Parcial"].includes(f.situacao) && Math.abs(f.recebido - p.valor) < 0.01 && !comPagamentoMp.has(c.id);
+      let motivo = null, peso = 9, detalhe = "", distancia = Infinity;
       if (doc.length >= 11 && soDigitosDe(c.cpf) === doc) { motivo = "CPF do pagador"; peso = 0; }
-      else if (manuaisSemPagamento.has(c.id) && Math.abs(f.recebido - p.valor) < 0.01) { motivo = "baixa à mão, mesmo valor"; peso = 1; }
-      else if (f.situacao !== "Pago" && f.valor > 0 && Math.abs(f.valor - f.recebido - p.valor) < 0.01) { motivo = "valor em aberto igual"; peso = 2; }
+      else if (baixaAMao && diaDoPix && f.dataPagamento === diaDoPix) { motivo = "baixa à mão no mesmo dia"; peso = 1; }
+      else if (baixaAMao && manuaisMercadoPago.has(c.id)) {
+        motivo = "baixa à mão como Mercado Pago"; peso = 2; detalhe = `pago em ${fmtData(f.dataPagamento)}`; distancia = distanciaAte(f.dataPagamento);
+      } else if (f.situacao !== "Pago" && f.valor > 0 && Math.abs(f.valor - f.recebido - p.valor) < 0.01) {
+        motivo = "valor em aberto igual"; peso = 3; detalhe = `serviço ${fmtData(f.dataServico)}`; distancia = distanciaAte(f.dataServico);
+      }
       if (!motivo) return;
-      const dia = f.dataServico ? new Date(`${f.dataServico}T12:00:00`).getTime() : 0;
-      lista.push({ c, motivo, peso, distancia: dia ? Math.abs(dia - quando) : Infinity });
+      lista.push({ c, motivo, detalhe, peso, distancia });
     });
     return lista.sort((a, b) => a.peso - b.peso || a.distancia - b.distancia).slice(0, 5);
   };
@@ -14737,7 +14751,7 @@ function AbaConciliacaoMercadoPago({ token, fin, clientes = [], docs = [], preco
   const td = { padding: "7px 9px", borderBottom: `1px solid ${CINZA_BORDA}`, fontSize: 13, verticalAlign: "top" };
   const quemPagou = (p) => (
     <>
-      <strong>{p.pagador?.nome || <span style={{ fontWeight: 400, color: "#65758b" }}>Pagador sem nome</span>}</strong>
+      <strong>{p.pagador?.nome || <span style={{ fontWeight: 400, color: "#65758b" }}>Nome não informado pelo Mercado Pago</span>}</strong>
       <div style={{ fontSize: 11.5, color: "#65758b" }}>
         {[formaDoMercadoPago(p), p.pagador?.documento ? Fin.formatarCpfCnpj(p.pagador.documento) : "", p.pagador?.banco, p.descricao].filter(Boolean).join(" · ")}
       </div>
@@ -14799,6 +14813,10 @@ function AbaConciliacaoMercadoPago({ token, fin, clientes = [], docs = [], preco
               a data e o valor do Mercado Pago, e a tarifa vira despesa. Se o cadastro já estava pago à mão, o vínculo só registra de onde
               veio o dinheiro — não soma de novo.
             </p>
+            <p style={{ fontSize: 13, color: "#8a5300", margin: "0 0 10px" }}>
+              O Mercado Pago não informa o nome de quem paga Pix direto na chave — só o banco. Confira data, hora, valor e banco com o
+              comprovante que o cliente mandou. Pagamento pelo link já chega com o cadastro certo.
+            </p>
             {semCadastro.length === 0 ? nadaA("Nada sem cadastro neste mês.") : tabela(["Data", "Valor", "Quem pagou", "De quem é"], semCadastro.map((p) => {
               const sug = sugestoes(p);
               const achados = encontrados(busca[p.id]);
@@ -14811,11 +14829,11 @@ function AbaConciliacaoMercadoPago({ token, fin, clientes = [], docs = [], preco
                   <td style={{ ...td, minWidth: 260 }}>
                     {sug.length > 0 && (
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
-                        {sug.map(({ c, motivo }) => (
+                        {sug.map(({ c, motivo, detalhe }) => (
                           <button key={c.id} className="btn-mini" title={motivo}
-                            style={escolha[p.id] === c.id ? { background: AZUL_MARINHO, color: "#fff" } : undefined}
+                            style={escolha[p.id] === c.id ? { background: "#1B7F4B", color: "#fff" } : undefined}
                             onClick={() => setEscolha((e) => ({ ...e, [p.id]: c.id }))}>
-                            {c.nome} <span style={{ opacity: .7 }}>· {motivo}</span>
+                            {escolha[p.id] === c.id ? "✓ " : ""}{c.nome} <span style={{ opacity: .75 }}>· {motivo}{detalhe ? ` · ${detalhe}` : ""}</span>
                           </button>
                         ))}
                       </div>
