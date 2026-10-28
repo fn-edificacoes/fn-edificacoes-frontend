@@ -14765,7 +14765,7 @@ function AbaConciliacaoMercadoPago({ token, fin, clientes = [], docs = [], preco
       </p>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
         <div>
-          <label style={lab}>Mês</label>
+          <label style={{ ...lab, display: "block", marginBottom: 4 }}>Mês</label>
           <input type="month" style={{ ...inp, width: "auto" }} value={mes} max={mesHoje} onChange={(e) => e.target.value && setMes(e.target.value)} />
         </div>
         <button className="btn-mini" onClick={() => buscar()} disabled={carregando}>
