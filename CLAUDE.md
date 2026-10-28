@@ -202,6 +202,13 @@ cadastro rápido (`ModalDespesa`) de qualquer tela.
 - **ART/TRT** se lança no card da Documentação (`CardDocumentosArt`), com a mesma `LinhaCobranca` em
   modo `compacto`: valor sugerido, situação, data e forma. Antes era só o seletor Pendente/Pago.
 - Nada decide regime tributário. O limite do MEI é o configurado; os campos do Simples são só guardados.
+- **O número do MEI sai de `situacaoMeiDoAno`** (faturamento do ano, limite, projeção): o painel
+  Situação Tributária e o aviso por e-mail usam a mesma conta. `Fin.projecaoMei` estica o ritmo do
+  ano até 31/12 (só no ano corrente, com 30+ dias corridos) e diz o mês em que o limite estouraria.
+- **Aviso do limite por e-mail** (`useAvisoLimiteMei`, chamado no `AppInterno`): uma vez por sessão da
+  Gerência, quando clientes, docs e preços terminam a primeira carga, manda o faturamento do ano para
+  `POST /api/financeiro/aviso-mei`. O servidor lembra a faixa já avisada (80/90/100/120%) e só manda
+  e-mail na nova; a tela mostra um `notify` quando isso acontece. Falha aqui fica só no console.
 
 **Controle financeiro** (`src/controle-financeiro.jsx`, arquivo próprio como a Rede Nacional):
 - `AbaArtsVistoria` (módulo `arts`, Gerência, Documentação e Atendimento): ART múltipla de vistoria por
@@ -219,6 +226,15 @@ cadastro rápido (`ModalDespesa`) de qualquer tela.
   regra não se repete no front.
 - Financeiro › **Conferência de pagamentos** (`AbaConferenciaPagamentos`, no App.jsx): "Pago" só no
   registro, pago sem data, realizado sem valor lançado e o que está a receber.
+- Financeiro › **Conciliação Mercado Pago** (`AbaConciliacaoMercadoPago`, item `fin-conciliacao`, no
+  App.jsx): por mês, o extrato da conta do Mercado Pago (`GET /api/financeiro/conciliacao`) contra os
+  cadastros. Primeiro o que pede ação: **entrou sem link** (Pix na chave — sugestão pelo CPF do
+  pagador, por baixa à mão de mesmo valor e pelo valor em aberto da ficha, ou busca por nome/CPF;
+  "Vincular" manda só o id do pagamento e o cadastro), **link pago sem baixa** ("Dar baixa"),
+  estornos com cadastro ainda Pago, link pago duas vezes e baixa à mão como "Mercado Pago" sem
+  pagamento. Conferidos ficam recolhidos. **Planilha do mês para o contador**: `receitaDoPeriodo` em
+  caixa (tudo o que entrou, qualquer forma, mais outras receitas recebidas) com tarifa, líquido e
+  número do pagamento do Mercado Pago (`mpPaymentId` de `GET /api/cobrancas`) e linha de total.
 - Despesa com `origem` foi lançada pelo sistema (técnico, ART, tarifa do Mercado Pago): o valor
   não se edita (`ModalDespesa` trava o campo; o servidor recusa).
 

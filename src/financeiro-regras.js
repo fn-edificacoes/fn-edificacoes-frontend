@@ -231,6 +231,25 @@ export function situacaoMei(faturamento, limite) {
   return { pct, faixa, alertas, restante: Math.max(0, limite - faturamento) };
 }
 
+/* Para onde o ano vai no ritmo de hoje: o faturado até agora dividido pelos dias já corridos
+   (desde 1º de janeiro, ou desde a abertura no ano em que o CNPJ nasceu), esticado até 31/12.
+   Com menos de 30 dias o ritmo ainda não diz nada, e ano que já acabou não se projeta — nos
+   dois casos devolve null. "mesEstouro" (0–11) é o mês em que o limite seria alcançado. */
+export function projecaoMei(faturamento, limite, ano, desde = "", hoje = new Date()) {
+  if (hoje.getFullYear() !== Number(ano) || !(faturamento > 0)) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(desde || ""));
+  const inicio = m && Number(m[1]) === Number(ano) ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(Number(ano), 0, 1);
+  const DIA = 86400000;
+  const corridos = Math.floor((hoje - inicio) / DIA) + 1;
+  if (corridos < 30) return null;
+  const totais = Math.round((new Date(Number(ano), 11, 31) - inicio) / DIA) + 1;
+  const ritmo = faturamento / corridos;
+  const projetado = ritmo * totais;
+  const mesEstouro = faturamento < limite && projetado > limite
+    ? new Date(inicio.getTime() + Math.ceil(limite / ritmo) * DIA).getMonth() : null;
+  return { projetado, mesEstouro };
+}
+
 /* ---------- Resultado ---------- */
 export function resultado(receita, despesa) {
   const r = Number(receita) || 0, d = Number(despesa) || 0;

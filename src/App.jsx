@@ -15,7 +15,7 @@ import {
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
   ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle, Megaphone, Clock,
   Wrench, Paperclip, Menu, Receipt, Car, FileBarChart, Gauge, Settings, Landmark, Wallet, Archive, FileSpreadsheet, FileCheck,
-  Map as IconeMapa
+  Link2, Scale, Map as IconeMapa
 } from "lucide-react";
 
 /* ============================================================
@@ -2236,6 +2236,7 @@ const GERENCIA_MENU_LATERAL = [
     { aba: "gerencia", sub: "fin-despesas", label: "Despesas", Icon: Receipt },
     { aba: "gerencia", sub: "fin-folha", label: "Folha de pagamento", Icon: Wallet },
     { aba: "gerencia", sub: "fin-conferencia", label: "Conferência de pagamentos", Icon: Check },
+    { aba: "gerencia", sub: "fin-conciliacao", label: "Conciliação Mercado Pago", Icon: Scale },
     { aba: "gerencia", sub: "fin-notas", label: "Notas e Comprovantes", Icon: FileCheck },
     { aba: "gerencia", sub: "fin-deslocamentos", label: "Deslocamentos", Icon: Car },
     { aba: "gerencia", sub: "fin-relatorios", label: "Relatórios", Icon: FileBarChart },
@@ -2831,6 +2832,11 @@ function AppInterno({ session, onLogout }) {
     setPrecosCarregando(false);
   };
   useEffect(() => { carregarPrecos(); }, []);
+  /* Aviso do limite do MEI (só Gerência): espera as três listas da primeira carga. */
+  useAvisoLimiteMei({
+    ativo: perfil === "gerencia" && clientes.length > 0 && !clientesCarregando && !docsCarregando && !precosCarregando,
+    token, clientes, docs, precos, notify,
+  });
   /* precos: { precoVistoria?, precoDocumentacao? } — o que não vier mantém o valor atual. */
   const salvarPreco = async (empreendimento, precos) => {
     try {
@@ -3833,7 +3839,8 @@ function AppInterno({ session, onLogout }) {
         )}
         {abaTop === "gerencia" && String(abaGerencia).startsWith("fin-") && (
           <AbaFinanceiroDespesas sub={abaGerencia} fin={fin} clientes={clientes} docs={docs} precos={precos} usuarios={usuarios}
-            usuarioAtual={session.usuario} telaEstreita={telaEstreita} notify={notify} token={token} updCliente={updCliente} />
+            usuarioAtual={session.usuario} telaEstreita={telaEstreita} notify={notify} token={token} updCliente={updCliente}
+            recarregarClientes={carregarClientes} />
         )}
         {abaTop === "gerencia" && !String(abaGerencia).startsWith("fin-") && (
           <AbaGerencia sub={abaGerencia} fin={fin} usuarioAtual={session.usuario} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem}
@@ -12818,6 +12825,38 @@ function useFinanceiro({ token, perfil, notify, ativo }) {
     baixarAnexo, abrirAnexo, decidir, excluir, salvarReceita, excluirReceita, salvarConfig };
 }
 
+/* Aviso do limite do MEI por e-mail. Roda uma vez por sessão da Gerência, quando cadastros,
+   registros e preços já chegaram: faz a mesma conta do painel Situação Tributária
+   (situacaoMeiDoAno) e manda o número ao servidor, que lembra até que faixa (80, 90, 100, 120%)
+   já avisou e só manda e-mail na faixa nova. A conta fica aqui porque a receita sai da ficha,
+   e a ficha mora no front. Falhar aqui não atrapalha ninguém: o painel continua mostrando. */
+function useAvisoLimiteMei({ ativo, token, clientes, docs, precos, notify }) {
+  const verificado = useRef(false);
+  useEffect(() => {
+    if (!ativo || verificado.current) return;
+    verificado.current = true;
+    (async () => {
+      try {
+        const [rc, rr] = await Promise.all([
+          apiFetch("/api/financeiro/config", { token }),
+          apiFetch("/api/financeiro/receitas", { token }),
+        ]);
+        const config = rc.config || {};
+        if ((config.regime || "MEI") !== "MEI") return;
+        const ano = new Date().getFullYear();
+        const m = situacaoMeiDoAno({ config, receitas: rr.receitas || [], clientes, docs, precos, ano });
+        const r = await apiFetch("/api/financeiro/aviso-mei", { method: "POST", token, body: {
+          ano, faturamento: Math.round(m.receita.total * 100) / 100, limite: m.limite,
+          projetado: m.projecao ? Math.round(m.projecao.projetado) : 0,
+        } });
+        if (r.avisado) {
+          notify(`O faturamento de ${ano} chegou a ${Fin.pct(r.pct)} do limite do MEI — ${r.emails ? "aviso enviado por e-mail à Gerência" : "o e-mail de aviso não saiu"}.`);
+        }
+      } catch (e) { console.warn("Aviso do limite do MEI não verificado:", e.message); }
+    })();
+  }, [ativo]);
+}
+
 /* ---------- Receita de um recorte ----------
    A mesma conta da aba Indicadores (resumirAtendimentos), para os dois números baterem. "base"
    vem da configuração fiscal: "cobrado" é o valor dos serviços do período (competência);
@@ -13842,18 +13881,26 @@ function TabelaRentabilidade({ linhas, rotulo, rodape, quantidade = null }) {
 }
 
 /* Barra do MEI: faturamento do ano contra o limite configurado. */
-function PainelSituacaoTributaria({ fin, clientes, docs, precos, ano = new Date().getFullYear() }) {
-  const config = fin.config || {};
-  /* No ano da abertura, o faturamento começa na data de abertura — o limite proporcional já
-     conta só os meses de atividade, e somar o que veio antes compararia um ano inteiro de
-     receita com um limite de poucos meses (a FN abriu o CNPJ em setembro, com a operação
-     rodando desde julho). */
+/* O número do limite do MEI, num lugar só: o painel Situação Tributária e o aviso por e-mail
+   (useAvisoLimiteMei) mostram a mesma conta.
+   No ano da abertura, o faturamento começa na data de abertura — o limite proporcional já
+   conta só os meses de atividade, e somar o que veio antes compararia um ano inteiro de
+   receita com um limite de poucos meses (a FN abriu o CNPJ em setembro, com a operação
+   rodando desde julho). */
+function situacaoMeiDoAno({ config = {}, receitas = [], clientes, docs, precos, ano }) {
   const abertura = /^\d{4}-\d{2}-\d{2}$/.test(String(config.dataAbertura || "")) ? config.dataAbertura : "";
   const desde = abertura && Number(abertura.slice(0, 4)) === Number(ano) ? abertura : "";
-  const receita = receitaDoPeriodo({ clientes, docs, precos, receitas: fin.receitas, periodo: { granularidade: "ano", ano, indice: 0 }, base: config.baseFaturamento || "cobrado", aPartirDe: desde });
+  const receita = receitaDoPeriodo({ clientes, docs, precos, receitas, periodo: { granularidade: "ano", ano, indice: 0 }, base: config.baseFaturamento || "cobrado", aPartirDe: desde });
   const limite = Fin.limiteEfetivo(config, ano);
-  const s = Fin.situacaoMei(receita.total, limite);
-  const regime = config.regime || "MEI";
+  return {
+    receita, limite, desde, regime: config.regime || "MEI",
+    s: Fin.situacaoMei(receita.total, limite), projecao: Fin.projecaoMei(receita.total, limite, ano, desde),
+  };
+}
+
+function PainelSituacaoTributaria({ fin, clientes, docs, precos, ano = new Date().getFullYear() }) {
+  const config = fin.config || {};
+  const { receita, limite, desde, regime, s, projecao } = situacaoMeiDoAno({ config, receitas: fin.receitas, clientes, docs, precos, ano });
   return (
     <Card icon={Landmark} titulo="Situação Tributária">
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
@@ -13876,7 +13923,24 @@ function PainelSituacaoTributaria({ fin, clientes, docs, precos, ano = new Date(
           </div>
           <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
             {s.alertas.map((a) => <AvisoFin key={a} tom={s.pct >= 100 ? "erro" : "atencao"}>{a}</AvisoFin>)}
+            {s.pct >= 100 && (
+              <AvisoFin tom="erro">
+                Pela regra do MEI, até 20% acima do limite ({Fin.brl(limite * 1.2)}) a empresa paga um DAS complementar sobre o que
+                passou e vira ME em janeiro; acima disso, o desenquadramento pode valer desde janeiro. Confirme com a contabilidade.
+              </AvisoFin>
+            )}
             {s.pct < 100 && <p style={{ fontSize: 13, color: "#4a5a70", margin: 0 }}>Ainda cabem <strong>{Fin.brl(s.restante)}</strong> no limite deste ano.</p>}
+            {projecao && (
+              <p style={{ fontSize: 13, color: projecao.mesEstouro != null ? "#A12020" : "#4a5a70", margin: 0 }}>
+                No ritmo atual, {ano} fecha perto de <strong>{Fin.brl(projecao.projetado)}</strong>
+                {projecao.mesEstouro != null
+                  ? <> — o limite seria alcançado em <strong>{Fin.MESES_NOMES[projecao.mesEstouro].toLowerCase()}</strong>. Planeje a mudança de regime com a contabilidade antes disso.</>
+                  : "."}
+              </p>
+            )}
+            <p style={{ fontSize: 12, color: "#65758b", margin: 0 }}>
+              A Gerência recebe um e-mail quando o faturamento chega a 80%, 90%, 100% e 120% do limite (uma vez por faixa, por ano).
+            </p>
           </div>
         </>
       ) : (
@@ -14517,12 +14581,367 @@ function AbaConferenciaPagamentos({ clientes = [], docs = [], precos = [], updCl
   );
 }
 
-function AbaFinanceiroDespesas({ sub, fin, clientes = [], docs = [], precos = [], usuarios = [], usuarioAtual, telaEstreita, notify, token, updCliente }) {
+/* ============================================================
+   Conciliação Mercado Pago
+   ============================================================
+   O extrato da conta do Mercado Pago (lido da API dele, no servidor — /api/financeiro/conciliacao)
+   lado a lado com o que o sistema registrou. O que precisa de alguém aparece primeiro:
+   - entrou sem link (Pix direto na chave da conta): diga de que cadastro é. A sugestão vem do CPF
+     do pagador, quando o Mercado Pago informa, de baixa à mão com o mesmo valor e do valor em
+     aberto na ficha;
+   - link pago sem baixa: o aviso do Mercado Pago (webhook) não chegou;
+   - estorno: o dinheiro voltou e o cadastro ainda diz Pago — o webhook não desfaz baixa;
+   - no sistema sem pagamento: baixa à mão como "Mercado Pago" que nenhum pagamento confirma.
+   "Vincular" e "Dar baixa" mandam só o id do pagamento: valor e data o servidor confere no
+   Mercado Pago. A planilha do contador é a mesma conta do Financeiro (receitaDoPeriodo, caixa). */
+const FORMA_MERCADO_PAGO = {
+  credit_card: "Cartão de crédito", debit_card: "Cartão de débito", account_money: "Saldo Mercado Pago",
+  ticket: "Boleto", bank_transfer: "Transferência", atm: "Lotérica",
+};
+const formaDoMercadoPago = (p) => (p.meio === "pix" ? "Pix" : FORMA_MERCADO_PAGO[p.forma] || p.forma || "—");
+const soDigitosDe = (s) => String(s || "").replace(/\D/g, "");
+
+function AbaConciliacaoMercadoPago({ token, fin, clientes = [], docs = [], precos = [], notify, recarregarClientes }) {
+  const mesHoje = hojeLocal().slice(0, 7);
+  const [mes, setMes] = useState(mesHoje);
+  const [dados, setDados] = useState(null);
+  const [carregando, setCarregando] = useState(false);
+  const [falha, setFalha] = useState("");
+  const [escolha, setEscolha] = useState({});
+  const [busca, setBusca] = useState({});
+  const [trabalhando, setTrabalhando] = useState(null);
+  const [gerandoPlanilha, setGerandoPlanilha] = useState(false);
+
+  /* O mês corrente vai só até hoje: o Mercado Pago não tem amanhã, e a planilha do mês aberto é parcial. */
+  const intervalo = (m) => {
+    const [a, mm] = m.split("-").map(Number);
+    const ultimo = `${m}-${String(Fin.ultimoDiaDoMes(a, mm - 1)).padStart(2, "0")}`;
+    return { de: `${m}-01`, ate: ultimo > hojeLocal() ? hojeLocal() : ultimo };
+  };
+  const buscar = async (m = mes) => {
+    if (!/^\d{4}-\d{2}$/.test(m) || m > mesHoje) return;
+    const { de, ate } = intervalo(m);
+    setCarregando(true);
+    setFalha("");
+    try { setDados(await apiFetch(`/api/financeiro/conciliacao?de=${de}&ate=${ate}`, { token })); }
+    catch (e) { setDados(null); setFalha(e.message); }
+    setCarregando(false);
+  };
+  useEffect(() => { buscar(mes); }, [mes]);
+
+  const precoPorChave = useMemo(() => {
+    const mapa = {};
+    precos.forEach((p) => { mapa[normalizarChaveEmpreendimento(p.empreendimento)] = p; });
+    return mapa;
+  }, [precos]);
+  const fichas = useMemo(() => clientes.filter((c) => c.status !== "Cancelado")
+    .map((c) => ({ c, f: fichaFinanceira(c, docDoCliente(c, docs), precoPorChave) })), [clientes, docs, precoPorChave]);
+
+  const pagamentos = dados?.pagamentos || [];
+  const soNoSistema = dados?.soNoSistema || [];
+  const semCadastro = pagamentos.filter((p) => p.situacao === "sem_cadastro");
+  const faltaBaixa = pagamentos.filter((p) => p.situacao === "falta_baixa");
+  const estornos = pagamentos.filter((p) => p.situacao === "estornado");
+  const duplicados = pagamentos.filter((p) => p.situacao === "duplicado");
+  const outros = pagamentos.filter((p) => p.situacao === "outro");
+  const conferidos = pagamentos.filter((p) => p.situacao === "conferido" || p.situacao === "marketplace");
+  const pendencias = semCadastro.length + faltaBaixa.length + duplicados.length + soNoSistema.length
+    + estornos.filter((p) => p.pagoNoCadastro).length;
+  const porForma = {};
+  pagamentos.filter((p) => p.status === "approved").forEach((p) => { const k = formaDoMercadoPago(p); porForma[k] = (porForma[k] || 0) + p.valor; });
+
+  /* De quem é este dinheiro? CPF do pagador primeiro (é a prova mais forte), depois a baixa à mão
+     com o mesmo valor (o Pix que alguém já baixou) e, por último, o valor em aberto igual — que
+     num empreendimento de preço único pode bater com muita gente, por isso vem ordenado pela
+     data do serviço mais próxima do pagamento. */
+  const manuaisSemPagamento = new Set(soNoSistema.filter((x) => x.tipo === "baixa_manual").map((x) => x.clienteId));
+  const sugestoes = (p) => {
+    const doc = p.pagador?.documento || "";
+    const quando = new Date(p.aprovadoEm || Date.now()).getTime();
+    const lista = [];
+    fichas.forEach(({ c, f }) => {
+      let motivo = null, peso = 9;
+      if (doc.length >= 11 && soDigitosDe(c.cpf) === doc) { motivo = "CPF do pagador"; peso = 0; }
+      else if (manuaisSemPagamento.has(c.id) && Math.abs(f.recebido - p.valor) < 0.01) { motivo = "baixa à mão, mesmo valor"; peso = 1; }
+      else if (f.situacao !== "Pago" && f.valor > 0 && Math.abs(f.valor - f.recebido - p.valor) < 0.01) { motivo = "valor em aberto igual"; peso = 2; }
+      if (!motivo) return;
+      const dia = f.dataServico ? new Date(`${f.dataServico}T12:00:00`).getTime() : 0;
+      lista.push({ c, motivo, peso, distancia: dia ? Math.abs(dia - quando) : Infinity });
+    });
+    return lista.sort((a, b) => a.peso - b.peso || a.distancia - b.distancia).slice(0, 5);
+  };
+  const encontrados = (texto) => {
+    const t = semAcento(texto).trim();
+    if (t.length < 2) return [];
+    const digitos = soDigitosDe(texto);
+    return fichas.filter(({ c }) => semAcento(c.nome).includes(t) || semAcento(c.empreendimento).includes(t)
+      || (digitos.length >= 4 && soDigitosDe(c.cpf).includes(digitos))).slice(0, 8);
+  };
+
+  const registrar = async (p, clienteId) => {
+    setTrabalhando(p.id);
+    try {
+      await apiFetch("/api/financeiro/conciliacao/baixar", { method: "POST", token, body: { paymentId: p.id, clienteId: clienteId || undefined } });
+      notify(clienteId ? "Pagamento vinculado ao cadastro ✓" : "Baixa registrada ✓");
+      await Promise.all([buscar(), recarregarClientes ? recarregarClientes() : null]);
+    } catch (e) { notify(`Não foi possível registrar: ${e.message}`); }
+    setTrabalhando(null);
+  };
+
+  /* Recebimentos do mês para a contabilidade: tudo o que entrou (Mercado Pago, Pix em outra
+     conta, dinheiro) mais as outras receitas recebidas — a mesma conta do Financeiro em regime de
+     caixa —, com a tarifa e o número do pagamento do Mercado Pago quando houver. */
+  const baixarPlanilha = async () => {
+    const [ano, mm] = mes.split("-").map(Number);
+    setGerandoPlanilha(true);
+    try {
+      const r = await apiFetch("/api/cobrancas", { token });
+      const doMp = {};
+      (r.cobrancas || []).filter((b) => b.status === "paga").forEach((b) => {
+        const x = doMp[b.clienteId] || (doMp[b.clienteId] = { taxa: 0, ids: [] });
+        x.taxa += Number(b.taxa) || 0;
+        if (b.mpPaymentId) x.ids.push(b.mpPaymentId);
+      });
+      const receita = receitaDoPeriodo({ clientes, docs, precos, receitas: fin.receitas, periodo: { granularidade: "mes", ano, indice: mm - 1 }, base: "recebido" });
+      const arred = (v) => Math.round((Number(v) || 0) * 100) / 100;
+      const linhas = receita.atendimentos.map((c) => {
+        const f = fichaFinanceira(c, docDoCliente(c, docs), precoPorChave);
+        const mp = doMp[c.id];
+        const valor = arred(receita.valorDe(c));
+        const taxa = arred(mp?.taxa);
+        return {
+          data: f.dataPagamento || f.dataServico, cliente: c.nome, documento: c.cpf, servico: c.servico || "",
+          empreendimento: [c.empreendimento, c.blocoTorre].filter(Boolean).join(" · "), forma: f.formaPagamento || (mp ? "Mercado Pago" : ""),
+          valor, taxa, liquido: arred(valor - taxa), ids: (mp?.ids || []).join(", "), origem: "Atendimento",
+        };
+      });
+      receita.avulsas.filter((x) => receita.valorAvulsa(x) > 0).forEach((x) => linhas.push({
+        data: x.data, cliente: x.clienteNome || "", documento: "", servico: x.servico || x.descricao, empreendimento: x.empreendimento || "",
+        forma: "", valor: arred(receita.valorAvulsa(x)), taxa: 0, liquido: arred(receita.valorAvulsa(x)), ids: "", origem: "Outras receitas",
+      }));
+      linhas.sort((a, b) => String(a.data).localeCompare(String(b.data)));
+      const soma = (k) => arred(linhas.reduce((s, l) => s + (Number(l[k]) || 0), 0));
+      linhas.push({ data: "", cliente: "TOTAL", documento: "", servico: "", empreendimento: "", forma: "", valor: soma("valor"), taxa: soma("taxa"), liquido: soma("liquido"), ids: "", origem: "" });
+      const colunas = [
+        ["Data do pagamento", (l) => Fin.dataBr(l.data)], ["Cliente", (l) => l.cliente], ["CPF/CNPJ", (l) => Fin.formatarCpfCnpj(l.documento)],
+        ["Serviço", (l) => l.servico], ["Empreendimento", (l) => l.empreendimento], ["Forma de recebimento", (l) => l.forma],
+        ["Valor recebido", (l) => l.valor], ["Tarifa Mercado Pago", (l) => l.taxa], ["Valor líquido", (l) => l.liquido],
+        ["Pagamento no Mercado Pago", (l) => l.ids], ["Origem", (l) => l.origem],
+      ];
+      Fin.baixarBlob(Fin.gerarXlsx(linhas, colunas, "Recebimentos"), `recebimentos-fn-${mes}.xlsx`);
+    } catch (e) { notify(`Não foi possível gerar a planilha: ${e.message}`); }
+    setGerandoPlanilha(false);
+  };
+
+  const th = { textAlign: "left", padding: "7px 9px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}`, whiteSpace: "nowrap", fontSize: 12.5 };
+  const td = { padding: "7px 9px", borderBottom: `1px solid ${CINZA_BORDA}`, fontSize: 13, verticalAlign: "top" };
+  const quemPagou = (p) => (
+    <>
+      <strong>{p.pagador?.nome || <span style={{ fontWeight: 400, color: "#65758b" }}>Pagador sem nome</span>}</strong>
+      <div style={{ fontSize: 11.5, color: "#65758b" }}>
+        {[formaDoMercadoPago(p), p.pagador?.documento ? Fin.formatarCpfCnpj(p.pagador.documento) : "", p.pagador?.banco, p.descricao].filter(Boolean).join(" · ")}
+      </div>
+    </>
+  );
+  const cadastro = (x) => (
+    <><strong>{x.clienteNome || "—"}</strong><div style={{ fontSize: 11.5, color: "#65758b" }}>{x.servico || "—"}{x.empreendimento ? ` · ${x.empreendimento}` : ""}</div></>
+  );
+  const tabela = (cabecalhos, linhas) => (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead><tr>{cabecalhos.map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+        <tbody>{linhas}</tbody>
+      </table>
+    </div>
+  );
+  const nadaA = (texto) => <p style={{ fontSize: 13, color: "#1B7F4B", margin: 0 }}>{texto} ✓</p>;
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <h2 style={{ margin: 0, fontSize: 18, color: AZUL_MARINHO }}>Conciliação Mercado Pago</h2>
+      <p style={{ fontSize: 13, color: "#65758b", margin: 0 }}>
+        O que entrou na conta do Mercado Pago da FN, conferido com os cadastros. Pagamento por link entra sozinho; o que entrou sem link
+        (Pix direto na chave) aparece aqui para você dizer de quem é. Para não precisar disso, mande sempre o link gerado no Setor de cobrança.
+      </p>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div>
+          <label style={lab}>Mês</label>
+          <input type="month" style={{ ...inp, width: "auto" }} value={mes} max={mesHoje} onChange={(e) => e.target.value && setMes(e.target.value)} />
+        </div>
+        <button className="btn-mini" onClick={() => buscar()} disabled={carregando}>
+          {carregando ? <Loader2 size={12} className="spin" /> : <RefreshCcw size={12} />} Conferir de novo
+        </button>
+        <button className="btn-solid" style={{ width: "auto" }} onClick={baixarPlanilha} disabled={gerandoPlanilha}>
+          {gerandoPlanilha ? <Loader2 size={14} className="spin" /> : <FileSpreadsheet size={14} />} Planilha do mês para o contador
+        </button>
+      </div>
+      {falha && <AvisoFin tom="erro">{falha}</AvisoFin>}
+      {carregando && !dados && <p style={{ fontSize: 13, color: "#65758b", margin: 0 }}><Loader2 size={13} className="spin" /> Consultando o Mercado Pago…</p>}
+
+      {dados && (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }}>
+            <KpiCard label="Entrou no Mercado Pago" valor={fmtReal(dados.totais.bruto)} Icon={DollarSign} percentual={`${dados.totais.quantidade} pagamento(s)`} />
+            <KpiCard label="Tarifas do Mercado Pago" valor={fmtReal(dados.totais.taxa)} Icon={Receipt} cor="#B26A00" />
+            <KpiCard label="Caiu na conta (líquido)" valor={fmtReal(dados.totais.liquido)} Icon={Wallet} cor="#1B7F4B" />
+            <KpiCard label="Precisa de conferência" valor={pendencias} Icon={AlertTriangle} cor={pendencias ? "#C62828" : "#1B7F4B"} />
+          </div>
+          {Object.keys(porForma).length > 0 && (
+            <p style={{ fontSize: 12.5, color: "#4a5a70", margin: 0 }}>
+              {Object.entries(porForma).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}: ${fmtReal(v)}`).join(" · ")}
+              {dados.totais.estornado > 0 && <> · <span style={{ color: "#A12020" }}>estornado: {fmtReal(dados.totais.estornado)}</span></>}
+            </p>
+          )}
+
+          <Card icon={Link2} titulo={`Entrou sem link — de quem é? (${semCadastro.length})`}>
+            <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
+              Pix ou pagamento que chegou na conta sem passar por um link do sistema. Escolha o cadastro e vincule: o cadastro fica pago com
+              a data e o valor do Mercado Pago, e a tarifa vira despesa. Se o cadastro já estava pago à mão, o vínculo só registra de onde
+              veio o dinheiro — não soma de novo.
+            </p>
+            {semCadastro.length === 0 ? nadaA("Nada sem cadastro neste mês.") : tabela(["Data", "Valor", "Quem pagou", "De quem é"], semCadastro.map((p) => {
+              const sug = sugestoes(p);
+              const achados = encontrados(busca[p.id]);
+              const escolhido = escolha[p.id] ? clientes.find((c) => c.id === escolha[p.id]) : null;
+              return (
+                <tr key={p.id}>
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtDataHora(p.aprovadoEm)}</td>
+                  <td style={{ ...td, whiteSpace: "nowrap", fontWeight: 700 }}>{fmtReal(p.valor)}</td>
+                  <td style={td}>{quemPagou(p)}</td>
+                  <td style={{ ...td, minWidth: 260 }}>
+                    {sug.length > 0 && (
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+                        {sug.map(({ c, motivo }) => (
+                          <button key={c.id} className="btn-mini" title={motivo}
+                            style={escolha[p.id] === c.id ? { background: AZUL_MARINHO, color: "#fff" } : undefined}
+                            onClick={() => setEscolha((e) => ({ ...e, [p.id]: c.id }))}>
+                            {c.nome} <span style={{ opacity: .7 }}>· {motivo}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <input style={{ ...inp, padding: "5px 8px" }} placeholder="Buscar por nome, CPF ou empreendimento" value={busca[p.id] || ""}
+                      onChange={(e) => setBusca((b) => ({ ...b, [p.id]: e.target.value }))} />
+                    {achados.length > 0 && (
+                      <div style={{ display: "grid", gap: 4, marginTop: 4 }}>
+                        {achados.map(({ c, f }) => (
+                          <button key={c.id} className="btn-mini" style={{ justifyContent: "flex-start", ...(escolha[p.id] === c.id ? { background: AZUL_MARINHO, color: "#fff" } : {}) }}
+                            onClick={() => { setEscolha((e) => ({ ...e, [p.id]: c.id })); setBusca((b) => ({ ...b, [p.id]: "" })); }}>
+                            {c.nome} · {c.empreendimento || "—"} · {f.situacao} {f.valor ? fmtReal(f.valor) : ""}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <button className="btn-solid" style={{ marginTop: 6, width: "auto" }} disabled={!escolhido || trabalhando === p.id}
+                      onClick={() => { if (window.confirm(`Vincular ${fmtReal(p.valor)} ao cadastro de ${escolhido.nome}?`)) registrar(p, escolhido.id); }}>
+                      {trabalhando === p.id ? <Loader2 size={13} className="spin" /> : <Link2 size={13} />} {escolhido ? `Vincular a ${escolhido.nome}` : "Escolha o cadastro"}
+                    </button>
+                  </td>
+                </tr>
+              );
+            }))}
+          </Card>
+
+          <Card icon={Clock} titulo={`Pago pelo link, sem baixa no sistema (${faltaBaixa.length})`}>
+            <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
+              O cliente pagou o link, mas o aviso do Mercado Pago não chegou ao sistema. "Dar baixa" faz o que o aviso faria.
+            </p>
+            {faltaBaixa.length === 0 ? nadaA("Todos os links pagos já têm baixa.") : tabela(["Data", "Valor", "Cadastro", ""], faltaBaixa.map((p) => (
+              <tr key={p.id}>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtDataHora(p.aprovadoEm)}</td>
+                <td style={{ ...td, whiteSpace: "nowrap", fontWeight: 700 }}>{fmtReal(p.valor)}</td>
+                <td style={td}>
+                  {cadastro(p)}
+                  {p.linkCancelado && (
+                    <div style={{ fontSize: 11.5, color: "#A12020" }}>
+                      O link tinha sido cancelado por uma baixa à mão. Confira se o cliente não pagou duas vezes antes de dar baixa.
+                    </div>
+                  )}
+                </td>
+                <td style={{ ...td, textAlign: "right" }}>
+                  <button className="btn-mini" disabled={trabalhando === p.id} onClick={() => registrar(p, null)}>
+                    {trabalhando === p.id ? <Loader2 size={12} className="spin" /> : <Check size={12} />} Dar baixa
+                  </button>
+                </td>
+              </tr>
+            )))}
+          </Card>
+
+          {(estornos.length > 0 || duplicados.length > 0 || outros.length > 0) && (
+            <Card icon={Undo2} titulo={`Estornos e casos para olhar (${estornos.length + duplicados.length + outros.length})`}>
+              <div style={{ display: "grid", gap: 8 }}>
+                {estornos.filter((p) => p.pagoNoCadastro).length > 0 && (
+                  <AvisoFin tom="erro">
+                    Dinheiro devolvido ao cliente e o cadastro ainda diz Pago. Ajuste no Setor de cobrança (Pendente ou Parcial), senão o
+                    Financeiro conta uma receita que voltou.
+                  </AvisoFin>
+                )}
+                {duplicados.length > 0 && (
+                  <AvisoFin tom="atencao">O mesmo link foi pago duas vezes. Devolva o pagamento repetido pelo painel do Mercado Pago.</AvisoFin>
+                )}
+                {tabela(["Data", "Valor", "Situação", "Cadastro"], [...estornos, ...duplicados, ...outros].map((p) => (
+                  <tr key={p.id}>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtDataHora(p.aprovadoEm)}</td>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtReal(p.valor)}</td>
+                    <td style={td}>
+                      {p.situacao === "estornado" ? `Estornado${p.valorEstornado ? ` (${fmtReal(p.valorEstornado)})` : ""}` : p.situacao === "duplicado" ? "Pago duas vezes" : p.status}
+                      {p.pagoNoCadastro && <div style={{ fontSize: 11.5, color: "#A12020" }}>ainda Pago no cadastro</div>}
+                    </td>
+                    <td style={td}>{p.clienteNome ? cadastro(p) : quemPagou(p)}</td>
+                  </tr>
+                )))}
+              </div>
+            </Card>
+          )}
+
+          <Card icon={AlertTriangle} titulo={`Pago no sistema, sem pagamento no Mercado Pago (${soNoSistema.length})`}>
+            <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
+              Baixa feita à mão como "Mercado Pago" (ou link pago) que nenhum pagamento deste mês confirma. Se o Pix aparece lá em cima, em
+              "Entrou sem link", vincule a este cadastro. Se não entrou dinheiro nenhum, corrija a baixa no Setor de cobrança.
+            </p>
+            {soNoSistema.length === 0 ? nadaA("Toda baixa pelo Mercado Pago tem pagamento.") : tabela(["Pago em", "Valor", "Cadastro", "Como"], soNoSistema.map((x) => (
+              <tr key={`${x.tipo}-${x.cobrancaId || x.clienteId}`}>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtData(x.pagoEm)}</td>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtReal(x.valor)}</td>
+                <td style={td}>{cadastro(x)}</td>
+                <td style={{ ...td, color: "#65758b" }}>{x.tipo === "link" ? `link · pagamento ${x.mpPaymentId || "—"}` : "baixa à mão"}</td>
+              </tr>
+            )))}
+          </Card>
+
+          <Card icon={Check} titulo={`Conferidos (${conferidos.length})`}>
+            {conferidos.length === 0 ? <p style={{ fontSize: 13, color: "#65758b", margin: 0 }}>Nenhum pagamento conferido neste mês.</p> : (
+              <details>
+                <summary style={{ cursor: "pointer", fontSize: 13, color: AZUL_MARINHO }}>Ver os {conferidos.length} pagamentos</summary>
+                <div style={{ marginTop: 8 }}>
+                  {tabela(["Data", "Valor", "Tarifa", "Líquido", "Forma", "Cadastro"], conferidos.map((p) => (
+                    <tr key={p.id}>
+                      <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtDataHora(p.aprovadoEm)}</td>
+                      <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtReal(p.valor)}</td>
+                      <td style={{ ...td, whiteSpace: "nowrap", color: "#B26A00" }}>{fmtReal(p.taxa)}</td>
+                      <td style={{ ...td, whiteSpace: "nowrap", color: "#1B7F4B" }}>{fmtReal(p.liquido)}</td>
+                      <td style={td}>{formaDoMercadoPago(p)}</td>
+                      <td style={td}>{p.situacao === "marketplace" ? <span style={{ color: "#65758b" }}>Pedido do marketplace{p.pedidoPago ? "" : " (sem baixa no pedido)"}</span> : cadastro(p)}</td>
+                    </tr>
+                  )))}
+                </div>
+              </details>
+            )}
+          </Card>
+          <p style={{ fontSize: 11.5, color: "#8593a8", margin: 0 }}>Consultado no Mercado Pago em {fmtDataHora(dados.consultadoEm)}.</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function AbaFinanceiroDespesas({ sub, fin, clientes = [], docs = [], precos = [], usuarios = [], usuarioAtual, telaEstreita, notify, token, updCliente, recarregarClientes }) {
   const comum = { fin, clientes, usuarios, usuarioAtual, telaEstreita, notify };
   /* Folha: vistoriadores, salário fixo e extras. O comprovante se anexa na despesa do
      pagamento, por isso a folha recebe o "fin" inteiro. */
   if (sub === "fin-folha") return <AbaFolhaPagamento token={token} apiFetch={apiFetch} notify={notify} fin={fin} usuarios={usuarios} />;
   if (sub === "fin-conferencia") return <AbaConferenciaPagamentos clientes={clientes} docs={docs} precos={precos} updCliente={updCliente} notify={notify} />;
+  if (sub === "fin-conciliacao") return <AbaConciliacaoMercadoPago token={token} fin={fin} clientes={clientes} docs={docs} precos={precos} notify={notify} recarregarClientes={recarregarClientes} />;
   if (sub === "fin-notas") return <AbaFinNotas {...comum} />;
   if (sub === "fin-deslocamentos") return <AbaFinDeslocamentos {...comum} docs={docs} precos={precos} />;
   if (sub === "fin-relatorios") return <AbaFinRelatorios fin={fin} clientes={clientes} docs={docs} precos={precos} notify={notify} />;
