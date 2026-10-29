@@ -100,6 +100,7 @@ src/rascunho-local.js       vistoria em edição salva no navegador
 src/financeiro-regras.js    regras do Financeiro (despesas, MEI, exportação) — sem tela
 src/controle-financeiro.jsx ARTs de vistoria, folha de pagamento, valores dos custos
 src/empreendimentos-lista.jsx Gerência → Empreendimentos: a lista do "Cadastre-se"
+src/patologia-voz.jsx       patologia por voz: gravar, acompanhar e revisar o item (aba da vistoria)
 ```
 
 Para achar algo no `App.jsx`, procure pela definição da componente
@@ -131,6 +132,33 @@ Cliente sem senha usa "primeiro acesso"; parceiro se cadastra pelo botão do rod
 abre a `TelaCadastroParceiro`. O login do parceiro nasce desativado e só abre quando a
 Gerência homologa: quem mexer nesse fluxo precisa manter a mensagem de "cadastro em
 análise" que o backend devolve, senão o parceiro acha que errou a senha.
+
+## Patologia por voz
+
+`src/patologia-voz.jsx`, encaixado na aba da vistoria (`AbaItens`) — backend em `src/patologia-voz.js`.
+O técnico anexa a foto, segura o microfone e fala; o servidor transcreve e o Claude monta o item; o
+técnico revisa e confirma. **Nada do fluxo antigo muda**: o item confirmado é um item comum
+(`novoItem` + os campos de sempre, foto em base64, mais `vozItemId`), que entra na lista de itens. O
+pendente mora só no servidor e não entra no laudo.
+
+- **Quem vê:** só vistoriador e gerência, e só com a flag `PATOLOGIA_VOZ_LIBERADA` do servidor
+  (`GET /api/patologia-voz/config`). Sem a flag, a aba fica exatamente como antes.
+- `usePatologiaVoz` é chamado no `AppInterno` (não na aba) porque o **"Enviar para gerência"** precisa
+  dos pendentes: com gravação ou item por revisar, `AvisoPendentesVoz` lista o que falta e deixa
+  voltar ou enviar sem eles. O aviso vem depois da checagem da foto com o cliente, como antes.
+- **Botão de gravar (`BotaoGravarVoz`)**, igual áudio de WhatsApp: segura e solta envia, arrastar
+  para o lado cancela, para cima trava. Pointer events com `touch-action: none` (sem isso o celular
+  rola a página no meio). Formato por `MediaRecorder.isTypeSupported`: webm/opus, senão mp4 (iPhone).
+  Menos de 1 s descarta; 2 min envia sozinho; app em segundo plano envia o que gravou. Na 1ª vez o
+  pedido de permissão do microfone interrompe o gesto — a tela só avisa que agora pode gravar.
+- Ao soltar, o card aparece na hora ("Enviando" → "Processando") e o técnico segue. Enquanto houver
+  algo processando, a lista é consultada a cada 3 s. Erro tem "Reprocessar" (sem regravar);
+  "processando" há mais de 5 min conta como erro. Falha de envio fica na tela com "Tentar de novo"
+  só enquanto a página está aberta — a fila offline (IndexedDB) é a fase 2.
+- Card de revisão: foto, áudio (URL assinada, `preload="none"`), transcrição recolhível, campos do
+  item com a patologia do catálogo pré-selecionada, selo de confiança e observações da IA.
+  Trocar a patologia traz título, sistema, norma e severidade do catálogo e mantém descrição e
+  recomendação. Regravar descarta o item e reaproveita a foto da gravação.
 
 ## Revistoria
 
