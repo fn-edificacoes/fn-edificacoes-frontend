@@ -6,6 +6,7 @@ import AbaRedeNacional from "./rede-nacional.jsx";
 import AbaEmpreendimentosCadastro from "./empreendimentos-lista.jsx";
 import { Building as IconeEmpreendimento } from "lucide-react";
 import AbaMapaAtuacao from "./mapa-atuacao.jsx";
+import { usePatologiaVoz, PainelPatologiaVoz, AvisoPendentesVoz } from "./patologia-voz.jsx";
 import { AbaArtsVistoria, AbaFolhaPagamento, CardValoresCustos, useCustosOperacionais } from "./controle-financeiro.jsx";
 import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
@@ -2305,6 +2306,10 @@ function AppInterno({ session, onLogout }) {
   const [dados, setDados] = useState(() => ({ ...DADOS_INICIAIS, rt: { ...DADOS_INICIAIS.rt, nome: session.usuario.nome || "" } }));
   const [itens, setItens] = useState(() => [novoItem()]);
   const [clienteAtualId, setClienteAtualId] = useState(null); // id do cliente carregado no laudo em edição — necessário para "Enviar para gerência"
+  /* Patologia por voz (src/patologia-voz.jsx): gravações e itens a revisar da vistoria aberta.
+     Fica aqui, e não na aba, porque o "Enviar para gerência" precisa saber dos pendentes. */
+  const voz = usePatologiaVoz({ apiFetch, token, clienteId: clienteAtualId, perfil });
+  const [avisoVozAberto, setAvisoVozAberto] = useState(false);
   /* Trava do laudo após o envio à gerência.
      Isto já existiu como useState solto com um botão de "desbloquear" ao lado: o próprio
      técnico reabria o laudo que tinha acabado de enviar, e um F5 destravava sozinho. Como o
@@ -3278,13 +3283,19 @@ function AppInterno({ session, onLogout }) {
      tela da vistoria depois que a aba "Dados do laudo" saiu. */
   const setD = (grupo, campo, val) => setDados((d) => ({ ...d, [grupo]: { ...d[grupo], [campo]: val } }));
   const setFotoCliente = (foto) => setDados((d) => ({ ...d, fotoCliente: foto }));
-  const enviarParaGerencia = async () => {
+  const enviarParaGerencia = async ({ ignorarPendentesVoz = false } = {}) => {
     if (!clienteAtualId) { notify("Selecione um cliente cadastrado em \"Dados do laudo\" antes de enviar."); return; }
     /* Na revistoria a foto com o cliente não é exigida: a visita é um retorno, muitas vezes
        com o imóvel já ocupado e sem ninguém para posar — cobrar a foto ali só travaria o
        laudo. A obrigatoriedade continua valendo na vistoria de entrega. */
     if (!dados.fotoCliente && !ehRevistoria(clienteEmEdicao)) {
       notify("Anexe a foto com o cliente antes de enviar (obrigatória).");
+      return;
+    }
+    /* Só item confirmado entra no laudo. Gravação por voz ainda pendente não trava o envio,
+       mas o técnico vê a lista antes e decide (ver AvisoPendentesVoz). */
+    if (!ignorarPendentesVoz && voz.pendentes.length) {
+      setAvisoVozAberto(true);
       return;
     }
     setEnviandoParaGerencia(true);
@@ -3779,7 +3790,7 @@ function AppInterno({ session, onLogout }) {
             statusLaudo={laudoNoServidor?.laudoStatusLabel} devolvido={laudoDevolvido}
             motivoDevolucao={laudoNoServidor?.motivo_devolucao} patologiasBanco={patologiasBanco}
             minhaAssinatura={minhaAssinatura} salvarMinhaAssinatura={salvarMinhaAssinatura} removerMinhaAssinatura={removerMinhaAssinatura}
-            token={token} clienteId={clienteAtualId} />
+            token={token} clienteId={clienteAtualId} voz={voz} />
         )}
         {abaTop === "laudos" && aba === "elaboracao" && (
           <AbaElaboracaoLaudo itens={itens} setItens={setItens} updItem={updItem} escolherPatologia={escolherPatologia}
@@ -3911,6 +3922,11 @@ function AppInterno({ session, onLogout }) {
 
       {toast && <div className="no-print" style={toastStyle}><Check size={15} /> {toast}</div>}
 
+      {avisoVozAberto && (
+        <AvisoPendentesVoz pendentes={voz.pendentes}
+          onVoltar={() => setAvisoVozAberto(false)}
+          onEnviarMesmoAssim={() => { setAvisoVozAberto(false); enviarParaGerencia({ ignorarPendentesVoz: true }); }} />
+      )}
       <ConfirmModal aberto={confirmandoDesbloqueio} titulo="Laudo fora de edição"
         mensagem={"Depois de enviado, o laudo continua editável por você até a gerência começar a analisar. "
           + "Deste ponto em diante ele é responsabilidade dela — ou já virou documento emitido, com PDF arquivado e "
@@ -7261,7 +7277,7 @@ function AbaLaudoAnterior({ laudo, carregando, cliente, assinatura }) {
   );
 }
 
-function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, dados, setD, fotoCliente, setFotoCliente, fotoClienteObrigatoria = true, notify, setAba, bloqueado, onPedirDesbloqueio, enviadoAindaEditavel = false, statusLaudo, devolvido, motivoDevolucao, patologiasBanco = [], minhaAssinatura, salvarMinhaAssinatura, removerMinhaAssinatura, token, clienteId }) {
+function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, dados, setD, fotoCliente, setFotoCliente, fotoClienteObrigatoria = true, notify, setAba, bloqueado, onPedirDesbloqueio, enviadoAindaEditavel = false, statusLaudo, devolvido, motivoDevolucao, patologiasBanco = [], minhaAssinatura, salvarMinhaAssinatura, removerMinhaAssinatura, token, clienteId, voz = null }) {
   const fotoClienteRef = useRef();        // câmera (capture="environment")
   const fotoClienteGaleriaRef = useRef(); // galeria do aparelho
   const [seletorAberto, setSeletorAberto] = useState(false);
@@ -7447,6 +7463,17 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
           );
         })}
       </div>
+
+      {/* Patologia por voz: aparece só para quem a flag liberou. O item confirmado entra aqui
+          como um item comum; o vazio do começo é ocupado, como no "Conferir por ambiente". */}
+      {voz?.habilitado && clienteId && !bloqueado && (
+        <PainelPatologiaVoz voz={voz} patologiasBanco={patologiasBanco} ambientes={LOCAIS} notify={notify} redimensionar={redimensionar}
+          onConfirmado={(novo) => setItens((l) => {
+            if (novo?.vozItemId && l.some((x) => x.vozItemId === novo.vozItemId)) return l; // confirmação repetida
+            const soVazio = l.length === 1 && !l[0].patologia && !l[0].local && !l[0].descricao && !l[0].fotos?.length;
+            return [...(soVazio ? [] : l), { ...novoItem(), ...novo }];
+          })} />
+      )}
 
       {itens.map((item, idx) => (
         <ItemCard key={item.id} item={item} num={idx + 1}
