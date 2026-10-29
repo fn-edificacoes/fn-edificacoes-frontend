@@ -4,7 +4,8 @@ import { listarAmbientes, paraItemDeLaudo, todasParaImportacao } from "./patolog
 import * as Fin from "./financeiro-regras.js";
 import AbaRedeNacional from "./rede-nacional.jsx";
 import AbaEmpreendimentosCadastro from "./empreendimentos-lista.jsx";
-import { Building as IconeEmpreendimento } from "lucide-react";
+import { Building as IconeEmpreendimento, ShoppingBag } from "lucide-react";
+import AbaProdutosMercadoLivre, { SecaoOfertasMercadoLivre } from "./fn-home-mercadolivre.jsx";
 import AbaMapaAtuacao from "./mapa-atuacao.jsx";
 import { usePatologiaVoz, PainelPatologiaVoz, AvisoPendentesVoz } from "./patologia-voz.jsx";
 import { AbaArtsVistoria, AbaFolhaPagamento, CardValoresCustos, useCustosOperacionais } from "./controle-financeiro.jsx";
@@ -1978,9 +1979,11 @@ function useCarrinho() {
 
 /* Botão do carrinho para o cabeçalho — usado em toda página que vende (vitrine pública,
    portfólio do parceiro, painel do cliente). */
-function BotaoCarrinho({ quantidade, onClick }) {
+/* btn-ghost é texto branco para fundo escuro (o cabeçalho do portfólio). Na vitrine, que é card
+   branco, quem chama passa as cores — sem isso o ícone sumia no fundo. */
+function BotaoCarrinho({ quantidade, onClick, style }) {
   return (
-    <button type="button" onClick={onClick} className="btn-ghost" style={{ position: "relative", padding: "8px 10px" }} title="Carrinho">
+    <button type="button" onClick={onClick} className="btn-ghost" style={{ position: "relative", padding: "8px 10px", ...style }} title="Carrinho">
       <ShoppingCart size={16} />
       {quantidade > 0 && (
         <span style={{
@@ -2223,6 +2226,11 @@ const GERENCIA_MENU_LATERAL = [
     { aba: "gerencia", sub: "prospeccao", label: "Prospecção", Icon: TrendingUp },
     /* A lista de construtora/empreendimento que o cliente vê no "Cadastre-se". */
     { aba: "gerencia", sub: "empreendimentos", label: "Empreendimentos", Icon: IconeEmpreendimento },
+  ] },
+  /* Os parceiros do FN Home são cuidados no FN Projetos (Casa Pronta › Fornecedores); aqui fica
+     o que é da própria FN: os produtos do Mercado Livre com o link de afiliado dela. */
+  { titulo: "FN Home", itens: [
+    { aba: "gerencia", sub: "fn-home-ml", label: "Produtos Mercado Livre", Icon: ShoppingBag },
   ] },
   { titulo: "FN Nacional", itens: [
     { aba: "nacional", label: "Rede Nacional", Icon: Landmark },
@@ -16529,6 +16537,9 @@ function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, de
   if (sub === "empreendimentos") {
     return <AbaEmpreendimentosCadastro token={token} apiFetch={apiFetch} notify={notify} aoMudar={carregarEmpreendimentosRef} />;
   }
+  if (sub === "fn-home-ml") {
+    return <AbaProdutosMercadoLivre token={token} apiFetch={apiFetch} notify={notify} redimensionar={redimensionar} />;
+  }
   if (sub === "prospeccao") {
     return <CardProspeccao prospeccao={prospeccao} carregando={prospeccaoCarregando} atualizar={atualizarProspeccao}
       publicarNoDrive={publicarProspeccaoDrive}
@@ -18154,6 +18165,10 @@ function PaginaBeneficiosFn({ tipo }) {
   const tokenCliente = clienteLogado ? sessaoAtual.token : undefined;
   return (
     <div style={{ minHeight: "100vh", background: CINZA_CLARO, fontFamily: "'Inter', system-ui, sans-serif" }}>
+      {/* Página aberta direto pelo link, fora do AppInterno/PainelCliente que injetam os estilos:
+          sem isto, os botões (FN Clube/FN Home, carrinho, "Comprar") saíam com a cara padrão do
+          navegador — igual faz a PaginaRetornoCobranca. */}
+      <style>{estilos}</style>
       <header style={{ background: AZUL_MARINHO, color: "#fff" }}>
         <div style={{ maxWidth: 780, margin: "0 auto", padding: "16px 18px", display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ width: "clamp(36px, 9vw, 44px)", height: "clamp(36px, 9vw, 44px)", borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
@@ -20414,7 +20429,9 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, so
   const [abaTipo, setAbaTipo] = useState(tipoInicial);
   const [selecionado, setSelecionado] = useState(null);
   const [carrinhoAberto, setCarrinhoAberto] = useState(false);
+  const [qtdOfertasMl, setQtdOfertasMl] = useState(0);
   const carrinho = useCarrinho();
+  const mostraOfertasMl = !somenteLogos && abaTipo === "produto";
 
   useEffect(() => {
     (async () => {
@@ -20449,13 +20466,17 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, so
               FN Home
             </button>
             <div style={{ flex: 1 }} />
-            <BotaoCarrinho quantidade={carrinho.quantidadeTotal} onClick={() => setCarrinhoAberto(true)} />
+            <BotaoCarrinho quantidade={carrinho.quantidadeTotal} onClick={() => setCarrinhoAberto(true)}
+              style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} />
           </div>
         </>
       )}
 
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
-      {!carregando && filtrados.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum parceiro disponível no momento.</p>}
+      {/* Sem parceiro de produto mas com oferta do Mercado Livre, o FN Home não está vazio. */}
+      {!carregando && filtrados.length === 0 && !(mostraOfertasMl && qtdOfertasMl > 0) && (
+        <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum parceiro disponível no momento.</p>
+      )}
 
       {filtrados.length > 0 && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 12 }}>
@@ -20466,6 +20487,10 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, so
           ))}
         </div>
       )}
+
+      {/* Produtos que a própria FN indica com o link de afiliado dela — fora do carrinho: a
+          compra é no Mercado Livre. Ver src/fn-home-mercadolivre.jsx. */}
+      {mostraOfertasMl && <SecaoOfertasMercadoLivre apiFetch={apiFetch} aoCarregar={setQtdOfertasMl} separar={filtrados.length > 0} />}
 
       {selecionado && (
         <ModalBeneficioParceiro parceiro={selecionado} onClose={() => setSelecionado(null)} notify={notify}
