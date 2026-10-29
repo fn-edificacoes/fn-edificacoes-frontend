@@ -103,6 +103,7 @@ src/empreendimentos-lista.jsx Gerência → Empreendimentos: a lista do "Cadastr
 src/patologia-voz.jsx       patologia por voz: gravar, acompanhar e revisar o item (aba da vistoria)
 src/voz-fila-offline.js     patologia por voz: gravações guardadas no celular até o servidor receber
 src/ia-creditos.jsx         Financeiro › Créditos de IA: gasto estimado da IA e limite de gravação por técnico
+src/fn-home-mercadolivre.jsx FN Home: produtos do Mercado Livre (cadastro da Gerência e vitrine)
 ```
 
 Para achar algo no `App.jsx`, procure pela definição da componente
@@ -328,6 +329,26 @@ corrigem na planilha, senão a sincronização desfaria. Toda gravação recarre
 App, a mesma lista de Preços por empreendimento e Importar base. O "Remover" de Preços manda o nome
 na querystring: o servidor não lê corpo de DELETE, e por isso ele nunca tinha funcionado. Regras no
 backend: `src/empreendimentos-cadastro.js`.
+
+## FN Home · Produtos do Mercado Livre
+
+`src/fn-home-mercadolivre.jsx`, arquivo próprio como a Rede Nacional (recebe `apiFetch` por prop).
+Produtos que a **própria FN** indica com o link de afiliado dela; a compra é no Mercado Livre e a
+comissão só aparece no painel de afiliados de lá. Backend: `src/afiliados-mercadolivre.js`.
+
+- **Gerência → FN Home → Produtos Mercado Livre** (`AbaProdutosMercadoLivre`, sub `fn-home-ml`):
+  cadastro à mão (o Mercado Livre não tem API para afiliado). Avisa, sem travar, quando o link não
+  parece o do portal de afiliados (`/sec/`, `/social/`, `meli.la`) — link da página do produto abre o
+  mesmo anúncio e não paga comissão. Foto por endereço https ou arquivo (reduzido a 600 px). Preço
+  conferido há mais de 14 dias fica em amarelo; "Conferi hoje" renova a data sem mudar o valor.
+- **Vitrine** (`SecaoOfertasMercadoLivre`): dentro de `SecaoParceirosVitrine` na aba FN Home — vale para
+  `?pagina=fn-home` e para o portal do cliente. Fora do carrinho. Some se não houver produto ou se a
+  API falhar. O botão é o link do Mercado Livre direto; o clique é avisado à API sem esperar resposta.
+  Cada card mostra a data do preço, e o rodapé diz que é link de afiliado e que entrega e garantia são
+  do Mercado Livre e do vendedor.
+- Os parceiros do FN Home (empresas, portfólio, carrinho) continuam no FN Projetos → Casa Pronta.
+- `PaginaBeneficiosFn` passou a injetar `estilos` (antes os botões da página pública saíam sem estilo),
+  e `BotaoCarrinho` aceita `style` — na vitrine branca o ícone branco do `btn-ghost` sumia.
 
 ## Rede Nacional (FN Nacional)
 
