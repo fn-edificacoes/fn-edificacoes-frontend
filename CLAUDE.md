@@ -118,7 +118,8 @@ O papel vem do backend no login, nunca é escolhido na tela. `App()` despacha po
 - `cliente` → `PainelCliente`
 - os demais → `AppInterno`, filtrado por `MODULOS_POR_PERFIL`:
   `vistoriador` (laudos), `documentacao`, `atendimento` (clientes, agendamento, documentação,
-  parceiros), `qualidade` (agendamento, só leitura), `vendas` (parceiros), `gerencia` (tudo).
+  FAQ, marketing — Fornecedores saiu dele em out/2026), `qualidade` (agendamento, só leitura),
+  `vendas` (parceiros), `gerencia` (tudo).
 
 **Aba Documentação (Atendimento e Documentação):** duas sub-abas — **TRTs de reforma**
 (`AbaDocumentacao`, os cadastros de "Documentação ART/TRT" com os dois anexos, pagamento e o
@@ -242,6 +243,10 @@ cadastro rápido (`ModalDespesa`) de qualquer tela.
   "Falta lançar" e do sino — não é fila do Atendimento. Selo cinza "Base antiga · sem valor".
 - **ART/TRT** se lança no card da Documentação (`CardDocumentosArt`), com a mesma `LinhaCobranca` em
   modo `compacto`: valor sugerido, situação, data e forma. Antes era só o seletor Pendente/Pago.
+- **Lançados** (sub-aba do Setor de cobrança, **só Gerência**, `ListaCobrancasLancadas`): tudo o que
+  tem `valorCobrado`, vistoria e ART/TRT juntas, do `cobrancaEm` mais recente para o mais antigo,
+  com quem lançou (`cobrancaPor`). "Corrigir" abre a mesma `LinhaCobranca` compacta — mesmas
+  validações e o mesmo PATCH. O Atendimento não vê o seletor de sub-abas.
 - Nada decide regime tributário. O limite do MEI é o configurado; os campos do Simples são só guardados.
 - **O número do MEI sai de `situacaoMeiDoAno`** (faturamento do ano, limite, projeção): o painel
   Situação Tributária e o aviso por e-mail usam a mesma conta. `Fin.projecaoMei` estica o ritmo do
