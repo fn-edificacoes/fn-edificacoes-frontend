@@ -15,6 +15,7 @@
    Quem vê o botão decide o servidor (flag por conta + papel). Esconder aqui não protege nada:
    as rotas recusam com 403 quem não pode. */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import * as Fila from "./voz-fila-offline.js";
 import { Mic, Lock, X, Camera, Image as IconeImagem, RefreshCcw, CheckCircle2, Trash2, Send, Loader2, AlertTriangle, ChevronUp, ChevronLeft } from "lucide-react";
 
 const AZUL_MEDIO = "#2C75B5";
@@ -69,17 +70,39 @@ function statusNaTela(g) {
   if (g.status === "processando" && Date.now() - new Date(g.atualizadoEm).getTime() > PARADA_MS) return "erro";
   return g.status;
 }
+/* Id do envio, gerado no aparelho: é com ele que o servidor reconhece um reenvio da mesma
+   gravação (a resposta pode ter se perdido com o sinal ruim) e não cria outra. */
+function novoIdEnvio() {
+  return crypto.randomUUID?.() || `v${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+}
+/* Sem resposta do servidor (rede, tempo, servidor fora) ou sessão vencida: tenta de novo
+   sozinho mais tarde. Recusa com motivo (formato, permissão, tamanho) não melhora tentando —
+   fica parada, com o motivo à vista, até o técnico decidir. */
+function falhaPassageira(e) {
+  return !e?.status || e.status >= 500 || [401, 408, 429].includes(e.status);
+}
+function lerHabilitadoGuardado(usuarioId) {
+  try { return localStorage.getItem(`fn_voz_habilitado:${usuarioId}`) === "1"; } catch { return false; }
+}
+function guardarHabilitado(usuarioId, valor) {
+  try { localStorage.setItem(`fn_voz_habilitado:${usuarioId}`, valor ? "1" : "0"); } catch { /* aba anônima */ }
+}
 
 /* ---------- Estado e chamadas ----------
    Um lugar só para tudo o que a voz conversa com a API. O AppInterno chama uma vez e entrega
    o resultado à aba da vistoria e ao "Enviar para gerência" (que avisa dos pendentes). */
-export function usePatologiaVoz({ apiFetch, token, clienteId, perfil }) {
+export function usePatologiaVoz({ apiFetch, token, clienteId, perfil, usuarioId }) {
   const podeUsar = perfil === "vistoriador" || perfil === "gerencia";
-  const [habilitado, setHabilitado] = useState(false);
+  const [habilitado, setHabilitado] = useState(() => (podeUsar && usuarioId ? lerHabilitadoGuardado(usuarioId) : false));
   const [gravacoes, setGravacoes] = useState([]);
-  /* Envios que ainda não têm resposta do servidor. Ficam só na memória da página: a fila que
-     sobrevive a sinal ruim e a recarregar a página é a fase 2 (IndexedDB). */
-  const [locais, setLocais] = useState([]);
+  /* Fila sem sinal (fase 2): toda gravação passa por aqui e fica guardada no aparelho
+     (voz-fila-offline.js) até o servidor confirmar que recebeu. Guarda as de todas as
+     vistorias do técnico — ele pode passar por três apartamentos sem sinal. */
+  const [fila, setFila] = useState([]);
+  const filaRef = useRef([]);
+  filaRef.current = fila;
+  const emEnvio = useRef(new Set());
+  const drenando = useRef(false);
   const clienteRef = useRef(clienteId);
   clienteRef.current = clienteId;
 
@@ -87,10 +110,19 @@ export function usePatologiaVoz({ apiFetch, token, clienteId, perfil }) {
     if (!podeUsar || !token) { setHabilitado(false); return; }
     let vivo = true;
     apiFetch("/api/patologia-voz/config", { token })
-      .then((r) => { if (vivo) setHabilitado(!!r?.habilitado); })
-      .catch(() => { if (vivo) setHabilitado(false); }); // sem a rota (backend antigo) = sem o botão
+      .then((r) => {
+        if (!vivo) return;
+        setHabilitado(!!r?.habilitado);
+        if (usuarioId) guardarHabilitado(usuarioId, !!r?.habilitado);
+      })
+      .catch((e) => {
+        /* Sem resposta (sinal ruim ao abrir o sistema): vale o que o servidor disse da última
+           vez, senão o botão some justamente quando a fila mais faz falta. Recusa de verdade
+           (rota inexistente num backend antigo, 403) desliga. */
+        if (vivo && e?.status) setHabilitado(false);
+      });
     return () => { vivo = false; };
-  }, [podeUsar, token]);
+  }, [podeUsar, token, usuarioId]);
 
   const recarregar = useCallback(async () => {
     const alvo = clienteRef.current;
@@ -103,12 +135,6 @@ export function usePatologiaVoz({ apiFetch, token, clienteId, perfil }) {
     }
   }, [habilitado, token]);
 
-  useEffect(() => {
-    setGravacoes([]);
-    setLocais([]);
-    recarregar();
-  }, [clienteId, habilitado]);
-
   /* Os cards se preenchem sozinhos: enquanto houver gravação em "processando", consulta de
      novo a cada poucos segundos. Nada processando, nada de consulta. */
   const algumProcessando = gravacoes.some((g) => statusNaTela(g) === "processando");
@@ -118,39 +144,125 @@ export function usePatologiaVoz({ apiFetch, token, clienteId, perfil }) {
     return () => clearTimeout(t);
   }, [algumProcessando, gravacoes, recarregar]);
 
-  const postarLocal = async (local) => {
-    setLocais((l) => l.map((x) => (x.idLocal === local.idLocal ? { ...x, status: "enviando", erro: null } : x)));
+  const atualizarNaFila = (envio) => setFila((f) => f.map((x) => (x.idLocal === envio.idLocal ? envio : x)));
+
+  const tentarEnviar = async (envio, { forcar = false } = {}) => {
+    if (!envio || emEnvio.current.has(envio.idLocal)) return;
+    if (!forcar && (envio.estado === "recusado" || navigator.onLine === false)) return;
+    emEnvio.current.add(envio.idLocal);
+    atualizarNaFila({ ...envio, enviando: true });
     try {
-      await apiFetch(`/api/patologia-voz/vistorias/${encodeURIComponent(local.clienteId)}/gravacoes`, {
-        method: "POST", token, body: local.corpo,
+      const audioBase64 = await blobParaDataUrl(new Blob([envio.audio], { type: envio.mimeType }));
+      await apiFetch(`/api/patologia-voz/vistorias/${encodeURIComponent(envio.clienteId)}/gravacoes`, {
+        method: "POST", token,
+        body: {
+          audioBase64, mimeType: envio.mimeType, duracaoMs: Math.round(envio.duracaoMs),
+          idEnvio: envio.idLocal, gravadoEm: envio.gravadoEm,
+          ...(envio.fotoDataUrl ? { fotoBase64: envio.fotoDataUrl, fotoMime: "image/jpeg" } : {}),
+          ...(!envio.fotoDataUrl && envio.fotoDeGravacaoId ? { fotoDeGravacaoId: envio.fotoDeGravacaoId } : {}),
+        },
       });
-      setLocais((l) => l.filter((x) => x.idLocal !== local.idLocal));
-      await recarregar();
+      // Só sai do aparelho depois que o servidor confirmou.
+      if (!envio.soNaMemoria) await Fila.removerEnvio(envio.idLocal).catch(() => {});
+      setFila((f) => f.filter((x) => x.idLocal !== envio.idLocal));
+      if (envio.clienteId === clienteRef.current) recarregar();
     } catch (e) {
-      setLocais((l) => l.map((x) => (x.idLocal === local.idLocal ? { ...x, status: "falha_envio", erro: e.message } : x)));
+      const passageira = falhaPassageira(e);
+      const atualizado = {
+        ...envio, enviando: false, tentativas: (envio.tentativas || 0) + 1,
+        estado: passageira ? "aguardando" : "recusado", erro: passageira ? null : e.message,
+      };
+      atualizarNaFila(atualizado);
+      if (!envio.soNaMemoria) Fila.guardarEnvio(atualizado).catch(() => {});
+    } finally {
+      emEnvio.current.delete(envio.idLocal);
     }
   };
 
-  /* Aparece na hora como "processando" e o técnico segue para a próxima patologia: o envio,
-     a transcrição e a IA correm por trás. */
+  /* Um por vez: com sinal fraco, subir vários áudios juntos faz todos falharem. */
+  const tentarFila = async () => {
+    if (drenando.current) return;
+    drenando.current = true;
+    try {
+      for (const envio of [...filaRef.current]) {
+        if (envio.estado === "recusado") continue;
+        await tentarEnviar(envio);
+      }
+    } finally {
+      drenando.current = false;
+    }
+  };
+  const tentarFilaRef = useRef(tentarFila);
+  tentarFilaRef.current = tentarFila;
+
+  /* Reenvia sozinho: ao abrir o sistema, quando o celular avisa que a conexão voltou, quando o
+     técnico volta para o app e — porque "conectado" no celular nem sempre quer dizer internet —
+     a cada 20 s enquanto houver algo esperando. */
+  useEffect(() => {
+    if (!habilitado || !usuarioId || !Fila.filaDisponivel()) return undefined;
+    let vivo = true;
+    Fila.listarEnvios(usuarioId)
+      .then((guardados) => {
+        if (!vivo) return;
+        setFila((atual) => [...atual, ...guardados.filter((g) => !atual.some((a) => a.idLocal === g.idLocal)).map((g) => ({ ...g, enviando: false }))]);
+        setTimeout(() => tentarFilaRef.current(), 0);
+      })
+      .catch((e) => console.warn("Patologia por voz: não consegui ler a fila guardada:", e.message));
+    const aoVoltarSinal = () => tentarFilaRef.current();
+    const aoMostrar = () => { if (!document.hidden) tentarFilaRef.current(); };
+    window.addEventListener("online", aoVoltarSinal);
+    document.addEventListener("visibilitychange", aoMostrar);
+    return () => {
+      vivo = false;
+      window.removeEventListener("online", aoVoltarSinal);
+      document.removeEventListener("visibilitychange", aoMostrar);
+    };
+  }, [habilitado, usuarioId]);
+
+  const temAguardando = fila.some((e) => e.estado === "aguardando");
+  useEffect(() => {
+    if (!temAguardando) return undefined;
+    const t = setInterval(() => tentarFilaRef.current(), 20000);
+    return () => clearInterval(t);
+  }, [temAguardando]);
+
+  /* Trocou de vistoria (ou reabriu): lista nova e mais uma tentativa com o que estava parado. */
+  useEffect(() => {
+    setGravacoes([]);
+    recarregar();
+    tentarFilaRef.current();
+  }, [clienteId, habilitado]);
+
+  /* Aparece na hora e o técnico segue para a próxima patologia: o envio, a transcrição e a IA
+     correm por trás. A gravação vai primeiro para o aparelho, depois para o servidor. */
   const enviar = async ({ blob, duracaoMs, fotoDataUrl, fotoDeGravacaoId }) => {
     if (!clienteRef.current) return;
-    const idLocal = `local-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const audioBase64 = await blobParaDataUrl(blob);
-    const local = {
-      idLocal, clienteId: clienteRef.current, criadoEm: new Date().toISOString(), duracaoMs, status: "enviando",
-      foto: fotoDataUrl || null,
-      corpo: {
-        audioBase64, mimeType: blob.type || "audio/webm", duracaoMs: Math.round(duracaoMs),
-        ...(fotoDataUrl ? { fotoBase64: fotoDataUrl, fotoMime: "image/jpeg" } : {}),
-        ...(!fotoDataUrl && fotoDeGravacaoId ? { fotoDeGravacaoId } : {}),
-      },
+    const audio = blob.arrayBuffer ? await blob.arrayBuffer() : await new Response(blob).arrayBuffer();
+    const envio = {
+      idLocal: novoIdEnvio(), usuarioId, clienteId: clienteRef.current, gravadoEm: new Date().toISOString(),
+      duracaoMs, mimeType: blob.type || "audio/webm", audio,
+      fotoDataUrl: fotoDataUrl || null, fotoDeGravacaoId: fotoDataUrl ? null : (fotoDeGravacaoId || null),
+      estado: "aguardando", erro: null, tentativas: 0,
     };
-    setLocais((l) => [local, ...l]);
-    postarLocal(local);
+    try {
+      await Fila.guardarEnvio(envio);
+    } catch (e) {
+      /* Sem IndexedDB (aba anônima, armazenamento cheio): ainda envia, mas só enquanto a página
+         estiver aberta — e a tela avisa isso no card. */
+      console.warn("Patologia por voz: gravação fora da fila guardada:", e.message);
+      envio.soNaMemoria = true;
+    }
+    setFila((f) => [...f, envio]);
+    tentarEnviar(envio);
   };
-  const reenviarLocal = (idLocal) => { const x = locais.find((l) => l.idLocal === idLocal); if (x) postarLocal(x); };
-  const descartarLocal = (idLocal) => setLocais((l) => l.filter((x) => x.idLocal !== idLocal));
+  const reenviarLocal = (idLocal) => {
+    const envio = filaRef.current.find((x) => x.idLocal === idLocal);
+    if (envio) tentarEnviar(envio, { forcar: true });
+  };
+  const descartarLocal = async (idLocal) => {
+    await Fila.removerEnvio(idLocal).catch(() => {});
+    setFila((f) => f.filter((x) => x.idLocal !== idLocal));
+  };
 
   const reprocessar = async (id) => {
     await apiFetch(`/api/patologia-voz/gravacoes/${encodeURIComponent(id)}/reprocessar`, { method: "POST", token });
@@ -166,13 +278,16 @@ export function usePatologiaVoz({ apiFetch, token, clienteId, perfil }) {
     await recarregar();
   };
 
+  const locais = useMemo(() => fila.filter((e) => e.clienteId === clienteId), [fila, clienteId]);
+  const deOutrasVistorias = fila.length - locais.length;
+
   /* O que ainda não está no laudo: aviso no "Enviar para gerência". */
   const pendentes = useMemo(() => {
-    const lista = locais.map((l) => `Gravação das ${horaDe(l.criadoEm)} — ${l.status === "enviando" ? "enviando" : "não enviada"}`);
+    const lista = locais.map((l) => `Gravação das ${horaDe(l.gravadoEm)} — ${l.estado === "recusado" ? "recusada pelo servidor" : "aguardando envio"}`);
     for (const g of gravacoes) {
       const st = statusNaTela(g);
-      if (st === "processando") lista.push(`Gravação das ${horaDe(g.criadoEm)} — processando`);
-      else if (st === "erro") lista.push(`Gravação das ${horaDe(g.criadoEm)} — com erro (reprocessar ou descartar)`);
+      if (st === "processando") lista.push(`Gravação das ${horaDe(g.gravadoEm || g.criadoEm)} — processando`);
+      else if (st === "erro") lista.push(`Gravação das ${horaDe(g.gravadoEm || g.criadoEm)} — com erro (reprocessar ou descartar)`);
       else {
         for (const it of g.itens) {
           if (it.statusRevisao !== "pendente_revisao") continue;
@@ -184,7 +299,10 @@ export function usePatologiaVoz({ apiFetch, token, clienteId, perfil }) {
     return lista;
   }, [gravacoes, locais]);
 
-  return { habilitado: habilitado && podeUsar, gravacoes, locais, pendentes, recarregar, enviar, reenviarLocal, descartarLocal, reprocessar, confirmar, descartar };
+  return {
+    habilitado: habilitado && podeUsar, gravacoes, locais, deOutrasVistorias, pendentes, recarregar, enviar,
+    reenviarLocal, descartarLocal, reprocessar, confirmar, descartar,
+  };
 }
 
 /* ---------- Botão de gravar, igual áudio de WhatsApp ----------
@@ -413,7 +531,9 @@ export function PainelPatologiaVoz({ voz, patologiasBanco = [], ambientes = [], 
     try {
       await voz.enviar({ blob, duracaoMs, fotoDataUrl: foto?.dataUrl || null, fotoDeGravacaoId: foto?.gravacaoId || null });
       setFoto(null);
-      notify?.("Gravação enviada — pode seguir para a próxima patologia.");
+      notify?.(navigator.onLine === false
+        ? "Sem sinal: gravação guardada no celular — envia sozinha quando o sinal voltar."
+        : "Gravação enviada — pode seguir para a próxima patologia.");
     } catch (e) {
       notify?.(e.message || "Não foi possível preparar a gravação.");
     }
@@ -471,24 +591,17 @@ export function PainelPatologiaVoz({ voz, patologiasBanco = [], ambientes = [], 
         <BotaoGravarVoz onGravado={aoGravar} />
       </div>
 
+      {voz.deOutrasVistorias > 0 && (
+        <p style={{ fontSize: 12.5, color: "#7a4e00", background: "#FFF4E0", borderRadius: 8, padding: "6px 9px", margin: "12px 0 0" }}>
+          {voz.deOutrasVistorias === 1
+            ? "1 gravação de outra vistoria está guardada no celular e será enviada assim que houver sinal."
+            : `${voz.deOutrasVistorias} gravações de outras vistorias estão guardadas no celular e serão enviadas assim que houver sinal.`}
+        </p>
+      )}
       {(voz.locais.length > 0 || abertas.length > 0) && (
         <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 12 }}>
           {voz.locais.map((l) => (
-            <div key={l.idLocal} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: 12, background: CINZA_CLARO }}>
-              <CabecalhoGravacao hora={horaDe(l.criadoEm)} duracaoMs={l.duracaoMs}
-                status={l.status === "enviando" ? "enviando" : "falha_envio"} />
-              {l.status === "enviando" ? (
-                <p style={{ fontSize: 12.5, color: "#5a6a80", margin: "6px 0 0" }}>Enviando… pode seguir para a próxima patologia.</p>
-              ) : (
-                <div style={{ marginTop: 8 }}>
-                  <p style={{ fontSize: 12.5, color: VERMELHO, margin: "0 0 8px" }}>{l.erro || "Não foi possível enviar."}</p>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <button type="button" style={btn} onClick={() => voz.reenviarLocal(l.idLocal)}><RefreshCcw size={15} /> Tentar enviar de novo</button>
-                    <button type="button" style={{ ...btnLeve, color: VERMELHO }} onClick={() => voz.descartarLocal(l.idLocal)}><Trash2 size={15} /> Descartar</button>
-                  </div>
-                </div>
-              )}
-            </div>
+            <CardEnvioNaFila key={l.idLocal} envio={l} voz={voz} />
           ))}
           {abertas.map((g) => (
             <CardGravacao key={g.id} g={g} voz={voz} patologiasBanco={patologiasBanco} ambientes={ambientes}
@@ -517,10 +630,42 @@ export function PainelPatologiaVoz({ voz, patologiasBanco = [], ambientes = [], 
   );
 }
 
+/* Gravação que ainda está no aparelho (fila sem sinal). A foto e o áudio ficam guardados
+   nele até o servidor confirmar; o técnico não precisa fazer nada além de seguir trabalhando. */
+function CardEnvioNaFila({ envio, voz }) {
+  const [confirmandoDescarte, setConfirmandoDescarte] = useState(false);
+  const status = envio.enviando ? "enviando" : envio.estado;
+  return (
+    <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: 12, background: CINZA_CLARO }}>
+      <CabecalhoGravacao hora={horaDe(envio.gravadoEm)} duracaoMs={envio.duracaoMs} status={status} />
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 8 }}>
+        {envio.fotoDataUrl && <img src={envio.fotoDataUrl} alt="" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 8, border: `1px solid ${CINZA_BORDA}` }} />}
+        <p style={{ fontSize: 12.5, color: status === "recusado" ? VERMELHO : "#5a6a80", margin: 0, flex: 1 }}>
+          {status === "enviando" && "Enviando… pode seguir para a próxima patologia."}
+          {status === "aguardando" && "Guardada no celular. Envia sozinha quando o sinal voltar — pode seguir trabalhando."}
+          {status === "recusado" && (envio.erro || "O servidor recusou esta gravação.")}
+          {envio.soNaMemoria && status !== "enviando" && " Atenção: este navegador não guardou a gravação no celular — não feche a página antes de ela ser enviada."}
+        </p>
+      </div>
+      {status !== "enviando" && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+          <button type="button" style={btn} onClick={() => voz.reenviarLocal(envio.idLocal)}><RefreshCcw size={15} /> Tentar agora</button>
+          {confirmandoDescarte ? (
+            <button type="button" style={{ ...btn, background: VERMELHO }} onClick={() => voz.descartarLocal(envio.idLocal)}><Trash2 size={15} /> Apagar a gravação</button>
+          ) : (
+            <button type="button" style={{ ...btnLeve, color: VERMELHO }} onClick={() => setConfirmandoDescarte(true)}><Trash2 size={15} /> Descartar</button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CabecalhoGravacao({ hora, duracaoMs, status }) {
   const meta = {
     enviando: { texto: "Enviando", cor: AZUL_MEDIO, fundo: "#EAF2FB", girando: true },
-    falha_envio: { texto: "Não enviada", cor: VERMELHO, fundo: "#FDECEC" },
+    aguardando: { texto: "Aguardando sinal", cor: AMBAR, fundo: "#FFF4E0" },
+    recusado: { texto: "Não enviada", cor: VERMELHO, fundo: "#FDECEC" },
     processando: { texto: "Processando", cor: AZUL_MEDIO, fundo: "#EAF2FB", girando: true },
     erro: { texto: "Erro", cor: VERMELHO, fundo: "#FDECEC" },
     concluido: { texto: "Pronta para revisar", cor: VERDE, fundo: "#E6F4EF" },
@@ -551,7 +696,7 @@ function CardGravacao({ g, voz, patologiasBanco, ambientes, notify, onConfirmado
 
   return (
     <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: 12, background: "#fff" }}>
-      <CabecalhoGravacao hora={horaDe(g.criadoEm)} duracaoMs={g.duracaoMs} status={status} />
+      <CabecalhoGravacao hora={horaDe(g.gravadoEm || g.criadoEm)} duracaoMs={g.duracaoMs} status={status} />
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
         {g.foto && <img src={g.foto} alt="" style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, border: `1px solid ${CINZA_BORDA}` }} />}
         {/* preload="none": o áudio só desce quando alguém aperta o play. */}

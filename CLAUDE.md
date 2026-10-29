@@ -101,6 +101,7 @@ src/financeiro-regras.js    regras do Financeiro (despesas, MEI, exportação) �
 src/controle-financeiro.jsx ARTs de vistoria, folha de pagamento, valores dos custos
 src/empreendimentos-lista.jsx Gerência → Empreendimentos: a lista do "Cadastre-se"
 src/patologia-voz.jsx       patologia por voz: gravar, acompanhar e revisar o item (aba da vistoria)
+src/voz-fila-offline.js     patologia por voz: gravações guardadas no celular até o servidor receber
 ```
 
 Para achar algo no `App.jsx`, procure pela definição da componente
@@ -153,8 +154,18 @@ pendente mora só no servidor e não entra no laudo.
   pedido de permissão do microfone interrompe o gesto — a tela só avisa que agora pode gravar.
 - Ao soltar, o card aparece na hora ("Enviando" → "Processando") e o técnico segue. Enquanto houver
   algo processando, a lista é consultada a cada 3 s. Erro tem "Reprocessar" (sem regravar);
-  "processando" há mais de 5 min conta como erro. Falha de envio fica na tela com "Tentar de novo"
-  só enquanto a página está aberta — a fila offline (IndexedDB) é a fase 2.
+  "processando" há mais de 5 min conta como erro.
+- **Fila sem sinal** (`src/voz-fila-offline.js`, banco IndexedDB `fn-voz-fila`, separado do rascunho):
+  toda gravação vai primeiro para o celular e só sai de lá quando o servidor confirma. Áudio como
+  ArrayBuffer (Blob no IndexedDB falhou no Safari do iPhone por várias versões). Reenvia sozinha ao
+  abrir o sistema, ao trocar/reabrir a vistoria, no evento `online`, ao voltar para o app e a cada
+  20 s enquanto houver algo "Aguardando sinal" — um envio por vez. Só reenvia falha sem resposta
+  (rede, 5xx, 401, 408, 429; o `apiFetch` agora põe `status` no erro); recusa com motivo fica
+  "Não enviada" até o técnico tentar de novo ou descartar. Cada envio leva `idEnvio` (gerado no
+  aparelho): se a resposta se perdeu, o reenvio devolve a mesma gravação em vez de duplicar.
+  Também vai `gravadoEm`, a hora real da gravação. A fila é por usuário (celular compartilhado) e
+  guarda todas as vistorias; o painel mostra as da vistoria aberta e conta as outras. Se o último
+  `config` disse "liberado" e agora não há resposta, o botão continua (`fn_voz_habilitado:<id>`).
 - Card de revisão: foto, áudio (URL assinada, `preload="none"`), transcrição recolhível, campos do
   item com a patologia do catálogo pré-selecionada, selo de confiança e observações da IA.
   Trocar a patologia traz título, sistema, norma e severidade do catálogo e mantém descrição e

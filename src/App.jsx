@@ -135,6 +135,9 @@ async function apiFetch(caminho, { method = "GET", body, token } = {}) {
     if (resp.status === 401 && token && aoPerderSessao) aoPerderSessao(dados?.erro || "");
 
     const falha = new Error(dados?.erro || (resp.status >= 500 ? MSG_API_FORA : `Erro ${resp.status}`));
+    /* O status vai junto para quem precisa distinguir "o servidor recusou" de "não houve
+       resposta" (erro sem status) — a fila sem sinal da patologia por voz só reenvia o segundo. */
+    falha.status = resp.status;
     if (!STATUS_PASSAGEIROS.includes(resp.status)) throw falha;
     ultimoErro = falha;
   }
@@ -2308,7 +2311,7 @@ function AppInterno({ session, onLogout }) {
   const [clienteAtualId, setClienteAtualId] = useState(null); // id do cliente carregado no laudo em edição — necessário para "Enviar para gerência"
   /* Patologia por voz (src/patologia-voz.jsx): gravações e itens a revisar da vistoria aberta.
      Fica aqui, e não na aba, porque o "Enviar para gerência" precisa saber dos pendentes. */
-  const voz = usePatologiaVoz({ apiFetch, token, clienteId: clienteAtualId, perfil });
+  const voz = usePatologiaVoz({ apiFetch, token, clienteId: clienteAtualId, perfil, usuarioId: session.usuario.id });
   const [avisoVozAberto, setAvisoVozAberto] = useState(false);
   /* Trava do laudo após o envio à gerência.
      Isto já existiu como useState solto com um botão de "desbloquear" ao lado: o próprio
