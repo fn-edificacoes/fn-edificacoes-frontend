@@ -246,6 +246,24 @@ o link do Mercado Pago (`POST /api/cobrancas`) e oferece copiar/WhatsApp. O clie
 card "Pagamentos" do `PainelCliente`; a volta do Mercado Pago cai em `?cobranca=<id>`
 (`PaginaRetornoCobranca`, rota pública). Quem dá baixa é o webhook no backend — a tela só lê.
 
+**Contas de recebimento e comprovante do Pix** (`src/recebimentos.js` no backend). A FN também recebe
+numa conta secundária sem integração; a conferência dela é o comprovante do Pix. Todo dinheiro de
+cliente em qualquer conta é faturamento da FN (a ficha não olha a conta) — a conta só diz em que
+extrato conferir. O sistema não escolhe a conta nem desvia link: os links saem sempre da PJ.
+
+- Estado num lugar só (`recebimentosEstado` + `useRecebimentos`, perto de `useFinanceiro`): contas e a
+  lista de comprovantes, carregadas uma vez pelo `AppInterno` (Gerência e Atendimento). Cada linha do
+  Setor de cobrança lê dali — buscar em cada linha seriam dezenas de pedidos iguais.
+- `LinhaCobranca`: com Pix, transferência, boleto, cartão ou "Outro", aparece **"Caiu em qual conta"**
+  (`contaRecebimento`); baixa nova por Pix/transferência não salva sem conta. Dinheiro limpa a conta;
+  "Mercado Pago" (o link) já grava a PJ no servidor. Depois da baixa salva, `BlocoComprovanteRecebimento`
+  anexa/abre/remove o comprovante; na conta conferida por comprovante, sem arquivo aparece o aviso.
+- Conciliação Mercado Pago: "Recebido no mês por conta" (pela ficha, data do pagamento), o quadro
+  **"Contas conferidas pelo comprovante"** (fora do bloco do Mercado Pago, aparece mesmo se a consulta
+  falhar) com quem está sem comprovante (entra em "Precisa de conferência"), a planilha com as colunas
+  **Conta de recebimento** e **Comprovante**, e **Comprovantes do mês (.zip)**, uma pasta por conta.
+- Configurações Fiscais › `CardContasRecebimento`: cadastrar conta e desativar/reativar (a PJ é fixa).
+
 ## Empreendimentos do cadastro público
 
 Gerência → Empreendimentos (`src/empreendimentos-lista.jsx`, `AbaEmpreendimentosCadastro`): onde a

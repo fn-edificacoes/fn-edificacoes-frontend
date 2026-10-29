@@ -201,6 +201,9 @@ function mapClienteDaApi(c) {
     /* Como o dinheiro entrou (Pix, dinheiro, Mercado Pago…) — junto com pagoEm, é o que se
        confere no extrato. */
     formaPagamento: c.forma_pagamento || "",
+    /* Em que conta o dinheiro caiu (id de /api/contas-recebimento): a PJ do Mercado Pago ou outra
+       que a Gerência cadastrou. Só diz onde conferir — a receita é a mesma em qualquer conta. */
+    contaRecebimento: c.conta_recebimento || "",
     /* O servidor já diz se este cadastro virou laudo. Sem isso, quem não recebe os registros
        de "docs" (o Atendimento) não conseguia distinguir vistoria em campo de vistoria
        entregue — e contava as duas como "Em vistoria". */
@@ -2832,6 +2835,8 @@ function AppInterno({ session, onLogout }) {
     setPrecosCarregando(false);
   };
   useEffect(() => { carregarPrecos(); }, []);
+  /* Contas de recebimento e comprovantes do Pix: quem dá baixa (Gerência e Atendimento). */
+  useEffect(() => { if (perfil === "gerencia" || perfil === "atendimento") carregarRecebimentos(token); }, []);
   /* Aviso do limite do MEI (só Gerência): espera as três listas da primeira carga. */
   useAvisoLimiteMei({
     ativo: perfil === "gerencia" && clientes.length > 0 && !clientesCarregando && !docsCarregando && !precosCarregando,
@@ -4936,6 +4941,11 @@ function LinhaCobranca({ cliente, sugerido, origemSugestao = null, tecnico, pode
   const pagoEmInicial = diaLocalDe(cliente.pagoEm) || ((cliente.pagamento || "Pendente") !== "Pendente" ? "" : hojeLocal());
   const [pagoEm, setPagoEm] = useState(pagoEmInicial);
   const [forma, setForma] = useState(cliente.formaPagamento || "Pix");
+  /* Em que conta o dinheiro caiu. Pix e transferência pedem a conta: a PJ do Mercado Pago é
+     conferida sozinha pela conciliação; a conta secundária, pelo comprovante anexado aqui. */
+  const recebimentos = useRecebimentos();
+  const [conta, setConta] = useState(cliente.contaRecebimento || "");
+  const [anexando, setAnexando] = useState(false);
   const [salvando, setSalvando] = useState(false);
   /* O pagamento pelo link muda o cadastro por fora (webhook do Mercado Pago). Sem isto, a
      linha continuava mostrando "Pendente" no seletor até alguém recarregar a página. */
@@ -4944,13 +4954,18 @@ function LinhaCobranca({ cliente, sugerido, origemSugestao = null, tecnico, pode
     setRecebido(cliente.valorRecebido != null ? String(cliente.valorRecebido) : "");
     setPagoEm(pagoEmInicial);
     setForma(cliente.formaPagamento || "Pix");
-  }, [cliente.pagamento, cliente.valorRecebido, cliente.pagoEm, cliente.formaPagamento]);
+    setConta(cliente.contaRecebimento || "");
+  }, [cliente.pagamento, cliente.valorRecebido, cliente.pagoEm, cliente.formaPagamento, cliente.contaRecebimento]);
 
   const entrouDinheiro = pagamento !== "Pendente";
+  /* Dinheiro em espécie não cai em conta; "Mercado Pago" é o link, que já grava a conta PJ. */
+  const pedeConta = entrouDinheiro && forma !== "Dinheiro" && forma !== "Mercado Pago" && recebimentos.contas.length > 0;
+  const contasDaLinha = recebimentos.contas.filter((c) => c.ativa || c.id === conta);
   const mudou = String(valor) !== (lancado ? String(cliente.valorCobrado) : textoSugerido)
     || pagamento !== (cliente.pagamento || "Pendente")
     || String(recebido) !== (cliente.valorRecebido != null ? String(cliente.valorRecebido) : "")
-    || (entrouDinheiro && (pagoEm !== pagoEmInicial || forma !== (cliente.formaPagamento || "Pix")));
+    || (entrouDinheiro && (pagoEm !== pagoEmInicial || forma !== (cliente.formaPagamento || "Pix")))
+    || (pedeConta && conta !== (cliente.contaRecebimento || ""));
   /* Ainda não lançado, o botão fica aceso mesmo sem mexer em nada: confirmar a sugestão como ela
      veio é justamente o trabalho. Antes ele só acendia depois de alguma alteração, e quem queria
      lançar os R$ 250 sugeridos precisava apagar e redigitar o mesmo número. */
@@ -4973,14 +4988,24 @@ function LinhaCobranca({ cliente, sugerido, origemSugestao = null, tecnico, pode
     const jaPagoSemData = !pagoEm && (cliente.pagamento || "Pendente") === pagamento && !cliente.pagoEm;
     if (entrouDinheiro && !jaPagoSemData && !/^\d{4}-\d{2}-\d{2}$/.test(pagoEm)) { onSalvar.notify("Informe a data em que o pagamento entrou."); return; }
     if (entrouDinheiro && pagoEm > hojeLocal()) { onSalvar.notify("A data do pagamento não pode ser no futuro."); return; }
+    /* Baixa nova por Pix ou transferência pede a conta: sem ela, o contador não sabe em que extrato
+       procurar. Baixa antiga sem conta continua salvando outras mudanças. */
+    const baixaNova = (cliente.pagamento || "Pendente") === "Pendente";
+    if (pedeConta && !conta && baixaNova && (forma === "Pix" || forma === "Transferência")) {
+      onSalvar.notify("Escolha em qual conta o dinheiro caiu.");
+      return;
+    }
     setSalvando(true);
     /* "Mercado Pago" quem grava é o link; se a linha já veio assim, a forma não é reenviada. */
     const formaParaGravar = forma === "Mercado Pago" ? undefined : forma;
     await onSalvar.salvar(cliente.id, {
       valorCobrado: numero, valorRecebido: recebidoNum, pagamento,
       ...(entrouDinheiro
-        ? { ...(pagoEm ? { pagoEm } : {}), ...(formaParaGravar ? { formaPagamento: formaParaGravar } : {}) }
-        : { pagoEm: null, formaPagamento: null }),
+        ? {
+          ...(pagoEm ? { pagoEm } : {}), ...(formaParaGravar ? { formaPagamento: formaParaGravar } : {}),
+          ...(pedeConta ? { contaRecebimento: conta || null } : forma === "Dinheiro" ? { contaRecebimento: null } : {}),
+        }
+        : { pagoEm: null, formaPagamento: null, contaRecebimento: null }),
     });
     /* Em "Pago" o recebido é gravado igual ao cobrado; sem espelhar aqui, o campo local
        continuaria vazio e o botão Salvar ficaria aceso como se houvesse mudança pendente. */
@@ -5082,6 +5107,15 @@ function LinhaCobranca({ cliente, sugerido, origemSugestao = null, tecnico, pode
             </select>
           </div>
         )}
+        {pedeConta && (
+          <div style={{ ...cell(), minWidth: 190 }}>
+            <label style={lab}>Caiu em qual conta</label>
+            <select style={{ ...inp, ...(!conta ? { border: "1px solid #f0c987" } : {}) }} value={conta} disabled={!podeAgir} onChange={(e) => setConta(e.target.value)}>
+              <option value="">— escolha —</option>
+              {contasDaLinha.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.ativa ? "" : " (desativada)"}</option>)}
+            </select>
+          </div>
+        )}
         {podeAgir && (
           <button className="btn-solid" style={{ width: "auto", padding: "9px 14px" }}
             onClick={salvar} disabled={salvando || !podeSalvar}
@@ -5090,6 +5124,11 @@ function LinhaCobranca({ cliente, sugerido, origemSugestao = null, tecnico, pode
           </button>
         )}
       </div>
+
+      {(cliente.pagamento === "Pago" || cliente.pagamento === "Parcial") && recebimentos.carregado
+        && cliente.formaPagamento !== "Mercado Pago" && cliente.formaPagamento !== "Dinheiro" && (
+        <BlocoComprovanteRecebimento cliente={cliente} podeAgir={podeAgir} notify={onSalvar.notify} />
+      )}
 
       {podeAgir && gerarLink && lancado && (
         <BlocoLinkPagamento cliente={cliente} cobranca={cobranca} gerarLink={gerarLink} notify={onSalvar.notify} />
@@ -5106,6 +5145,53 @@ function LinhaCobranca({ cliente, sugerido, origemSugestao = null, tecnico, pode
         <div style={{ fontSize: 11.5, color: "#8593a8" }}>
           Último lançamento em {fmtDataHora(cliente.cobrancaEm)}
         </div>
+      )}
+    </div>
+  );
+}
+
+/* Comprovante do Pix de um cadastro já baixado. É a conferência das contas que o sistema não lê
+   sozinho (a conta secundária): o arquivo vai para o Drive, na pasta do mês e da conta em que o
+   dinheiro caiu, e a Conciliação aponta quem ficou sem. Na conta PJ do Mercado Pago ele é opcional
+   — a conciliação já confere pelo próprio Mercado Pago. */
+function BlocoComprovanteRecebimento({ cliente, podeAgir, notify }) {
+  const rec = useRecebimentos();
+  const [enviando, setEnviando] = useState(false);
+  const lista = rec.comprovantesDe(cliente.id);
+  const conta = rec.contas.find((c) => c.id === cliente.contaRecebimento);
+  const precisa = conta?.conferencia === "comprovante";
+  const anexar = async (arquivos) => {
+    setEnviando(true);
+    for (const arquivo of arquivos) {
+      try { await rec.anexar(cliente.id, arquivo); notify("Comprovante anexado ✓"); }
+      catch (e) { notify(`Não foi possível anexar ${arquivo.name || "o comprovante"}: ${e.message}`); }
+    }
+    setEnviando(false);
+  };
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5 }}>
+      <span style={{ color: lista.length ? "#1B7F4B" : precisa ? "#B26A00" : "#65758b", fontWeight: 600 }}>
+        {lista.length ? `Comprovante (${lista.length}):` : precisa ? `Sem comprovante — anexe o Pix para a conferência da conta "${conta.nome}".` : "Comprovante do Pix:"}
+      </span>
+      {lista.map((a) => (
+        <span key={a.id} style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+          <button className="btn-mini" onClick={() => rec.abrir(a).catch((e) => notify(e.message))} title={`Enviado por ${a.enviadoPor || "—"} em ${fmtDataHora(a.enviadoEm)}`}>
+            <Paperclip size={11} /> {String(a.nomeArquivo || "comprovante").slice(0, 28)}
+          </button>
+          {podeAgir && (
+            <button className="btn-mini" title="Remover comprovante" style={{ background: "#fff", color: "#C62828", border: "1px solid #f3b9b9" }}
+              onClick={() => { if (window.confirm("Remover este comprovante?")) rec.remover(a.id).catch((e) => notify(e.message)); }}>
+              <Trash2 size={11} />
+            </button>
+          )}
+        </span>
+      ))}
+      {podeAgir && (
+        <label className="btn-mini" style={{ cursor: enviando ? "wait" : "pointer" }}>
+          {enviando ? <Loader2 size={11} className="spin" /> : <Upload size={11} />} {lista.length ? "Anexar outro" : "Anexar comprovante"}
+          <input type="file" accept="image/*,application/pdf" multiple hidden disabled={enviando}
+            onChange={(e) => { const arquivos = [...(e.target.files || [])]; e.target.value = ""; if (arquivos.length) anexar(arquivos); }} />
+        </label>
       )}
     </div>
   );
@@ -12707,6 +12793,76 @@ const lerArquivoComoDataUrl = (arquivo) => new Promise((resolver, rejeitar) => {
   leitor.readAsDataURL(arquivo);
 });
 
+/* ---------- Contas de recebimento e comprovante do Pix (src/recebimentos.js no backend) ----------
+   Num lugar só, fora dos componentes: cada linha do Setor de cobrança mostra a conta e o
+   comprovante do seu cadastro, e buscar a lista em cada linha seriam dezenas de pedidos iguais a
+   cada abertura da tela. O AppInterno carrega uma vez (Gerência e Atendimento); quem anexa,
+   remove ou cadastra conta mexe na lista daqui, e todas as telas que usam useRecebimentos
+   acompanham. */
+const CONTA_MP_PJ = "mp_pj";
+const recebimentosEstado = { token: null, contas: [], comprovantes: [], carregado: false, ouvintes: new Set() };
+const avisarRecebimentos = () => recebimentosEstado.ouvintes.forEach((f) => f());
+async function carregarRecebimentos(token) {
+  recebimentosEstado.token = token;
+  try {
+    const [rc, rp] = await Promise.all([
+      apiFetch("/api/contas-recebimento", { token }),
+      apiFetch("/api/comprovantes-recebimento", { token }),
+    ]);
+    recebimentosEstado.contas = rc.contas || [];
+    recebimentosEstado.comprovantes = rp.comprovantes || [];
+    recebimentosEstado.carregado = true;
+  } catch (e) { console.warn("Contas de recebimento indisponíveis:", e.message); }
+  avisarRecebimentos();
+}
+/* As funções devolvem o resultado ou lançam o erro com a mensagem do servidor — quem chama é que
+   sabe se avisa no notify ou mostra na própria tela. */
+function useRecebimentos() {
+  const [, setVersao] = useState(0);
+  useEffect(() => {
+    const ouvir = () => setVersao((v) => v + 1);
+    recebimentosEstado.ouvintes.add(ouvir);
+    return () => { recebimentosEstado.ouvintes.delete(ouvir); };
+  }, []);
+  const { token, contas, comprovantes, carregado } = recebimentosEstado;
+  const anexar = async (clienteId, arquivo) => {
+    let dataUrl = await lerArquivoComoDataUrl(arquivo);
+    let mimeType = arquivo.type || "application/pdf";
+    /* Mesma redução do comprovante de despesa: print do Pix e foto de celular ficam legíveis em 1600px. */
+    if (mimeType.startsWith("image/") && !/hei[cf]/.test(mimeType)) { dataUrl = await redimensionar(dataUrl, 1600); mimeType = "image/jpeg"; }
+    const nome = mimeType === "image/jpeg" ? String(arquivo.name || "comprovante").replace(/\.[^.]+$/, "") + ".jpg" : arquivo.name;
+    const r = await apiFetch(`/api/clientes/${clienteId}/comprovantes`, { method: "POST", token, body: { nomeArquivo: nome, mimeType, arquivoBase64: dataUrl } });
+    recebimentosEstado.comprovantes = [r.comprovante, ...recebimentosEstado.comprovantes];
+    avisarRecebimentos();
+    return r.comprovante;
+  };
+  const remover = async (id) => {
+    await apiFetch(`/api/comprovantes-recebimento/${id}`, { method: "DELETE", token });
+    recebimentosEstado.comprovantes = recebimentosEstado.comprovantes.filter((a) => a.id !== id);
+    avisarRecebimentos();
+  };
+  const baixar = (comprovante) => baixarComToken(`/api/comprovantes-recebimento/${comprovante.id}/arquivo`, token);
+  /* A aba abre ANTES do download: aberta depois de um await, o navegador trata como pop-up. */
+  const abrir = async (comprovante) => {
+    const janela = window.open("", "_blank");
+    try {
+      const url = URL.createObjectURL(await baixar(comprovante));
+      if (janela) janela.location.href = url; else window.location.href = url;
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) { janela?.close(); throw e; }
+  };
+  const trocarContas = (lista) => { recebimentosEstado.contas = lista || []; avisarRecebimentos(); };
+  const adicionarConta = async (nome) => trocarContas((await apiFetch("/api/contas-recebimento", { method: "POST", token, body: { nome } })).contas);
+  const atualizarConta = async (id, dados) => trocarContas((await apiFetch(`/api/contas-recebimento/${id}`, { method: "PATCH", token, body: dados })).contas);
+  return {
+    carregado, contas, contasAtivas: contas.filter((c) => c.ativa),
+    contasPorComprovante: contas.filter((c) => c.conferencia === "comprovante"),
+    nomeDaConta: (id) => contas.find((c) => c.id === id)?.nome || "",
+    comprovantesDe: (clienteId) => comprovantes.filter((a) => a.clienteId === clienteId),
+    anexar, remover, baixar, abrir, adicionarConta, atualizarConta,
+  };
+}
+
 /* Estado do módulo, num lugar só. Carrega quando alguém abre uma tela do Financeiro — não no
    login: o técnico que só vai fazer vistoria não precisa baixar a lista de despesas. */
 function useFinanceiro({ token, perfil, notify, ativo }) {
@@ -14611,6 +14767,8 @@ function AbaConciliacaoMercadoPago({ token, fin, clientes = [], docs = [], preco
   const [busca, setBusca] = useState({});
   const [trabalhando, setTrabalhando] = useState(null);
   const [gerandoPlanilha, setGerandoPlanilha] = useState(false);
+  const [zipando, setZipando] = useState(null);
+  const rec = useRecebimentos();
 
   /* O mês corrente vai só até hoje: o Mercado Pago não tem amanhã, e a planilha do mês aberto é parcial. */
   const intervalo = (m) => {
@@ -14645,8 +14803,24 @@ function AbaConciliacaoMercadoPago({ token, fin, clientes = [], docs = [], preco
   const duplicados = pagamentos.filter((p) => p.situacao === "duplicado");
   const outros = pagamentos.filter((p) => p.situacao === "outro");
   const conferidos = pagamentos.filter((p) => p.situacao === "conferido" || p.situacao === "marketplace");
+  /* Contas conferidas pelo comprovante (a conta secundária): o que entrou nelas no mês, pela data do
+     pagamento — a mesma ficha do Financeiro em regime de caixa —, e quem está sem comprovante. */
+  const recebidosNoMes = fichas.filter(({ f }) => f.recebido > 0 && String(f.dataPagamento || "").startsWith(mes));
+  const idsPorComprovante = new Set(rec.contasPorComprovante.map((c) => c.id));
+  const naContaSecundaria = recebidosNoMes.filter(({ c }) => idsPorComprovante.has(c.contaRecebimento))
+    .sort((a, b) => String(a.f.dataPagamento).localeCompare(String(b.f.dataPagamento)));
+  const semComprovante = naContaSecundaria.filter(({ c }) => rec.comprovantesDe(c.id).length === 0);
+  /* O recebido do mês por conta. "Conta não informada" é baixa antiga, ou forma que não pediu
+     conta (boleto, cartão): só aparece para ninguém achar que o total sumiu. */
+  const totalPorConta = {};
+  recebidosNoMes.forEach(({ c, f }) => {
+    const chave = c.contaRecebimento ? (rec.nomeDaConta(c.contaRecebimento) || "Conta removida")
+      : c.formaPagamento === "Mercado Pago" ? rec.nomeDaConta(CONTA_MP_PJ) || "Mercado Pago PJ (CNPJ)"
+      : c.formaPagamento === "Dinheiro" ? "Dinheiro" : "Conta não informada";
+    totalPorConta[chave] = (totalPorConta[chave] || 0) + f.recebido;
+  });
   const pendencias = semCadastro.length + faltaBaixa.length + duplicados.length + soNoSistema.length
-    + estornos.filter((p) => p.pagoNoCadastro).length;
+    + estornos.filter((p) => p.pagoNoCadastro).length + semComprovante.length;
   const porForma = {};
   pagamentos.filter((p) => p.status === "approved").forEach((p) => { const k = formaDoMercadoPago(p); porForma[k] = (porForma[k] || 0) + p.valor; });
 
@@ -14723,28 +14897,60 @@ function AbaConciliacaoMercadoPago({ token, fin, clientes = [], docs = [], preco
         const mp = doMp[c.id];
         const valor = arred(receita.valorDe(c));
         const taxa = arred(mp?.taxa);
+        const comprovantes = rec.comprovantesDe(c.id).length;
         return {
           data: f.dataPagamento || f.dataServico, cliente: c.nome, documento: c.cpf, servico: c.servico || "",
           empreendimento: [c.empreendimento, c.blocoTorre].filter(Boolean).join(" · "), forma: f.formaPagamento || (mp ? "Mercado Pago" : ""),
+          /* Em que extrato o contador procura: a conta da baixa, ou a PJ quando veio pelo Mercado Pago. */
+          conta: rec.nomeDaConta(c.contaRecebimento) || (mp || f.formaPagamento === "Mercado Pago" ? rec.nomeDaConta(CONTA_MP_PJ) || "Mercado Pago PJ (CNPJ)" : ""),
+          comprovante: comprovantes ? `Sim (${comprovantes})` : mp ? "Mercado Pago" : "Não",
           valor, taxa, liquido: arred(valor - taxa), ids: (mp?.ids || []).join(", "), origem: "Atendimento",
         };
       });
       receita.avulsas.filter((x) => receita.valorAvulsa(x) > 0).forEach((x) => linhas.push({
         data: x.data, cliente: x.clienteNome || "", documento: "", servico: x.servico || x.descricao, empreendimento: x.empreendimento || "",
-        forma: "", valor: arred(receita.valorAvulsa(x)), taxa: 0, liquido: arred(receita.valorAvulsa(x)), ids: "", origem: "Outras receitas",
+        forma: "", conta: "", comprovante: "", valor: arred(receita.valorAvulsa(x)), taxa: 0, liquido: arred(receita.valorAvulsa(x)), ids: "", origem: "Outras receitas",
       }));
       linhas.sort((a, b) => String(a.data).localeCompare(String(b.data)));
       const soma = (k) => arred(linhas.reduce((s, l) => s + (Number(l[k]) || 0), 0));
-      linhas.push({ data: "", cliente: "TOTAL", documento: "", servico: "", empreendimento: "", forma: "", valor: soma("valor"), taxa: soma("taxa"), liquido: soma("liquido"), ids: "", origem: "" });
+      linhas.push({ data: "", cliente: "TOTAL", documento: "", servico: "", empreendimento: "", forma: "", conta: "", comprovante: "", valor: soma("valor"), taxa: soma("taxa"), liquido: soma("liquido"), ids: "", origem: "" });
       const colunas = [
         ["Data do pagamento", (l) => Fin.dataBr(l.data)], ["Cliente", (l) => l.cliente], ["CPF/CNPJ", (l) => Fin.formatarCpfCnpj(l.documento)],
         ["Serviço", (l) => l.servico], ["Empreendimento", (l) => l.empreendimento], ["Forma de recebimento", (l) => l.forma],
+        ["Conta de recebimento", (l) => l.conta], ["Comprovante", (l) => l.comprovante],
         ["Valor recebido", (l) => l.valor], ["Tarifa Mercado Pago", (l) => l.taxa], ["Valor líquido", (l) => l.liquido],
         ["Pagamento no Mercado Pago", (l) => l.ids], ["Origem", (l) => l.origem],
       ];
       Fin.baixarBlob(Fin.gerarXlsx(linhas, colunas, "Recebimentos"), `recebimentos-fn-${mes}.xlsx`);
     } catch (e) { notify(`Não foi possível gerar a planilha: ${e.message}`); }
     setGerandoPlanilha(false);
+  };
+
+  /* Os comprovantes do Pix do mês num ZIP, uma pasta por conta — o que o contador pede junto com
+     a planilha. Um por vez, como o ZIP de despesas: em paralelo o Drive devolve erro de cota. */
+  const baixarComprovantesDoMes = async () => {
+    const lista = recebidosNoMes.flatMap(({ c, f }) => rec.comprovantesDe(c.id).map((a) => ({ c, f, a })));
+    if (!lista.length) { notify("Nenhum comprovante anexado aos recebimentos deste mês."); return; }
+    const limpo = (s) => String(s || "").replace(/[\\/:*?"<>|]+/g, "-").trim().slice(0, 80);
+    setZipando({ feito: 0, total: lista.length });
+    const arquivos = [];
+    let falhas = 0;
+    for (const [i, { c, f, a }] of lista.entries()) {
+      try {
+        const blob = await rec.baixar(a);
+        const extensao = (String(a.nomeArquivo).match(/\.[a-z0-9]{2,5}$/i)?.[0] || (a.mimeType === "application/pdf" ? ".pdf" : ".jpg")).toLowerCase();
+        const conta = limpo(rec.nomeDaConta(c.contaRecebimento) || "Conta não informada");
+        arquivos.push({
+          caminho: `${conta}/${f.dataPagamento} - ${limpo(c.nome)} - ${fmtReal(f.recebido).replace(/\s/g, " ")} - ${i + 1}${extensao}`,
+          dados: new Uint8Array(await blob.arrayBuffer()),
+        });
+      } catch { falhas += 1; }
+      setZipando({ feito: i + 1, total: lista.length });
+    }
+    setZipando(null);
+    if (!arquivos.length) { notify("Não foi possível baixar os comprovantes agora. Tente de novo em instantes."); return; }
+    Fin.baixarBlob(Fin.criarZip(arquivos), `comprovantes-recebimentos-fn-${mes}.zip`);
+    notify(falhas ? `ZIP gerado, mas ${falhas} comprovante(s) não baixaram — gere de novo para tentar incluí-los.` : "ZIP dos comprovantes gerado ✓");
   };
 
   const th = { textAlign: "left", padding: "7px 9px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}`, whiteSpace: "nowrap", fontSize: 12.5 };
@@ -14788,7 +14994,16 @@ function AbaConciliacaoMercadoPago({ token, fin, clientes = [], docs = [], preco
         <button className="btn-solid" style={{ width: "auto" }} onClick={baixarPlanilha} disabled={gerandoPlanilha}>
           {gerandoPlanilha ? <Loader2 size={14} className="spin" /> : <FileSpreadsheet size={14} />} Planilha do mês para o contador
         </button>
+        <button className="btn-mini" onClick={baixarComprovantesDoMes} disabled={!!zipando}>
+          {zipando ? <><Loader2 size={12} className="spin" /> {zipando.feito}/{zipando.total}</> : <><Archive size={12} /> Comprovantes do mês (.zip)</>}
+        </button>
       </div>
+      {Object.keys(totalPorConta).length > 0 && (
+        <p style={{ fontSize: 12.5, color: "#4a5a70", margin: 0 }}>
+          <strong>Recebido no mês por conta</strong> (cadastros, pela data do pagamento):{" "}
+          {Object.entries(totalPorConta).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}: ${fmtReal(v)}`).join(" · ")}
+        </p>
+      )}
       {falha && <AvisoFin tom="erro">{falha}</AvisoFin>}
       {carregando && !dados && <p style={{ fontSize: 13, color: "#65758b", margin: 0 }}><Loader2 size={13} className="spin" /> Consultando o Mercado Pago…</p>}
 
@@ -14949,7 +15164,96 @@ function AbaConciliacaoMercadoPago({ token, fin, clientes = [], docs = [], preco
           <p style={{ fontSize: 11.5, color: "#8593a8", margin: 0 }}>Consultado no Mercado Pago em {fmtDataHora(dados.consultadoEm)}.</p>
         </>
       )}
+
+      {/* Fora do bloco do Mercado Pago de propósito: a conta secundária se confere pelo comprovante,
+          e a lista dela continua aqui mesmo se a consulta ao Mercado Pago falhar. */}
+      {rec.carregado && (rec.contasPorComprovante.length === 0 ? (
+        <Card icon={Wallet} titulo="Outras contas de recebimento">
+          <p style={{ fontSize: 13, color: "#65758b", margin: 0 }}>
+            Se a FN também recebe em outra conta, cadastre-a em Financeiro › Configurações Fiscais › Contas de recebimento. A conferência
+            dela é pelo comprovante do Pix, anexado na baixa do cliente (Agendamento › Cobrança).
+          </p>
+        </Card>
+      ) : (
+        <Card icon={Wallet} titulo={`Contas conferidas pelo comprovante — ${naContaSecundaria.length} recebimento(s), ${semComprovante.length} sem comprovante`}>
+          <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
+            O que caiu em {rec.contasPorComprovante.map((c) => `"${c.nome}"`).join(", ")} neste mês, pela baixa do Setor de cobrança. Essas contas não
+            têm ligação com o sistema: a conferência é o comprovante do Pix. Tudo aqui é faturamento da FN — entra no MEI e na planilha do contador.
+          </p>
+          {semComprovante.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <AvisoFin tom="atencao">{semComprovante.length} recebimento(s) sem comprovante. Anexe o Pix que o cliente mandou, aqui mesmo ou na cobrança dele.</AvisoFin>
+            </div>
+          )}
+          {naContaSecundaria.length === 0 ? <p style={{ fontSize: 13, color: "#65758b", margin: 0 }}>Nenhum recebimento nessas contas neste mês.</p>
+            : tabela(["Pago em", "Valor", "Cadastro", "Conta", "Comprovante"], naContaSecundaria.map(({ c, f }) => (
+              <tr key={c.id}>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtData(f.dataPagamento)}</td>
+                <td style={{ ...td, whiteSpace: "nowrap", fontWeight: 700 }}>{fmtReal(f.recebido)}</td>
+                <td style={td}>{cadastro({ clienteNome: c.nome, servico: c.servico, empreendimento: [c.empreendimento, c.blocoTorre].filter(Boolean).join(" · ") })}</td>
+                <td style={td}>{rec.nomeDaConta(c.contaRecebimento)}</td>
+                <td style={{ ...td, minWidth: 220 }}><BlocoComprovanteRecebimento cliente={c} podeAgir notify={notify} /></td>
+              </tr>
+            )))}
+        </Card>
+      ))}
     </div>
+  );
+}
+
+/* Contas de recebimento (Configurações Fiscais). A PJ do Mercado Pago é fixa — é a dos links e da
+   conciliação automática. As outras a Gerência cadastra aqui, e a conferência delas é pelo
+   comprovante do Pix. Desativar só tira a conta da lista da baixa: o que já caiu nela continua lá. */
+function CardContasRecebimento({ notify }) {
+  const rec = useRecebimentos();
+  const [nome, setNome] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const adicionar = async () => {
+    if (nome.trim().length < 2) { notify("Dê um nome à conta (por exemplo: Mercado Pago secundária)."); return; }
+    setSalvando(true);
+    try { await rec.adicionarConta(nome.trim()); setNome(""); notify("Conta cadastrada ✓"); }
+    catch (e) { notify(`Não foi possível cadastrar: ${e.message}`); }
+    setSalvando(false);
+  };
+  const alternar = async (c) => {
+    try { await rec.atualizarConta(c.id, { ativa: !c.ativa }); notify(c.ativa ? "Conta desativada" : "Conta reativada ✓"); }
+    catch (e) { notify(`Não foi possível alterar: ${e.message}`); }
+  };
+  const td = { padding: "7px 9px", borderBottom: `1px solid ${CINZA_BORDA}`, fontSize: 13 };
+  return (
+    <Card icon={Wallet} titulo="Contas de recebimento">
+      <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
+        Onde a FN recebe dos clientes. A conta PJ do Mercado Pago é conferida sozinha (Financeiro › Conciliação Mercado Pago); as outras,
+        pelo comprovante do Pix anexado na baixa do cliente. O dinheiro de cliente em qualquer conta é faturamento da FN: entra no limite do
+        MEI e na planilha do contador.
+      </p>
+      {!rec.carregado ? <p style={{ fontSize: 13, color: "#65758b", margin: 0 }}><Loader2 size={13} className="spin" /> Carregando…</p> : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>{rec.contas.map((c) => (
+              <tr key={c.id}>
+                <td style={td}><strong>{c.nome}</strong></td>
+                <td style={{ ...td, color: "#65758b" }}>{c.conferencia === "api" ? "conferida pelo Mercado Pago (automática)" : "conferida pelo comprovante do Pix"}</td>
+                <td style={{ ...td, color: c.ativa ? "#1B7F4B" : "#8593a8" }}>{c.ativa ? "ativa" : "desativada"}</td>
+                <td style={{ ...td, textAlign: "right" }}>
+                  {c.id !== CONTA_MP_PJ && <button className="btn-mini" onClick={() => alternar(c)}>{c.ativa ? "Desativar" : "Reativar"}</button>}
+                </td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginTop: 12 }}>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <label style={{ ...lab, display: "block", marginBottom: 4 }}>Nova conta</label>
+          <input style={{ ...inp, width: "100%" }} value={nome} maxLength={60} placeholder="Ex.: Mercado Pago secundária"
+            onChange={(e) => setNome(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") adicionar(); }} />
+        </div>
+        <button className="btn-solid" style={{ width: "auto" }} onClick={adicionar} disabled={salvando}>
+          {salvando ? <Loader2 size={14} className="spin" /> : <Plus size={14} />} Cadastrar conta
+        </button>
+      </div>
+    </Card>
   );
 }
 
@@ -14968,6 +15272,7 @@ function AbaFinanceiroDespesas({ sub, fin, clientes = [], docs = [], precos = []
     <div style={{ display: "grid", gap: 16 }}>
       <AbaFinConfig fin={fin} clientes={clientes} docs={docs} precos={precos} />
       <CardValoresCustos token={token} apiFetch={apiFetch} notify={notify} />
+      <CardContasRecebimento notify={notify} />
     </div>
   );
   return <AbaFinDespesas {...comum} />;
