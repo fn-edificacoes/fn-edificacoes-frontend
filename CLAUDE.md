@@ -169,7 +169,9 @@ pendente mora só no servidor e não entra no laudo.
 - Card de revisão: foto, áudio (URL assinada, `preload="none"`), transcrição recolhível, campos do
   item com a patologia do catálogo pré-selecionada, selo de confiança e observações da IA.
   Trocar a patologia traz título, sistema, norma e severidade do catálogo e mantém descrição e
-  recomendação. Regravar descarta o item e reaproveita a foto da gravação.
+  recomendação. Regravar descarta o item e reaproveita a foto da gravação. **Foto do item**: X tira a
+  foto, "Trocar foto" (câmera ou galeria) põe outra, "Voltar à foto da gravação" desfaz — tudo antes
+  de confirmar e só para aquele item; o servidor guarda a escolha (`foto_escolhida`).
 
 ## Revistoria
 

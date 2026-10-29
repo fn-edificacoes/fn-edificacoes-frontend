@@ -268,8 +268,15 @@ export function usePatologiaVoz({ apiFetch, token, clienteId, perfil, usuarioId 
     await apiFetch(`/api/patologia-voz/gravacoes/${encodeURIComponent(id)}/reprocessar`, { method: "POST", token });
     await recarregar();
   };
-  const confirmar = async (itemId, valores) => {
-    const r = await apiFetch(`/api/patologia-voz/itens/${encodeURIComponent(itemId)}/confirmar`, { method: "POST", token, body: { valores } });
+  /* foto: undefined = a da gravação; { tipo: "nova", dataUrl } = trocada na revisão;
+     { tipo: "nenhuma" } = o técnico tirou a foto. */
+  const confirmar = async (itemId, valores, foto) => {
+    const body = {
+      valores,
+      ...(foto?.tipo === "nova" ? { fotoBase64: foto.dataUrl, fotoMime: "image/jpeg" } : {}),
+      ...(foto?.tipo === "nenhuma" ? { semFoto: true } : {}),
+    };
+    const r = await apiFetch(`/api/patologia-voz/itens/${encodeURIComponent(itemId)}/confirmar`, { method: "POST", token, body });
     await recarregar();
     return r.item;
   };
@@ -605,7 +612,7 @@ export function PainelPatologiaVoz({ voz, patologiasBanco = [], ambientes = [], 
           ))}
           {abertas.map((g) => (
             <CardGravacao key={g.id} g={g} voz={voz} patologiasBanco={patologiasBanco} ambientes={ambientes}
-              notify={notify} onConfirmado={onConfirmado} onRegravar={regravar} />
+              notify={notify} onConfirmado={onConfirmado} onRegravar={regravar} redimensionar={redimensionar} />
           ))}
         </div>
       )}
@@ -620,7 +627,7 @@ export function PainelPatologiaVoz({ voz, patologiasBanco = [], ambientes = [], 
             <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
               {revisadas.map((g) => (
                 <CardGravacao key={g.id} g={g} voz={voz} patologiasBanco={patologiasBanco} ambientes={ambientes}
-                  notify={notify} onConfirmado={onConfirmado} onRegravar={regravar} />
+                  notify={notify} onConfirmado={onConfirmado} onRegravar={regravar} redimensionar={redimensionar} />
               ))}
             </div>
           )}
@@ -683,7 +690,7 @@ function CabecalhoGravacao({ hora, duracaoMs, status }) {
   );
 }
 
-function CardGravacao({ g, voz, patologiasBanco, ambientes, notify, onConfirmado, onRegravar }) {
+function CardGravacao({ g, voz, patologiasBanco, ambientes, notify, onConfirmado, onRegravar, redimensionar }) {
   const [reprocessando, setReprocessando] = useState(false);
   const status = statusNaTela(g);
   const erroNaTela = g.erro || (status === "erro" ? "O processamento parou no meio. Toque em reprocessar — não precisa gravar de novo." : "");
@@ -698,7 +705,11 @@ function CardGravacao({ g, voz, patologiasBanco, ambientes, notify, onConfirmado
     <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: 12, background: "#fff" }}>
       <CabecalhoGravacao hora={horaDe(g.gravadoEm || g.criadoEm)} duracaoMs={g.duracaoMs} status={status} />
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
-        {g.foto && <img src={g.foto} alt="" style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, border: `1px solid ${CINZA_BORDA}` }} />}
+        {/* Com item para revisar, a foto aparece (e se troca) dentro de cada item — aqui em
+            cima ela confundiria depois de o técnico tirar ou trocar. */}
+        {g.foto && !(status === "concluido" && g.itens.some((it) => it.statusRevisao === "pendente_revisao")) && (
+          <img src={g.foto} alt="" style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, border: `1px solid ${CINZA_BORDA}` }} />
+        )}
         {/* preload="none": o áudio só desce quando alguém aperta o play. */}
         <audio controls preload="none" src={g.audioUrl} style={{ flex: 1, minWidth: 200, maxWidth: "100%", height: 36 }} />
       </div>
@@ -733,7 +744,8 @@ function CardGravacao({ g, voz, patologiasBanco, ambientes, notify, onConfirmado
       {status === "concluido" && g.itens.map((it) => (
         it.statusRevisao === "pendente_revisao" ? (
           <CardRevisaoVoz key={it.id} item={it} patologiasBanco={patologiasBanco} ambientes={ambientes} notify={notify}
-            onConfirmar={async (valores) => { const item = await voz.confirmar(it.id, valores); onConfirmado?.(item); }}
+            fotoGravacao={g.foto} redimensionar={redimensionar}
+            onConfirmar={async (valores, foto) => { const item = await voz.confirmar(it.id, valores, foto); onConfirmado?.(item); }}
             onDescartar={() => voz.descartar(it.id)}
             onRegravar={() => onRegravar(it, g)} />
         ) : (
@@ -748,8 +760,25 @@ function CardGravacao({ g, voz, patologiasBanco, ambientes, notify, onConfirmado
   );
 }
 
-function CardRevisaoVoz({ item, patologiasBanco, ambientes, notify, onConfirmar, onDescartar, onRegravar }) {
+function CardRevisaoVoz({ item, patologiasBanco, ambientes, notify, onConfirmar, onDescartar, onRegravar, fotoGravacao = null, redimensionar }) {
   const [v, setV] = useState(() => ({ ...item.sugestao }));
+  /* A foto anexada antes de gravar pode ter sido a errada: aqui o técnico tira (X) ou troca por
+     outra antes de confirmar, sem regravar o áudio. Vale só para este item. */
+  const [foto, setFoto] = useState(() => (fotoGravacao ? { tipo: "gravacao" } : { tipo: "nenhuma" }));
+  const cameraRef = useRef();
+  const galeriaRef = useRef();
+  const fotoNaTela = foto.tipo === "nova" ? foto.dataUrl : (foto.tipo === "gravacao" ? fotoGravacao : null);
+  const aoEscolherFoto = (file) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { notify?.("Envie uma imagem (JPG ou PNG)."); return; }
+    const leitor = new FileReader();
+    leitor.onload = async (e) => {
+      const reduzida = redimensionar ? await redimensionar(e.target.result, 1024) : e.target.result;
+      setFoto({ tipo: "nova", dataUrl: reduzida });
+    };
+    leitor.onerror = () => notify?.("Não foi possível carregar a foto. Tente de novo.");
+    leitor.readAsDataURL(file);
+  };
   const [salvando, setSalvando] = useState(false);
   const [confirmandoDescarte, setConfirmandoDescarte] = useState(false);
   const conf = CONFIANCA[item.confianca] || CONFIANCA.baixa;
@@ -772,7 +801,7 @@ function CardRevisaoVoz({ item, patologiasBanco, ambientes, notify, onConfirmar,
     if (!v.descricao?.trim()) { notify?.("Preencha a descrição antes de confirmar."); return; }
     setSalvando(true);
     try {
-      await onConfirmar(v);
+      await onConfirmar(v, foto.tipo === "gravacao" ? undefined : foto);
       notify?.("Item confirmado e adicionado ao laudo ✓");
     } catch (e) {
       notify?.(e.message || "Não foi possível confirmar agora.");
@@ -793,6 +822,36 @@ function CardRevisaoVoz({ item, patologiasBanco, ambientes, notify, onConfirmar,
       {item.observacoes && (
         <p style={{ fontSize: 12.5, color: "#7a4e00", background: "#FFF4E0", borderRadius: 8, padding: "6px 9px", margin: "0 0 10px" }}>{item.observacoes}</p>
       )}
+
+      <div style={{ marginBottom: 10 }}>
+        <span style={lab}>Foto do item</span>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 4 }}>
+          {fotoNaTela ? (
+            <div style={{ position: "relative", width: 92, height: 92, borderRadius: 10, overflow: "hidden", border: `1px solid ${CINZA_BORDA}` }}>
+              <img src={fotoNaTela} alt="Foto do item" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              <button type="button" aria-label="Tirar a foto" onClick={() => setFoto({ tipo: "nenhuma" })}
+                style={{ position: "absolute", top: 4, right: 4, width: 26, height: 26, borderRadius: "50%", border: "none", background: "rgba(0,0,0,.65)", color: "#fff", display: "grid", placeItems: "center", cursor: "pointer" }}>
+                <X size={14} />
+              </button>
+            </div>
+          ) : (
+            <span style={{ fontSize: 12.5, color: "#8a97a8" }}>Sem foto</span>
+          )}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <button type="button" style={btnLeve} onClick={() => cameraRef.current?.click()}><Camera size={15} /> {fotoNaTela ? "Trocar foto" : "Tirar foto"}</button>
+            <button type="button" style={btnLeve} onClick={() => galeriaRef.current?.click()} aria-label="Escolher foto da galeria"><IconeImagem size={15} /></button>
+            {foto.tipo !== "gravacao" && fotoGravacao && (
+              <button type="button" style={{ ...btnLeve, border: "none", background: "none", color: AZUL_MEDIO }} onClick={() => setFoto({ tipo: "gravacao" })}>
+                Voltar à foto da gravação
+              </button>
+            )}
+          </div>
+          <input ref={cameraRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }}
+            onChange={(e) => { aoEscolherFoto(e.target.files?.[0]); e.target.value = ""; }} />
+          <input ref={galeriaRef} type="file" accept="image/*" style={{ display: "none" }}
+            onChange={(e) => { aoEscolherFoto(e.target.files?.[0]); e.target.value = ""; }} />
+        </div>
+      </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
         <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
