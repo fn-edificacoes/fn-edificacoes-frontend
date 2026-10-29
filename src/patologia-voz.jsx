@@ -105,24 +105,25 @@ export function usePatologiaVoz({ apiFetch, token, clienteId, perfil, usuarioId 
   const drenando = useRef(false);
   const clienteRef = useRef(clienteId);
   clienteRef.current = clienteId;
+  /* Limite de uso que a Gerência pôs para este técnico (Financeiro › Créditos de IA):
+     { minutos, periodo, usadosMinutos } ou null (sem limite). */
+  const [limite, setLimite] = useState(null);
 
-  useEffect(() => {
+  const carregarConfig = useCallback(async () => {
     if (!podeUsar || !token) { setHabilitado(false); return; }
-    let vivo = true;
-    apiFetch("/api/patologia-voz/config", { token })
-      .then((r) => {
-        if (!vivo) return;
-        setHabilitado(!!r?.habilitado);
-        if (usuarioId) guardarHabilitado(usuarioId, !!r?.habilitado);
-      })
-      .catch((e) => {
-        /* Sem resposta (sinal ruim ao abrir o sistema): vale o que o servidor disse da última
-           vez, senão o botão some justamente quando a fila mais faz falta. Recusa de verdade
-           (rota inexistente num backend antigo, 403) desliga. */
-        if (vivo && e?.status) setHabilitado(false);
-      });
-    return () => { vivo = false; };
+    try {
+      const r = await apiFetch("/api/patologia-voz/config", { token });
+      setHabilitado(!!r?.habilitado);
+      setLimite(r?.limite || null);
+      if (usuarioId) guardarHabilitado(usuarioId, !!r?.habilitado);
+    } catch (e) {
+      /* Sem resposta (sinal ruim ao abrir o sistema): vale o que o servidor disse da última
+         vez, senão o botão some justamente quando a fila mais faz falta. Recusa de verdade
+         (rota inexistente num backend antigo, 403) desliga. */
+      if (e?.status) setHabilitado(false);
+    }
   }, [podeUsar, token, usuarioId]);
+  useEffect(() => { carregarConfig(); }, [carregarConfig]);
 
   const recarregar = useCallback(async () => {
     const alvo = clienteRef.current;
@@ -166,6 +167,7 @@ export function usePatologiaVoz({ apiFetch, token, clienteId, perfil, usuarioId 
       if (!envio.soNaMemoria) await Fila.removerEnvio(envio.idLocal).catch(() => {});
       setFila((f) => f.filter((x) => x.idLocal !== envio.idLocal));
       if (envio.clienteId === clienteRef.current) recarregar();
+      carregarConfig(); // o tempo usado do limite mudou
     } catch (e) {
       const passageira = falhaPassageira(e);
       const atualizado = {
@@ -307,7 +309,7 @@ export function usePatologiaVoz({ apiFetch, token, clienteId, perfil, usuarioId 
   }, [gravacoes, locais]);
 
   return {
-    habilitado: habilitado && podeUsar, gravacoes, locais, deOutrasVistorias, pendentes, recarregar, enviar,
+    habilitado: habilitado && podeUsar, limite, gravacoes, locais, deOutrasVistorias, pendentes, recarregar, enviar,
     reenviarLocal, descartarLocal, reprocessar, confirmar, descartar,
   };
 }
@@ -557,6 +559,7 @@ export function PainelPatologiaVoz({ voz, patologiasBanco = [], ambientes = [], 
     }
   };
 
+  const limiteEsgotado = !!voz.limite && voz.limite.usadosMinutos >= voz.limite.minutos;
   const abertas = voz.gravacoes.filter((g) => statusNaTela(g) !== "concluido" || g.itens.some((it) => it.statusRevisao === "pendente_revisao") || !g.itens.length);
   const revisadas = voz.gravacoes.filter((g) => !abertas.includes(g));
   const fotoMostrada = foto?.dataUrl || foto?.url;
@@ -595,8 +598,9 @@ export function PainelPatologiaVoz({ voz, patologiasBanco = [], ambientes = [], 
           <input ref={galeriaRef} type="file" accept="image/*" style={{ display: "none" }}
             onChange={(e) => { aoEscolherFoto(e.target.files?.[0]); e.target.value = ""; }} />
         </div>
-        <BotaoGravarVoz onGravado={aoGravar} />
+        <BotaoGravarVoz onGravado={aoGravar} desabilitado={limiteEsgotado} />
       </div>
+      {voz.limite && <UsoDoLimite limite={voz.limite} />}
 
       {voz.deOutrasVistorias > 0 && (
         <p style={{ fontSize: 12.5, color: "#7a4e00", background: "#FFF4E0", borderRadius: 8, padding: "6px 9px", margin: "12px 0 0" }}>
@@ -663,6 +667,32 @@ function CardEnvioNaFila({ envio, voz }) {
             <button type="button" style={{ ...btnLeve, color: VERMELHO }} onClick={() => setConfirmandoDescarte(true)}><Trash2 size={15} /> Descartar</button>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/* Quanto do limite de gravação o técnico já usou. Acabou: o botão trava e a mensagem diz com
+   quem falar — sem isso ele gravaria e só descobriria na recusa do servidor. */
+function UsoDoLimite({ limite }) {
+  const usado = Math.min(limite.usadosMinutos, limite.minutos);
+  const pct = limite.minutos > 0 ? Math.min(100, (limite.usadosMinutos / limite.minutos) * 100) : 100;
+  const esgotado = limite.usadosMinutos >= limite.minutos;
+  const quando = limite.periodo === "dia" ? "hoje" : "neste mês";
+  const fmt = (n) => Number(n).toLocaleString("pt-BR", { maximumFractionDigits: 1 });
+  return (
+    <div style={{ maxWidth: 420, margin: "12px auto 0" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: esgotado ? VERMELHO : "#5a6a80", marginBottom: 4 }}>
+        <span>Seu limite de gravação {quando}</span>
+        <strong>{fmt(usado)} de {fmt(limite.minutos)} min</strong>
+      </div>
+      <div style={{ height: 6, borderRadius: 4, background: CINZA_CLARO, overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", background: esgotado ? VERMELHO : pct >= 80 ? AMBAR : VERDE }} />
+      </div>
+      {esgotado && (
+        <p role="alert" style={{ fontSize: 12.5, color: VERMELHO, margin: "6px 0 0", textAlign: "center" }}>
+          Seu tempo de gravação {quando} acabou. Fale com a Gerência para liberar mais.
+        </p>
       )}
     </div>
   );
@@ -785,6 +815,11 @@ function CardRevisaoVoz({ item, patologiasBanco, ambientes, notify, onConfirmar,
   const set = (patch) => setV((x) => ({ ...x, ...patch }));
 
   const opcoes = useMemo(() => [...patologiasBanco].sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR")), [patologiasBanco]);
+  /* Patologia não identificada: as mais próximas do catálogo, como botões (o servidor manda os ids). */
+  const alternativas = useMemo(() => (item.extra?.alternativas || [])
+    .map((id) => patologiasBanco.find((p) => String(p.id) === String(id)))
+    .filter(Boolean), [item.extra, patologiasBanco]);
+  const semNorma = !String(v.norma || "").trim() || String(v.norma).trim().toLowerCase() === "a confirmar";
   /* Trocar a patologia traz do catálogo o que é dele (título, sistema, norma, severidade) e
      mantém a descrição e a recomendação, que são o que o técnico falou. */
   const trocarPatologia = (tipo) => {
@@ -792,7 +827,7 @@ function CardRevisaoVoz({ item, patologiasBanco, ambientes, notify, onConfirmar,
     if (!p) { set({ tipo: "", patologia: "", titulo: "" }); return; }
     set({
       tipo, patologia: p.nome, titulo: p.nome, categoria: p.sistema || "",
-      norma: [p.norma, p.normasComplementares].filter(Boolean).join("; ") || v.norma,
+      norma: [p.norma, p.normasComplementares].filter(Boolean).join("; ") || "a confirmar",
       severidade: p.severidade || v.severidade,
     });
   };
@@ -821,6 +856,18 @@ function CardRevisaoVoz({ item, patologiasBanco, ambientes, notify, onConfirmar,
       </div>
       {item.observacoes && (
         <p style={{ fontSize: 12.5, color: "#7a4e00", background: "#FFF4E0", borderRadius: 8, padding: "6px 9px", margin: "0 0 10px" }}>{item.observacoes}</p>
+      )}
+      {alternativas.length > 0 && !v.tipo && (
+        <div style={{ marginBottom: 10 }}>
+          <span style={lab}>É uma destas? Escolha para trazer a norma técnica do catálogo:</span>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+            {alternativas.map((p) => (
+              <button key={p.id} type="button" style={{ ...btnLeve, fontWeight: 600, fontSize: 12.5, textAlign: "left" }} onClick={() => trocarPatologia(`bp-${p.id}`)}>
+                {p.nome}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
 
       <div style={{ marginBottom: 10 }}>
@@ -878,6 +925,17 @@ function CardRevisaoVoz({ item, patologiasBanco, ambientes, notify, onConfirmar,
             {["Baixa", "Média", "Alta"].map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </label>
+        {/* A norma vem do catálogo da patologia escolhida (é a "Referência normativa" do laudo).
+            A IA nunca escreve norma: sem patologia, fica "a confirmar" até o técnico escolher. */}
+        <label style={{ display: "flex", flexDirection: "column", gap: 4, gridColumn: "1 / -1" }}>
+          <span style={lab}>Norma técnica (do catálogo da patologia)</span>
+          <input style={{ ...inp, ...(semNorma ? { border: "1px solid #f0c987", background: "#FFFBF2" } : {}) }} value={v.norma || ""} onChange={(e) => set({ norma: e.target.value })} />
+          {semNorma && (
+            <span style={{ fontSize: 12, color: "#7a4e00" }}>
+              Sem norma ainda: escolha a patologia do catálogo acima e a norma dela vem junto.
+            </span>
+          )}
+        </label>
         <label style={{ display: "flex", flexDirection: "column", gap: 4, gridColumn: "1 / -1" }}>
           <span style={lab}>Descrição</span>
           <textarea style={{ ...inp, minHeight: 70, resize: "vertical" }} value={v.descricao || ""} onChange={(e) => set({ descricao: e.target.value })} />
@@ -885,10 +943,6 @@ function CardRevisaoVoz({ item, patologiasBanco, ambientes, notify, onConfirmar,
         <label style={{ display: "flex", flexDirection: "column", gap: 4, gridColumn: "1 / -1" }}>
           <span style={lab}>Recomendação</span>
           <textarea style={{ ...inp, minHeight: 60, resize: "vertical" }} value={v.recomendacao || ""} onChange={(e) => set({ recomendacao: e.target.value })} />
-        </label>
-        <label style={{ display: "flex", flexDirection: "column", gap: 4, gridColumn: "1 / -1" }}>
-          <span style={lab}>Norma</span>
-          <input style={inp} value={v.norma || ""} onChange={(e) => set({ norma: e.target.value })} />
         </label>
       </div>
       {item.extra?.causa && (

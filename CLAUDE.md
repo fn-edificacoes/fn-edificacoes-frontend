@@ -102,6 +102,7 @@ src/controle-financeiro.jsx ARTs de vistoria, folha de pagamento, valores dos cu
 src/empreendimentos-lista.jsx Gerência → Empreendimentos: a lista do "Cadastre-se"
 src/patologia-voz.jsx       patologia por voz: gravar, acompanhar e revisar o item (aba da vistoria)
 src/voz-fila-offline.js     patologia por voz: gravações guardadas no celular até o servidor receber
+src/ia-creditos.jsx         Financeiro › Créditos de IA: gasto estimado da IA e limite de gravação por técnico
 ```
 
 Para achar algo no `App.jsx`, procure pela definição da componente
@@ -172,6 +173,18 @@ pendente mora só no servidor e não entra no laudo.
   recomendação. Regravar descarta o item e reaproveita a foto da gravação. **Foto do item**: X tira a
   foto, "Trocar foto" (câmera ou galeria) põe outra, "Voltar à foto da gravação" desfaz — tudo antes
   de confirmar e só para aquele item; o servidor guarda a escolha (`foto_escolhida`).
+- **Norma técnica** em destaque no card ("do catálogo da patologia"): vem só do catálogo. Sem patologia
+  identificada, o card mostra "É uma destas?" com as opções mais próximas (`extra.alternativas` do
+  servidor) — um toque escolhe a patologia e traz a norma; o campo vazio/"a confirmar" fica destacado.
+- **Limite de gravação:** `GET /config` traz `limite` (`{ minutos, periodo, usadosMinutos }` ou null);
+  `UsoDoLimite` mostra o uso embaixo do botão e, quando acaba, trava o `BotaoGravarVoz` com "fale com a
+  Gerência". O config é relido depois de cada envio. Quem define é a Gerência em Créditos de IA.
+
+**Créditos de IA** (`src/ia-creditos.jsx`, `AbaCreditosIA`, item `fin-ia` do Financeiro, só Gerência):
+crédito colocado em cada empresa (OpenAI e Anthropic) com gasto e restante **estimados** — o saldo exato
+fica no painel delas, e a tela diz isso —, o gasto do mês por recurso e por pessoa, o limite padrão de
+gravação dos técnicos, o limite próprio de cada um (padrão, próprio em min/dia ou min/mês, sem limite) e
+os preços de tabela usados na conta. Tudo num `GET /api/financeiro/ia-creditos` e salvo num `PUT`.
 
 ## Revistoria
 
