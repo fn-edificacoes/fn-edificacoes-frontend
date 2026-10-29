@@ -8,6 +8,7 @@ import { Building as IconeEmpreendimento, ShoppingBag } from "lucide-react";
 import AbaProdutosMercadoLivre, { SecaoOfertasMercadoLivre } from "./fn-home-mercadolivre.jsx";
 import AbaMapaAtuacao from "./mapa-atuacao.jsx";
 import { usePatologiaVoz, PainelPatologiaVoz, AvisoPendentesVoz } from "./patologia-voz.jsx";
+import AbaCreditosIA from "./ia-creditos.jsx";
 import { AbaArtsVistoria, AbaFolhaPagamento, CardValoresCustos, useCustosOperacionais } from "./controle-financeiro.jsx";
 import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
@@ -2256,6 +2257,7 @@ const GERENCIA_MENU_LATERAL = [
     { aba: "gerencia", sub: "fin-deslocamentos", label: "Deslocamentos", Icon: Car },
     { aba: "gerencia", sub: "fin-relatorios", label: "Relatórios", Icon: FileBarChart },
     { aba: "gerencia", sub: "fin-indicadores", label: "Indicadores financeiros", Icon: Gauge },
+    { aba: "gerencia", sub: "fin-ia", label: "Créditos de IA", Icon: Sparkles },
     { aba: "gerencia", sub: "fin-config", label: "Configurações Fiscais", Icon: Settings },
   ] },
   { titulo: "Sistema", itens: [
@@ -15306,6 +15308,9 @@ function AbaFinanceiroDespesas({ sub, fin, clientes = [], docs = [], precos = []
   if (sub === "fin-deslocamentos") return <AbaFinDeslocamentos {...comum} docs={docs} precos={precos} />;
   if (sub === "fin-relatorios") return <AbaFinRelatorios fin={fin} clientes={clientes} docs={docs} precos={precos} notify={notify} />;
   if (sub === "fin-indicadores") return <AbaFinIndicadores fin={fin} clientes={clientes} docs={docs} precos={precos} token={token} />;
+  /* Créditos de IA (src/ia-creditos.jsx): gasto estimado da OpenAI e do Claude e o limite de
+     gravação de cada técnico na patologia por voz. */
+  if (sub === "fin-ia") return <AbaCreditosIA apiFetch={apiFetch} token={token} notify={notify} />;
   if (sub === "fin-config") return (
     <div style={{ display: "grid", gap: 16 }}>
       <AbaFinConfig fin={fin} clientes={clientes} docs={docs} precos={precos} />
