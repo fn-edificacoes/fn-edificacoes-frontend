@@ -9,13 +9,15 @@
        cliente), dentro da vitrine de parceiros.
 
    A FN não vende nada aqui: o cliente compra no Mercado Livre e a comissão aparece no painel de
-   afiliados de lá. O sistema só conta os cliques no botão. Tudo é cadastrado à mão porque o
-   Mercado Livre não tem API para afiliado e a API pública dele recusa consulta de anúncio sem
-   aplicativo autorizado (out/2026) — por isso o preço vem sempre com a data em que foi conferido.
+   afiliados de lá. O sistema só conta os cliques no botão. O link de afiliado sai só do portal
+   (o Mercado Livre não tem API para isso); o resto a tela adianta pelo endereço da página do
+   produto (/preencher no backend): nome e categoria sempre, foto e preço quando o aplicativo da
+   FN no Mercado Livre está configurado no servidor. A Gerência confere e salva — e o preço vem
+   sempre com a data em que foi conferido.
 
    Arquivo à parte como a Rede Nacional: o App.jsx só o encaixa e entrega o apiFetch. */
 import React, { useEffect, useMemo, useState } from "react";
-import { ShoppingBag, ExternalLink, Plus, Pencil, Trash2, RefreshCcw, Loader2, X, Search, Upload, CalendarCheck, Eye, EyeOff, MousePointerClick } from "lucide-react";
+import { ShoppingBag, ExternalLink, Plus, Pencil, Trash2, RefreshCcw, Loader2, X, Search, Upload, CalendarCheck, Eye, EyeOff, MousePointerClick, Sparkles } from "lucide-react";
 
 const AZUL_MEDIO = "#2C75B5";
 const AZUL_MARINHO = "#12335B";
@@ -51,6 +53,21 @@ function pareceLinkDeAfiliado(link) {
     const u = new URL(link);
     return u.hostname.endsWith("meli.la") || /^\/(sec|social)\//.test(u.pathname);
   } catch { return true; }
+}
+function ehLinkCurto(texto) {
+  try {
+    const u = new URL(String(texto || "").trim());
+    return u.hostname.endsWith("meli.la") || /^\/(sec|social)\//.test(u.pathname);
+  } catch { return false; }
+}
+
+/* Endereço de página do Mercado Livre (não de imagem do mlstatic) — é o que o Preencher lê. Serve
+   também para notar a página colada no campo da foto, que na vitrine vira imagem quebrada. */
+function ehPaginaDoMercadoLivre(texto) {
+  try {
+    const u = new URL(String(texto || "").trim());
+    return u.protocol === "https:" && /(^|\.)(mercadolivre\.com(\.br)?|mercadolibre\.com)$/i.test(u.hostname);
+  } catch { return false; }
 }
 
 function Etiqueta({ cor = AZUL_MEDIO, children }) {
@@ -177,6 +194,12 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
   const [salvando, setSalvando] = useState(false);
   const [mexendo, setMexendo] = useState(null); // id da linha com ação em andamento
   const [busca, setBusca] = useState("");
+  // Endereço da página do produto: só alimenta o Preencher, não é gravado.
+  const [pagina, setPagina] = useState("");
+  const [preenchendo, setPreenchendo] = useState(false);
+  const [preenchido, setPreenchido] = useState(null); // { campos, categoriaCaminho, avisos }
+
+  const abrirForm = (f = formVazio()) => { setForm(f); setPagina(""); setPreenchido(null); };
 
   const carregar = async () => {
     setCarregando(true);
@@ -196,6 +219,52 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
 
   const mudar = (campo, valor) => setForm((f) => ({ ...f, [campo]: valor }));
   const avisoLink = form.link.trim() && !pareceLinkDeAfiliado(form.link.trim());
+  const fotoEhPagina = !form.foto.startsWith("data:") && ehPaginaDoMercadoLivre(form.foto);
+
+  /* Lê do Mercado Livre o que der e põe no formulário, por cima do que estiver nele — foi pedido;
+     o que não veio fica como está. Nada é salvo até "Cadastrar". */
+  const preencher = async (endereco = pagina) => {
+    const texto = String(endereco || "").trim();
+    if (!texto) { notify("Cole o endereço da página do produto no Mercado Livre."); return; }
+    // O link curto é o que paga a comissão, e o servidor não consegue abri-lo: vai para o campo dele.
+    if (ehLinkCurto(texto)) {
+      setPagina("");
+      if (!form.link.trim()) mudar("link", texto);
+      notify(form.link.trim()
+        ? "Esse é um link de afiliado. Para preencher, cole o endereço da página do produto."
+        : "Esse é o link de afiliado — coloquei no campo dele. Para preencher, cole agora o endereço da página do produto.");
+      return;
+    }
+    setPagina(texto);
+    setPreenchendo(true);
+    setPreenchido(null);
+    try {
+      const r = await apiFetch("/api/afiliados/mercadolivre/preencher", { method: "POST", token, body: { link: texto } });
+      const novo = {};
+      if (r.titulo) novo.titulo = r.titulo;
+      if (r.categoria) novo.categoria = r.categoria;
+      if (r.foto) novo.foto = r.foto;
+      // Preço novo leva junto o "De" dele (ou nenhum): um "De" antigo menor que o preço novo travaria o salvar.
+      if (r.preco != null) { novo.preco = String(r.preco); novo.preco_de = r.preco_de != null ? String(r.preco_de) : ""; }
+      setForm((f) => ({ ...f, ...novo }));
+      const nomes = { titulo: "nome", categoria: "categoria", foto: "foto", preco: "preço" };
+      setPreenchido({
+        campos: Object.keys(nomes).filter((k) => k in novo).map((k) => nomes[k]),
+        categoriaCaminho: r.categoriaCaminho || "",
+        avisos: r.avisos || [],
+      });
+    } catch (e) {
+      setPreenchido({ campos: [], categoriaCaminho: "", avisos: [e.message] });
+    }
+    setPreenchendo(false);
+  };
+
+  /* Endereço de página colado no lugar errado (link de afiliado ou foto): vira o do Preencher. */
+  const usarParaPreencher = (campo) => {
+    const texto = form[campo].trim();
+    mudar(campo, "");
+    preencher(texto);
+  };
 
   const onArquivoFoto = (e) => {
     const arquivo = e.target.files?.[0];
@@ -225,7 +294,7 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
         await apiFetch("/api/afiliados/mercadolivre", { method: "POST", token, body: corpo });
         notify("Produto cadastrado — já aparece no FN Home ✓");
       }
-      setForm(formVazio());
+      abrirForm();
       await carregar();
     } catch (e) { notify(`Não foi possível salvar: ${e.message}`); }
     setSalvando(false);
@@ -247,7 +316,7 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
     try {
       await apiFetch(`/api/afiliados/mercadolivre/${encodeURIComponent(p.id)}`, { method: "DELETE", token });
       notify("Produto excluído ✓");
-      if (form.id === p.id) setForm(formVazio());
+      if (form.id === p.id) abrirForm();
       await carregar();
     } catch (e) { notify(`Não foi possível excluir: ${e.message}`); }
     setMexendo(null);
@@ -259,21 +328,53 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
         <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
           <div style={{ width: 30, height: 30, borderRadius: 8, background: CINZA_CLARO, display: "grid", placeItems: "center" }}><ShoppingBag size={16} color={AZUL_MEDIO} /></div>
           <h3 style={{ margin: 0, fontSize: 15, color: AZUL_MARINHO, flex: 1 }}>{form.id ? "Editar produto" : "Novo produto do Mercado Livre"}</h3>
-          {form.id && <button style={btnLeve} onClick={() => setForm(formVazio())}><X size={14} /> Cancelar edição</button>}
+          {form.id && <button style={btnLeve} onClick={() => abrirForm()}><X size={14} /> Cancelar edição</button>}
         </div>
         <p style={{ fontSize: 13, color: "#5a6a80", margin: "0 0 12px", lineHeight: 1.5 }}>
-          No <a href={PORTAL_AFILIADOS} target="_blank" rel="noreferrer" style={{ color: AZUL_MEDIO }}>portal de afiliados do Mercado Livre</a>,
-          gere o link do produto e cole aqui com o nome, a foto e o preço que aparece hoje. O produto entra na vitrine do
-          FN Home com o botão "Comprar no Mercado Livre"; a venda e a comissão aparecem no painel de afiliados de lá.
+          Abra o produto no Mercado Livre e cole o endereço da página dele no primeiro campo: o resto se preenche sozinho.
+          Depois gere o link do produto no <a href={PORTAL_AFILIADOS} target="_blank" rel="noreferrer" style={{ color: AZUL_MEDIO }}>portal de afiliados do Mercado Livre</a> e
+          cole em "Link de afiliado". O produto entra na vitrine do FN Home com o botão "Comprar no Mercado Livre"; a venda e a
+          comissão aparecem no painel de afiliados de lá.
         </p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+          <Campo label="Página do produto no Mercado Livre" largo
+            dica="O endereço da barra do navegador com o produto aberto. Ao colar, o sistema busca nome, categoria, foto e preço.">
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <input style={{ ...inp, flex: "1 1 240px", width: "auto" }} type="url" placeholder="https://www.mercadolivre.com.br/.../p/MLB..."
+                value={pagina} onChange={(e) => setPagina(e.target.value)}
+                onPaste={(e) => { const t = e.clipboardData.getData("text").trim(); if (t) { e.preventDefault(); preencher(t); } }}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); preencher(); } }} />
+              <button type="button" style={{ ...btn, opacity: preenchendo ? 0.6 : 1 }} disabled={preenchendo} onClick={() => preencher()}>
+                {preenchendo ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />} Preencher
+              </button>
+            </div>
+          </Campo>
+          {preenchido && (
+            <div style={{ flex: "1 1 100%", display: "grid", gap: 6, fontSize: 12.5, lineHeight: 1.45 }}>
+              {preenchido.campos.length > 0 && (
+                <div style={{ color: VERDE, background: "#EAF5EA", borderRadius: 6, padding: "6px 8px" }}>
+                  Veio do Mercado Livre: {preenchido.campos.join(", ")}.
+                  {preenchido.categoriaCaminho ? ` Categoria lá: ${preenchido.categoriaCaminho}.` : ""} Confira antes de salvar.
+                </div>
+              )}
+              {preenchido.avisos.map((a) => (
+                <div key={a} style={{ color: AMBAR, background: "#FFF4E0", borderRadius: 6, padding: "6px 8px" }}>{a}</div>
+              ))}
+            </div>
+          )}
           <Campo label="Link de afiliado *" largo
-            dica={avisoLink ? null : "O link que o portal gera começa com https://mercadolivre.com/sec/…"}>
-            <input style={inp} type="url" placeholder="https://mercadolivre.com/sec/..." value={form.link} onChange={(e) => mudar("link", e.target.value)} />
+            dica={avisoLink ? null : "O link que o portal gera: https://meli.la/… ou https://mercadolivre.com/sec/…"}>
+            <input style={inp} type="url" placeholder="https://meli.la/..." value={form.link} onChange={(e) => mudar("link", e.target.value)} />
             {avisoLink && (
               <span style={{ fontSize: 12, color: AMBAR, background: "#FFF4E0", borderRadius: 6, padding: "6px 8px", lineHeight: 1.4 }}>
                 Este parece ser o endereço da página do produto, não o link de afiliado. Assim o produto abre normalmente, mas a FN
                 não recebe comissão. Gere o link no portal de afiliados e cole aqui.
+                {ehPaginaDoMercadoLivre(form.link) && (
+                  <button type="button" onClick={() => usarParaPreencher("link")}
+                    style={{ ...btnLeve, display: "flex", marginTop: 6, padding: "5px 10px", fontSize: 12 }}>
+                    <Sparkles size={13} /> Usar este endereço para preencher
+                  </button>
+                )}
               </span>
             )}
           </Campo>
@@ -309,6 +410,15 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
                 <input type="file" accept="image/*" onChange={onArquivoFoto} style={{ display: "none" }} />
               </label>
             </div>
+            {fotoEhPagina && (
+              <span style={{ fontSize: 12, color: AMBAR, background: "#FFF4E0", borderRadius: 6, padding: "6px 8px", lineHeight: 1.4 }}>
+                Esse é o endereço da página do produto, não da foto — na vitrine ele aparece como imagem quebrada.
+                <button type="button" onClick={() => usarParaPreencher("foto")}
+                  style={{ ...btnLeve, display: "flex", marginTop: 6, padding: "5px 10px", fontSize: 12 }}>
+                  <Sparkles size={13} /> Usar este endereço para preencher
+                </button>
+              </span>
+            )}
           </Campo>
           {form.id && (
             <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#1a2330", flex: "1 1 100%" }}>
@@ -383,7 +493,7 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
                   {ocupado ? <Loader2 size={16} className="spin" color={AZUL_MEDIO} /> : (
                     <>
                       <a href={p.link} target="_blank" rel="noreferrer" title="Abrir o anúncio" style={{ ...btnLeve, padding: "6px 9px", textDecoration: "none" }}><ExternalLink size={14} /></a>
-                      <button title="Editar" style={{ ...btnLeve, padding: "6px 9px" }} onClick={() => { setForm(paraForm(p)); window.scrollTo({ top: 0, behavior: "smooth" }); }}><Pencil size={14} /></button>
+                      <button title="Editar" style={{ ...btnLeve, padding: "6px 9px" }} onClick={() => { abrirForm(paraForm(p)); window.scrollTo({ top: 0, behavior: "smooth" }); }}><Pencil size={14} /></button>
                       {p.preco != null && (
                         <button title="O preço continua o mesmo: marcar como conferido hoje" style={{ ...btnLeve, padding: "6px 9px", color: velho ? AMBAR : AZUL_MARINHO }}
                           onClick={() => acao(p, { conferirPreco: true }, "Preço marcado como conferido hoje ✓")}>

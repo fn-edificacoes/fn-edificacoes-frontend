@@ -337,10 +337,17 @@ Produtos que a **própria FN** indica com o link de afiliado dela; a compra é n
 comissão só aparece no painel de afiliados de lá. Backend: `src/afiliados-mercadolivre.js`.
 
 - **Gerência → FN Home → Produtos Mercado Livre** (`AbaProdutosMercadoLivre`, sub `fn-home-ml`):
-  cadastro à mão (o Mercado Livre não tem API para afiliado). Avisa, sem travar, quando o link não
-  parece o do portal de afiliados (`/sec/`, `/social/`, `meli.la`) — link da página do produto abre o
-  mesmo anúncio e não paga comissão. Foto por endereço https ou arquivo (reduzido a 600 px). Preço
-  conferido há mais de 14 dias fica em amarelo; "Conferi hoje" renova a data sem mudar o valor.
+  - **Preencher**: o primeiro campo recebe o endereço da **página do produto** (colar já dispara) e
+    chama `POST /api/afiliados/mercadolivre/preencher`, que devolve nome e categoria sempre e foto e
+    preço só com o aplicativo da FN no Mercado Livre configurado no servidor. Preenche por cima o que
+    veio e mostra os avisos do que faltou; não salva. O link curto (`meli.la`, `/sec/`) colado ali vai
+    para o campo do link de afiliado — o servidor não consegue abri-lo. Página colada no link de
+    afiliado ou na foto ganha o botão "Usar este endereço para preencher".
+  - O link de afiliado continua à mão (o Mercado Livre não tem API para afiliado). Avisa, sem travar,
+    quando o link não parece o do portal (`/sec/`, `/social/`, `meli.la`) — link da página do produto
+    abre o mesmo anúncio e não paga comissão.
+  - Foto por endereço https ou arquivo (reduzido a 600 px). Preço conferido há mais de 14 dias fica em
+    amarelo; "Conferi hoje" renova a data sem mudar o valor.
 - **Vitrine** (`SecaoOfertasMercadoLivre`): dentro de `SecaoParceirosVitrine` na aba FN Home — vale para
   `?pagina=fn-home` e para o portal do cliente. Fora do carrinho. Some se não houver produto ou se a
   API falhar. O botão é o link do Mercado Livre direto; o clique é avisado à API sem esperar resposta.
