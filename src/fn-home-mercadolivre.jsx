@@ -240,6 +240,24 @@ export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true 
         .fnh-chips { scrollbar-width: none; }
         .fnh-chips::-webkit-scrollbar { display: none; }
         @media (prefers-reduced-motion: reduce) { .fnh-card, .fnh-card:hover { transition: none; transform: none; } }
+        /* Cartão grande como o do site institucional (out/2026, pedido da Gerência): ~220 px de
+           largura e foto quadrada. No celular volta a duas colunas, com letra menor. */
+        .fnh-grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 18px; }
+        .fnh-foto { padding: 18px; }
+        .fnh-corpo { padding: 14px 16px 16px; gap: 6px; }
+        .fnh-cat { font-size: 11px; }
+        .fnh-nome { font-size: 15px; }
+        .fnh-preco { font-size: 21px; }
+        .fnh-comprar { font-size: 13.5px; padding: 10px 8px; }
+        @media (max-width: 640px) {
+          .fnh-grade { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+          .fnh-foto { padding: 10px; }
+          .fnh-corpo { padding: 10px 12px 12px; gap: 4px; }
+          .fnh-cat { font-size: 10px; }
+          .fnh-nome { font-size: 13px; }
+          .fnh-preco { font-size: 17px; }
+          .fnh-comprar { font-size: 12.5px; padding: 9px 6px; }
+        }
       `}</style>
 
       {separar && (
@@ -278,41 +296,41 @@ export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true 
         </p>
       )}
 
-      {/* 130 px: duas por linha no celular (o card da vitrine deixa ~300 px) — produto em coluna
-          única vira rolagem sem fim. */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 10 }}>
+      {/* Tamanhos nas classes fnh-* do <style> acima: grande no computador, duas colunas no
+          celular — produto em coluna única vira rolagem sem fim. */}
+      <div className="fnh-grade">
         {visiveis.map((p) => {
           const off = desconto(p);
           return (
-            <div key={p.id} className="fnh-card" style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, overflow: "hidden", display: "flex", flexDirection: "column", background: "#fff", minWidth: 0 }}>
-              <div style={{ position: "relative", aspectRatio: "1 / 1", padding: 12, background: "#fff", display: "grid", placeItems: "center", borderBottom: `1px solid ${CINZA_CLARO}` }}>
+            <div key={p.id} className="fnh-card" style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column", background: "#fff", minWidth: 0, boxShadow: "0 1px 2px rgba(18,51,91,.04), 0 4px 14px rgba(18,51,91,.05)" }}>
+              <div className="fnh-foto" style={{ position: "relative", aspectRatio: "1 / 1", background: "#fff", display: "grid", placeItems: "center", borderBottom: `1px solid ${CINZA_CLARO}` }}>
                 {p.foto
                   ? <img src={p.foto} alt={p.titulo} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-                  : <ShoppingBag size={30} color="#b8c3d3" />}
+                  : <ShoppingBag size={34} color="#b8c3d3" />}
                 {off && (
-                  <span style={{ position: "absolute", top: 8, left: 8, fontSize: 11, fontWeight: 700, color: "#fff", background: VERDE, borderRadius: 6, padding: "2px 7px" }}>-{off}%</span>
+                  <span style={{ position: "absolute", top: 10, left: 10, fontSize: 12, fontWeight: 700, color: "#fff", background: AZUL_MARINHO, borderRadius: 7, padding: "3px 8px" }}>-{off}%</span>
                 )}
               </div>
-              <div style={{ padding: "10px 12px 12px", display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
+              <div className="fnh-corpo" style={{ display: "flex", flexDirection: "column", flex: 1 }}>
                 {p.categoria && (
-                  <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: AZUL_MEDIO, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.categoria}</div>
+                  <div className="fnh-cat" style={{ fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: AZUL_MEDIO, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.categoria}</div>
                 )}
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#1a2330", lineHeight: 1.35, minHeight: "2.7em", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }} title={p.titulo}>
+                <div className="fnh-nome" style={{ fontWeight: 600, color: "#1a2330", lineHeight: 1.35, minHeight: "2.7em", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }} title={p.titulo}>
                   {p.titulo}
                 </div>
-                <div style={{ marginTop: "auto", paddingTop: 4 }}>
-                  {off && <div style={{ fontSize: 11.5, color: "#8593a8", textDecoration: "line-through" }}>{fmtReal(p.preco_de)}</div>}
+                <div style={{ marginTop: "auto", paddingTop: 6 }}>
+                  {off && <div style={{ fontSize: 12, color: "#8593a8", textDecoration: "line-through" }}>{fmtReal(p.preco_de)}</div>}
                   {p.preco
-                    ? <div style={{ fontSize: 17, fontWeight: 800, color: AZUL_MARINHO, letterSpacing: "-.01em" }}>{fmtReal(p.preco)}</div>
-                    : <div style={{ fontSize: 12.5, color: "#65758b" }}>Veja o preço no Mercado Livre</div>}
+                    ? <div className="fnh-preco" style={{ fontWeight: 800, color: AZUL_MARINHO, letterSpacing: "-.02em", lineHeight: 1.2 }}>{fmtReal(p.preco)}</div>
+                    : <div style={{ fontSize: 13, color: "#65758b" }}>Veja o preço no Mercado Livre</div>}
                   {p.preco && p.preco_conferido_em && (
-                    <div style={{ fontSize: 10.5, color: "#8593a8" }}>Preço em {fmtDia(p.preco_conferido_em)}</div>
+                    <div style={{ fontSize: 11, color: "#8593a8" }}>Preço em {fmtDia(p.preco_conferido_em)}</div>
                   )}
                 </div>
                 <a href={p.link} target="_blank" rel="noopener noreferrer sponsored nofollow"
-                  onClick={() => registrarClique(p.id)}
-                  style={{ ...btn, justifyContent: "center", marginTop: 8, padding: "9px 8px", textDecoration: "none", fontSize: 12.5 }}>
-                  <ExternalLink size={13} /> Comprar
+                  onClick={() => registrarClique(p.id)} className="fnh-comprar"
+                  style={{ ...btn, justifyContent: "center", marginTop: 10, borderRadius: 10, textDecoration: "none" }}>
+                  <ExternalLink size={14} /> Comprar
                 </a>
               </div>
             </div>

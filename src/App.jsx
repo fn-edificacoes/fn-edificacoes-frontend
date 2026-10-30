@@ -18227,6 +18227,47 @@ function PaginaPrivacidade() {
    Mesma vitrine de sempre (SecaoParceirosVitrine, tipo "servico"/"produto"), só que como
    página própria, dentro da marca FN Serviços — é o que o resto do site linka quando fala
    em "VER BENEFÍCIOS" ou "VER PRODUTOS". Funciona sem login, igual ao portfólio do parceiro. */
+/* Faixa de abertura da loja, com a mesma cara da seção FN Home do site institucional: fundo azul,
+   título grande e a proposta em três pontos. O primeiro ponto é o que mais importa — quem ainda
+   não é cliente achava que a loja era fechada. "compacta" é a versão do portal do cliente. */
+const PROPOSTA_LOJA = [
+  ["Aberta a todos", "Não precisa ser cliente nem ter cadastro."],
+  ["Escolhido por técnicos", "O que a equipe vê fazer falta em apartamento novo."],
+  ["Compra no Mercado Livre", "Pagamento, entrega e garantia por lá, sem custo a mais."],
+];
+function FaixaLojaFnHome({ compacta = false }) {
+  return (
+    <section style={{
+      position: "relative", overflow: "hidden", color: "#fff", borderRadius: 20,
+      padding: compacta ? "22px 20px" : "clamp(24px, 4.5vw, 44px)",
+      background: "radial-gradient(520px 280px at 100% 0%, rgba(44,117,181,.45), transparent 70%), linear-gradient(160deg, #12335B, #0B2140)",
+    }}>
+      <div style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 11.5, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "#C8A44D" }}>
+        <span style={{ width: 20, height: 2, borderRadius: 2, background: "#C8A44D" }} /> FN Home · a loja da FN
+      </div>
+      <h2 style={{ margin: "10px 0 0", fontSize: compacta ? 22 : "clamp(24px, 3.4vw, 36px)", lineHeight: 1.15, fontWeight: 800, letterSpacing: "-.02em", maxWidth: 640 }}>
+        Chegou a chave. Agora é equipar o imóvel.
+      </h2>
+      {!compacta && (
+        <p style={{ margin: "12px 0 0", fontSize: 15.5, lineHeight: 1.6, color: "rgba(255,255,255,.8)", maxWidth: 640 }}>
+          O que costuma faltar depois da entrega — iluminação, elétrica, banheiro, cozinha e organização —,
+          escolhido por quem vistoria apartamento novo todo dia.
+        </p>
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 10, marginTop: compacta ? 14 : 24 }}>
+        {PROPOSTA_LOJA.map(([titulo, texto]) => (
+          <div key={titulo} style={{ display: "flex", gap: 10, alignItems: "flex-start", background: "rgba(255,255,255,.07)", border: "1px solid rgba(255,255,255,.12)", borderRadius: 12, padding: compacta ? "10px 12px" : "14px 16px" }}>
+            <Check size={17} color="#C8A44D" style={{ flexShrink: 0, marginTop: 2 }} />
+            <div style={{ fontSize: 13, lineHeight: 1.45, color: "rgba(255,255,255,.75)" }}>
+              <strong style={{ display: "block", color: "#fff", fontSize: 14 }}>{titulo}</strong>{texto}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function PaginaBeneficiosFn({ tipo }) {
   const info = FN_AREA_INFO[tipo] || FN_AREA_INFO.servico;
   const [toast, setToast] = useState("");
@@ -18237,6 +18278,11 @@ function PaginaBeneficiosFn({ tipo }) {
   const sessaoAtual = carregarSessaoSalva();
   const clienteLogado = sessaoAtual?.usuario?.role === "cliente" ? sessaoAtual.usuario : null;
   const tokenCliente = clienteLogado ? sessaoAtual.token : undefined;
+  /* A loja ocupa a largura do site institucional (1160): com 780 os cartões ficavam pequenos, e
+     a Gerência pediu a loja "grande, bonita" como lá (out/2026). O FN Clube segue estreito. */
+  const ehLoja = tipo === "produto";
+  const largura = ehLoja ? 1160 : 780;
+  const [qtdProdutos, setQtdProdutos] = useState(null);
   return (
     <div style={{ minHeight: "100vh", background: CINZA_CLARO, fontFamily: "'Inter', system-ui, sans-serif" }}>
       {/* Página aberta direto pelo link, fora do AppInterno/PainelCliente que injetam os estilos:
@@ -18244,7 +18290,7 @@ function PaginaBeneficiosFn({ tipo }) {
           navegador — igual faz a PaginaRetornoCobranca. */}
       <style>{estilos}</style>
       <header style={{ background: AZUL_MARINHO, color: "#fff" }}>
-        <div style={{ maxWidth: 780, margin: "0 auto", padding: "16px 18px", display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ maxWidth: largura, margin: "0 auto", padding: "16px 18px", display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ width: "clamp(36px, 9vw, 44px)", height: "clamp(36px, 9vw, 44px)", borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
             <img src={LOGO_URL} alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
           </div>
@@ -18254,15 +18300,25 @@ function PaginaBeneficiosFn({ tipo }) {
           </div>
           <a href={home} className="btn-ghost" style={{ textDecoration: "none" }}>← Início</a>
         </div>
-        <div style={{ maxWidth: 780, margin: "0 auto", padding: "0 18px 14px", display: "flex", gap: 20, fontSize: 13, fontWeight: 700 }}>
+        <div style={{ maxWidth: largura, margin: "0 auto", padding: "0 18px 14px", display: "flex", gap: 20, fontSize: 13, fontWeight: 700 }}>
           <a href={`${home}#solicitar-servico`} style={{ color: "#fff", opacity: 0.85, textDecoration: "none" }}>Serviços FN</a>
           <a href="?pagina=fn-clube" style={{ color: "#fff", opacity: tipo === "servico" ? 1 : 0.85, textDecoration: "none" }}>FN Clube</a>
           <a href="?pagina=fn-home" style={{ color: "#fff", opacity: tipo === "produto" ? 1 : 0.85, textDecoration: "none" }}>FN Home</a>
         </div>
       </header>
-      <main style={{ maxWidth: 780, margin: "0 auto", padding: "22px 18px 80px" }}>
-        <SecaoParceirosVitrine notify={notify} tipoInicial={tipo} clienteLogado={clienteLogado} token={tokenCliente}
-          onIrParaLogin={() => { window.location.href = `${window.location.origin}${window.location.pathname}`; }} />
+      <main style={{ maxWidth: largura, margin: "0 auto", padding: "22px 18px 80px" }}>
+        {ehLoja ? (
+          <div style={{ display: "grid", gap: 20 }}>
+            <FaixaLojaFnHome />
+            <section style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 18, padding: "clamp(16px, 3vw, 28px)", minWidth: 0 }}>
+              {qtdProdutos === 0 && <p style={{ color: "#8593a8", fontSize: 14, margin: 0 }}>Nenhum produto disponível no momento.</p>}
+              <SecaoOfertasMercadoLivre apiFetch={apiFetch} aoCarregar={setQtdProdutos} separar={false} />
+            </section>
+          </div>
+        ) : (
+          <SecaoParceirosVitrine notify={notify} tipoInicial={tipo} clienteLogado={clienteLogado} token={tokenCliente}
+            onIrParaLogin={() => { window.location.href = `${window.location.origin}${window.location.pathname}`; }} />
+        )}
       </main>
       {toast && (
         <div className="no-print" style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: AZUL_MARINHO, color: "#fff", padding: "10px 18px", borderRadius: 10, fontSize: 13.5, boxShadow: "0 6px 20px rgba(0,0,0,.2)" }}>
@@ -19393,9 +19449,14 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado 
      que o cliente via). Para quem acabou de se cadastrar ela sobe para o topo, logo abaixo da
      confirmação — o "Meu atendimento" ainda está vazio nessa hora. Para os demais fica no fim,
      e o botão do cabeçalho leva até ela. */
+  /* Mais larga que o resto do portal (720): os cartões de produto pedem espaço, como no site.
+     justifySelf: "center" não centraliza o que é maior que a coluna (vazava só para a direita);
+     a margem negativa de metade da sobra, sim. O % da margem é a largura da coluna. */
+  const larguraLoja = "min(1100px, 100vw - 36px)";
   const loja = (
-    <div id="loja-fn-home" style={{ scrollMarginTop: 90 }}>
-      <SecaoParceirosVitrine notify={notify} clienteLogado={cliente} token={session.token} tipoInicial="produto" />
+    <div id="loja-fn-home" style={{ scrollMarginTop: 90, width: larguraLoja, marginLeft: `calc((100% - ${larguraLoja}) / 2)`, justifySelf: "start", display: "grid", gap: 12 }}>
+      <FaixaLojaFnHome compacta />
+      <SecaoParceirosVitrine notify={notify} clienteLogado={cliente} token={session.token} tipoInicial="produto" semDescricao />
     </div>
   );
   const irParaLoja = () => document.getElementById("loja-fn-home")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -20528,7 +20589,8 @@ function CardProdutoVitrine({ p, onClick }) {
   );
 }
 
-function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, somenteLogos = false, tipoInicial = "servico" }) {
+/* semDescricao: no portal do cliente a faixa da loja já explica a área logo acima. */
+function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, somenteLogos = false, tipoInicial = "servico", semDescricao = false }) {
   const [parceiros, setParceiros] = useState([]);
   const [carregando, setCarregando] = useState(false);
   const [abaTipo, setAbaTipo] = useState(tipoInicial);
@@ -20564,7 +20626,7 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, so
     <Card icon={!somenteLogos && abaTipo === "produto" ? ShoppingBag : Building2} titulo={somenteLogos ? "Benefícios Exclusivos FN" : info.titulo}>
       {!somenteLogos && (
         <>
-          <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>{info.descricao}</p>
+          {!semDescricao && <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>{info.descricao}</p>}
           <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
             <button onClick={() => setAbaTipo("servico")}
               className={abaTipo === "servico" ? "btn-solid" : "btn-ghost"}
