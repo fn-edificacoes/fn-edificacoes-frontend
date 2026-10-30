@@ -369,6 +369,13 @@ comissão só aparece no painel de afiliados de lá. Backend: `src/afiliados-mer
   (`SecaoParceirosVitrine`): o cartão "FN Home · Catálogo de móveis e decoração" saiu a pedido da
   Gerência (out/2026); o carrinho só aparece ali se já tiver item. O título da área é "Loja FN Home"
   e o texto diz que ela é aberta a todos, sem ser cliente.
+- **Loja grande, com a cara do site** (out/2026, pedido da Gerência): `?pagina=fn-home` tem 1160 px de
+  largura (o FN Clube segue em 780), abre com a faixa azul `FaixaLojaFnHome` (título e a proposta em três
+  pontos) e mostra só a grade de produtos, sem as abas. No portal do cliente a loja vem com a faixa em
+  versão compacta e ocupa até 1100 px, mais que o resto do portal (720): a margem negativa calculada
+  centraliza — `justifySelf: "center"` vazava só para a direita. Os tamanhos dos cartões ficam nas
+  classes `fnh-*` do `<style>` de `SecaoOfertasMercadoLivre`: ~210 px no computador, duas colunas abaixo
+  de 640 px.
 - **No portal do cliente a loja abre na aba FN Home** (`tipoInicial="produto"`) e o cabeçalho tem o
   botão "Loja FN Home", que rola até ela (`#loja-fn-home`). **Quem acabou de se cadastrar** pelo
   "Cadastre-se" entra com a confirmação do cadastro e a loja no topo da página, antes de "Meu
