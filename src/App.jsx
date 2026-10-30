@@ -6,6 +6,7 @@ import AbaRedeNacional from "./rede-nacional.jsx";
 import AbaEmpreendimentosCadastro from "./empreendimentos-lista.jsx";
 import { Building as IconeEmpreendimento, ShoppingBag } from "lucide-react";
 import AbaProdutosMercadoLivre, { SecaoOfertasMercadoLivre, temRascunhoMercadoLivre } from "./fn-home-mercadolivre.jsx";
+import AbaFinanceiroFnHome, { CardFnHomeNosIndicadores } from "./fn-home-financeiro.jsx";
 import AbaMapaAtuacao from "./mapa-atuacao.jsx";
 import { usePatologiaVoz, PainelPatologiaVoz, AvisoPendentesVoz } from "./patologia-voz.jsx";
 import AbaCreditosIA from "./ia-creditos.jsx";
@@ -2229,9 +2230,11 @@ const GERENCIA_MENU_LATERAL = [
     { aba: "gerencia", sub: "empreendimentos", label: "Empreendimentos", Icon: IconeEmpreendimento },
   ] },
   /* Os parceiros do FN Home são cuidados no FN Projetos (Casa Pronta › Fornecedores); aqui fica
-     o que é da própria FN: os produtos do Mercado Livre com o link de afiliado dela. */
+     o que é da própria FN: os produtos do Mercado Livre com o link de afiliado dela, e o financeiro
+     das vendas (o mesmo que abre ao lado da Conciliação Mercado Pago). */
   { titulo: "FN Home", itens: [
     { aba: "gerencia", sub: "fn-home-ml", label: "Produtos Mercado Livre", Icon: ShoppingBag },
+    { aba: "gerencia", sub: "fn-home-financeiro", label: "Vendas e comissões", Icon: Wallet },
   ] },
   { titulo: "FN Nacional", itens: [
     { aba: "nacional", label: "Rede Nacional", Icon: Landmark },
@@ -3877,6 +3880,7 @@ function AppInterno({ session, onLogout }) {
         )}
         {abaTop === "gerencia" && !String(abaGerencia).startsWith("fin-") && (
           <AbaGerencia sub={abaGerencia} fin={fin} usuarioAtual={session.usuario} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem}
+            aoAbrirFnHome={() => setAbaGerencia("fn-home-financeiro")}
             importarClientesHistorico={importarClientesHistorico}
             prospeccaoParceiros={prospeccaoParceiros} prospeccaoParceirosCarregando={prospeccaoParceirosCarregando}
             atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
@@ -8429,6 +8433,17 @@ function rotuloPeriodo(periodo) {
   if (periodo.granularidade === "ano") return String(periodo.ano);
   if (periodo.granularidade === "trimestre") return `${periodo.indice + 1}º trimestre de ${periodo.ano}`;
   return `${MESES_LONGOS[periodo.indice]} de ${periodo.ano}`;
+}
+/* O recorte em datas (AAAA-MM-DD), para o que vem pronto do servidor — o bloco do FN Home nos
+   Indicadores. "Todo o período" vai sem datas. */
+function datasDoPeriodo(periodo) {
+  if (!periodo || periodo.granularidade === "tudo") return { de: null, ate: null };
+  const dois = (n) => String(n).padStart(2, "0");
+  const [primeiro, ultimo] = periodo.granularidade === "ano" ? [0, 11]
+    : periodo.granularidade === "trimestre" ? [periodo.indice * 3, periodo.indice * 3 + 2]
+    : [periodo.indice, periodo.indice];
+  const fim = new Date(periodo.ano, ultimo + 1, 0).getDate();
+  return { de: `${periodo.ano}-${dois(primeiro + 1)}-01`, ate: `${periodo.ano}-${dois(ultimo + 1)}-${dois(fim)}` };
 }
 /* O recorte imediatamente anterior ao escolhido, para a comparação nos cartões. "Todo o
    período" não tem anterior — ali a comparação some, em vez de comparar com algo inventado. */
@@ -14801,6 +14816,38 @@ const FORMA_MERCADO_PAGO = {
 const formaDoMercadoPago = (p) => (p.meio === "pix" ? "Pix" : FORMA_MERCADO_PAGO[p.forma] || p.forma || "—");
 const soDigitosDe = (s) => String(s || "").replace(/\D/g, "");
 
+/* A aba do Mercado Pago tem dois lados: a conciliação da conta e o financeiro das vendas do FN
+   Home, cujo carrinho recebe nessa mesma conta (pedido da Gerência, out/2026). O financeiro do FN
+   Home também abre por FN Home → Vendas e comissões — é a mesma tela (src/fn-home-financeiro.jsx). */
+function AbaMercadoPago(props) {
+  const [lado, setLado] = useState("conciliacao");
+  const aba = (id, rotulo, Icone) => {
+    const ativo = lado === id;
+    return (
+      <button key={id} type="button" role="tab" aria-selected={ativo} onClick={() => setLado(id)}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 14px", borderRadius: 9, cursor: "pointer",
+          fontSize: 13.5, fontWeight: 700, whiteSpace: "nowrap",
+          background: ativo ? AZUL_MEDIO : "#fff", color: ativo ? "#fff" : AZUL_MARINHO,
+          border: `1px solid ${ativo ? AZUL_MEDIO : CINZA_BORDA}`,
+        }}>
+        <Icone size={15} /> {rotulo}
+      </button>
+    );
+  };
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <div role="tablist" aria-label="Mercado Pago" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {aba("conciliacao", "Conciliação da conta", Scale)}
+        {aba("fn-home", "Financeiro do FN Home", Wallet)}
+      </div>
+      {lado === "conciliacao"
+        ? <AbaConciliacaoMercadoPago {...props} />
+        : <AbaFinanceiroFnHome token={props.token} apiFetch={apiFetch} notify={props.notify} />}
+    </div>
+  );
+}
+
 function AbaConciliacaoMercadoPago({ token, fin, clientes = [], docs = [], precos = [], notify, recarregarClientes }) {
   const mesHoje = hojeLocal().slice(0, 7);
   const [mes, setMes] = useState(mesHoje);
@@ -15307,7 +15354,7 @@ function AbaFinanceiroDespesas({ sub, fin, clientes = [], docs = [], precos = []
      pagamento, por isso a folha recebe o "fin" inteiro. */
   if (sub === "fin-folha") return <AbaFolhaPagamento token={token} apiFetch={apiFetch} notify={notify} fin={fin} usuarios={usuarios} />;
   if (sub === "fin-conferencia") return <AbaConferenciaPagamentos clientes={clientes} docs={docs} precos={precos} updCliente={updCliente} notify={notify} />;
-  if (sub === "fin-conciliacao") return <AbaConciliacaoMercadoPago token={token} fin={fin} clientes={clientes} docs={docs} precos={precos} notify={notify} recarregarClientes={recarregarClientes} />;
+  if (sub === "fin-conciliacao") return <AbaMercadoPago token={token} fin={fin} clientes={clientes} docs={docs} precos={precos} notify={notify} recarregarClientes={recarregarClientes} />;
   if (sub === "fin-notas") return <AbaFinNotas {...comum} />;
   if (sub === "fin-deslocamentos") return <AbaFinDeslocamentos {...comum} docs={docs} precos={precos} />;
   if (sub === "fin-relatorios") return <AbaFinRelatorios fin={fin} clientes={clientes} docs={docs} precos={precos} notify={notify} />;
@@ -15459,7 +15506,7 @@ function AbaGerenciaReformas({ usuarioAtual, perfil, token }) {
    ficavam somados num total só: histórico importado × operação de hoje, vistoria × ART/TRT, e
    por empreendimento/construtora. O recorte de período (mês, trimestre, ano) vale para os três.
    ============================================================ */
-function AbaGerenciaIndicadores({ clientes = [], docs = [], precos = [], carregando }) {
+function AbaGerenciaIndicadores({ clientes = [], docs = [], precos = [], carregando, token, aoAbrirFnHome }) {
   const [periodo, setPeriodo] = useState(PERIODO_TUDO);
   const [origem, setOrigem] = useState("tudo"); // "tudo" | "historico" | "atual"
   const [buscaObra, setBuscaObra] = useState("");
@@ -15621,6 +15668,11 @@ function AbaGerenciaIndicadores({ clientes = [], docs = [], precos = [], carrega
           {blocoServico({ titulo: "Documentação ART/TRT", Icon: FileText, cor: "#6E36BE", resumo: resumoDoc, resumoAntes: resumoDocAntes, rotuloConcluido: "Documentações prontas" })}
         </div>
       </Card>
+
+      {/* O FN Home no mesmo recorte. A origem (base antiga/operação atual) não se aplica: é venda
+          de parceiro, não atendimento. */}
+      <CardFnHomeNosIndicadores token={token} apiFetch={apiFetch} {...datasDoPeriodo(periodo)}
+        rotulo={rotuloPeriodo(periodo)} aoAbrir={aoAbrirFnHome} />
 
       <Card icon={Building2} titulo={`Por empreendimento e construtora — ${rotuloPeriodo(periodo)}`}>
         <input style={{ ...inp, marginBottom: 12 }} placeholder="Filtrar por empreendimento ou construtora…"
@@ -16511,7 +16563,7 @@ function AbaGerenciaImportacao({ clientes = [], precos = [], empreendimentosRef 
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, decidirComissaoItem, importarClientesHistorico, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], carregarEmpreendimentosRef, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
+function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, decidirComissaoItem, importarClientesHistorico, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], carregarEmpreendimentosRef, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas, aoAbrirFnHome }) {
   if (sub === "painel") {
     return <AbaGerenciaPainelEstrategico clientes={clientes} docs={docs} usuarios={usuarios} precos={precos}
       avaliacoes={avaliacoes} prospeccao={prospeccao} prospeccaoParceiros={prospeccaoParceiros}
@@ -16521,7 +16573,7 @@ function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, de
       patologiasIndisponivel={painelPatologiasIndisponivel} recarregarPatologias={carregarPainelPatologias} />;
   }
   if (sub === "indicadores") {
-    return <AbaGerenciaIndicadores clientes={clientes} docs={docs} precos={precos} carregando={carregando} />;
+    return <AbaGerenciaIndicadores clientes={clientes} docs={docs} precos={precos} carregando={carregando} token={token} aoAbrirFnHome={aoAbrirFnHome} />;
   }
   if (sub === "importacao") {
     return <AbaGerenciaImportacao clientes={clientes} precos={precos} empreendimentosRef={empreendimentosRef}
@@ -16548,6 +16600,9 @@ function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, de
   }
   if (sub === "fn-home-ml") {
     return <AbaProdutosMercadoLivre token={token} apiFetch={apiFetch} notify={notify} redimensionar={redimensionar} />;
+  }
+  if (sub === "fn-home-financeiro") {
+    return <AbaFinanceiroFnHome token={token} apiFetch={apiFetch} notify={notify} />;
   }
   if (sub === "prospeccao") {
     return <CardProspeccao prospeccao={prospeccao} carregando={prospeccaoCarregando} atualizar={atualizarProspeccao}

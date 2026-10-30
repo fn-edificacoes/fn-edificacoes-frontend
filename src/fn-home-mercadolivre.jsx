@@ -279,10 +279,11 @@ export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true 
 
 /* ---------------- Gerência ---------------- */
 
-const formVazio = () => ({ id: null, link: "", titulo: "", categoria: "", preco: "", preco_de: "", foto: "", ativo: true });
+const formVazio = () => ({ id: null, link: "", titulo: "", categoria: "", preco: "", preco_de: "", comissao_percentual: "", foto: "", ativo: true });
 const paraForm = (p) => ({
   id: p.id, link: p.link || "", titulo: p.titulo || "", categoria: p.categoria || "",
   preco: p.preco != null ? String(Number(p.preco)) : "", preco_de: p.preco_de != null ? String(Number(p.preco_de)) : "",
+  comissao_percentual: p.comissao_percentual != null ? String(Number(p.comissao_percentual)) : "",
   foto: p.foto || "", ativo: p.ativo !== false,
 });
 
@@ -415,6 +416,7 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
     const corpo = {
       link: form.link.trim(), titulo: form.titulo.trim(), categoria: form.categoria.trim(),
       preco: form.preco === "" ? null : form.preco, preco_de: form.preco_de === "" ? null : form.preco_de,
+      comissao_percentual: form.comissao_percentual === "" ? null : form.comissao_percentual,
       foto: form.foto, ativo: form.ativo,
     };
     try {
@@ -534,6 +536,11 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
           <Campo label={'Preço "De" (R$, opcional)'} dica="Só quando o anúncio mostra preço riscado.">
             <input style={inp} type="number" min="0" step="0.01" placeholder="249,90" value={form.preco_de} onChange={(e) => mudar("preco_de", e.target.value)} />
           </Campo>
+          {/* Só para o Financeiro do FN Home dizer quanto a FN ganha por venda; a comissão de
+              verdade continua no painel de afiliados do Mercado Livre. */}
+          <Campo label="Sua comissão (%)" dica="O percentual que o portal de afiliados mostra ao gerar o link. Opcional.">
+            <input style={inp} type="number" min="0" max="100" step="0.1" placeholder="8" value={form.comissao_percentual} onChange={(e) => mudar("comissao_percentual", e.target.value)} />
+          </Campo>
           <Campo label="Foto" largo dica={'Na página do produto, clique com o botão direito na foto → "Copiar endereço da imagem" e cole aqui. Ou envie um arquivo.'}>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               {form.foto && (
@@ -619,6 +626,7 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
                     {p.ativo ? <Etiqueta cor={VERDE}>No FN Home</Etiqueta> : <Etiqueta cor="#65758b">Fora do FN Home</Etiqueta>}
                     {p.categoria && <Etiqueta>{p.categoria}</Etiqueta>}
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}><MousePointerClick size={12} /> {p.cliques || 0}</span>
+                    {p.comissao_percentual != null && <span title="Sua comissão no Mercado Livre">{String(Number(p.comissao_percentual)).replace(".", ",")}% de comissão</span>}
                   </div>
                 </div>
                 <div style={{ flex: "0 1 170px", fontSize: 12.5 }}>
