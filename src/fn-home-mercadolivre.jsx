@@ -10,14 +10,16 @@
 
    A FN não vende nada aqui: o cliente compra no Mercado Livre e a comissão aparece no painel de
    afiliados de lá. O sistema só conta os cliques no botão. O link de afiliado sai só do portal
-   (o Mercado Livre não tem API para isso); o resto a tela adianta pelo endereço da página do
-   produto (/preencher no backend): nome e categoria sempre, foto e preço quando o aplicativo da
-   FN no Mercado Livre está configurado no servidor. A Gerência confere e salva — e o preço vem
-   sempre com a data em que foi conferido.
+   (o Mercado Livre não tem API para isso); o resto a tela adianta de dois jeitos:
+     - pelo endereço da página do produto (/preencher no backend): nome e categoria sempre, foto
+       e preço só de produto de catálogo (/p/), com o aplicativo da FN configurado no servidor;
+     - pelo botão "Enviar ao FN Home", um favorito do Chrome que lê a página aberta (ver
+       lerPaginaParaOFnHome): foto e preço de qualquer anúncio.
+   A Gerência confere e salva — e o preço vem sempre com a data em que foi conferido.
 
    Arquivo à parte como a Rede Nacional: o App.jsx só o encaixa e entrega o apiFetch. */
-import React, { useEffect, useMemo, useState } from "react";
-import { ShoppingBag, ExternalLink, Plus, Pencil, Trash2, RefreshCcw, Loader2, X, Search, Upload, CalendarCheck, Eye, EyeOff, MousePointerClick, Sparkles } from "lucide-react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { ShoppingBag, ExternalLink, Plus, Pencil, Trash2, RefreshCcw, Loader2, X, Search, Upload, CalendarCheck, Eye, EyeOff, MousePointerClick, Sparkles, Bookmark } from "lucide-react";
 
 const AZUL_MEDIO = "#2C75B5";
 const AZUL_MARINHO = "#12335B";
@@ -68,6 +70,103 @@ function ehPaginaDoMercadoLivre(texto) {
     const u = new URL(String(texto || "").trim());
     return u.protocol === "https:" && /(^|\.)(mercadolivre\.com(\.br)?|mercadolibre\.com)$/i.test(u.hostname);
   } catch { return false; }
+}
+
+/* ---------------- Botão "Enviar ao FN Home" (favorito do Chrome) ----------------
+   A API do Mercado Livre só libera foto e preço de produto de catálogo (/p/); produto de vendedor
+   (/up/) e anúncio avulso dão 403, e a página não abre pelo servidor. Mas ela abre no Chrome de
+   quem está logado no Mercado Livre — então quem lê é o próprio navegador da Gerência, na página
+   que ela está vendo: este favorito pega nome, foto, preço (e o meli.la, se já foi gerado) e abre
+   o sistema com #fn-home-ml=<dados>. Nada passa pelo servidor nesse caminho.
+
+   Vira código de favorito por toString(): precisa ser autossuficiente (nada de fora da função) e
+   em JS simples, sem nada que o build troque por ajudante. As classes ui-pdp-* / andes-* são as da
+   página de produto do Mercado Livre; og:*, itemprop e JSON-LD seguram se elas mudarem. */
+function lerPaginaParaOFnHome(destino) {
+  var d = document;
+  var q = function (s) { return d.querySelector(s); };
+  if (!/mercadoli(vre|bre)\./.test(location.hostname)) {
+    alert("Abra a página de um produto do Mercado Livre e clique de novo em \"Enviar ao FN Home\".");
+    return;
+  }
+  var meta = function (p) { var m = q("meta[property=\"" + p + "\"]") || q("meta[name=\"" + p + "\"]"); return m ? m.getAttribute("content") || "" : ""; };
+  var ld = {};
+  d.querySelectorAll("script[type=\"application/ld+json\"]").forEach(function (s) {
+    try {
+      [].concat(JSON.parse(s.textContent)).forEach(function (j) {
+        [].concat(j && j["@graph"] ? j["@graph"] : j).forEach(function (x) { if (x && x["@type"] === "Product" && !ld.name) ld = x; });
+      });
+    } catch (e) { /* JSON-LD quebrado: segue sem ele */ }
+  });
+  var oferta = [].concat(ld.offers || [])[0] || {};
+  var imagemLd = [].concat(ld.image || [])[0];
+  var valor = function (el) {
+    if (!el) return "";
+    var f = el.querySelector(".andes-money-amount__fraction"), c = el.querySelector(".andes-money-amount__cents");
+    return f ? f.textContent.replace(/\D/g, "") + "." + (c ? c.textContent.replace(/\D/g, "") : "00") : "";
+  };
+  var h1 = q("h1.ui-pdp-title") || q("h1");
+  var img = q(".ui-pdp-gallery__figure img") || q("figure img");
+  var precoMeta = q("meta[itemprop=\"price\"]");
+  var curto = /https:\/\/meli\.la\/[A-Za-z0-9]+/;
+  var link = ((d.body.innerText || "").match(curto) || [""])[0];
+  d.querySelectorAll("input,textarea").forEach(function (i) { var m = (i.value || "").match(curto); if (m && !link) link = m[0]; });
+  var dados = {
+    pagina: location.href,
+    titulo: (h1 && h1.textContent.trim()) || ld.name || meta("og:title"),
+    foto: (img && (img.getAttribute("data-zoom") || img.currentSrc || img.src)) || (imagemLd && (imagemLd.url || imagemLd)) || meta("og:image"),
+    preco: (precoMeta && precoMeta.getAttribute("content")) || oferta.price || valor(q(".ui-pdp-price__second-line .andes-money-amount")),
+    preco_de: valor(q(".ui-pdp-price s.andes-money-amount--previous") || q("s.andes-money-amount--previous")),
+    link: link,
+  };
+  window.open(destino + "#fn-home-ml=" + encodeURIComponent(JSON.stringify(dados)), "_blank");
+}
+// encodeURIComponent: o Chrome decodifica o favorito antes de rodar, e um "%" solto no código o quebraria.
+const codigoDoBotao = (destino) => `javascript:${encodeURIComponent(`(${lerPaginaParaOFnHome.toString()})(${JSON.stringify(destino)})`)}`;
+
+/* O que chega pelo endereço é de quem montou o link, não necessariamente do botão: só entra o que
+   tem a cara certa (página e link do Mercado Livre, foto do mlstatic, preço número), e mesmo assim
+   só preenche o formulário — a Gerência confere e salva, e o backend valida de novo. */
+const CHAVE_RASCUNHO = "fn-home-ml-rascunho";
+const PREFIXO_RASCUNHO = "#fn-home-ml=";
+function limparRascunho(r) {
+  if (!r || typeof r !== "object") return null;
+  const texto = (v, max) => String(v || "").replace(/\s+/g, " ").trim().slice(0, max);
+  const numero = (v) => { const n = Number(String(v ?? "").replace(",", ".")); return Number.isFinite(n) && n > 0 && n <= 1e7 ? n : null; };
+  let foto = "";
+  try {
+    const u = new URL(String(r.foto || ""));
+    if (u.protocol === "https:" && (u.hostname === "mlstatic.com" || u.hostname.endsWith(".mlstatic.com"))) foto = u.toString();
+  } catch { /* fica sem foto */ }
+  const preco = numero(r.preco);
+  const precoDe = numero(r.preco_de);
+  return {
+    pagina: ehPaginaDoMercadoLivre(r.pagina) ? String(r.pagina).trim().slice(0, 2000) : "",
+    titulo: texto(r.titulo, 200),
+    foto,
+    preco,
+    preco_de: preco != null && precoDe != null && precoDe > preco ? precoDe : null,
+    link: /^https:\/\/meli\.la\/[A-Za-z0-9]+$/.test(String(r.link || "")) ? r.link : "",
+  };
+}
+/* Guarda assim que o arquivo carrega e tira do endereço: o login pode vir antes da tela, e um F5
+   não deve preencher de novo. sessionStorage é da aba que o botão abriu. */
+(function guardarRascunhoDoEndereco() {
+  try {
+    if (!window.location.hash.startsWith(PREFIXO_RASCUNHO)) return;
+    sessionStorage.setItem(CHAVE_RASCUNHO, decodeURIComponent(window.location.hash.slice(PREFIXO_RASCUNHO.length)));
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  } catch { /* sem sessionStorage: o botão só não preenche */ }
+})();
+export function temRascunhoMercadoLivre() {
+  try { return Boolean(sessionStorage.getItem(CHAVE_RASCUNHO)); } catch { return false; }
+}
+function pegarRascunho() {
+  try {
+    const t = sessionStorage.getItem(CHAVE_RASCUNHO);
+    sessionStorage.removeItem(CHAVE_RASCUNHO);
+    return t ? limparRascunho(JSON.parse(t)) : null;
+  } catch { return null; }
 }
 
 function Etiqueta({ cor = AZUL_MEDIO, children }) {
@@ -222,8 +321,10 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
   const fotoEhPagina = !form.foto.startsWith("data:") && ehPaginaDoMercadoLivre(form.foto);
 
   /* Lê do Mercado Livre o que der e põe no formulário, por cima do que estiver nele — foi pedido;
-     o que não veio fica como está. Nada é salvo até "Cadastrar". */
-  const preencher = async (endereco = pagina) => {
+     o que não veio fica como está. Nada é salvo até "Cadastrar". daPagina é o que o botão "Enviar
+     ao FN Home" leu da página aberta no Chrome: vale mais que a API (é o que a Gerência está vendo),
+     e a API entra para a categoria e para o que a página não deu. */
+  const preencher = async (endereco = pagina, daPagina = null) => {
     const texto = String(endereco || "").trim();
     if (!texto) { notify("Cole o endereço da página do produto no Mercado Livre."); return; }
     // O link curto é o que paga a comissão, e o servidor não consegue abri-lo: vai para o campo dele.
@@ -238,26 +339,56 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
     setPagina(texto);
     setPreenchendo(true);
     setPreenchido(null);
+    // Preço novo leva junto o "De" dele (ou nenhum): um "De" antigo menor que o preço novo travaria o salvar.
+    const comPreco = (alvo, p, antes) => { alvo.preco = String(p); alvo.preco_de = antes != null ? String(antes) : ""; };
+    const novo = {};
+    if (daPagina) {
+      if (daPagina.titulo) novo.titulo = daPagina.titulo;
+      if (daPagina.foto) novo.foto = daPagina.foto;
+      if (daPagina.preco != null) comPreco(novo, daPagina.preco, daPagina.preco_de);
+      if (daPagina.link) novo.link = daPagina.link;
+    }
+    let categoriaCaminho = "";
+    let avisos = [];
     try {
       const r = await apiFetch("/api/afiliados/mercadolivre/preencher", { method: "POST", token, body: { link: texto } });
-      const novo = {};
-      if (r.titulo) novo.titulo = r.titulo;
+      if (r.titulo && !novo.titulo) novo.titulo = r.titulo;
       if (r.categoria) novo.categoria = r.categoria;
-      if (r.foto) novo.foto = r.foto;
-      // Preço novo leva junto o "De" dele (ou nenhum): um "De" antigo menor que o preço novo travaria o salvar.
-      if (r.preco != null) { novo.preco = String(r.preco); novo.preco_de = r.preco_de != null ? String(r.preco_de) : ""; }
-      setForm((f) => ({ ...f, ...novo }));
-      const nomes = { titulo: "nome", categoria: "categoria", foto: "foto", preco: "preço" };
-      setPreenchido({
-        campos: Object.keys(nomes).filter((k) => k in novo).map((k) => nomes[k]),
-        categoriaCaminho: r.categoriaCaminho || "",
-        avisos: r.avisos || [],
-      });
+      if (r.foto && !novo.foto) novo.foto = r.foto;
+      if (r.preco != null && novo.preco == null) comPreco(novo, r.preco, r.preco_de);
+      categoriaCaminho = r.categoriaCaminho || "";
+      // Com a página lida, os avisos da API sobre nome, foto e preço não valem; o da categoria sim.
+      avisos = daPagina ? (r.avisos || []).filter((a) => /categoria/i.test(a)) : (r.avisos || []);
     } catch (e) {
-      setPreenchido({ campos: [], categoriaCaminho: "", avisos: [e.message] });
+      avisos = [daPagina ? `Não consegui a categoria no Mercado Livre agora (${e.message}). Escolha uma à mão.` : e.message];
     }
+    if (daPagina) {
+      if (!novo.foto) avisos.push("Não achei a foto na página. Na foto do produto, botão direito → \"Copiar endereço da imagem\" e cole no campo Foto.");
+      if (novo.preco == null) avisos.push("Não achei o preço na página. Digite o preço que aparece no anúncio.");
+      if (!novo.link) {
+        avisos.push("Falta o link de afiliado: gere na barra de afiliados do Mercado Livre (no topo da página do produto) e cole abaixo. " +
+          "Se gerar antes de clicar em \"Enviar ao FN Home\", ele já vem junto.");
+      }
+    }
+    setForm((f) => ({ ...f, ...novo }));
+    const nomes = { titulo: "nome", categoria: "categoria", foto: "foto", preco: "preço", link: "link de afiliado" };
+    setPreenchido({ campos: Object.keys(nomes).filter((k) => k in novo).map((k) => nomes[k]), categoriaCaminho, avisos });
     setPreenchendo(false);
   };
+
+  // Veio do botão "Enviar ao FN Home": formulário novo, preenchido com o que ele leu da página.
+  useEffect(() => {
+    const r = pegarRascunho();
+    if (!r || !r.pagina) return;
+    setForm(formVazio());
+    preencher(r.pagina, r);
+  }, []);
+
+  // Pelo DOM e não pela prop: o React avisa (e vai barrar) href "javascript:".
+  const refBotao = useRef(null);
+  useEffect(() => {
+    refBotao.current?.setAttribute("href", codigoDoBotao(`${window.location.origin}${window.location.pathname}`));
+  }, []);
 
   /* Endereço de página colado no lugar errado (link de afiliado ou foto): vira o do Preencher. */
   const usarParaPreencher = (campo) => {
@@ -336,6 +467,18 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
           cole em "Link de afiliado". O produto entra na vitrine do FN Home com o botão "Comprar no Mercado Livre"; a venda e a
           comissão aparecem no painel de afiliados de lá.
         </p>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", background: CINZA_CLARO, borderRadius: 10, padding: "10px 12px", margin: "0 0 12px" }}>
+          <a ref={refBotao} href="#" draggable="true" title="Arraste para a barra de favoritos do Chrome"
+            onClick={(e) => { e.preventDefault(); notify("Arraste este botão para a barra de favoritos do Chrome — aqui ele não faz nada."); }}
+            style={{ ...btn, textDecoration: "none", cursor: "grab" }}>
+            <Bookmark size={14} /> Enviar ao FN Home
+          </a>
+          <span style={{ fontSize: 12.5, color: "#4a5a70", lineHeight: 1.45, flex: "1 1 260px" }}>
+            <strong>Mais rápido, no computador:</strong> arraste este botão para a barra de favoritos do Chrome (se ela não
+            aparece, aperte Ctrl+Shift+B). Com um produto aberto no Mercado Livre, clique nele: o cadastro abre aqui já com nome,
+            foto, preço e categoria — em qualquer anúncio, inclusive os que o Preencher não consegue.
+          </span>
+        </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
           <Campo label="Página do produto no Mercado Livre" largo
             dica="O endereço da barra do navegador com o produto aberto. Ao colar, o sistema busca nome, categoria, foto e preço.">

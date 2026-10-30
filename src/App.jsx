@@ -5,7 +5,7 @@ import * as Fin from "./financeiro-regras.js";
 import AbaRedeNacional from "./rede-nacional.jsx";
 import AbaEmpreendimentosCadastro from "./empreendimentos-lista.jsx";
 import { Building as IconeEmpreendimento, ShoppingBag } from "lucide-react";
-import AbaProdutosMercadoLivre, { SecaoOfertasMercadoLivre } from "./fn-home-mercadolivre.jsx";
+import AbaProdutosMercadoLivre, { SecaoOfertasMercadoLivre, temRascunhoMercadoLivre } from "./fn-home-mercadolivre.jsx";
 import AbaMapaAtuacao from "./mapa-atuacao.jsx";
 import { usePatologiaVoz, PainelPatologiaVoz, AvisoPendentesVoz } from "./patologia-voz.jsx";
 import AbaCreditosIA from "./ia-creditos.jsx";
@@ -2340,6 +2340,10 @@ function AppInterno({ session, onLogout }) {
     if (!modulosPermitidos.includes(abaTop)) setAbaTop(modulosPermitidos[0]);
     // O vistoriador entra direto na agenda dele — é o ponto de partida do trabalho.
     if (perfil === "vistoriador") setAba("agenda");
+  }, [perfil]);
+  // Veio do botão "Enviar ao FN Home" (favorito no Chrome): abre direto no cadastro, que se preenche.
+  useEffect(() => {
+    if (perfil === "gerencia" && temRascunhoMercadoLivre()) { setAbaTop("gerencia"); setAbaGerencia("fn-home-ml"); }
   }, [perfil]);
 
   const [docs, setDocs] = useState([]);
