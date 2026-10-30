@@ -303,7 +303,11 @@ export const COLUNAS_CONTADOR = [
 export function gerarCsv(linhas, colunas = COLUNAS_CONTADOR) {
   const esc = (v) => {
     if (typeof v === "number") return String(v).replace(".", ",");
-    const s = String(v ?? "");
+    /* Descrição ou fornecedor que começa com = + - @ vira fórmula quando o contador abre o CSV
+       no Excel (injeção de CSV): o apóstrofo na frente deixa a célula como texto. Valor é
+       número e não passa por aqui, então negativo continua negativo. */
+    let s = String(v ?? "");
+    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
     return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const corpo = [colunas.map(([t]) => esc(t)).join(";"), ...linhas.map((l) => colunas.map(([, f]) => esc(f(l))).join(";"))].join("\r\n");
