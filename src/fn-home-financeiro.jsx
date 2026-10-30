@@ -2,17 +2,19 @@
    FN HOME — FINANCEIRO (vendas, comissão da FN, repasses e cliques)
    ============================================================
    Tudo o que as vendas do FN Home deixam para a FN, lido de GET /api/financeiro/fn-home
-   (src/fn-home-financeiro.js no backend, só Gerência). A conta é toda do servidor; aqui a tela só
-   mostra e manda uma ação: marcar o acerto com o parceiro (PATCH /api/vendas/:id, o mesmo botão
-   de Parceiros → Vendas e comissões).
+   (src/fn-home-financeiro.js no backend, só Gerência). A conta é toda do servidor; aqui a tela
+   mostra e manda as ações: marcar o acerto com o parceiro (PATCH /api/vendas/:id, o mesmo botão
+   de Parceiros → Vendas e comissões) e lançar as vendas do Mercado Livre.
 
    Duas origens de venda, e o acerto de cada uma vai num sentido:
      - carrinho: o cliente pagou à FN pelo Mercado Pago. A comissão já está no caixa; a FN REPASSA
        ao parceiro o valor menos a comissão;
      - orçamento: proposta aceita, e o cliente paga o parceiro. A FN RECEBE a comissão dele.
-   Os produtos do Mercado Livre são à parte: a venda e a comissão de verdade só aparecem no painel
-   de afiliados de lá (sem API). Aqui ficam os cliques e o ganho por venda pelo percentual que a
-   Gerência informou no cadastro.
+   Terceira origem, o Mercado Livre (link de afiliado da FN): a venda e a comissão só aparecem no
+   painel de afiliados de lá, que não manda nada para fora — "não atualizou sozinho" foi a primeira
+   reclamação. A Gerência copia de lá em "Registrar venda" (/api/financeiro/fn-home/vendas-ml), e a
+   venda entra nas mesmas somas; a comissão fica "a confirmar" até o painel confirmar. Também ficam
+   os cliques e o ganho por venda pelo percentual informado no cadastro do produto.
 
    Três lugares usam este arquivo, todos pelo App.jsx (que entrega o apiFetch):
      - AbaFinanceiroFnHome: FN Home → Vendas e comissões, e o lado "Financeiro do FN Home" da aba
@@ -21,7 +23,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Wallet, RefreshCcw, ShoppingCart, Package, Users, Receipt, ArrowRightLeft, ShoppingBag,
-  Search, Check, Loader2, BarChart3, HandCoins, Store, Info,
+  Search, Check, Loader2, BarChart3, HandCoins, Store, Info, Plus, Pencil, Trash2, X,
 } from "lucide-react";
 
 const AZUL_MEDIO = "#2C75B5";
@@ -259,6 +261,108 @@ function GraficoMeses({ serie, comCliques }) {
   );
 }
 
+const hojeBr = () => new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
+const OUTRO_PRODUTO = "__outro__";
+const SITUACAO_ML = { pendente: "Pendente", confirmada: "Confirmada", cancelada: "Cancelada" };
+
+function CampoMl({ rotulo, dica, children, largo }) {
+  return (
+    <label style={{ display: "grid", gap: 4, gridColumn: largo ? "1 / -1" : undefined, minWidth: 0 }}>
+      <span style={{ fontSize: 12, fontWeight: 600, color: "#5a6a80" }}>{rotulo}</span>
+      {children}
+      {dica && <span style={{ fontSize: 11.5, color: TEXTO_APOIO }}>{dica}</span>}
+    </label>
+  );
+}
+
+/* Lançar ou corrigir uma venda do Mercado Livre, copiada do painel de afiliados. O valor nasce do
+   preço do produto vezes a quantidade (ajustável); a comissão em branco o servidor calcula pelo
+   percentual do produto, e a tela mostra quanto vai dar. */
+function FormVendaMl({ produtos, inicial, salvando, aoSalvar, aoCancelar }) {
+  const [f, setF] = useState(() => {
+    if (inicial) return inicial;
+    const p = produtos[0];
+    return {
+      produtoId: p ? p.id : OUTRO_PRODUTO, titulo: "", dia: hojeBr(), quantidade: "1",
+      valor: p?.preco != null ? String(p.preco) : "", comissao: "", situacao: "pendente", observacao: "",
+    };
+  });
+  const mudar = (campo, valor) => setF((x) => ({ ...x, [campo]: valor }));
+  const produto = produtos.find((p) => p.id === f.produtoId) || null;
+  const valorNum = Number(String(f.valor).replace(",", "."));
+  const sugerida = produto?.comissaoPercentual != null && valorNum > 0
+    ? Math.round(valorNum * produto.comissaoPercentual) / 100 : null;
+  /* Trocar o produto ou a quantidade refaz o valor só se ele ainda é o do preço de tabela — valor
+     digitado (desconto, frete) não é apagado. */
+  const valorDoPreco = (p, qtd) => (p?.preco != null ? String(Math.round(p.preco * (Number(qtd) || 1) * 100) / 100) : "");
+  const valorEhDoPreco = f.valor === "" || f.valor === valorDoPreco(produto, f.quantidade);
+  const escolherProduto = (id) => setF((x) => {
+    const p = produtos.find((q) => q.id === id);
+    return { ...x, produtoId: id, valor: valorEhDoPreco ? valorDoPreco(p, x.quantidade) : x.valor };
+  });
+  const mudarQuantidade = (qtd) => setF((x) => ({ ...x, quantidade: qtd, valor: valorEhDoPreco && produto ? valorDoPreco(produto, qtd) : x.valor }));
+  const outro = f.produtoId === OUTRO_PRODUTO;
+  const salvar = (e) => {
+    e.preventDefault();
+    aoSalvar({
+      produtoId: outro ? null : f.produtoId, ...(outro ? { titulo: f.titulo.trim() } : {}),
+      dia: f.dia, quantidade: Number(f.quantidade) || 1, valor: f.valor,
+      comissao: f.comissao === "" ? null : f.comissao, situacao: f.situacao, observacao: f.observacao,
+    });
+  };
+  return (
+    <form onSubmit={salvar} style={{ border: `1px solid ${AZUL_MEDIO}`, background: "#F7FAFD", borderRadius: 12, padding: 14, margin: "12px 0" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <strong style={{ color: AZUL_MARINHO, fontSize: 14, flex: 1 }}>{inicial?.id ? "Corrigir venda do Mercado Livre" : "Registrar venda do Mercado Livre"}</strong>
+        <button type="button" onClick={aoCancelar} title="Fechar" aria-label="Fechar" style={{ ...btnLeve, padding: "4px 8px" }}><X size={14} /></button>
+      </div>
+      <p style={{ fontSize: 12.5, color: TEXTO_APOIO, margin: "0 0 10px" }}>
+        Copie do painel de afiliados do Mercado Livre: a data da venda, o valor e a sua comissão. Uma venda por produto.
+      </p>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>
+        <CampoMl rotulo="Produto" largo={outro}>
+          <select style={inp} value={f.produtoId} onChange={(e) => escolherProduto(e.target.value)}>
+            {produtos.map((p) => <option key={p.id} value={p.id}>{p.titulo}{p.ativo ? "" : " (fora da vitrine)"}</option>)}
+            <option value={OUTRO_PRODUTO}>Outro produto (escrever o nome)</option>
+          </select>
+        </CampoMl>
+        {outro && (
+          <CampoMl rotulo="Nome do produto" largo>
+            <input style={inp} value={f.titulo} onChange={(e) => mudar("titulo", e.target.value)} placeholder="Como aparece no painel de afiliados" maxLength={200} />
+          </CampoMl>
+        )}
+        <CampoMl rotulo="Data da venda">
+          <input type="date" style={inp} value={f.dia} max={hojeBr()} onChange={(e) => mudar("dia", e.target.value)} required />
+        </CampoMl>
+        <CampoMl rotulo="Quantidade">
+          <input type="number" min="1" max="999" step="1" style={inp} value={f.quantidade} onChange={(e) => mudarQuantidade(e.target.value)} />
+        </CampoMl>
+        <CampoMl rotulo="Valor da venda (R$)" dica={produto?.preco != null ? `Preço cadastrado: ${brl(produto.preco)}` : null}>
+          <input type="number" min="0" step="0.01" style={inp} value={f.valor} onChange={(e) => mudar("valor", e.target.value)} placeholder="199,90" required />
+        </CampoMl>
+        <CampoMl rotulo="Sua comissão (R$)"
+          dica={sugerida != null && f.comissao === "" ? `Em branco: ${pct(produto.comissaoPercentual)} do valor = ${brl(sugerida)}`
+            : produto && produto.comissaoPercentual == null ? "Este produto não tem % cadastrado: informe o valor." : null}>
+          <input type="number" min="0" step="0.01" style={inp} value={f.comissao} onChange={(e) => mudar("comissao", e.target.value)}
+            placeholder={sugerida != null ? String(sugerida).replace(".", ",") : "Ex.: 12,50"} />
+        </CampoMl>
+        <CampoMl rotulo="Situação no painel" dica="Pendente até a entrega e o prazo de devolução; depois, confirmada.">
+          <select style={inp} value={f.situacao} onChange={(e) => mudar("situacao", e.target.value)}>
+            {Object.entries(SITUACAO_ML).map(([id, rotulo]) => <option key={id} value={id}>{rotulo}</option>)}
+          </select>
+        </CampoMl>
+        <CampoMl rotulo="Observação (opcional)" largo>
+          <input style={inp} value={f.observacao} onChange={(e) => mudar("observacao", e.target.value)} maxLength={300} placeholder="Ex.: número da venda no painel" />
+        </CampoMl>
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+        <button type="submit" style={btn} disabled={salvando}>{salvando ? <Loader2 size={14} className="spin" /> : <Check size={14} />} {inicial?.id ? "Salvar correção" : "Registrar venda"}</button>
+        <button type="button" style={btnLeve} onClick={aoCancelar}>Cancelar</button>
+      </div>
+    </form>
+  );
+}
+
 /* Busca o resumo da rota. Cada pedido leva um número; a resposta de um recorte antigo que
    chegue depois do novo é descartada (trocar de mês rápido mostraria o mês errado). */
 function useResumoFnHome({ apiFetch, token, de, ate, area }) {
@@ -293,6 +397,10 @@ export default function AbaFinanceiroFnHome({ token, apiFetch, notify }) {
   const [buscaItem, setBuscaItem] = useState("");
   const [soAbertas, setSoAbertas] = useState(false);
   const [mexendo, setMexendo] = useState(null);
+  const [formMl, setFormMl] = useState(null); // null fechado; {} nova venda; { id, ... } corrigir
+  const [salvandoMl, setSalvandoMl] = useState(false);
+  const [apagandoMl, setApagandoMl] = useState(null); // id da venda esperando o "Sim, apagar"
+  const blocoMl = useRef(null);
   const { de, ate } = intervalo(periodo);
   const { dados, carregando, falha, carregar } = useResumoFnHome({ apiFetch, token, de, ate, area });
 
@@ -305,16 +413,57 @@ export default function AbaFinanceiroFnHome({ token, apiFetch, notify }) {
   const acertar = async (v, feito) => {
     setMexendo(v.id);
     try {
-      await apiFetch(`/api/vendas/${v.id}`, { method: "PATCH", token, body: { statusComissao: feito ? "paga" : "pendente" } });
+      if (v.origem === "mercadolivre") {
+        await apiFetch(`/api/financeiro/fn-home/vendas-ml/${v.id}`, { method: "PATCH", token, body: { situacao: feito ? "confirmada" : "pendente" } });
+      } else {
+        await apiFetch(`/api/vendas/${v.id}`, { method: "PATCH", token, body: { statusComissao: feito ? "paga" : "pendente" } });
+      }
       notify(feito
-        ? (v.acerto.tipo === "repassar" ? "Repasse ao parceiro marcado como feito ✓" : "Comissão marcada como recebida ✓")
-        : "Acerto desfeito: a venda voltou para em aberto ✓");
+        ? ({ repassar: "Repasse ao parceiro marcado como feito ✓", receber: "Comissão marcada como recebida ✓", confirmar: "Comissão do Mercado Livre confirmada ✓" })[v.acerto.tipo]
+        : "Desfeito: a venda voltou para em aberto ✓");
       await carregar();
     } catch (e) {
       notify(`Não foi possível salvar: ${e.message}`);
     }
     setMexendo(null);
   };
+
+  const abrirFormMl = (inicial = {}) => {
+    setFormMl(inicial);
+    setTimeout(() => blocoMl.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
+  const salvarVendaMl = async (corpo) => {
+    setSalvandoMl(true);
+    try {
+      if (formMl?.id) await apiFetch(`/api/financeiro/fn-home/vendas-ml/${formMl.id}`, { method: "PATCH", token, body: corpo });
+      else await apiFetch("/api/financeiro/fn-home/vendas-ml", { method: "POST", token, body: corpo });
+      const fora = (de && corpo.dia < de) || (ate && corpo.dia > ate);
+      notify(`${formMl?.id ? "Venda corrigida" : "Venda registrada"} ✓${fora ? ` — é de ${dataBr(corpo.dia)}, fora do período na tela` : ""}`);
+      setFormMl(null);
+      await carregar();
+    } catch (e) {
+      notify(`Não foi possível salvar: ${e.message}`);
+    }
+    setSalvandoMl(false);
+  };
+  const apagarVendaMl = async (v) => {
+    setMexendo(v.id);
+    try {
+      await apiFetch(`/api/financeiro/fn-home/vendas-ml/${v.id}`, { method: "DELETE", token });
+      notify("Venda do Mercado Livre apagada ✓");
+      setApagandoMl(null);
+      await carregar();
+    } catch (e) {
+      notify(`Não foi possível apagar: ${e.message}`);
+    }
+    setMexendo(null);
+  };
+  const paraFormMl = (v) => ({
+    id: v.id, produtoId: v.produtoId && (ml?.produtos || []).some((p) => p.id === v.produtoId) ? v.produtoId : OUTRO_PRODUTO,
+    titulo: v.titulo, dia: v.dia, quantidade: String(v.quantidade), valor: String(v.valor), comissao: String(v.comissao),
+    situacao: v.situacao, observacao: v.observacao || "",
+  });
+  const vendasMl = (dados?.vendas || []).filter((v) => v.origem === "mercadolivre");
 
   const termo = buscaItem.trim().toLowerCase();
   const catalogo = useMemo(() => (dados?.catalogo || [])
@@ -363,6 +512,9 @@ export default function AbaFinanceiroFnHome({ token, apiFetch, notify }) {
                     return d && <span style={{ fontWeight: 700, color: d.sobe ? VERDE : VERMELHO }}>{d.sobe ? "▲" : "▼"} {d.texto} sobre {dataBr(antes.de)} a {dataBr(antes.ate)}</span>;
                   })()}
                   <span>média de {pct(t.percentualMedio)} sobre o vendido</span>
+                  {t.mercadoLivre.comissao > 0 && (
+                    <span>· {brl(t.mercadoLivre.comissao)} do Mercado Livre{t.mercadoLivre.aConfirmar > 0 ? ` (${brl(t.mercadoLivre.aConfirmar)} a confirmar)` : ""}</span>
+                  )}
                 </div>
               </div>
             </div>
@@ -377,7 +529,20 @@ export default function AbaFinanceiroFnHome({ token, apiFetch, notify }) {
                 apoio={`${dados.emAberto.vendasRepassar} venda(s) do carrinho, todas as datas`} />
               <Kpi rotulo="A receber dos parceiros" valor={brl(dados.emAberto.receber)} cor={dados.emAberto.receber > 0 ? AMBAR : AZUL_MARINHO}
                 apoio={`${dados.emAberto.vendasReceber} comissão(ões) de orçamento, todas as datas`} />
+              {ml && (
+                <Kpi rotulo="A confirmar no Mercado Livre" valor={brl(dados.emAberto.confirmarMl)} cor={dados.emAberto.confirmarMl > 0 ? AMBAR : AZUL_MARINHO}
+                  apoio={`${dados.emAberto.vendasConfirmarMl} venda(s) pendente(s) no painel, todas as datas`} />
+              )}
             </GradeKpi>
+            {ml && t.mercadoLivre.vendas === 0 && (
+              <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 10, background: "#FFF7E8", border: "1px solid #F1D9A8", fontSize: 13, color: "#5a4a20", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ flex: "1 1 260px" }}>
+                  Vendeu pelo link do Mercado Livre? Essas vendas <strong>não chegam sozinhas</strong>: o Mercado Livre só as mostra no seu
+                  painel de afiliados. Registre aqui o que aparece lá.
+                </span>
+                <button type="button" style={btn} onClick={() => abrirFormMl()}><Plus size={14} /> Registrar venda do Mercado Livre</button>
+              </div>
+            )}
             {(t.semComissao > 0 || t.canceladas > 0) && (
               <Nota cor={AMBAR}>
                 {t.semComissao > 0 && `${t.semComissao} venda(s) do período sem comissão cadastrada — ajuste em Parceiros → Vendas e comissões. `}
@@ -513,8 +678,17 @@ export default function AbaFinanceiroFnHome({ token, apiFetch, notify }) {
           </div>
 
           {ml && (
-            <Caixa icon={ShoppingBag} titulo="Mercado Livre (link de afiliado da FN)">
+            <div ref={blocoMl} style={{ scrollMarginTop: 90, minWidth: 0 }}>
+            <Caixa icon={ShoppingBag} titulo="Mercado Livre (link de afiliado da FN)"
+              acoes={!formMl && <button type="button" style={btn} onClick={() => abrirFormMl()}><Plus size={14} /> Registrar venda</button>}>
+              {formMl && (
+                <FormVendaMl key={formMl.id || "nova"} produtos={ml.produtos} inicial={formMl.id ? formMl : null}
+                  salvando={salvandoMl} aoSalvar={salvarVendaMl} aoCancelar={() => setFormMl(null)} />
+              )}
               <GradeKpi min={150}>
+                <Kpi rotulo="Vendas registradas" valor={numero(t.mercadoLivre.vendas)} apoio={`${brl(t.mercadoLivre.faturamento)} vendido no período`} />
+                <Kpi rotulo="Comissão do Mercado Livre" valor={brl(t.mercadoLivre.comissao)}
+                  apoio={`${brl(t.mercadoLivre.confirmada)} confirmada · ${brl(t.mercadoLivre.aConfirmar)} a confirmar`} />
                 <Kpi rotulo="Produtos na vitrine" valor={numero(ml.ativos)} />
                 <Kpi rotulo="Cliques no período" valor={numero(ml.cliquesNoPeriodo)} />
                 <Kpi rotulo="Cliques desde sempre" valor={numero(ml.cliques)} />
@@ -525,7 +699,8 @@ export default function AbaFinanceiroFnHome({ token, apiFetch, notify }) {
                   <table style={{ width: "100%", borderCollapse: "collapse" }}>
                     <thead><tr>
                       <th style={th}>Produto</th><th style={thN}>Preço</th><th style={thN}>Comissão</th><th style={thN}>Você ganha por venda</th>
-                      <th style={thN}>Cliques no período</th><th style={thN}>Desde sempre</th>
+                      <th style={thN}>Vendidos no período</th><th style={thN}>Comissão no período</th>
+                      <th style={thN}>Cliques no período</th><th style={thN}>Cliques desde sempre</th>
                     </tr></thead>
                     <tbody>
                       {ml.produtos.map((p) => (
@@ -538,6 +713,8 @@ export default function AbaFinanceiroFnHome({ token, apiFetch, notify }) {
                           <td style={tdN}>{p.preco != null ? brl(p.preco) : "—"}</td>
                           <td style={tdN}>{p.comissaoPercentual != null ? pct(p.comissaoPercentual) : <span style={{ color: AMBAR }}>não informada</span>}</td>
                           <td style={{ ...tdN, fontWeight: 700, color: AZUL_MARINHO }}>{p.ganhoPorVenda != null ? brl(p.ganhoPorVenda) : "—"}</td>
+                          <td style={tdN}>{numero(p.vendidosNoPeriodo)}</td>
+                          <td style={tdN}>{brl(p.comissaoNoPeriodo)}</td>
                           <td style={tdN}>{numero(p.cliquesNoPeriodo)}</td>
                           <td style={tdN}>{numero(p.cliques)}</td>
                         </tr>
@@ -546,13 +723,52 @@ export default function AbaFinanceiroFnHome({ token, apiFetch, notify }) {
                   </table>
                 </div>
               )}
+              {vendasMl.length > 0 && (
+                <div style={{ overflowX: "auto", marginTop: 14 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 6 }}>Vendas registradas no período</div>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead><tr>
+                      <th style={th}>Data</th><th style={th}>Produto</th><th style={thN}>Qtd.</th><th style={thN}>Valor</th>
+                      <th style={thN}>Comissão</th><th style={th}>Situação</th><th style={th}></th>
+                    </tr></thead>
+                    <tbody>
+                      {vendasMl.map((v) => (
+                        <tr key={v.id} style={{ opacity: v.cancelada ? 0.55 : 1 }}>
+                          <td style={{ ...td, whiteSpace: "nowrap" }}>{dataBr(v.dia)}</td>
+                          <td style={td}>{v.titulo}{v.observacao && <div style={{ fontSize: 11.5, color: TEXTO_APOIO }}>{v.observacao}</div>}</td>
+                          <td style={tdN}>{numero(v.quantidade)}</td>
+                          <td style={tdN}>{brl(v.valor)}</td>
+                          <td style={{ ...tdN, fontWeight: 700 }}>{brl(v.comissao)}</td>
+                          <td style={{ ...td, color: v.situacao === "confirmada" ? VERDE : v.situacao === "pendente" ? AMBAR : TEXTO_APOIO, fontWeight: 600 }}>{SITUACAO_ML[v.situacao]}</td>
+                          <td style={{ ...td, whiteSpace: "nowrap" }}>
+                            {mexendo === v.id ? <Loader2 size={14} className="spin" /> : apagandoMl === v.id ? (
+                              <span style={{ display: "inline-flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
+                                Apagar?
+                                <button type="button" style={{ ...btn, background: VERMELHO, padding: "4px 9px", fontSize: 12 }} onClick={() => apagarVendaMl(v)}>Sim, apagar</button>
+                                <button type="button" style={{ ...btnLeve, padding: "4px 9px", fontSize: 12 }} onClick={() => setApagandoMl(null)}>Não</button>
+                              </span>
+                            ) : (
+                              <span style={{ display: "inline-flex", gap: 6 }}>
+                                <button type="button" title="Corrigir" aria-label="Corrigir" style={{ ...btnLeve, padding: "4px 8px" }} onClick={() => abrirFormMl(paraFormMl(v))}><Pencil size={13} /></button>
+                                <button type="button" title="Apagar" aria-label="Apagar" style={{ ...btnLeve, padding: "4px 8px" }} onClick={() => setApagandoMl(v.id)}><Trash2 size={13} /></button>
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
               <Nota>
-                <Info size={12} style={{ verticalAlign: "-2px" }} /> A compra é feita no Mercado Livre: quantas vendas houve e a comissão que caiu aparecem
-                só no painel de afiliados de lá, que não tem integração. Aqui fica o que o sistema sabe — os cliques no botão da
-                vitrine e o ganho por venda pelo percentual informado em FN Home → Produtos Mercado Livre.
+                <Info size={12} style={{ verticalAlign: "-2px" }} /> A compra é feita no Mercado Livre, que só mostra as vendas e a comissão no painel de
+                afiliados de lá — não há como elas chegarem sozinhas. Registre cada venda aqui com a situação do painel:
+                pendente até a entrega e o prazo de devolução, depois confirmada (o botão "Confirmada" fica na lista de vendas abaixo).
+                Os cliques no botão da vitrine e o ganho por venda (percentual informado em FN Home → Produtos Mercado Livre) o sistema já conta.
                 {ml.cliquesDesde ? ` Cliques por mês contados desde ${dataBr(ml.cliquesDesde)}; antes disso só existe o total.` : " Os cliques por mês começam a contar a partir do primeiro clique depois desta versão."}
               </Nota>
             </Caixa>
+            </div>
           )}
 
           <Caixa icon={Receipt} titulo={`Vendas do período (${dados.vendasNoPeriodo})`}
@@ -562,14 +778,14 @@ export default function AbaFinanceiroFnHome({ token, apiFetch, notify }) {
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead><tr>
                     <th style={th}>Data</th><th style={th}>Item</th><th style={th}>Parceiro</th><th style={th}>Cliente</th>
-                    <th style={thN}>Valor</th><th style={thN}>Comissão</th><th style={thN}>Tarifa</th><th style={th}>Acerto com o parceiro</th>
+                    <th style={thN}>Valor</th><th style={thN}>Comissão</th><th style={thN}>Tarifa</th><th style={th}>Acerto</th>
                   </tr></thead>
                   <tbody>
                     {vendasVisiveis.map((v) => (
                       <tr key={v.id} style={{ opacity: v.cancelada ? 0.55 : 1 }}>
                         <td style={{ ...td, whiteSpace: "nowrap" }}>
                           {dataBr(v.dia)}
-                          <div style={{ fontSize: 11, color: TEXTO_APOIO }}>{v.origem === "carrinho" ? "Carrinho" : "Orçamento"}</div>
+                          <div style={{ fontSize: 11, color: TEXTO_APOIO }}>{({ carrinho: "Carrinho", orcamento: "Orçamento", mercadolivre: "Mercado Livre" })[v.origem]}</div>
                         </td>
                         <td style={td}>{v.titulo}{v.quantidade > 1 && <span style={{ color: TEXTO_APOIO }}> × {v.quantidade}</span>}</td>
                         <td style={td}>{v.parceiro}</td>
@@ -583,15 +799,17 @@ export default function AbaFinanceiroFnHome({ token, apiFetch, notify }) {
                           {v.cancelada ? <span style={{ color: TEXTO_APOIO }}>Cancelada</span> : (
                             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                               <span style={{ color: v.acerto.feito ? VERDE : (v.acerto.tipo === "repassar" ? VERMELHO : AMBAR), fontWeight: 600 }}>
-                                {v.acerto.feito
-                                  ? (v.acerto.tipo === "repassar" ? `Repassado ${brl(v.acerto.valor)}` : `Recebido ${brl(v.acerto.valor)}`)
-                                  : (v.acerto.tipo === "repassar" ? `Repassar ${brl(v.acerto.valor)}` : `Receber ${brl(v.acerto.valor)}`)}
+                                {({
+                                  repassar: [`Repassar ${brl(v.acerto.valor)}`, `Repassado ${brl(v.acerto.valor)}`],
+                                  receber: [`Receber ${brl(v.acerto.valor)}`, `Recebido ${brl(v.acerto.valor)}`],
+                                  confirmar: [`A confirmar ${brl(v.acerto.valor)}`, `Confirmada ${brl(v.acerto.valor)}`],
+                                })[v.acerto.tipo][v.acerto.feito ? 1 : 0]}
                               </span>
                               {mexendo === v.id ? <Loader2 size={14} className="spin" /> : v.acerto.feito ? (
                                 <button type="button" style={{ ...btnLeve, padding: "4px 9px", fontSize: 12 }} onClick={() => acertar(v, false)}>Desfazer</button>
                               ) : v.acerto.valor > 0 && (
                                 <button type="button" style={{ ...btn, padding: "4px 9px", fontSize: 12 }} onClick={() => acertar(v, true)}>
-                                  <Check size={13} /> {v.acerto.tipo === "repassar" ? "Repassei" : "Recebi"}
+                                  <Check size={13} /> {({ repassar: "Repassei", receber: "Recebi", confirmar: "Confirmada" })[v.acerto.tipo]}
                                 </button>
                               )}
                             </div>
@@ -636,9 +854,14 @@ export function CardFnHomeNosIndicadores({ token, apiFetch, de = null, ate = nul
           <Kpi rotulo="Vendido" valor={brl(t.faturamento)} delta={variacao(t.faturamento, antes?.faturamento)} />
           <Kpi rotulo="Itens vendidos" valor={numero(t.itens)} apoio={`${numero(t.vendas)} venda(s)`} />
           <Kpi rotulo="Fica para a FN" valor={brl(t.resultado)} cor={t.resultado < 0 ? VERMELHO : VERDE} apoio="comissão menos a tarifa do Mercado Pago" />
-          <Kpi rotulo="Em aberto com parceiros" valor={brl(dados.emAberto.repassar + dados.emAberto.receber)}
-            apoio={`${brl(dados.emAberto.repassar)} a repassar · ${brl(dados.emAberto.receber)} a receber`}
-            cor={dados.emAberto.repassar + dados.emAberto.receber > 0 ? AMBAR : AZUL_MARINHO} />
+          {(() => {
+            const a = dados.emAberto;
+            const total = a.repassar + a.receber + (a.confirmarMl || 0);
+            return (
+              <Kpi rotulo="Em aberto" valor={brl(total)} cor={total > 0 ? AMBAR : AZUL_MARINHO}
+                apoio={`${brl(a.repassar)} a repassar · ${brl(a.receber)} a receber · ${brl(a.confirmarMl || 0)} a confirmar no Mercado Livre`} />
+            );
+          })()}
           {dados.mercadoLivre && (
             <Kpi rotulo="Cliques no Mercado Livre" valor={numero(dados.mercadoLivre.cliquesNoPeriodo)} apoio={`${numero(dados.mercadoLivre.cliques)} desde sempre`}
               cor={AZUL_MARINHO} />
