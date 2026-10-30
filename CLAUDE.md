@@ -388,13 +388,23 @@ destaque com a variação sobre o período anterior; vendido, vendas, tarifa do 
 FN" (comissão − tarifa), **a repassar** e **a receber** dos parceiros (todas as datas); gráfico de 12 meses
 da comissão (uma série, tooltip com o mês inteiro, "Ver em tabela"); mais vendidos; por parceiro;
 **comissão de cada item** do catálogo (do item / da categoria / padrão do parceiro, e "você ganha por
-venda"); funil do carrinho; orçamentos; Mercado Livre (cliques do período e ganho por venda — a venda de
-verdade só no painel de afiliados de lá); e a lista de vendas com o acerto:
+venda"); funil do carrinho; orçamentos; Mercado Livre (vendas registradas, comissão confirmada e a
+confirmar, cliques e ganho por venda); e a lista de vendas com o acerto:
 
 - Carrinho: a FN recebeu tudo, então o botão é **"Repassei"** (valor − comissão ao parceiro).
 - Orçamento: o cliente pagou o parceiro, então é **"Recebi"** (a comissão).
 - Os dois mandam `PATCH /api/vendas/:id` `{ statusComissao: "paga" | "pendente" }`, o mesmo de
   Parceiros → Vendas e comissões, e recarregam.
+- Mercado Livre: **"Confirmada"** quando o painel de afiliados confirma a comissão
+  (`PATCH /api/financeiro/fn-home/vendas-ml/:id` `{ situacao }`).
+
+**Vendas do Mercado Livre não chegam sozinhas** (o Mercado Livre só as mostra no painel de afiliados de
+lá). No bloco Mercado Livre, **"Registrar venda"** abre `FormVendaMl`: produto da vitrine ou "Outro
+produto", data, quantidade, valor (nasce do preço × quantidade enquanto não for digitado), comissão (em
+branco, o servidor usa o % do produto — a tela mostra quanto dá) e situação do painel. A lista do bloco
+corrige (lápis) e apaga (com "Sim, apagar"). Enquanto o período não tem venda do Mercado Livre, um aviso
+amarelo no topo explica e abre o formulário. O `div` que envolve o bloco (para o `scrollIntoView`) precisa
+de `minWidth: 0` — sem isso a tabela larga esticava a coluna do grid e a tela inteira ganhava rolagem lateral.
 
 A comissão do FN Home **não entra** na receita do Financeiro (ficha, MEI, contador).
 - `PaginaBeneficiosFn` passou a injetar `estilos` (antes os botões da página pública saíam sem estilo),
