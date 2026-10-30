@@ -364,7 +364,17 @@ comissão só aparece no painel de afiliados de lá. Backend: `src/afiliados-mer
   `?pagina=fn-home` e para o portal do cliente. Fora do carrinho. Some se não houver produto ou se a
   API falhar. O botão é o link do Mercado Livre direto; o clique é avisado à API sem esperar resposta.
   Cada card mostra a data do preço, e o rodapé diz que é link de afiliado e que entrega e garantia são
-  do Mercado Livre e do vendedor.
+  do Mercado Livre e do vendedor. Busca (sem acento), categorias com contagem numa fileira que rola
+  de lado, e 24 produtos por vez com "Ver mais". **A aba FN Home não mostra cartão de parceiro**
+  (`SecaoParceirosVitrine`): o cartão "FN Home · Catálogo de móveis e decoração" saiu a pedido da
+  Gerência (out/2026); o carrinho só aparece ali se já tiver item. O título da área é "Loja FN Home"
+  e o texto diz que ela é aberta a todos, sem ser cliente.
+- **No portal do cliente a loja abre na aba FN Home** (`tipoInicial="produto"`) e o cabeçalho tem o
+  botão "Loja FN Home", que rola até ela (`#loja-fn-home`). **Quem acabou de se cadastrar** pelo
+  "Cadastre-se" entra com a confirmação do cadastro e a loja no topo da página, antes de "Meu
+  atendimento" (`recemCadastrado`: o `AbaCliente` chama `onLogin(sessao, { recemCadastrado: true })`, o
+  `App()` guarda só na memória — um F5 devolve a loja ao fim da página). Pedido da Gerência (out/2026).
+  O site institucional também mostra uma amostra dos produtos (seção FN Home de lá).
 - Os parceiros do FN Home (empresas, portfólio, carrinho) continuam no FN Projetos → Casa Pronta.
 - O cadastro tem **"Sua comissão (%)"** (opcional): o percentual do portal de afiliados, só para o
   Financeiro do FN Home dizer quanto a FN ganha por venda. A lista mostra "X% de comissão".
