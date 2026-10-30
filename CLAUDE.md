@@ -104,6 +104,7 @@ src/patologia-voz.jsx       patologia por voz: gravar, acompanhar e revisar o it
 src/voz-fila-offline.js     patologia por voz: gravações guardadas no celular até o servidor receber
 src/ia-creditos.jsx         Financeiro › Créditos de IA: gasto estimado da IA e limite de gravação por técnico
 src/fn-home-mercadolivre.jsx FN Home: produtos do Mercado Livre (cadastro da Gerência e vitrine)
+src/fn-home-financeiro.jsx  FN Home: vendas, comissão da FN, repasses, mais vendidos e cliques
 ```
 
 Para achar algo no `App.jsx`, procure pela definição da componente
@@ -365,6 +366,37 @@ comissão só aparece no painel de afiliados de lá. Backend: `src/afiliados-mer
   Cada card mostra a data do preço, e o rodapé diz que é link de afiliado e que entrega e garantia são
   do Mercado Livre e do vendedor.
 - Os parceiros do FN Home (empresas, portfólio, carrinho) continuam no FN Projetos → Casa Pronta.
+- O cadastro tem **"Sua comissão (%)"** (opcional): o percentual do portal de afiliados, só para o
+  Financeiro do FN Home dizer quanto a FN ganha por venda. A lista mostra "X% de comissão".
+
+## FN Home · Financeiro (vendas e comissões)
+
+`src/fn-home-financeiro.jsx`, arquivo próprio (recebe `apiFetch` por prop). Tudo vem pronto de
+`GET /api/financeiro/fn-home?de&ate&area` (`src/fn-home-financeiro.js` no backend): a tela não soma nada.
+Pedido da Gerência (out/2026): "acompanhar todas as vendas na FN Home… a comissão que vou ganhar de
+todos os itens, itens mais vendidos". Três lugares, um componente:
+
+- **Gerência → FN Home → Vendas e comissões** (sub `fn-home-financeiro`) e o lado **"Financeiro do FN
+  Home"** da aba **Conciliação Mercado Pago** (`AbaMercadoPago` no App.jsx: duas abas, conciliação e
+  FN Home — o carrinho recebe nessa mesma conta). Os dois abrem `AbaFinanceiroFnHome`.
+- **Gerência → Indicadores**: `CardFnHomeNosIndicadores` logo abaixo de "Indicadores por período", no
+  mesmo recorte (`datasDoPeriodo` converte o período da tela em de/ate). "Abrir o financeiro do FN
+  Home" leva à tela inteira (`aoAbrirFnHome`).
+
+Na tela: período (este mês, ano, tudo ou um mês) e área (FN Home, FN Clube, tudo); comissão da FN em
+destaque com a variação sobre o período anterior; vendido, vendas, tarifa do Mercado Pago, "fica para a
+FN" (comissão − tarifa), **a repassar** e **a receber** dos parceiros (todas as datas); gráfico de 12 meses
+da comissão (uma série, tooltip com o mês inteiro, "Ver em tabela"); mais vendidos; por parceiro;
+**comissão de cada item** do catálogo (do item / da categoria / padrão do parceiro, e "você ganha por
+venda"); funil do carrinho; orçamentos; Mercado Livre (cliques do período e ganho por venda — a venda de
+verdade só no painel de afiliados de lá); e a lista de vendas com o acerto:
+
+- Carrinho: a FN recebeu tudo, então o botão é **"Repassei"** (valor − comissão ao parceiro).
+- Orçamento: o cliente pagou o parceiro, então é **"Recebi"** (a comissão).
+- Os dois mandam `PATCH /api/vendas/:id` `{ statusComissao: "paga" | "pendente" }`, o mesmo de
+  Parceiros → Vendas e comissões, e recarregam.
+
+A comissão do FN Home **não entra** na receita do Financeiro (ficha, MEI, contador).
 - `PaginaBeneficiosFn` passou a injetar `estilos` (antes os botões da página pública saíam sem estilo),
   e `BotaoCarrinho` aceita `style` — na vitrine branca o ícone branco do `btn-ghost` sumia.
 
