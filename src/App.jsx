@@ -2090,6 +2090,9 @@ export default function App() {
   const [session, setSessionEstado] = useState(() => carregarSessaoSalva());
   const [mostrarLogin, setMostrarLogin] = useState(false);
   const [linkParceiroFechado, setLinkParceiroFechado] = useState(false);
+  /* Quem acabou de se cadastrar pelo "Cadastre-se" entra no portal com a loja FN Home aberta
+     em cima. Só na memória: um F5 depois volta ao portal de sempre. */
+  const [recemCadastrado, setRecemCadastrado] = useState(false);
 
   const setSession = (s) => { guardarSessao(s); setSessionEstado(s); };
 
@@ -2193,13 +2196,15 @@ export default function App() {
     }
     return mostrarLogin
       ? <TelaLogin onLogin={setSession} onVoltar={() => setMostrarLogin(false)} />
-      : <PortalCliente onIrParaLogin={() => setMostrarLogin(true)} onLogin={setSession} />;
+      : <PortalCliente onIrParaLogin={() => setMostrarLogin(true)}
+          onLogin={(s, opcoes) => { setRecemCadastrado(!!opcoes?.recemCadastrado); setSession(s); }} />;
   }
   if (session.usuario.role === "afiliado") {
     return <PainelParceiro session={session} onLogout={() => { setSession(null); setMostrarLogin(false); }} />;
   }
   if (session.usuario.role === "cliente") {
-    return <PainelCliente session={session} onLogout={() => { setSession(null); setMostrarLogin(false); }} onSessaoAtualizada={setSession} />;
+    return <PainelCliente session={session} recemCadastrado={recemCadastrado}
+      onLogout={() => { setSession(null); setMostrarLogin(false); setRecemCadastrado(false); }} onSessaoAtualizada={setSession} />;
   }
   return <AppInterno session={session} onLogout={() => { setSession(null); setMostrarLogin(false); }} />;
 }
@@ -17397,7 +17402,7 @@ function AbaCliente({ notify, onLogin, onIrParaLogin }) {
       setConstrutoraSel(""); setEmpreendimentoSel(""); setConstrutoraOutros(""); setEmpreendimentoOutros("");
       // Já criou senha no cadastro: entra direto no portal, sem precisar logar de novo.
       if (r.token && onLogin) {
-        onLogin({ token: r.token, usuario: r.usuario });
+        onLogin({ token: r.token, usuario: r.usuario }, { recemCadastrado: true });
       } else {
         notify("Cadastro realizado ✓");
       }
@@ -17418,6 +17423,10 @@ function AbaCliente({ notify, onLogin, onIrParaLogin }) {
                 ? "Sua solicitação de Documentação ART/TRT já foi para a nossa equipe de Documentação. Entre com seu e-mail e senha para acompanhar — quando ficar pronta, você baixa os documentos por lá."
                 : "Recebemos seus dados. Nossa equipe entra em contato para confirmar o atendimento. Entre com seu e-mail e senha para acompanhar."}
             </div>
+            {/* Só aparece quando o cadastro não abriu o portal sozinho (lá a loja já vem aberta). */}
+            <a href="?pagina=fn-home" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 13.5, fontWeight: 700, color: AZUL_MARINHO }}>
+              <ShoppingBag size={15} /> Enquanto isso, conheça a loja FN Home →
+            </a>
             <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: "#fff", marginTop: 10, padding: "6px 12px" }} onClick={() => setCadastroRealizado(null)}>
               Fazer outro cadastro
             </button>
@@ -17612,7 +17621,8 @@ const PARCEIRO_TIPO_LABEL = { servico: "Parceiro", produto: "Afiliado" };
    cadastro de sempre (campo "tipo"), só a apresentação ao cliente muda por área. */
 const FN_AREA_INFO = {
   servico: { titulo: "FN Clube", descricao: "Serviços selecionados para seu imóvel, com benefícios exclusivos para clientes FN." },
-  produto: { titulo: "FN Home", descricao: "Produtos e vantagens para transformar seu imóvel em lar, com condições exclusivas FN." },
+  /* "Aberta a todos" é de propósito: quem ainda não é cliente achava que a loja era fechada. */
+  produto: { titulo: "Loja FN Home", descricao: "Produtos escolhidos pela equipe técnica da FN para equipar o seu imóvel. Aberta a todos: não precisa ser cliente nem ter cadastro." },
 };
 
 const PARCEIRO_STATUS_OPCOES = ["em_analise", "aprovado", "suspenso", "encerrado"];
@@ -19252,7 +19262,7 @@ function PaginaRetornoCobranca({ id }) {
   );
 }
 
-function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
+function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado = false }) {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
   const [cliente, setCliente] = useState(null);
@@ -19379,6 +19389,20 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
     setSolicitandoDoc(false);
   };
 
+  /* Loja FN Home: abre direto na aba FN Home (a do FN Clube estava vazia e era a primeira coisa
+     que o cliente via). Para quem acabou de se cadastrar ela sobe para o topo, logo abaixo da
+     confirmação — o "Meu atendimento" ainda está vazio nessa hora. Para os demais fica no fim,
+     e o botão do cabeçalho leva até ela. */
+  const loja = (
+    <div id="loja-fn-home" style={{ scrollMarginTop: 90 }}>
+      <SecaoParceirosVitrine notify={notify} clienteLogado={cliente} token={session.token} tipoInicial="produto" />
+    </div>
+  );
+  const irParaLoja = () => document.getElementById("loja-fn-home")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const primeiroNome = String(session.usuario.nome || "").trim().split(/\s+/)[0];
+  // O cadastro fica no fim da página pública; sem isto o portal abria rolado lá para baixo.
+  useEffect(() => { if (recemCadastrado) window.scrollTo(0, 0); }, []);
+
   return (
     <div style={{ fontFamily: "'Inter', system-ui, sans-serif", color: "#1a2330", background: CINZA_CLARO, minHeight: "100vh" }}>
       <style>{estilos}</style>
@@ -19400,6 +19424,9 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
               <div style={{ fontWeight: 700 }}>{session.usuario.nome}</div>
               <div style={{ opacity: 0.7 }}>{cliente?.cpfMascarado || ""}</div>
             </div>
+            <button className="btn-ghost" onClick={irParaLoja} title="Loja FN Home" aria-label="Loja FN Home">
+              <ShoppingBag size={14} /> <span className="rotulo-cabecalho">Loja FN Home</span>
+            </button>
             <button className="btn-ghost" onClick={onLogout} title="Sair" aria-label="Sair"><X size={14} /> <span className="rotulo-cabecalho">Sair</span></button>
           </div>
         </div>
@@ -19409,6 +19436,20 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
         {erro && (
           <div style={{ background: "#FCEAEA", color: "#C62828", padding: "12px 14px", borderRadius: 10, fontSize: 13.5 }}>{erro}</div>
         )}
+
+        {recemCadastrado && (
+          <div style={{ background: "#E6F4EA", border: "1px solid #A5D6B0", borderRadius: 12, padding: "14px 16px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#2E7D32", fontWeight: 700, fontSize: 15, marginBottom: 4 }}>
+              <Check size={17} /> Cadastro realizado{primeiroNome ? `, ${primeiroNome}` : ""}!
+            </div>
+            <div style={{ fontSize: 13.5, color: "#33683c" }}>
+              Nossa equipe já recebeu seus dados e entra em contato para confirmar o atendimento — você acompanha
+              tudo aqui, em "Meu atendimento". Enquanto isso, conheça a <strong>loja FN Home</strong>: produtos que a
+              FN escolheu para equipar o seu imóvel novo.
+            </div>
+          </div>
+        )}
+        {recemCadastrado && loja}
 
         <Card icon={ClipboardCheck} titulo="Meu atendimento">
           {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
@@ -19597,7 +19638,7 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
           </Card>
         )}
 
-        <SecaoParceirosVitrine notify={notify} clienteLogado={cliente} token={session.token} />
+        {!recemCadastrado && loja}
 
         <CardPrivacidadeCliente token={session.token} notify={notify} />
       </main>
@@ -20510,11 +20551,17 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, so
 
   // Na página pública é só a vitrine de logos, sem separar por tipo — quem quer o detalhe
   // (e resgatar) entra no portal do cliente, onde a área continua disponível.
-  const filtrados = somenteLogos ? parceiros : parceiros.filter((p) => p.tipo === abaTipo);
+  /* Na aba FN Home não entram cartões de parceiro: a loja é a grade de produtos lá embaixo. O
+     cartão "FN Home · Catálogo de móveis e decoração" ficava sozinho em cima dela, sem nada
+     dentro, e saiu a pedido da Gerência (out/2026) — parceiro que vende produto mora no FN
+     Projetos → Casa Pronta. */
+  const filtrados = somenteLogos ? parceiros : (abaTipo === "produto" ? [] : parceiros.filter((p) => p.tipo === abaTipo));
   const info = FN_AREA_INFO[abaTipo] || FN_AREA_INFO.servico;
+  // O carrinho é dos parceiros do FN Clube; na loja ele só aparece se já tiver item.
+  const mostraCarrinho = abaTipo !== "produto" || carrinho.quantidadeTotal > 0;
 
   return (
-    <Card icon={Building2} titulo={somenteLogos ? "Benefícios Exclusivos FN" : info.titulo}>
+    <Card icon={!somenteLogos && abaTipo === "produto" ? ShoppingBag : Building2} titulo={somenteLogos ? "Benefícios Exclusivos FN" : info.titulo}>
       {!somenteLogos && (
         <>
           <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>{info.descricao}</p>
@@ -20530,16 +20577,19 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, so
               FN Home
             </button>
             <div style={{ flex: 1 }} />
-            <BotaoCarrinho quantidade={carrinho.quantidadeTotal} onClick={() => setCarrinhoAberto(true)}
-              style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} />
+            {mostraCarrinho && (
+              <BotaoCarrinho quantidade={carrinho.quantidadeTotal} onClick={() => setCarrinhoAberto(true)}
+                style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} />
+            )}
           </div>
         </>
       )}
 
-      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
-      {/* Sem parceiro de produto mas com oferta do Mercado Livre, o FN Home não está vazio. */}
+      {carregando && !mostraOfertasMl && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
       {!carregando && filtrados.length === 0 && !(mostraOfertasMl && qtdOfertasMl > 0) && (
-        <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum parceiro disponível no momento.</p>
+        <p style={{ color: "#8593a8", fontSize: 14 }}>
+          {mostraOfertasMl ? "Nenhum produto disponível no momento." : "Nenhum parceiro disponível no momento."}
+        </p>
       )}
 
       {filtrados.length > 0 && (

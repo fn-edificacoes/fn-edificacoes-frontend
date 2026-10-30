@@ -184,11 +184,17 @@ function Campo({ label, children, largo, dica }) {
 
 /* ---------------- Vitrine (FN Home) ---------------- */
 
+/* Quantos cartões aparecem antes do "Ver mais": com 70+ produtos numa grade só, o celular virava
+   rolagem sem fim e a loja parecia desorganizada. Buscar ou escolher categoria mostra tudo dela. */
+const PRODUTOS_POR_PAGINA = 24;
+
 /* Some quando não há produto — e também quando a API falha: para o cliente, uma seção vazia
    ou um erro no meio do FN Home seria pior que nada. A falha fica no console. */
 export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true }) {
   const [produtos, setProdutos] = useState([]);
   const [categoria, setCategoria] = useState("");
+  const [busca, setBusca] = useState("");
+  const [limite, setLimite] = useState(PRODUTOS_POR_PAGINA);
 
   useEffect(() => {
     let vivo = true;
@@ -198,9 +204,20 @@ export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true 
     return () => { vivo = false; };
   }, []);
 
-  const categorias = useMemo(() => [...new Set(produtos.map((p) => p.categoria).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR")), [produtos]);
+  // Categoria com a contagem, a maior primeiro: a fileira de filtros começa pelo que a loja mais tem.
+  const categorias = useMemo(() => {
+    const n = new Map();
+    for (const p of produtos) if (p.categoria) n.set(p.categoria, (n.get(p.categoria) || 0) + 1);
+    return [...n.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "pt-BR"));
+  }, [produtos]);
   if (produtos.length === 0) return null;
-  const visiveis = categoria ? produtos.filter((p) => p.categoria === categoria) : produtos;
+
+  // Sem acento e sem caixa: os títulos do Mercado Livre vêm ora "Lâmpada", ora "Lampada".
+  const semAcento = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  const termo = semAcento(busca.trim());
+  const filtrados = produtos.filter((p) => (!categoria || p.categoria === categoria) && (!termo || semAcento(p.titulo).includes(termo)));
+  const visiveis = filtrados.slice(0, limite);
+  const trocarCategoria = (c) => { setCategoria(c); setLimite(PRODUTOS_POR_PAGINA); };
 
   /* O botão é o próprio link do Mercado Livre: a compra não depende da nossa API. O aviso de
      clique vai junto, sem esperar resposta — se falhar, perde-se só a contagem. */
@@ -208,58 +225,94 @@ export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true 
     apiFetch(`/api/afiliados/mercadolivre/${encodeURIComponent(id)}/clique`, { method: "POST" }).catch(() => {});
   };
 
+  const chip = (ativo) => ({
+    flex: "0 0 auto", border: `1px solid ${ativo ? AZUL_MARINHO : CINZA_BORDA}`, background: ativo ? AZUL_MARINHO : "#fff",
+    color: ativo ? "#fff" : "#4a5a70", borderRadius: 999, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+  });
+
   return (
     <div style={separar ? { marginTop: 22, paddingTop: 18, borderTop: `1px solid ${CINZA_BORDA}` } : {}}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-        <ShoppingBag size={17} color={AZUL_MEDIO} />
-        <h4 style={{ margin: 0, fontSize: 15, color: AZUL_MARINHO }}>Ofertas no Mercado Livre</h4>
+      {/* Hover dos cartões e a fileira de categorias sem barra de rolagem: estilo em linha não tem
+          :hover nem pseudo-elemento. */}
+      <style>{`
+        .fnh-card { transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease; }
+        .fnh-card:hover { border-color: #BFD3EA; box-shadow: 0 8px 22px rgba(18,51,91,.10); transform: translateY(-2px); }
+        .fnh-chips { scrollbar-width: none; }
+        .fnh-chips::-webkit-scrollbar { display: none; }
+        @media (prefers-reduced-motion: reduce) { .fnh-card, .fnh-card:hover { transition: none; transform: none; } }
+      `}</style>
+
+      {separar && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+          <ShoppingBag size={17} color={AZUL_MEDIO} />
+          <h4 style={{ margin: 0, fontSize: 15, color: AZUL_MARINHO }}>Produtos da loja</h4>
+        </div>
+      )}
+
+      {/* Busca e total na mesma linha; no celular a busca ocupa a linha inteira. */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+        <label style={{ position: "relative", flex: "1 1 220px", minWidth: 0 }}>
+          <Search size={15} color="#8593a8" style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)" }} />
+          <input value={busca} onChange={(e) => { setBusca(e.target.value); setLimite(PRODUTOS_POR_PAGINA); }}
+            placeholder="Buscar produto (ex.: luminária, tomada)" aria-label="Buscar produto"
+            style={{ ...inp, padding: "9px 10px 9px 32px", fontSize: 14 }} />
+        </label>
+        <span style={{ fontSize: 12.5, color: "#65758b", whiteSpace: "nowrap" }}>
+          {filtrados.length === 1 ? "1 produto" : `${filtrados.length} produtos`}
+        </span>
       </div>
-      <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 12px" }}>
-        Produtos para o seu imóvel escolhidos pela FN. A compra é feita no Mercado Livre.
-      </p>
 
       {categorias.length > 1 && (
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-          {["", ...categorias].map((c) => (
-            <button key={c || "todas"} onClick={() => setCategoria(c)}
-              style={{ border: `1px solid ${categoria === c ? AZUL_MEDIO : CINZA_BORDA}`, background: categoria === c ? "#EAF2FB" : "#fff", color: categoria === c ? AZUL_MEDIO : "#4a5a70", borderRadius: 999, padding: "5px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
-              {c || "Todas"}
-            </button>
+        <div className="fnh-chips" role="group" aria-label="Categorias"
+          style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4, marginBottom: 14 }}>
+          <button style={chip(!categoria)} onClick={() => trocarCategoria("")}>Todas ({produtos.length})</button>
+          {categorias.map(([c, n]) => (
+            <button key={c} style={chip(categoria === c)} onClick={() => trocarCategoria(categoria === c ? "" : c)}>{c} ({n})</button>
           ))}
         </div>
       )}
 
-      {/* 130 px cabe duas por linha no celular — produto em coluna única vira rolagem sem fim. */}
+      {filtrados.length === 0 && (
+        <p style={{ fontSize: 13.5, color: "#65758b", textAlign: "center", padding: "24px 0" }}>
+          Nenhum produto encontrado{termo ? ` para "${busca.trim()}"` : ""}.
+        </p>
+      )}
+
+      {/* 130 px: duas por linha no celular (o card da vitrine deixa ~300 px) — produto em coluna
+          única vira rolagem sem fim. */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 10 }}>
         {visiveis.map((p) => {
           const off = desconto(p);
           return (
-            <div key={p.id} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, overflow: "hidden", display: "flex", flexDirection: "column", background: "#fff", minWidth: 0 }}>
-              <div style={{ position: "relative", height: 140, background: "#fff", display: "grid", placeItems: "center", borderBottom: `1px solid ${CINZA_CLARO}` }}>
+            <div key={p.id} className="fnh-card" style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, overflow: "hidden", display: "flex", flexDirection: "column", background: "#fff", minWidth: 0 }}>
+              <div style={{ position: "relative", aspectRatio: "1 / 1", padding: 12, background: "#fff", display: "grid", placeItems: "center", borderBottom: `1px solid ${CINZA_CLARO}` }}>
                 {p.foto
                   ? <img src={p.foto} alt={p.titulo} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-                  : <ShoppingBag size={28} color="#b8c3d3" />}
+                  : <ShoppingBag size={30} color="#b8c3d3" />}
                 {off && (
                   <span style={{ position: "absolute", top: 8, left: 8, fontSize: 11, fontWeight: 700, color: "#fff", background: VERDE, borderRadius: 6, padding: "2px 7px" }}>-{off}%</span>
                 )}
               </div>
-              <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#1a2330", lineHeight: 1.3, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }} title={p.titulo}>
+              <div style={{ padding: "10px 12px 12px", display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
+                {p.categoria && (
+                  <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: AZUL_MEDIO, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.categoria}</div>
+                )}
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#1a2330", lineHeight: 1.35, minHeight: "2.7em", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }} title={p.titulo}>
                   {p.titulo}
                 </div>
-                <div style={{ marginTop: "auto" }}>
+                <div style={{ marginTop: "auto", paddingTop: 4 }}>
                   {off && <div style={{ fontSize: 11.5, color: "#8593a8", textDecoration: "line-through" }}>{fmtReal(p.preco_de)}</div>}
                   {p.preco
-                    ? <div style={{ fontSize: 16, fontWeight: 700, color: AZUL_MARINHO }}>{fmtReal(p.preco)}</div>
+                    ? <div style={{ fontSize: 17, fontWeight: 800, color: AZUL_MARINHO, letterSpacing: "-.01em" }}>{fmtReal(p.preco)}</div>
                     : <div style={{ fontSize: 12.5, color: "#65758b" }}>Veja o preço no Mercado Livre</div>}
                   {p.preco && p.preco_conferido_em && (
                     <div style={{ fontSize: 10.5, color: "#8593a8" }}>Preço em {fmtDia(p.preco_conferido_em)}</div>
                   )}
                 </div>
-                <a className="btn-solid" href={p.link} target="_blank" rel="noopener noreferrer sponsored nofollow"
+                <a href={p.link} target="_blank" rel="noopener noreferrer sponsored nofollow"
                   onClick={() => registrarClique(p.id)}
-                  style={{ justifyContent: "center", marginTop: 8, padding: "8px", textDecoration: "none", display: "flex", fontSize: 12.5 }}>
-                  <ExternalLink size={13} /> Comprar no Mercado Livre
+                  style={{ ...btn, justifyContent: "center", marginTop: 8, padding: "9px 8px", textDecoration: "none", fontSize: 12.5 }}>
+                  <ExternalLink size={13} /> Comprar
                 </a>
               </div>
             </div>
@@ -267,10 +320,17 @@ export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true 
         })}
       </div>
 
+      {filtrados.length > limite && (
+        <button onClick={() => setLimite((n) => n + PRODUTOS_POR_PAGINA)}
+          style={{ ...btnLeve, width: "100%", justifyContent: "center", marginTop: 14, padding: "10px" }}>
+          Ver mais produtos ({filtrados.length - limite})
+        </button>
+      )}
+
       {/* Publicidade com link de afiliado se identifica como tal — e o cliente precisa saber
           de quem cobrar a entrega e a garantia, que não são da FN. */}
-      <p style={{ fontSize: 11.5, color: "#8593a8", margin: "12px 0 0", lineHeight: 1.5 }}>
-        Links de afiliado: a FN pode receber comissão do Mercado Livre pelas compras feitas por eles, sem custo a mais para você.
+      <p style={{ fontSize: 11.5, color: "#8593a8", margin: "14px 0 0", lineHeight: 1.5 }}>
+        A compra é feita no Mercado Livre. Links de afiliado: a FN pode receber comissão pelas compras feitas por eles, sem custo a mais para você.
         O preço pode ter mudado desde a data indicada; valor final, entrega, troca e garantia são do Mercado Livre e do vendedor.
       </p>
     </div>
