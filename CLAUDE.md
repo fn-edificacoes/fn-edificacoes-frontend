@@ -337,9 +337,20 @@ Produtos que a **própria FN** indica com o link de afiliado dela; a compra é n
 comissão só aparece no painel de afiliados de lá. Backend: `src/afiliados-mercadolivre.js`.
 
 - **Gerência → FN Home → Produtos Mercado Livre** (`AbaProdutosMercadoLivre`, sub `fn-home-ml`):
+  - **Botão "Enviar ao FN Home"** (favorito do Chrome, arrastado da tela): a API do Mercado Livre só
+    libera foto e preço de produto de catálogo (`/p/`); produto de vendedor (`/up/`) e anúncio dão
+    403 e a página não abre pelo servidor. O favorito roda na página aberta no Chrome de quem está
+    logado (`lerPaginaParaOFnHome`, vira código por `toString()` — tem de ser autossuficiente e em JS
+    simples), lê nome, foto, preço, "De" e o `meli.la` se já gerado (classes `ui-pdp-*`/`andes-*`,
+    com og:*, `itemprop="price"` e JSON-LD de reserva) e abre o sistema com `#fn-home-ml=<json>`.
+    Ao carregar, o módulo guarda isso em `sessionStorage` e limpa o endereço; o App abre a Gerência
+    nessa tela e ela preenche, com a API só para a categoria. O que chega é filtrado
+    (`limparRascunho`: página/link do Mercado Livre, foto do `mlstatic`, preço número) e só preenche.
+    O `href` é posto pelo DOM, porque o React avisa sobre `javascript:` em prop. Testado contra páginas
+    que imitam a do Mercado Livre — a de verdade pede login para quem não está logado.
   - **Preencher**: o primeiro campo recebe o endereço da **página do produto** (colar já dispara) e
     chama `POST /api/afiliados/mercadolivre/preencher`, que devolve nome e categoria sempre e foto e
-    preço só com o aplicativo da FN no Mercado Livre configurado no servidor. Preenche por cima o que
+    preço só de produto de catálogo, com o aplicativo da FN no Mercado Livre configurado no servidor. Preenche por cima o que
     veio e mostra os avisos do que faltou; não salva. O link curto (`meli.la`, `/sec/`) colado ali vai
     para o campo do link de afiliado — o servidor não consegue abri-lo. Página colada no link de
     afiliado ou na foto ganha o botão "Usar este endereço para preencher".
