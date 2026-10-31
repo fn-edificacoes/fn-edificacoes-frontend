@@ -711,8 +711,18 @@ export default function AbaFinanceiroFnHome({ token, apiFetch, notify }) {
                             <BarraNaCelula valor={p.cliquesNoPeriodo} maximo={maiorCliques} />
                           </td>
                           <td style={tdN}>{p.preco != null ? brl(p.preco) : "—"}</td>
-                          <td style={tdN}>{p.comissaoPercentual != null ? pct(p.comissaoPercentual) : <span style={{ color: AMBAR }}>não informada</span>}</td>
-                          <td style={{ ...tdN, fontWeight: 700, color: AZUL_MARINHO }}>{p.ganhoPorVenda != null ? brl(p.ganhoPorVenda) : "—"}</td>
+                          {/* Sem a % do portal, o servidor estima pela tabela do Mercado Livre para a categoria do
+                              produto lá (comissaoTabela, ganhoEstimado) — a mesma conta da lista de produtos. */}
+                          <td style={tdN}>
+                            {p.comissaoPercentual != null ? pct(p.comissaoPercentual)
+                              : p.comissaoTabela != null
+                                ? <><div>{pct(p.comissaoTabela)}</div><div style={{ fontSize: 11, color: TEXTO_APOIO }}>tabela do ML</div></>
+                                : <span style={{ color: AMBAR }}>não informada</span>}
+                          </td>
+                          <td style={{ ...tdN, fontWeight: 700, color: AZUL_MARINHO }}>
+                            {p.ganhoPorVenda != null ? brl(p.ganhoPorVenda) : "—"}
+                            {p.ganhoPorVenda != null && p.ganhoEstimado && <div style={{ fontSize: 11, fontWeight: 400, color: TEXTO_APOIO }}>estimado</div>}
+                          </td>
                           <td style={tdN}>{numero(p.vendidosNoPeriodo)}</td>
                           <td style={tdN}>{brl(p.comissaoNoPeriodo)}</td>
                           <td style={tdN}>{numero(p.cliquesNoPeriodo)}</td>

@@ -19,7 +19,7 @@
 
    Arquivo à parte como a Rede Nacional: o App.jsx só o encaixa e entrega o apiFetch. */
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ShoppingBag, ExternalLink, Plus, Pencil, Trash2, RefreshCcw, Loader2, X, Search, Upload, CalendarCheck, Eye, EyeOff, MousePointerClick, Sparkles, Bookmark } from "lucide-react";
+import { ShoppingBag, ExternalLink, Plus, Pencil, Trash2, RefreshCcw, Loader2, X, Search, Upload, CalendarCheck, Eye, EyeOff, MousePointerClick, Sparkles, Bookmark, Check } from "lucide-react";
 
 const AZUL_MEDIO = "#2C75B5";
 const AZUL_MARINHO = "#12335B";
@@ -184,6 +184,16 @@ function Campo({ label, children, largo, dica }) {
 
 /* ---------------- Vitrine (FN Home) ---------------- */
 
+/* A foto do cartão, dentro da moldura .fnh-foto (ver o <style> da vitrine). Foto que não abre
+   (endereço vencido no Mercado Livre, link de página colado no lugar da foto) vira o ícone da
+   sacola — no iPhone o navegador mostrava o nome do produto solto no quadro, como foto quebrada. */
+function FotoDoProduto({ src, alt }) {
+  const [quebrou, setQuebrou] = useState(false);
+  useEffect(() => { setQuebrou(false); }, [src]);
+  if (!src || quebrou) return <div className="fnh-sem-foto"><ShoppingBag size={34} color="#b8c3d3" /></div>;
+  return <img src={src} alt={alt} loading="lazy" decoding="async" onError={() => setQuebrou(true)} />;
+}
+
 /* Quantos cartões aparecem antes do "Ver mais": com 70+ produtos numa grade só, o celular virava
    rolagem sem fim e a loja parecia desorganizada. Buscar ou escolher categoria mostra tudo dela. */
 const PRODUTOS_POR_PAGINA = 24;
@@ -243,7 +253,14 @@ export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true 
         /* Cartão grande como o do site institucional (out/2026, pedido da Gerência): ~220 px de
            largura e foto quadrada. No celular volta a duas colunas, com letra menor. */
         .fnh-grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 18px; }
-        .fnh-foto { padding: 18px; }
+        /* Moldura da foto com tamanho fixo: quadrada, da largura do cartão. A foto fica por cima dela
+           (absolute) e não ocupa espaço. Antes ela ia dentro de uma grade com aspect-ratio, e foto alta
+           (garrafa, cadeira) esticava a moldura e a linha inteira de cartões — no iPhone ainda vazava por
+           cima do "Comprar" (out/2026). Agora qualquer formato cabe inteiro no quadrado, centralizado. */
+        .fnh-foto { position: relative; flex: none; aspect-ratio: 1 / 1; overflow: hidden; background: #fff; border-bottom: 1px solid ${CINZA_CLARO}; }
+        @supports not (aspect-ratio: 1 / 1) { .fnh-foto::before { content: ""; display: block; padding-top: 100%; } }
+        .fnh-foto > img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; box-sizing: border-box; padding: 18px; object-fit: contain; display: block; }
+        .fnh-sem-foto { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; }
         .fnh-corpo { padding: 14px 16px 16px; gap: 6px; }
         .fnh-cat { font-size: 11px; }
         .fnh-nome { font-size: 15px; }
@@ -251,7 +268,7 @@ export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true 
         .fnh-comprar { font-size: 13.5px; padding: 10px 8px; }
         @media (max-width: 640px) {
           .fnh-grade { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
-          .fnh-foto { padding: 10px; }
+          .fnh-foto > img { padding: 10px; }
           .fnh-corpo { padding: 10px 12px 12px; gap: 4px; }
           .fnh-cat { font-size: 10px; }
           .fnh-nome { font-size: 13px; }
@@ -303,12 +320,10 @@ export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true 
           const off = desconto(p);
           return (
             <div key={p.id} className="fnh-card" style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column", background: "#fff", minWidth: 0, boxShadow: "0 1px 2px rgba(18,51,91,.04), 0 4px 14px rgba(18,51,91,.05)" }}>
-              <div className="fnh-foto" style={{ position: "relative", aspectRatio: "1 / 1", background: "#fff", display: "grid", placeItems: "center", borderBottom: `1px solid ${CINZA_CLARO}` }}>
-                {p.foto
-                  ? <img src={p.foto} alt={p.titulo} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-                  : <ShoppingBag size={34} color="#b8c3d3" />}
+              <div className="fnh-foto">
+                <FotoDoProduto src={p.foto} alt={p.titulo} />
                 {off && (
-                  <span style={{ position: "absolute", top: 10, left: 10, fontSize: 12, fontWeight: 700, color: "#fff", background: AZUL_MARINHO, borderRadius: 7, padding: "3px 8px" }}>-{off}%</span>
+                  <span style={{ position: "absolute", zIndex: 1, top: 10, left: 10, fontSize: 12, fontWeight: 700, color: "#fff", background: AZUL_MARINHO, borderRadius: 7, padding: "3px 8px" }}>-{off}%</span>
                 )}
               </div>
               <div className="fnh-corpo" style={{ display: "flex", flexDirection: "column", flex: 1 }}>
@@ -357,12 +372,115 @@ export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true 
 
 /* ---------------- Gerência ---------------- */
 
-const formVazio = () => ({ id: null, link: "", titulo: "", categoria: "", preco: "", preco_de: "", comissao_percentual: "", foto: "", ativo: true });
+/* Miniatura da lista: mesma ideia da moldura da vitrine — caixa de tamanho fixo e a foto por cima,
+   inteira. Com a foto dentro de uma grade, a alta (garrafa) saía cortada embaixo. */
+function Miniatura({ src, tamanho = 56 }) {
+  const [quebrou, setQuebrou] = useState(false);
+  useEffect(() => { setQuebrou(false); }, [src]);
+  return (
+    <div style={{ position: "relative", width: tamanho, height: tamanho, borderRadius: 8, border: `1px solid ${CINZA_CLARO}`, background: "#fff", overflow: "hidden", flexShrink: 0 }}>
+      {src && !quebrou
+        ? <img src={src} alt="" loading="lazy" onError={() => setQuebrou(true)}
+            style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "contain", display: "block" }} />
+        : <span style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0, display: "flex", alignItems: "center", justifyContent: "center" }}><ShoppingBag size={20} color="#b8c3d3" /></span>}
+    </div>
+  );
+}
+
+const fmtPct = (n) => `${String(Math.round(Number(n) * 100) / 100).replace(".", ",")}%`;
+const numeroDigitado = (v) => {
+  if (v === null || v === undefined || String(v).trim() === "") return null;
+  const n = Number(String(v).replace(",", "."));
+  return Number.isFinite(n) ? n : null;
+};
+
+/* A comissão que entra na conta do "você ganha": a que a Gerência informou (a do portal de
+   afiliados, que é a que vale) ou, sem ela, a da tabela do Mercado Livre para a categoria do
+   produto lá — estimativa que o servidor manda pronta em comissao_tabela (ver
+   comissao-mercadolivre.js no backend). Ganho = preço × %, a mesma conta do Financeiro do FN Home.
+   É o teto: o Mercado Livre paga sobre a venda sem as tarifas dele. */
+function comissaoDoProduto(p) {
+  const informada = numeroDigitado(p.comissao_percentual);
+  const tabela = p.comissao_tabela != null ? Number(p.comissao_tabela) : null;
+  const percentual = informada ?? tabela;
+  return {
+    percentual,
+    origem: informada != null ? "informada" : tabela != null ? "tabela" : null,
+    ganho: percentual != null && p.preco != null ? Math.round(Number(p.preco) * percentual) / 100 : null,
+  };
+}
+
+/* "Você ganha R$ X por venda" em cada item da lista, com a % editável ali mesmo: o percentual de
+   cada produto aparece no portal de afiliados ao gerar o link, e abrir o formulário inteiro só para
+   digitar um número fazia ninguém digitar (em out/2026 nenhum produto tinha a %). Pedido da Gerência. */
+function BlocoComissao({ p, salvar, ocupado, buscandoCategorias }) {
+  const [editando, setEditando] = useState(false);
+  const [valor, setValor] = useState("");
+  const c = comissaoDoProduto(p);
+  const abrir = () => { setValor(p.comissao_percentual != null ? String(Number(p.comissao_percentual)).replace(".", ",") : ""); setEditando(true); };
+  const confirmar = async () => {
+    const texto = valor.trim();
+    if (texto === "" && p.comissao_percentual == null) { setEditando(false); return; }
+    if (await salvar(texto)) setEditando(false);
+  };
+
+  if (editando) {
+    return (
+      <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <input autoFocus inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)}
+            placeholder={p.comissao_tabela != null ? String(p.comissao_tabela) : "8"} aria-label="Sua comissão (%)"
+            onKeyDown={(e) => { if (e.key === "Enter") confirmar(); if (e.key === "Escape") setEditando(false); }}
+            style={{ ...inp, width: 64, padding: "6px 8px", fontSize: 16 /* menos que 16 px, o iPhone dá zoom na tela */ }} />
+          <span style={{ fontSize: 13, color: "#4a5a70" }}>%</span>
+          <button type="button" style={{ ...btn, padding: "6px 10px", opacity: ocupado ? 0.6 : 1 }} disabled={ocupado} onClick={confirmar}>
+            {ocupado ? <Loader2 size={14} className="spin" /> : <Check size={14} />} Salvar
+          </button>
+          <button type="button" style={{ ...btnLeve, padding: "6px 8px" }} onClick={() => setEditando(false)} aria-label="Cancelar"><X size={14} /></button>
+        </div>
+        <span style={{ fontSize: 11, color: "#8593a8", lineHeight: 1.4 }}>
+          A % que o portal de afiliados mostra para este produto.
+          {p.comissao_tabela != null ? ` Em branco, vale a tabela do Mercado Livre (${fmtPct(p.comissao_tabela)}).` : ""}
+        </span>
+      </div>
+    );
+  }
+
+  const cor = c.origem === "informada" ? VERDE : c.origem === "tabela" ? AZUL_MEDIO : AMBAR;
+  let detalhe;
+  if (c.origem === "informada") detalhe = `${fmtPct(c.percentual)} · informada por você`;
+  else if (c.origem === "tabela") detalhe = `${fmtPct(c.percentual)} · estimada pela tabela do ML · ${p.categoria_ml}`;
+  else if (p.categoria_ml == null && buscandoCategorias) detalhe = "Buscando a categoria no Mercado Livre…";
+  else if (p.categoria_ml) detalhe = `${p.categoria_ml}: fora da tabela do Mercado Livre`;
+  else detalhe = "Sem categoria do Mercado Livre para estimar";
+  return (
+    <button type="button" onClick={abrir} title="Toque para informar a % que o portal de afiliados mostra"
+      style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, width: "100%", textAlign: "left", background: `${cor}0D`, border: `1px solid ${cor}40`, borderRadius: 8, padding: "6px 9px", cursor: "pointer", fontFamily: "inherit", boxSizing: "border-box" }}>
+      <span style={{ flex: 1, minWidth: 0, display: "grid", gap: 1 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: c.origem === "tabela" ? AZUL_MARINHO : cor }}>
+          {c.percentual == null ? "Informe a % de comissão"
+            : c.ganho != null ? `Você ganha ${fmtReal(c.ganho)} por venda`
+              : `Comissão de ${fmtPct(c.percentual)} (produto sem preço)`}
+        </span>
+        <span style={{ fontSize: 11, color: "#65758b", lineHeight: 1.35 }}>{detalhe}</span>
+      </span>
+      <Pencil size={13} color="#8593a8" style={{ flexShrink: 0 }} />
+    </button>
+  );
+}
+
+const formVazio = () => ({
+  id: null, link: "", titulo: "", categoria: "", preco: "", preco_de: "", comissao_percentual: "", foto: "", ativo: true,
+  // Categoria de cima do Mercado Livre e a % da tabela dela: só para a estimativa da comissão.
+  // categoria_ml_nova = veio do Preencher agora e vai junto ao salvar.
+  categoria_ml: "", comissao_tabela: null, categoria_ml_nova: false,
+});
 const paraForm = (p) => ({
   id: p.id, link: p.link || "", titulo: p.titulo || "", categoria: p.categoria || "",
   preco: p.preco != null ? String(Number(p.preco)) : "", preco_de: p.preco_de != null ? String(Number(p.preco_de)) : "",
   comissao_percentual: p.comissao_percentual != null ? String(Number(p.comissao_percentual)) : "",
   foto: p.foto || "", ativo: p.ativo !== false,
+  categoria_ml: p.categoria_ml || "", comissao_tabela: p.comissao_tabela ?? null, categoria_ml_nova: false,
 });
 
 export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redimensionar }) {
@@ -377,17 +495,43 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
   const [preenchendo, setPreenchendo] = useState(false);
   const [preenchido, setPreenchido] = useState(null); // { campos, categoriaCaminho, avisos }
 
+  // A categoria do Mercado Livre de cada produto (para a comissão estimada) é buscada pelo servidor
+  // em segundo plano; enquanto isso a lista se recarrega sozinha algumas vezes.
+  const [categoriasMl, setCategoriasMl] = useState({ pendentes: 0, buscando: false });
+  const recargas = useRef(0);
+
   const abrirForm = (f = formVazio()) => { setForm(f); setPagina(""); setPreenchido(null); };
 
-  const carregar = async () => {
+  const carregar = async (silencioso = false) => {
     setCarregando(true);
     try {
       const r = await apiFetch("/api/afiliados/mercadolivre", { token });
       setLista(r.produtos || []);
-    } catch (e) { notify(`Não foi possível carregar os produtos: ${e.message}`); }
+      setCategoriasMl({ pendentes: Number(r.categoriasMlPendentes) || 0, buscando: Boolean(r.buscandoCategoriasMl) });
+    } catch (e) { if (!silencioso) notify(`Não foi possível carregar os produtos: ${e.message}`); }
     setCarregando(false);
   };
   useEffect(() => { carregar(); }, []);
+  useEffect(() => {
+    if (!categoriasMl.buscando || recargas.current >= 8) return undefined;
+    const t = setTimeout(() => { recargas.current += 1; carregar(true); }, 6000);
+    return () => clearTimeout(t);
+  }, [lista, categoriasMl.buscando]);
+
+  /* A % de um item, direto da lista (BlocoComissao). Em branco apaga a informada — volta a valer a
+     estimativa da tabela. Devolve se deu certo, para o quadro fechar ou continuar aberto. */
+  const salvarComissao = async (p, valor) => {
+    setMexendo(p.id);
+    try {
+      await apiFetch(`/api/afiliados/mercadolivre/${encodeURIComponent(p.id)}`, { method: "PATCH", token, body: { comissao_percentual: valor === "" ? null : valor } });
+      notify(valor === "" ? "Comissão apagada — volta a valer a estimativa ✓" : "Comissão salva ✓");
+      await carregar(true);
+      return true;
+    } catch (e) {
+      notify(`Não foi possível salvar a comissão: ${e.message}`);
+      return false;
+    } finally { setMexendo(null); }
+  };
 
   const categorias = useMemo(() => [...new Set((lista || []).map((p) => p.categoria).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR")), [lista]);
   const termo = busca.trim().toLowerCase();
@@ -397,6 +541,14 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
 
   const mudar = (campo, valor) => setForm((f) => ({ ...f, [campo]: valor }));
   const avisoLink = form.link.trim() && !pareceLinkDeAfiliado(form.link.trim());
+  // O "você ganha" do formulário, com o que está digitado agora (mesma conta da lista).
+  const comissaoNoForm = comissaoDoProduto({ comissao_percentual: form.comissao_percentual, comissao_tabela: form.comissao_tabela, preco: numeroDigitado(form.preco) });
+  const dicaComissao = comissaoNoForm.origem === "tabela"
+    ? `Em branco, vale a tabela do Mercado Livre para ${form.categoria_ml}: ${fmtPct(comissaoNoForm.percentual)}` +
+      `${comissaoNoForm.ganho != null ? ` — você ganha ${fmtReal(comissaoNoForm.ganho)} por venda` : ""}. Confira no portal de afiliados.`
+    : comissaoNoForm.origem === "informada" && comissaoNoForm.ganho != null
+      ? `Você ganha ${fmtReal(comissaoNoForm.ganho)} por venda.`
+      : "O percentual que o portal de afiliados mostra ao gerar o link. Opcional.";
   const fotoEhPagina = !form.foto.startsWith("data:") && ehPaginaDoMercadoLivre(form.foto);
 
   /* Lê do Mercado Livre o que der e põe no formulário, por cima do que estiver nele — foi pedido;
@@ -433,6 +585,12 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
       const r = await apiFetch("/api/afiliados/mercadolivre/preencher", { method: "POST", token, body: { link: texto } });
       if (r.titulo && !novo.titulo) novo.titulo = r.titulo;
       if (r.categoria) novo.categoria = r.categoria;
+      // A da vitrine a Gerência pode trocar; a do Mercado Livre fica guardada à parte para a comissão.
+      if (r.categoriaMl) {
+        novo.categoria_ml = r.categoriaMl;
+        novo.comissao_tabela = r.comissaoTabela ?? null;
+        novo.categoria_ml_nova = true;
+      }
       if (r.foto && !novo.foto) novo.foto = r.foto;
       if (r.preco != null && novo.preco == null) comPreco(novo, r.preco, r.preco_de);
       categoriaCaminho = r.categoriaCaminho || "";
@@ -496,6 +654,7 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
       preco: form.preco === "" ? null : form.preco, preco_de: form.preco_de === "" ? null : form.preco_de,
       comissao_percentual: form.comissao_percentual === "" ? null : form.comissao_percentual,
       foto: form.foto, ativo: form.ativo,
+      ...(form.categoria_ml_nova ? { categoria_ml: form.categoria_ml } : {}),
     };
     try {
       if (form.id) {
@@ -616,8 +775,9 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
           </Campo>
           {/* Só para o Financeiro do FN Home dizer quanto a FN ganha por venda; a comissão de
               verdade continua no painel de afiliados do Mercado Livre. */}
-          <Campo label="Sua comissão (%)" dica="O percentual que o portal de afiliados mostra ao gerar o link. Opcional.">
-            <input style={inp} type="number" min="0" max="100" step="0.1" placeholder="8" value={form.comissao_percentual} onChange={(e) => mudar("comissao_percentual", e.target.value)} />
+          <Campo label="Sua comissão (%)" dica={dicaComissao}>
+            <input style={inp} type="number" min="0" max="100" step="0.1" placeholder={form.comissao_tabela != null ? String(form.comissao_tabela) : "8"}
+              value={form.comissao_percentual} onChange={(e) => mudar("comissao_percentual", e.target.value)} />
           </Campo>
           <Campo label="Foto" largo dica={'Na página do produto, clique com o botão direito na foto → "Copiar endereço da imagem" e cole aqui. Ou envie um arquivo.'}>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -670,9 +830,20 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
           <a href="?pagina=fn-home" target="_blank" rel="noreferrer" style={{ ...btnLeve, textDecoration: "none" }}><Eye size={14} /> Ver o FN Home</a>
           <button style={btnLeve} onClick={carregar} disabled={carregando}><RefreshCcw size={14} /> Atualizar</button>
         </div>
-        <p style={{ fontSize: 12.5, color: "#8593a8", margin: "0 0 12px" }}>
+        <p style={{ fontSize: 12.5, color: "#8593a8", margin: "0 0 12px", lineHeight: 1.5 }}>
           Cliques contados no botão "Comprar no Mercado Livre". Vendas e comissão só aparecem no painel de afiliados do Mercado Livre.
           Preço conferido há mais de {DIAS_PRECO_VELHO} dias fica em amarelo: confira no anúncio e use "Conferi hoje" ou edite o valor.
+        </p>
+        <p style={{ fontSize: 12.5, color: "#5a6a80", background: CINZA_CLARO, borderRadius: 8, padding: "8px 10px", margin: "0 0 12px", lineHeight: 1.5 }}>
+          <strong>Você ganha</strong> = preço × sua comissão: a % que você informar (a do portal de afiliados — toque no quadro
+          do produto) ou, sem ela, a estimada pela tabela do Mercado Livre para a categoria. O que cai pode ser um pouco menos:
+          o Mercado Livre desconta as tarifas dele.
+          {categoriasMl.buscando && categoriasMl.pendentes > 0 && (
+            <span style={{ display: "block", marginTop: 4, color: AZUL_MEDIO }}>
+              <Loader2 size={12} className="spin" style={{ verticalAlign: "-2px" }} /> Buscando no Mercado Livre a categoria de
+              {categoriasMl.pendentes === 1 ? " 1 produto" : ` ${categoriasMl.pendentes} produtos`} para estimar a comissão…
+            </span>
+          )}
         </p>
         {(lista || []).length > 6 && (
           <div style={{ position: "relative", marginBottom: 12 }}>
@@ -695,19 +866,17 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
             const ocupado = mexendo === p.id;
             return (
               <div key={p.id} style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", border: `1px solid ${form.id === p.id ? AZUL_MEDIO : CINZA_BORDA}`, borderRadius: 10, padding: 10, opacity: p.ativo ? 1 : 0.65 }}>
-                <div style={{ width: 56, height: 56, borderRadius: 8, border: `1px solid ${CINZA_CLARO}`, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
-                  {p.foto ? <img src={p.foto} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <ShoppingBag size={20} color="#b8c3d3" />}
-                </div>
+                <Miniatura src={p.foto} />
                 <div style={{ flex: "1 1 220px", minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600, color: "#1a2330", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.titulo}>{p.titulo}</div>
+                  {/* Duas linhas: o nome do Mercado Livre é comprido, e numa linha só o celular mostrava metade. */}
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: "#1a2330", lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", overflowWrap: "anywhere" }} title={p.titulo}>{p.titulo}</div>
                   <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 4, fontSize: 12, color: "#65758b" }}>
                     {p.ativo ? <Etiqueta cor={VERDE}>No FN Home</Etiqueta> : <Etiqueta cor="#65758b">Fora do FN Home</Etiqueta>}
                     {p.categoria && <Etiqueta>{p.categoria}</Etiqueta>}
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}><MousePointerClick size={12} /> {p.cliques || 0}</span>
-                    {p.comissao_percentual != null && <span title="Sua comissão no Mercado Livre">{String(Number(p.comissao_percentual)).replace(".", ",")}% de comissão</span>}
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }} title="Cliques no botão Comprar"><MousePointerClick size={12} /> {p.cliques || 0}</span>
                   </div>
                 </div>
-                <div style={{ flex: "0 1 170px", fontSize: 12.5 }}>
+                <div style={{ flex: "1 1 230px", maxWidth: 360, minWidth: 0, fontSize: 12.5 }}>
                   {p.preco != null ? (
                     <>
                       <strong style={{ color: AZUL_MARINHO, fontSize: 14 }}>{fmtReal(p.preco)}</strong>
@@ -717,6 +886,8 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
                       </div>
                     </>
                   ) : <span style={{ color: "#8593a8" }}>Sem preço na vitrine</span>}
+                  <BlocoComissao p={p} ocupado={ocupado}
+                    buscandoCategorias={categoriasMl.buscando} salvar={(valor) => salvarComissao(p, valor)} />
                 </div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   {ocupado ? <Loader2 size={16} className="spin" color={AZUL_MEDIO} /> : (

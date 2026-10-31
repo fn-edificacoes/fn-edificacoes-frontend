@@ -383,8 +383,22 @@ comissão só aparece no painel de afiliados de lá. Backend: `src/afiliados-mer
   `App()` guarda só na memória — um F5 devolve a loja ao fim da página). Pedido da Gerência (out/2026).
   O site institucional também mostra uma amostra dos produtos (seção FN Home de lá).
 - Os parceiros do FN Home (empresas, portfólio, carrinho) continuam no FN Projetos → Casa Pronta.
-- O cadastro tem **"Sua comissão (%)"** (opcional): o percentual do portal de afiliados, só para o
-  Financeiro do FN Home dizer quanto a FN ganha por venda. A lista mostra "X% de comissão".
+- O cadastro tem **"Sua comissão (%)"** (opcional): o percentual do portal de afiliados, só para a
+  conta de quanto a FN ganha por venda.
+- **"Você ganha R$ X por venda" em cada item da lista** (`BlocoComissao`, pedido da Gerência em
+  31/10/2026): preço × a % informada ou, sem ela, a **estimada** pela tabela do Mercado Livre para a
+  categoria do produto lá (`comissao_tabela`, que o servidor manda pronta — ver
+  `comissao-mercadolivre.js` no backend). Tocar no quadro abre a % para digitar ali mesmo (PATCH só de
+  `comissao_percentual`; em branco apaga e volta a estimativa). A conta é `comissaoDoProduto`, a mesma
+  do Financeiro do FN Home, que também mostra a estimada como "tabela do ML"/"estimado". A categoria do
+  Mercado Livre (`categoria_ml`) vem do Preencher (vai no salvar só quando veio agora) ou o servidor a
+  busca pelo nome em segundo plano; enquanto busca, a lista se recarrega sozinha (até 8 vezes).
+- **Foto no quadro certo** (31/10/2026): a moldura `.fnh-foto` tem tamanho fixo (quadrada, da largura
+  do cartão) e a foto fica por cima dela em `position: absolute`, sem ocupar espaço. Com a foto dentro
+  de uma grade com `aspect-ratio`, foto alta (garrafa, cadeira) esticava a moldura e a linha inteira —
+  o cartão vizinho ganhava um vão entre o nome e o preço, e no iPhone a foto vazava por cima do
+  "Comprar". Foto que não abre vira o ícone (`FotoDoProduto`). A miniatura da lista (`Miniatura`)
+  segue a mesma ideia — dentro de grade, a foto alta saía cortada.
 
 ## FN Home · Financeiro (vendas e comissões)
 
