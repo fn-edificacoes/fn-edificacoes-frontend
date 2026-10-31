@@ -399,6 +399,24 @@ comissão só aparece no painel de afiliados de lá. Backend: `src/afiliados-mer
   o cartão vizinho ganhava um vão entre o nome e o preço, e no iPhone a foto vazava por cima do
   "Comprar". Foto que não abre vira o ícone (`FotoDoProduto`). A miniatura da lista (`Miniatura`)
   segue a mesma ideia — dentro de grade, a foto alta saía cortada.
+- **Cadastro pelo celular — "Colar do Mercado Livre"** (31/10/2026, pedido da Gerência): no celular
+  não há favorito para arrastar, então o caminho é o Compartilhar do app do Mercado Livre → Copiar
+  link, e o botão lê a área de transferência (`navigator.clipboard.readText`; sem permissão, abre uma
+  caixa para colar com o dedo). `lerTextoDoMercadoLivre` separa o que veio, sem depender do formato do
+  texto: `meli.la`/`/sec/`/`/social/` → link de afiliado; endereço de página → Preencher; código solto
+  (`MLB…`, o "Copiar ID" do compartilhar de afiliado) → `enderecoDoCodigo` monta o endereço que o
+  servidor entende (até 9 dígitos = catálogo `/p/`; 10+ = anúncio `-_JM`; `MLBU` = `/up/`), com o nome
+  já conhecido no trecho do nome; "R$ …" → preço (o maior vira o "De"); o resto, a linha mais longa
+  sem frase de convite → nome. Nome e preço do texto só entram onde o Preencher não deu (o nome que o
+  servidor tira do endereço vem sem acento). Colar na página do produto passa pelo mesmo caminho; no
+  link de afiliado, só quando o link vem no meio de um texto. Quatro selos (link, nome, foto, preço)
+  dizem o que falta, e o aviso do último "Colar" fica na tela (`avisoColar`).
+  - O cadastro em andamento fica na aba (`sessionStorage`, chave `fn-home-ml-form`, 12 h): o iPhone
+    recarrega a aba que ficou para trás enquanto se copia no app, e o que já tinha sido colado sumia.
+    Some ao salvar e ao "Limpar"/"Cancelar edição".
+  - Telas sem mouse (`(hover: none) and (pointer: coarse)`) trocam o "Enviar ao FN Home" e o texto do
+    computador pelo passo a passo do celular (classes `fnml-so-toque`/`fnml-so-mouse`). Foto: "Enviar
+    foto" (câmera/galeria) ou imagem copiada colada no campo da foto.
 
 ## FN Home · Financeiro (vendas e comissões)
 
@@ -511,6 +529,27 @@ para quem mexe aqui:
   `/api/laudos/:docId/conteudo` quando alguém abre uma linha. Com o conteúdo na lista, uma
   abertura de tela baixava 62 MB — foi o que consumiu a banda mensal da hospedagem e
   suspendeu o serviço.
+
+## Celular
+
+- **Celular ou computador se decide por media query, nunca por `window.innerWidth`.** No iPhone,
+  `innerWidth` é a área visível com o zoom do momento: com a página de zoom afastado (algo vazou da
+  largura e o navegador afastou, ou a pessoa fez pinça), um aparelho de 393 px "media" 1572 px. O
+  `useTelaEstreita` antigo caía no layout de computador — menu lateral fixo e o conteúdo espremido em
+  160 px —, o que vazava mais e prendia o zoom. Foi o print da Gerência de 31/10/2026. Hoje ele usa
+  `matchMedia(CONSULTA_TELA_ESTREITA)`, a mesma régua dos `@media` do `estilos`.
+- **Nada passa da largura da tela.** No iPhone, um único elemento mais largo que a tela afasta o zoom
+  da página inteira. Tabela vai dentro de caixa com `overflowX: "auto"` (ou `.tabela-rolagem`, que
+  volta a `visible` na impressão); grade de colunas fixas usa `auto-fit`/`minmax`. Rede de segurança:
+  abaixo de 880 px, `.tela-app` (raiz do `AppInterno`, `PainelCliente` e `PainelParceiro`) tem
+  `overflow-x: clip` — `clip`, não `hidden`, para o cabeçalho continuar preso no topo. Para conferir,
+  some com a regra e meça `document.documentElement.scrollWidth` a 393 px em cada tela.
+- **Cabeçalho do `AppInterno` numa linha no celular** (≤ 640 px): somem `.cabecalho-titulo` (a logo
+  fica) e `.cabecalho-quem` (o nome vai para o título do "Sair"); "Abrir", "Salvar", "Gerar PDF" e
+  "Atualizar" ficam só com o ícone (`.rotulo-cabecalho`); o envio do laudo mantém o texto. Ele é fixo
+  no topo, e em três linhas comia 240 px de 852.
+- **Sino:** no celular o painel de avisos é `position: fixed` da largura da tela, logo abaixo do sino
+  (preso à direita dele, saía pela esquerda da tela).
 
 ## Convenções
 

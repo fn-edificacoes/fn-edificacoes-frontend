@@ -1089,6 +1089,8 @@ function LaudoModelo({ laudo, assinatura, assinaturaVistoriador, aprovado = true
       {itens.length > 0 && (
         <section className="laudo-pagina">
           <h2 style={{ fontSize: 15, color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_CLARO}`, paddingBottom: 7, marginBottom: 12 }}>Quadro-resumo das não conformidades</h2>
+          {/* No celular a tabela rola dentro da caixa (no papel ela cabe: ver .tabela-rolagem). */}
+          <div className="tabela-rolagem">
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5 }}>
             <thead>
               <tr style={{ background: CINZA_CLARO }}>
@@ -1110,6 +1112,7 @@ function LaudoModelo({ laudo, assinatura, assinaturaVistoriador, aprovado = true
               ))}
             </tbody>
           </table>
+          </div>
         </section>
       )}
 
@@ -1119,7 +1122,7 @@ function LaudoModelo({ laudo, assinatura, assinaturaVistoriador, aprovado = true
           <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginBottom: 8 }}>
             <span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 800, color: "#fff", background: AZUL_MARINHO, borderRadius: 6, padding: "2px 8px" }}>ITEM {i.n}</span>
             <strong style={{ fontSize: 12.5, color: AZUL_MARINHO }}>{i.ambiente}</strong>
-            <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap" }}>
               {i.categoria && <span style={{ fontSize: 9.5, border: `1px solid ${CINZA_BORDA}`, borderRadius: 20, padding: "2px 8px", color: "#4a5a70" }}>{i.categoria}</span>}
               <span style={{ fontSize: 9.5, borderRadius: 20, padding: "2px 8px", color: "#fff", background: corSeveridade[i.severidade], fontWeight: 700 }}>{ROTULO_SEVERIDADE[i.severidade]}</span>
               <span style={{ fontSize: 9.5, borderRadius: 20, padding: "2px 8px", color: "#fff", background: corStatus[i.status], fontWeight: 700 }}>{ROTULO_STATUS[i.status]}</span>
@@ -1515,11 +1518,24 @@ function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], ava
 
 function SinoNotificacoes({ itens = [], onIr }) {
   const [aberto, setAberto] = useState(false);
+  /* No celular o painel vira uma faixa da largura da tela, logo abaixo do sino. Preso à direita
+     do sino com 300 px, como no computador, ele saía para fora da tela pela esquerda: o sino fica
+     no meio do cabeçalho e só o fim de cada aviso aparecia ("…provação", "…T/TRT"). */
+  const [posicaoCelular, setPosicaoCelular] = useState(null); // { top } quando a tela é estreita
+  const refBotao = useRef(null);
   const urgentes = itens.filter((i) => i.urgente).length;
+  const alternar = () => {
+    if (!aberto) {
+      const estreita = window.matchMedia?.("(max-width: 640px)").matches;
+      const r = refBotao.current?.getBoundingClientRect();
+      setPosicaoCelular(estreita && r ? { top: Math.round(r.bottom + 8) } : null);
+    }
+    setAberto((v) => !v);
+  };
 
   return (
     <div style={{ position: "relative" }}>
-      <button className={`btn-ghost${urgentes ? " sino-alerta" : ""}`} onClick={() => setAberto((v) => !v)}
+      <button ref={refBotao} className={`btn-ghost${urgentes ? " sino-alerta" : ""}`} onClick={alternar}
         title={itens.length ? `${itens.length} aviso(s)` : "Nada pendente"}
         aria-label={`Notificações: ${itens.length} aviso(s)`}
         style={{
@@ -1547,9 +1563,12 @@ function SinoNotificacoes({ itens = [], onIr }) {
           <div onClick={() => setAberto(false)}
             style={{ position: "fixed", inset: 0, zIndex: 40 }} />
           <div style={{
-            position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 41, width: 300,
+            ...(posicaoCelular
+              ? { position: "fixed", left: 10, right: 10, top: posicaoCelular.top, maxHeight: `calc(100vh - ${posicaoCelular.top + 16}px)` }
+              : { position: "absolute", right: 0, top: "calc(100% + 6px)", width: 300, maxHeight: "70vh" }),
+            zIndex: 41, overflowY: "auto",
             background: "#fff", color: "#1a2330", borderRadius: 12, border: `1px solid ${CINZA_BORDA}`,
-            boxShadow: "0 10px 30px rgba(0,0,0,.16)", overflow: "hidden",
+            boxShadow: "0 10px 30px rgba(0,0,0,.16)",
           }}>
             <div style={{ padding: "10px 13px", borderBottom: `1px solid ${CINZA_BORDA}`, fontSize: 13, fontWeight: 700, color: AZUL_MARINHO }}>
               Avisos
@@ -2282,12 +2301,34 @@ const LARGURA_MENU_LATERAL_GERENCIA = 232;
    nasce fechado e vira uma gaveta (some da tela, abre por cima ao tocar no atalho do
    cabeçalho) em vez de empurrar o conteúdo. */
 const LARGURA_TELA_ESTREITA = 880;
+/* A largura vem da mesma media query que o CSS usa, e NÃO de window.innerWidth.
+   No iPhone, innerWidth é a área visível com o zoom do momento: quando a página fica com o zoom
+   afastado (algo passou da largura da tela e o navegador afastou para caber, ou a pessoa fez
+   pinça), um celular de 393 px passava a "medir" 1572 px. O sistema achava que era computador,
+   prendia o menu lateral fixo e espremia o conteúdo numa coluna de 160 px — que por sua vez
+   vazava ainda mais e segurava o zoom afastado. Foi o print da Gerência em 31/10/2026 (FN Home ›
+   Produtos Mercado Livre). A media query mede a largura de layout, que o zoom não muda: é a
+   mesma régua dos @media do `estilos`, então menu e CSS nunca mais discordam. */
+const CONSULTA_TELA_ESTREITA = `(max-width: ${LARGURA_TELA_ESTREITA - 0.02}px)`;
+function telaEstaEstreita() {
+  if (typeof window === "undefined") return false;
+  if (window.matchMedia) return window.matchMedia(CONSULTA_TELA_ESTREITA).matches;
+  return document.documentElement.clientWidth < LARGURA_TELA_ESTREITA;
+}
 function useTelaEstreita() {
-  const [estreita, setEstreita] = useState(() => typeof window !== "undefined" && window.innerWidth < LARGURA_TELA_ESTREITA);
+  const [estreita, setEstreita] = useState(telaEstaEstreita);
   useEffect(() => {
-    const aoRedimensionar = () => setEstreita(window.innerWidth < LARGURA_TELA_ESTREITA);
-    window.addEventListener("resize", aoRedimensionar);
-    return () => window.removeEventListener("resize", aoRedimensionar);
+    if (!window.matchMedia) return undefined;
+    const consulta = window.matchMedia(CONSULTA_TELA_ESTREITA);
+    const aoMudar = () => setEstreita(consulta.matches);
+    aoMudar();
+    // Safari antes do 14 só conhece addListener.
+    if (consulta.addEventListener) consulta.addEventListener("change", aoMudar);
+    else consulta.addListener(aoMudar);
+    return () => {
+      if (consulta.removeEventListener) consulta.removeEventListener("change", aoMudar);
+      else consulta.removeListener(aoMudar);
+    };
   }, []);
   return estreita;
 }
@@ -3568,7 +3609,7 @@ function AppInterno({ session, onLogout }) {
   const imprimir = () => window.print();
 
   return (
-    <div style={{ fontFamily: "'Inter', system-ui, sans-serif", color: "#1a2330", background: CINZA_CLARO, minHeight: "100vh", ...(perfil === "gerencia" && !telaEstreita ? { paddingLeft: LARGURA_MENU_LATERAL_GERENCIA } : {}) }}>
+    <div className="tela-app" style={{ fontFamily: "'Inter', system-ui, sans-serif", color: "#1a2330", background: CINZA_CLARO, minHeight: "100vh", ...(perfil === "gerencia" && !telaEstreita ? { paddingLeft: LARGURA_MENU_LATERAL_GERENCIA } : {}) }}>
       <style>{estilos}</style>
 
       {/* Fundo escurecido atrás da gaveta, só na tela estreita — toca fora do menu pra
@@ -3629,27 +3670,30 @@ function AppInterno({ session, onLogout }) {
       )}
 
       {/* ---------------- Barra superior ---------------- */}
+      {/* No celular o cabeçalho cabe numa linha só (classes cabecalho-* no `estilos`): ele é
+          fixo no topo, e com logo, nome, subtítulo e os botões em três linhas comia um quarto
+          da tela o tempo todo — 240 px de 852 no iPhone, com a aba da vistoria aberta. */}
       <header className="no-print" style={{ background: AZUL_MARINHO, color: "#fff", position: "sticky", top: 0, zIndex: 20 }}>
-        <div style={{ maxWidth: 1080, margin: "0 auto", padding: "12px 18px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        <div className="cabecalho-linha" style={{ maxWidth: 1080, margin: "0 auto", padding: "12px 18px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {/* Abre a gaveta do menu lateral — só existe na tela estreita, onde o menu some
                 da tela por padrão (ver useTelaEstreita). */}
             {perfil === "gerencia" && telaEstreita && (
-              <button className="btn-ghost" onClick={() => setMenuLateralAberto(true)} title="Abrir menu" style={{ padding: 8 }}>
+              <button className="btn-ghost" onClick={() => setMenuLateralAberto(true)} title="Abrir menu" aria-label="Abrir menu" style={{ padding: 8 }}>
                 <Menu size={18} />
               </button>
             )}
             <div style={{ width: "clamp(36px, 9vw, 44px)", height: "clamp(36px, 9vw, 44px)", borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
               <img src={LOGO_URL} alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
             </div>
-            <div style={{ lineHeight: 1.1 }}>
+            <div className="cabecalho-titulo" style={{ lineHeight: 1.1 }}>
               <div style={{ fontWeight: 700, fontSize: 15 }}>FN Edificações</div>
               <div style={{ fontSize: 11, opacity: 0.7 }}>Sistema FN · v1.2</div>
             </div>
           </div>
           <div style={{ flex: 1 }} />
           <div className="cabecalho-usuario" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
-            <div style={{ textAlign: "right", lineHeight: 1.2, minWidth: 0 }}>
+            <div className="cabecalho-quem" style={{ textAlign: "right", lineHeight: 1.2, minWidth: 0 }}>
               <div style={{ fontWeight: 700 }}>{session.usuario.nome}</div>
               <div style={{ opacity: 0.7 }}>{PERFIL_LABEL[perfil] || perfil}</div>
             </div>
@@ -3669,17 +3713,20 @@ function AppInterno({ session, onLogout }) {
             <button className="btn-ghost" onClick={() => setTrocandoSenha(true)} title="Alterar minha senha" aria-label="Alterar minha senha">
               <Lock size={14} /> <span className="rotulo-cabecalho">Senha</span>
             </button>
-            <button className="btn-ghost" onClick={onLogout} title="Sair" aria-label="Sair"><X size={14} /> <span className="rotulo-cabecalho">Sair</span></button>
+            {/* O nome some do cabeçalho no celular (falta espaço); fica aqui, no "Sair". */}
+            <button className="btn-ghost" onClick={onLogout} title={`Sair (${session.usuario.nome || PERFIL_LABEL[perfil] || perfil})`} aria-label="Sair"><X size={14} /> <span className="rotulo-cabecalho">Sair</span></button>
           </div>
           {trocandoSenha && <ModalTrocarSenha token={token} notify={notify} onFechar={() => setTrocandoSenha(false)} />}
           {abaTop === "laudos" && (
             <>
-              <button className="btn-ghost" onClick={() => { setShowLoad(true); listarRascunhos(); }}><FolderOpen size={15} /> Abrir</button>
-              <button className="btn-ghost" onClick={salvarRascunho}><Save size={15} /> Salvar</button>
+              {/* No celular estes três ficam só com o ícone (rotulo-cabecalho); o envio, que é o
+                  botão principal, continua com o texto. */}
+              <button className="btn-ghost" onClick={() => { setShowLoad(true); listarRascunhos(); }} title="Abrir rascunho" aria-label="Abrir rascunho"><FolderOpen size={15} /> <span className="rotulo-cabecalho">Abrir</span></button>
+              <button className="btn-ghost" onClick={salvarRascunho} title="Salvar rascunho" aria-label="Salvar rascunho"><Save size={15} /> <span className="rotulo-cabecalho">Salvar</span></button>
               {/* Gerar PDF é da Gerência: quem aprova é quem emite. O vistoriador vê o laudo
                   na tela e envia para aprovação — assim nenhuma versão não aprovada circula. */}
               {perfil === "gerencia" && (
-                <button className="btn-solid" onClick={() => { setAba("laudo"); setTimeout(imprimir, 300); }}><Printer size={15} /> Gerar PDF</button>
+                <button className="btn-solid" onClick={() => { setAba("laudo"); setTimeout(imprimir, 300); }} title="Gerar PDF" aria-label="Gerar PDF"><Printer size={15} /> <span className="rotulo-cabecalho">Gerar PDF</span></button>
               )}
               {/* O vistoriador envia para aprovação; a Gerência, que também vistoria, não
                   teria a quem enviar — o mesmo botão finaliza e aprova de uma vez. */}
@@ -3704,7 +3751,7 @@ function AppInterno({ session, onLogout }) {
             <button className="btn-solid" onClick={() => addDoc(novoRegistroDoc())}><Plus size={15} /> Novo registro</button>
           )}
           {abaTop === "gerencia" && (
-            <button className="btn-ghost" onClick={carregarDocs}><RefreshCcw size={15} className={docsCarregando ? "spin" : ""} /> Atualizar</button>
+            <button className="btn-ghost" onClick={carregarDocs} title="Atualizar" aria-label="Atualizar"><RefreshCcw size={15} className={docsCarregando ? "spin" : ""} /> <span className="rotulo-cabecalho">Atualizar</span></button>
           )}
         </div>
 
@@ -3773,7 +3820,7 @@ function AppInterno({ session, onLogout }) {
         )}
       </header>
 
-      <main style={{ maxWidth: 1080, margin: "0 auto", padding: "22px 18px 80px" }}>
+      <main className="conteudo-app" style={{ maxWidth: 1080, margin: "0 auto", padding: "22px 18px 80px" }}>
         {abaTop === "laudos" && <NotificacoesClientes clientes={clientesAtivos} preencherComCliente={preencherComCliente} usuarioAtualId={session.usuario.id} style={{ marginBottom: 18 }} />}
         {/* Fica nas duas telas de onde se começa uma vistoria (a agenda e a própria vistoria);
             no laudo final e nos laudos realizados só atrapalharia. */}
@@ -8693,7 +8740,9 @@ function CardIndicadoresGerais({ docs, clientes = [], modo = "completo" }) {
             <div style={{ fontSize: 13, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
               <FileText size={14} /> ART Documentações
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+            {/* auto-fit: três colunas fixas não cabiam no celular — cada cartão tem ~120 px de
+                largura mínima, e o terceiro ("Prontas") saía para fora da tela. */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
               <KpiCard label="Pedidos" valor={clientesArt.length} cor="#2C75B5" Icon={FileText} />
               <KpiCard label="Elaborando" valor={artElaborando} cor="#B26A00" Icon={FileText} />
               <KpiCard label="Prontas" valor={artProntas} cor="#2E7D32" Icon={ClipboardCheck} />
@@ -19465,7 +19514,7 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado 
   useEffect(() => { if (recemCadastrado) window.scrollTo(0, 0); }, []);
 
   return (
-    <div style={{ fontFamily: "'Inter', system-ui, sans-serif", color: "#1a2330", background: CINZA_CLARO, minHeight: "100vh" }}>
+    <div className="tela-app" style={{ fontFamily: "'Inter', system-ui, sans-serif", color: "#1a2330", background: CINZA_CLARO, minHeight: "100vh" }}>
       <style>{estilos}</style>
 
       <header className="no-print" style={{ background: AZUL_MARINHO, color: "#fff", position: "sticky", top: 0, zIndex: 20 }}>
@@ -19857,7 +19906,7 @@ function PainelParceiro({ session, onLogout }) {
   useEffect(() => { carregarVendas(); }, []);
 
   return (
-    <div style={{ fontFamily: "'Inter', system-ui, sans-serif", color: "#1a2330", background: CINZA_CLARO, minHeight: "100vh" }}>
+    <div className="tela-app" style={{ fontFamily: "'Inter', system-ui, sans-serif", color: "#1a2330", background: CINZA_CLARO, minHeight: "100vh" }}>
       <style>{estilos}</style>
 
       <header className="no-print" style={{ background: AZUL_MARINHO, color: "#fff", position: "sticky", top: 0, zIndex: 20 }}>
@@ -20741,6 +20790,18 @@ const estilos = `
      e-mail ou nome colado continua sem estourar a tela. */
   body { overflow-wrap: break-word; }
   .quebra-texto { overflow-wrap: anywhere; min-width: 0; }
+  /* Rede de segurança do celular: nada passa da largura da tela. No iPhone, um único elemento
+     mais largo que a tela fazia o navegador afastar o zoom da PÁGINA INTEIRA (tudo miúdo, com
+     uma faixa branca à direita) — e era esse zoom que enganava o menu lateral (ver
+     useTelaEstreita). Tabela larga continua rolando dentro da própria caixa (.tabela-rolagem e
+     os overflowX:auto das telas); o que vazar sem caixa é cortado na borda em vez de encolher
+     tudo. "clip", e não "hidden": hidden criaria uma área de rolagem e o cabeçalho deixaria de
+     ficar preso no topo. Navegador que não conhece clip (iOS 15 e anteriores) fica como era.
+     Só na tela: a folha A4 também "mede" menos de 880 px, e corte na impressão é risco à toa. */
+  @media screen and (max-width: 879.98px) {
+    @supports (overflow: clip) { .tela-app { overflow-x: clip; } }
+  }
+  .tabela-rolagem { overflow-x: auto; max-width: 100%; }
   /* Rótulos de interface nunca se partem no meio da palavra. */
   button, label, th, select, option, .tab { overflow-wrap: normal; word-break: normal; }
   .btn-ghost, .btn-solid, .btn-mini { justify-content: center; text-align: center; line-height: 1.25; }
@@ -20814,6 +20875,12 @@ const estilos = `
     body { background:#fff !important; }
     main { padding:0 !important; max-width:100% !important; }
     .laudo-print { border:none !important; border-radius:0 !important; }
+    .tabela-rolagem { overflow: visible !important; }
+  }
+  /* Laudo na tela do celular: as margens de folha A4 (30 px dos dois lados) tiravam um quinto
+     da largura. Só na tela — a impressão segue com as dela. */
+  @media screen and (max-width: 640px) {
+    .laudo-pagina, .laudo-ficha { padding: 18px 14px; }
   }
   @media (max-width: 640px) {
     .icon-btn { padding:8px; }
@@ -20826,6 +20893,11 @@ const estilos = `
     .rotulo-cabecalho { display: none; }
     .cabecalho-usuario { flex-wrap: wrap; justify-content: flex-end; max-width: 100%; }
     .cabecalho-usuario .btn-ghost { padding: 9px 10px; min-width: 40px; min-height: 40px; }
+    /* Uma linha só: a logo basta como marca, e o nome de quem entrou está no título do "Sair". */
+    .cabecalho-titulo, .cabecalho-quem { display: none; }
+    .cabecalho-linha { padding: 8px 12px !important; gap: 8px !important; }
+    .cabecalho-linha > .btn-ghost, .cabecalho-linha > .btn-solid { min-height: 40px; min-width: 40px; }
+    .conteudo-app { padding: 16px 12px 80px !important; }
     .modal-acoes, .modal-acoes > div { flex-direction: column-reverse; width: 100%; }
     .modal-acoes button { width: 100%; min-height: 44px; }
     th { white-space: nowrap; }

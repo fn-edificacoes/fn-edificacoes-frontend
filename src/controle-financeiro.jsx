@@ -687,8 +687,11 @@ function SalariosFixos({ token, apiFetch, notify, usuarios, config, personalizad
         salário de uma pessoa, inclui alguém de outro setor ou tira da folha fixa. Vale do mês aberto em diante — salário já pago não muda.
       </p>
       {linhas.length === 0 && <div style={{ fontSize: 13, color: "#8593a8", marginBottom: 10 }}>Ninguém com salário fixo.</div>}
+      {/* Rola dentro da caixa: no celular os botões "Voltar ao padrão"/"Tirar da folha fixa" (que não
+          quebram linha) passavam da largura da tela. */}
       {linhas.length > 0 && (
-        <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 12 }}>
+        <div style={{ overflowX: "auto", marginBottom: 12 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead><tr>{["Pessoa", "Setor", "Salário/mês", ""].map((h, i) => <th key={i} style={{ ...th, textAlign: i === 2 ? "right" : "left" }}>{h}</th>)}</tr></thead>
           <tbody>
             {linhas.map(({ u, s, valor }) => (
@@ -704,6 +707,7 @@ function SalariosFixos({ token, apiFetch, notify, usuarios, config, personalizad
             ))}
           </tbody>
         </table>
+        </div>
       )}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
         <div style={{ display: "grid", gap: 4, minWidth: 200 }}><label style={lab}>Pessoa</label>
