@@ -14,12 +14,14 @@
      - pelo endereço da página do produto (/preencher no backend): nome e categoria sempre, foto
        e preço só de produto de catálogo (/p/), com o aplicativo da FN configurado no servidor;
      - pelo botão "Enviar ao FN Home", um favorito do Chrome que lê a página aberta (ver
-       lerPaginaParaOFnHome): foto e preço de qualquer anúncio.
+       lerPaginaParaOFnHome): foto e preço de qualquer anúncio;
+     - pelo "Colar do Mercado Livre", o caminho do celular: lê o que o Compartilhar do app copiou e
+       manda cada pedaço para o campo certo (ver lerTextoDoMercadoLivre).
    A Gerência confere e salva — e o preço vem sempre com a data em que foi conferido.
 
    Arquivo à parte como a Rede Nacional: o App.jsx só o encaixa e entrega o apiFetch. */
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ShoppingBag, ExternalLink, Plus, Pencil, Trash2, RefreshCcw, Loader2, X, Search, Upload, CalendarCheck, Eye, EyeOff, MousePointerClick, Sparkles, Bookmark, Check } from "lucide-react";
+import { ShoppingBag, ExternalLink, Plus, Pencil, Trash2, RefreshCcw, Loader2, X, Search, Upload, CalendarCheck, Eye, EyeOff, MousePointerClick, Sparkles, Bookmark, Check, ClipboardPaste, CircleCheck, Circle } from "lucide-react";
 
 const AZUL_MEDIO = "#2C75B5";
 const AZUL_MARINHO = "#12335B";
@@ -71,6 +73,64 @@ function ehPaginaDoMercadoLivre(texto) {
     return u.protocol === "https:" && /(^|\.)(mercadolivre\.com(\.br)?|mercadolibre\.com)$/i.test(u.hostname);
   } catch { return false; }
 }
+
+/* ---------------- "Colar do Mercado Livre" (o caminho do celular) ----------------
+   No celular não existe o favorito arrastável: o que se tem é o "Compartilhar" do app do Mercado
+   Livre, que para afiliado dá o link de afiliado (meli.la) e o código do produto (MLB…), e para
+   todo mundo dá o endereço da página. O texto que vem junto muda conforme a versão do app, então
+   nada aqui depende do formato: cada pedaço reconhecível vai para o seu campo, e o resto é tentado
+   como nome (e "R$ …" como preço). Pedido da Gerência em 31/10/2026: cadastrar pelo celular. */
+const EMOJI = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu;
+// Com \b: "Folha", "escolha" e "molhe" não são convite.
+const CONVITE = /(mercado\s*livre|mercadolivre|\b(olh[ae]|veja|confira|encontrei|achei)\b|\bcompartilh|\brecomend)/i;
+const semAcentoMin = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+function precoDoTexto(trecho) {
+  const m = trecho.match(/^R\$\s*(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d{1,2}))?/);
+  return m ? Number(`${m[1].replace(/\./g, "")}.${(m[2] || "0").padEnd(2, "0")}`) : null;
+}
+function lerTextoDoMercadoLivre(texto) {
+  const bruto = String(texto || "").slice(0, 4000);
+  const urls = (bruto.match(/https?:\/\/[^\s<>"']+/gi) || []).map((u) => u.replace(/[).,;:!?\]]+$/, ""));
+  let link = "";
+  let pagina = "";
+  for (const u of urls) {
+    if (ehLinkCurto(u)) { if (!link) link = u; } else if (ehPaginaDoMercadoLivre(u) && !pagina) pagina = u;
+  }
+  let resto = bruto;
+  for (const u of urls) resto = resto.split(u).join(" ");
+  const cod = resto.match(/\bMLB(U?)-?(\d{6,})\b/i);
+  const codigo = cod ? `MLB${cod[1] ? "U" : ""}${cod[2]}` : "";
+  // "De R$ 249,90 por R$ 199,90": o menor é o preço, o maior vira o "De".
+  const precos = (resto.match(/R\$\s*[\d.]+(?:,\d{1,2})?/g) || []).map(precoDoTexto).filter((n) => n > 0 && n <= 1e7);
+  const preco = precos.length ? Math.min(...precos) : null;
+  const precoDe = precos.length > 1 && Math.max(...precos) > preco ? Math.max(...precos) : null;
+  const linhas = resto.split(/\n+/).map((l) => {
+    let t = l.replace(EMOJI, " ").replace(/R\$\s*[\d.]+(?:,\d{1,2})?/g, " ").replace(/\bMLBU?-?\d{6,}\b/gi, " ");
+    const doisPontos = t.indexOf(":");
+    if (doisPontos >= 0 && CONVITE.test(t.slice(0, doisPontos))) t = t.slice(doisPontos + 1);
+    return t.replace(/[*_~|•·]+/g, " ").replace(/\s+/g, " ").trim().replace(/^[-–—:,.!\s]+|[-–—:,.!\s]+$/g, "");
+  }).filter((t) => t.length >= 6 && t.length <= 200 && /[a-zà-ú]{3}/i.test(t) && !(CONVITE.test(t) && t.split(" ").length <= 8));
+  const nome = linhas.sort((a, b) => b.length - a.length)[0] || "";
+  return { link, pagina, codigo, preco, precoDe, nome };
+}
+/* Só o código (o "Copiar ID" do compartilhar de afiliado): monta um endereço que o Preencher do
+   servidor entende. Catálogo tem até 9 dígitos (MLB19567837); anúncio, 10 ou mais (out/2026). O
+   nome vai no endereço porque, sem foto e preço liberados, é dele que o servidor tira o rascunho
+   do nome e a categoria. */
+function enderecoDoCodigo(codigo, nome) {
+  const m = String(codigo || "").match(/^MLB(U?)(\d{6,})$/);
+  if (!m) return "";
+  const trecho = semAcentoMin(nome).replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "produto";
+  if (m[1]) return `https://www.mercadolivre.com.br/${trecho}/up/MLBU${m[2]}`;
+  if (m[2].length <= 9) return `https://www.mercadolivre.com.br/${trecho}/p/MLB${m[2]}`;
+  return `https://produto.mercadolivre.com.br/MLB-${m[2]}-${trecho}-_JM`;
+}
+
+/* O cadastro em andamento fica na aba (sessionStorage) enquanto se vai e volta do app do Mercado
+   Livre: no iPhone, a aba que fica para trás pode ser recarregada pelo sistema, e o que já tinha
+   sido colado sumia. Some ao salvar, ao cancelar e ao fechar a aba. */
+const CHAVE_FORM = "fn-home-ml-form";
+const DOZE_HORAS = 12 * 3600 * 1000;
 
 /* ---------------- Botão "Enviar ao FN Home" (favorito do Chrome) ----------------
    A API do Mercado Livre só libera foto e preço de produto de catálogo (/p/); produto de vendedor
@@ -475,6 +535,20 @@ const formVazio = () => ({
   // categoria_ml_nova = veio do Preencher agora e vai junto ao salvar.
   categoria_ml: "", comissao_tabela: null, categoria_ml_nova: false,
 });
+function lerFormGuardado() {
+  try {
+    const g = JSON.parse(sessionStorage.getItem(CHAVE_FORM) || "null");
+    if (!g || !g.form || Date.now() - (Number(g.em) || 0) > DOZE_HORAS) return null;
+    return { form: { ...formVazio(), ...g.form }, pagina: String(g.pagina || "") };
+  } catch { return null; }
+}
+function guardarForm(form, pagina) {
+  try {
+    const vazio = JSON.stringify(form) === JSON.stringify(formVazio()) && !String(pagina || "").trim();
+    if (vazio) sessionStorage.removeItem(CHAVE_FORM);
+    else sessionStorage.setItem(CHAVE_FORM, JSON.stringify({ form, pagina, em: Date.now() }));
+  } catch { /* sem espaço ou sem storage: só não guarda */ }
+}
 const paraForm = (p) => ({
   id: p.id, link: p.link || "", titulo: p.titulo || "", categoria: p.categoria || "",
   preco: p.preco != null ? String(Number(p.preco)) : "", preco_de: p.preco_de != null ? String(Number(p.preco_de)) : "",
@@ -486,21 +560,31 @@ const paraForm = (p) => ({
 export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redimensionar }) {
   const [lista, setLista] = useState(null);
   const [carregando, setCarregando] = useState(false);
-  const [form, setForm] = useState(formVazio());
+  // O cadastro que estava aberto volta sozinho (ver CHAVE_FORM): no celular a aba recarrega
+  // enquanto se copia o link no app do Mercado Livre.
+  const [guardado] = useState(lerFormGuardado);
+  const [form, setForm] = useState(() => guardado?.form || formVazio());
+  const [recuperado, setRecuperado] = useState(Boolean(guardado));
   const [salvando, setSalvando] = useState(false);
   const [mexendo, setMexendo] = useState(null); // id da linha com ação em andamento
   const [busca, setBusca] = useState("");
   // Endereço da página do produto: só alimenta o Preencher, não é gravado.
-  const [pagina, setPagina] = useState("");
+  const [pagina, setPagina] = useState(() => guardado?.pagina || "");
   const [preenchendo, setPreenchendo] = useState(false);
   const [preenchido, setPreenchido] = useState(null); // { campos, categoriaCaminho, avisos }
+  // Sem permissão para ler a área de transferência (ou navegador sem a função), abre uma caixa
+  // para colar com o dedo — segurar e "Colar".
+  const [colarManual, setColarManual] = useState(false);
+  // O que o último "Colar" fez e o que falta — fica na tela (o aviso flutuante some em 2 s).
+  const [avisoColar, setAvisoColar] = useState("");
+  useEffect(() => { guardarForm(form, pagina); }, [form, pagina]);
 
   // A categoria do Mercado Livre de cada produto (para a comissão estimada) é buscada pelo servidor
   // em segundo plano; enquanto isso a lista se recarrega sozinha algumas vezes.
   const [categoriasMl, setCategoriasMl] = useState({ pendentes: 0, buscando: false });
   const recargas = useRef(0);
 
-  const abrirForm = (f = formVazio()) => { setForm(f); setPagina(""); setPreenchido(null); };
+  const abrirForm = (f = formVazio()) => { setForm(f); setPagina(""); setPreenchido(null); setRecuperado(false); setColarManual(false); setAvisoColar(""); };
 
   const carregar = async (silencioso = false) => {
     setCarregando(true);
@@ -554,10 +638,12 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
   /* Lê do Mercado Livre o que der e põe no formulário, por cima do que estiver nele — foi pedido;
      o que não veio fica como está. Nada é salvo até "Cadastrar". daPagina é o que o botão "Enviar
      ao FN Home" leu da página aberta no Chrome: vale mais que a API (é o que a Gerência está vendo),
-     e a API entra para a categoria e para o que a página não deu. */
-  const preencher = async (endereco = pagina, daPagina = null) => {
+     e a API entra para a categoria e para o que a página não deu. doTexto é o que o "Colar do
+     Mercado Livre" achou no texto compartilhado (link de afiliado, nome, preço): entra só onde a API
+     não deu. Devolve o que foi posto no formulário (null quando nem chamou a API). */
+  const preencher = async (endereco = pagina, daPagina = null, doTexto = null) => {
     const texto = String(endereco || "").trim();
-    if (!texto) { notify("Cole o endereço da página do produto no Mercado Livre."); return; }
+    if (!texto) { notify("Cole o endereço da página do produto no Mercado Livre."); return null; }
     // O link curto é o que paga a comissão, e o servidor não consegue abri-lo: vai para o campo dele.
     if (ehLinkCurto(texto)) {
       setPagina("");
@@ -565,7 +651,7 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
       notify(form.link.trim()
         ? "Esse é um link de afiliado. Para preencher, cole o endereço da página do produto."
         : "Esse é o link de afiliado — coloquei no campo dele. Para preencher, cole agora o endereço da página do produto.");
-      return;
+      return null;
     }
     setPagina(texto);
     setPreenchendo(true);
@@ -579,6 +665,7 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
       if (daPagina.preco != null) comPreco(novo, daPagina.preco, daPagina.preco_de);
       if (daPagina.link) novo.link = daPagina.link;
     }
+    if (doTexto?.link) novo.link = doTexto.link;
     let categoriaCaminho = "";
     let avisos = [];
     try {
@@ -599,6 +686,17 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
     } catch (e) {
       avisos = [daPagina ? `Não consegui a categoria no Mercado Livre agora (${e.message}). Escolha uma à mão.` : e.message];
     }
+    /* O nome tirado do endereço vem sem acento ("Furadeira Impacto Bosch"); o do texto compartilhado
+       é o do anúncio. O preço do texto só entra quando o Mercado Livre não liberou o dele. */
+    if (doTexto) {
+      const nomeDoEndereco = avisos.some((a) => /nome veio do endere/i.test(a));
+      if (doTexto.nome && (!novo.titulo || nomeDoEndereco)) {
+        novo.titulo = doTexto.nome;
+        avisos = avisos.filter((a) => !/nome veio do endere/i.test(a));
+      }
+      if (doTexto.preco != null && novo.preco == null) comPreco(novo, doTexto.preco, doTexto.precoDe);
+      if (!novo.foto && !form.foto) avisos.push("Sem foto: salve a foto do produto (ou faça um print) e use \"Enviar foto\", lá embaixo.");
+    }
     if (daPagina) {
       if (!novo.foto) avisos.push("Não achei a foto na página. Na foto do produto, botão direito → \"Copiar endereço da imagem\" e cole no campo Foto.");
       if (novo.preco == null) avisos.push("Não achei o preço na página. Digite o preço que aparece no anúncio.");
@@ -611,6 +709,56 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
     const nomes = { titulo: "nome", categoria: "categoria", foto: "foto", preco: "preço", link: "link de afiliado" };
     setPreenchido({ campos: Object.keys(nomes).filter((k) => k in novo).map((k) => nomes[k]), categoriaCaminho, avisos });
     setPreenchendo(false);
+    return novo;
+  };
+
+  /* "Colar do Mercado Livre": o que veio do Compartilhar do app vai, pedaço por pedaço, para o
+     campo certo (ver lerTextoDoMercadoLivre). Endereço ou código do produto chamam o Preencher; o
+     link de afiliado sozinho só entra no campo dele, e a tela diz o que falta. */
+  const aplicarColado = async (texto) => {
+    const r = lerTextoDoMercadoLivre(texto);
+    // O nome que já se tem (do texto agora ou de um "Colar" anterior) vai no endereço montado a partir
+    // do código e fica no lugar do nome sem acento que o servidor tira do endereço.
+    const nomeConhecido = r.nome || form.titulo.trim();
+    const endereco = r.pagina || (r.codigo ? enderecoDoCodigo(r.codigo, nomeConhecido) : "");
+    if (endereco) {
+      setColarManual(false);
+      setAvisoColar("");
+      await preencher(endereco, null, { ...r, nome: nomeConhecido });
+      return true;
+    }
+    // Sem o produto: guarda o que veio (nome e preço só onde estava vazio) e diz o que falta.
+    const patch = {};
+    const colados = [];
+    if (r.link && r.link !== form.link.trim()) { patch.link = r.link; colados.push("link de afiliado"); }
+    if (r.nome && !form.titulo.trim()) { patch.titulo = r.nome; colados.push("nome"); }
+    if (r.preco != null && !String(form.preco).trim()) {
+      patch.preco = String(r.preco);
+      patch.preco_de = r.precoDe != null ? String(r.precoDe) : "";
+      colados.push("preço");
+    }
+    if (!colados.length) {
+      setAvisoColar(r.link
+        ? "Esse link de afiliado já está no formulário. Agora copie o endereço (ou o código MLB…) do produto."
+        : "Não achei nada do Mercado Livre no que foi colado. No app, toque em Compartilhar → Copiar link e tente de novo.");
+      return false;
+    }
+    setColarManual(false);
+    setForm((f) => ({ ...f, ...patch }));
+    const lista = colados.length > 1 ? `${colados.slice(0, -1).join(", ")} e ${colados[colados.length - 1]}` : colados[0];
+    const temLink = Boolean(patch.link || form.link.trim());
+    // "Produto" aqui é o endereço/código já lido pelo Preencher — é ele que traz foto, preço e categoria.
+    const proximo = !pagina.trim() ? "Agora copie o endereço (ou o código MLB…) do produto e toque em \"Colar do Mercado Livre\" de novo."
+      : !temLink ? "Falta o link de afiliado: no app, Compartilhar → Copiar link, e toque em \"Colar do Mercado Livre\" de novo."
+        : "Confira os campos e toque em \"Cadastrar produto\".";
+    setAvisoColar(`${lista.charAt(0).toUpperCase()}${lista.slice(1)} ${colados.length > 1 ? "colados" : "colado"} ✓ ${proximo}`);
+    return true;
+  };
+  const colarDoMercadoLivre = async () => {
+    let texto = "";
+    try { if (navigator.clipboard?.readText) texto = await navigator.clipboard.readText(); } catch { /* sem permissão: cai na caixa */ }
+    if (!String(texto).trim()) { setColarManual(true); return; }
+    await aplicarColado(texto);
   };
 
   // Veio do botão "Enviar ao FN Home": formulário novo, preenchido com o que ele leu da página.
@@ -634,15 +782,23 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
     preencher(texto);
   };
 
-  const onArquivoFoto = (e) => {
-    const arquivo = e.target.files?.[0];
-    e.target.value = "";
+  const lerArquivoDeFoto = (arquivo) => {
     if (!arquivo) return;
     if (!arquivo.type.startsWith("image/")) { notify("Envie uma imagem (JPG ou PNG)."); return; }
     const leitor = new FileReader();
     // 600 px basta para o card da vitrine e mantém cada foto em dezenas de KB.
     leitor.onload = async () => mudar("foto", await redimensionar(leitor.result, 600));
     leitor.readAsDataURL(arquivo);
+  };
+  const onArquivoFoto = (e) => {
+    const arquivo = e.target.files?.[0];
+    e.target.value = "";
+    lerArquivoDeFoto(arquivo);
+  };
+  // Foto copiada (no celular: segurar a foto do produto → Copiar) e colada no campo da foto.
+  const onColarNaFoto = (e) => {
+    const imagem = [...(e.clipboardData?.files || [])].find((f) => f.type.startsWith("image/"));
+    if (imagem) { e.preventDefault(); lerArquivoDeFoto(imagem); }
   };
 
   const salvar = async () => {
@@ -692,39 +848,107 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
     setMexendo(null);
   };
 
+  // O que já está no formulário, para quem cadastra pelo celular saber o que falta colar.
+  const prontos = [
+    ["Link de afiliado", Boolean(form.link.trim()) && pareceLinkDeAfiliado(form.link.trim())],
+    ["Nome", Boolean(form.titulo.trim())],
+    ["Foto", Boolean(form.foto)],
+    ["Preço", String(form.preco).trim() !== ""],
+  ];
+  const urlSemCorretor = { inputMode: "url", autoCapitalize: "none", autoCorrect: "off", spellCheck: false };
+
   return (
     <div style={{ display: "grid", gap: 16, minWidth: 0 }}>
+      {/* Celular e tablet (sem mouse) não arrastam favorito: lá aparece o passo a passo do
+          Compartilhar do app no lugar do "Enviar ao FN Home". No celular os botões crescem para o dedo. */}
+      <style>{`
+        .fnml-so-toque { display: none; }
+        @media (hover: none) and (pointer: coarse) {
+          .fnml-so-toque { display: block; }
+          .fnml-so-mouse { display: none !important; }
+        }
+        @media (max-width: 640px) {
+          .fnml-colar { flex: 1 1 100%; justify-content: center; min-height: 46px; font-size: 15px !important; }
+          .fnml-acoes > button { flex: 1 1 100%; justify-content: center; min-height: 46px; font-size: 15px !important; }
+          .fnml-btn-lista { min-width: 40px; min-height: 40px; justify-content: center; }
+        }
+      `}</style>
       <section style={secao}>
-        <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8, flexWrap: "wrap" }}>
           <div style={{ width: 30, height: 30, borderRadius: 8, background: CINZA_CLARO, display: "grid", placeItems: "center" }}><ShoppingBag size={16} color={AZUL_MEDIO} /></div>
           <h3 style={{ margin: 0, fontSize: 15, color: AZUL_MARINHO, flex: 1 }}>{form.id ? "Editar produto" : "Novo produto do Mercado Livre"}</h3>
           {form.id && <button style={btnLeve} onClick={() => abrirForm()}><X size={14} /> Cancelar edição</button>}
+          {!form.id && recuperado && JSON.stringify(form) !== JSON.stringify(formVazio()) && (
+            <button style={btnLeve} onClick={() => abrirForm()} title="O cadastro que estava aberto voltou. Toque para começar outro.">
+              <X size={14} /> Limpar
+            </button>
+          )}
         </div>
-        <p style={{ fontSize: 13, color: "#5a6a80", margin: "0 0 12px", lineHeight: 1.5 }}>
+        <p className="fnml-so-mouse" style={{ fontSize: 13, color: "#5a6a80", margin: "0 0 12px", lineHeight: 1.5 }}>
           Abra o produto no Mercado Livre e cole o endereço da página dele no primeiro campo: o resto se preenche sozinho.
           Depois gere o link do produto no <a href={PORTAL_AFILIADOS} target="_blank" rel="noreferrer" style={{ color: AZUL_MEDIO }}>portal de afiliados do Mercado Livre</a> e
           cole em "Link de afiliado". O produto entra na vitrine do FN Home com o botão "Comprar no Mercado Livre"; a venda e a
           comissão aparecem no painel de afiliados de lá.
         </p>
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", background: CINZA_CLARO, borderRadius: 10, padding: "10px 12px", margin: "0 0 12px" }}>
-          <a ref={refBotao} href="#" draggable="true" title="Arraste para a barra de favoritos do Chrome"
-            onClick={(e) => { e.preventDefault(); notify("Arraste este botão para a barra de favoritos do Chrome — aqui ele não faz nada."); }}
-            style={{ ...btn, textDecoration: "none", cursor: "grab" }}>
-            <Bookmark size={14} /> Enviar ao FN Home
-          </a>
-          <span style={{ fontSize: 12.5, color: "#4a5a70", lineHeight: 1.45, flex: "1 1 260px" }}>
-            <strong>Mais rápido, no computador:</strong> arraste este botão para a barra de favoritos do Chrome (se ela não
+        <div style={{ display: "grid", gap: 10, background: CINZA_CLARO, borderRadius: 10, padding: "10px 12px", margin: "0 0 12px" }}>
+          <div className="fnml-so-toque" style={{ fontSize: 13, color: "#4a5a70", lineHeight: 1.5 }}>
+            <strong style={{ color: AZUL_MARINHO }}>Pelo celular:</strong>
+            <ol style={{ margin: "6px 0 0", paddingLeft: 20, display: "grid", gap: 4 }}>
+              <li>No app do Mercado Livre, abra o produto e toque em <strong>Compartilhar</strong> → <strong>Copiar link</strong>.</li>
+              <li>Volte aqui e toque em <strong>Colar do Mercado Livre</strong>: cada coisa vai para o campo certo.</li>
+              <li>Repita até os quatro itens abaixo ficarem verdes — o link de afiliado (meli.la) e o endereço ou o código
+                do produto (MLB…), que traz nome, categoria e, quando o Mercado Livre libera, foto e preço.</li>
+            </ol>
+          </div>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <button type="button" className="fnml-colar" style={{ ...btn, background: AZUL_MARINHO, opacity: preenchendo ? 0.6 : 1 }}
+              disabled={preenchendo} onClick={colarDoMercadoLivre}>
+              {preenchendo ? <Loader2 size={15} className="spin" /> : <ClipboardPaste size={15} />} Colar do Mercado Livre
+            </button>
+            <a ref={refBotao} href="#" draggable="true" title="Arraste para a barra de favoritos do Chrome" className="fnml-so-mouse"
+              onClick={(e) => { e.preventDefault(); notify("Arraste este botão para a barra de favoritos do Chrome — aqui ele não faz nada."); }}
+              style={{ ...btn, textDecoration: "none", cursor: "grab" }}>
+              <Bookmark size={14} /> Enviar ao FN Home
+            </a>
+          </div>
+          <span className="fnml-so-mouse" style={{ fontSize: 12.5, color: "#4a5a70", lineHeight: 1.45 }}>
+            <strong>Mais rápido, no computador:</strong> arraste "Enviar ao FN Home" para a barra de favoritos do Chrome (se ela não
             aparece, aperte Ctrl+Shift+B). Com um produto aberto no Mercado Livre, clique nele: o cadastro abre aqui já com nome,
-            foto, preço e categoria — em qualquer anúncio, inclusive os que o Preencher não consegue.
+            foto, preço e categoria — em qualquer anúncio, inclusive os que o Preencher não consegue. "Colar do Mercado Livre" lê
+            o que você copiou (o endereço do produto ou o link de afiliado) e põe no campo certo.
           </span>
+          {colarManual && (
+            <div style={{ display: "grid", gap: 6 }}>
+              <span style={{ fontSize: 12.5, color: "#4a5a70", lineHeight: 1.45 }}>
+                O navegador não deixou ler o que foi copiado. Segure o dedo na caixa abaixo e toque em <strong>Colar</strong>.
+              </span>
+              <textarea autoFocus rows={3} {...urlSemCorretor} inputMode="text" placeholder="Cole aqui o link ou o texto do Mercado Livre"
+                style={{ ...inp, fontSize: 16 /* menos que 16 px, o iPhone dá zoom na tela */, resize: "vertical" }}
+                onPaste={(e) => { const t = e.clipboardData.getData("text"); if (t.trim()) { e.preventDefault(); aplicarColado(t); } }}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && e.currentTarget.value.trim()) { e.preventDefault(); aplicarColado(e.currentTarget.value); } }} />
+              <button type="button" style={{ ...btnLeve, justifySelf: "start" }} onClick={() => setColarManual(false)}><X size={14} /> Fechar</button>
+            </div>
+          )}
+          {avisoColar && (
+            <div role="status" style={{ fontSize: 12.5, lineHeight: 1.45, color: /✓/.test(avisoColar) ? VERDE : AMBAR, background: /✓/.test(avisoColar) ? "#EAF5EA" : "#FFF4E0", borderRadius: 6, padding: "6px 8px" }}>
+              {avisoColar}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }} aria-label="O que já está preenchido">
+            {prontos.map(([rotulo, ok]) => (
+              <span key={rotulo} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, color: ok ? VERDE : "#8593a8", background: "#fff", border: `1px solid ${ok ? "#BFE0C1" : CINZA_BORDA}`, borderRadius: 999, padding: "3px 9px" }}>
+                {ok ? <CircleCheck size={13} /> : <Circle size={13} />} {rotulo}
+              </span>
+            ))}
+          </div>
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
           <Campo label="Página do produto no Mercado Livre" largo
-            dica="O endereço da barra do navegador com o produto aberto. Ao colar, o sistema busca nome, categoria, foto e preço.">
+            dica="O endereço do produto (no app: Compartilhar → Copiar link; no computador: a barra do navegador). Ao colar, o sistema busca nome, categoria, foto e preço.">
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <input style={{ ...inp, flex: "1 1 240px", width: "auto" }} type="url" placeholder="https://www.mercadolivre.com.br/.../p/MLB..."
+              <input style={{ ...inp, flex: "1 1 240px", width: "auto" }} type="url" {...urlSemCorretor} enterKeyHint="go" placeholder="https://www.mercadolivre.com.br/.../p/MLB..."
                 value={pagina} onChange={(e) => setPagina(e.target.value)}
-                onPaste={(e) => { const t = e.clipboardData.getData("text").trim(); if (t) { e.preventDefault(); preencher(t); } }}
+                onPaste={(e) => { const t = e.clipboardData.getData("text").trim(); if (t) { e.preventDefault(); aplicarColado(t); } }}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); preencher(); } }} />
               <button type="button" style={{ ...btn, opacity: preenchendo ? 0.6 : 1 }} disabled={preenchendo} onClick={() => preencher()}>
                 {preenchendo ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />} Preencher
@@ -746,7 +970,13 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
           )}
           <Campo label="Link de afiliado *" largo
             dica={avisoLink ? null : "O link que o portal gera: https://meli.la/… ou https://mercadolivre.com/sec/…"}>
-            <input style={inp} type="url" placeholder="https://meli.la/..." value={form.link} onChange={(e) => mudar("link", e.target.value)} />
+            <input style={inp} type="url" {...urlSemCorretor} placeholder="https://meli.la/..." value={form.link} onChange={(e) => mudar("link", e.target.value)}
+              onPaste={(e) => {
+                // Texto do Compartilhar com o link no meio: fica só o link (e o resto vai para os outros campos).
+                const t = e.clipboardData.getData("text");
+                const r = lerTextoDoMercadoLivre(t);
+                if (r.link && t.trim() !== r.link) { e.preventDefault(); aplicarColado(t); }
+              }} />
             {avisoLink && (
               <span style={{ fontSize: 12, color: AMBAR, background: "#FFF4E0", borderRadius: 6, padding: "6px 8px", lineHeight: 1.4 }}>
                 Este parece ser o endereço da página do produto, não o link de afiliado. Assim o produto abre normalmente, mas a FN
@@ -768,18 +998,18 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
             <datalist id="categorias-ml">{categorias.map((c) => <option key={c} value={c} />)}</datalist>
           </Campo>
           <Campo label="Preço hoje (R$)" dica="Em branco, a vitrine manda ver o preço no Mercado Livre.">
-            <input style={inp} type="number" min="0" step="0.01" placeholder="199,90" value={form.preco} onChange={(e) => mudar("preco", e.target.value)} />
+            <input style={inp} type="number" inputMode="decimal" min="0" step="0.01" placeholder="199,90" value={form.preco} onChange={(e) => mudar("preco", e.target.value)} />
           </Campo>
           <Campo label={'Preço "De" (R$, opcional)'} dica="Só quando o anúncio mostra preço riscado.">
-            <input style={inp} type="number" min="0" step="0.01" placeholder="249,90" value={form.preco_de} onChange={(e) => mudar("preco_de", e.target.value)} />
+            <input style={inp} type="number" inputMode="decimal" min="0" step="0.01" placeholder="249,90" value={form.preco_de} onChange={(e) => mudar("preco_de", e.target.value)} />
           </Campo>
           {/* Só para o Financeiro do FN Home dizer quanto a FN ganha por venda; a comissão de
               verdade continua no painel de afiliados do Mercado Livre. */}
           <Campo label="Sua comissão (%)" dica={dicaComissao}>
-            <input style={inp} type="number" min="0" max="100" step="0.1" placeholder={form.comissao_tabela != null ? String(form.comissao_tabela) : "8"}
+            <input style={inp} type="number" inputMode="decimal" min="0" max="100" step="0.1" placeholder={form.comissao_tabela != null ? String(form.comissao_tabela) : "8"}
               value={form.comissao_percentual} onChange={(e) => mudar("comissao_percentual", e.target.value)} />
           </Campo>
-          <Campo label="Foto" largo dica={'Na página do produto, clique com o botão direito na foto → "Copiar endereço da imagem" e cole aqui. Ou envie um arquivo.'}>
+          <Campo label="Foto" largo dica={'No computador: botão direito na foto do produto → "Copiar endereço da imagem" e cole aqui. No celular: salve a foto (ou faça um print) e toque em "Enviar foto" — ou copie a foto e cole aqui.'}>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               {form.foto && (
                 <div style={{ position: "relative", width: 64, height: 64, border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, overflow: "hidden", background: "#fff", flexShrink: 0 }}>
@@ -790,11 +1020,11 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
                   </button>
                 </div>
               )}
-              <input style={{ ...inp, flex: "1 1 220px", width: "auto" }} placeholder="https://http2.mlstatic.com/..."
+              <input style={{ ...inp, flex: "1 1 220px", width: "auto" }} {...urlSemCorretor} placeholder="https://http2.mlstatic.com/..."
                 value={form.foto.startsWith("data:") ? "" : form.foto} disabled={form.foto.startsWith("data:")}
-                onChange={(e) => mudar("foto", e.target.value.trim())} />
+                onPaste={onColarNaFoto} onChange={(e) => mudar("foto", e.target.value.trim())} />
               <label style={{ ...btnLeve, cursor: "pointer" }}>
-                <Upload size={14} /> Enviar arquivo
+                <Upload size={14} /> Enviar foto
                 <input type="file" accept="image/*" onChange={onArquivoFoto} style={{ display: "none" }} />
               </label>
             </div>
@@ -815,7 +1045,7 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
             </label>
           )}
         </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+        <div className="fnml-acoes" style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
           <button style={{ ...btn, opacity: salvando ? 0.6 : 1 }} disabled={salvando} onClick={salvar}>
             {salvando ? <Loader2 size={15} className="spin" /> : form.id ? <Pencil size={15} /> : <Plus size={15} />}
             {form.id ? "Salvar alterações" : "Cadastrar produto"}
@@ -892,19 +1122,19 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   {ocupado ? <Loader2 size={16} className="spin" color={AZUL_MEDIO} /> : (
                     <>
-                      <a href={p.link} target="_blank" rel="noreferrer" title="Abrir o anúncio" style={{ ...btnLeve, padding: "6px 9px", textDecoration: "none" }}><ExternalLink size={14} /></a>
-                      <button title="Editar" style={{ ...btnLeve, padding: "6px 9px" }} onClick={() => { abrirForm(paraForm(p)); window.scrollTo({ top: 0, behavior: "smooth" }); }}><Pencil size={14} /></button>
+                      <a href={p.link} target="_blank" rel="noreferrer" title="Abrir o anúncio" aria-label="Abrir o anúncio" className="fnml-btn-lista" style={{ ...btnLeve, padding: "6px 9px", textDecoration: "none" }}><ExternalLink size={14} /></a>
+                      <button title="Editar" aria-label="Editar" className="fnml-btn-lista" style={{ ...btnLeve, padding: "6px 9px" }} onClick={() => { abrirForm(paraForm(p)); window.scrollTo({ top: 0, behavior: "smooth" }); }}><Pencil size={14} /></button>
                       {p.preco != null && (
-                        <button title="O preço continua o mesmo: marcar como conferido hoje" style={{ ...btnLeve, padding: "6px 9px", color: velho ? AMBAR : AZUL_MARINHO }}
+                        <button title="O preço continua o mesmo: marcar como conferido hoje" className="fnml-btn-lista" style={{ ...btnLeve, padding: "6px 9px", color: velho ? AMBAR : AZUL_MARINHO }}
                           onClick={() => acao(p, { conferirPreco: true }, "Preço marcado como conferido hoje ✓")}>
                           <CalendarCheck size={14} /> Conferi hoje
                         </button>
                       )}
-                      <button title={p.ativo ? "Tirar do FN Home" : "Voltar ao FN Home"} style={{ ...btnLeve, padding: "6px 9px" }}
+                      <button title={p.ativo ? "Tirar do FN Home" : "Voltar ao FN Home"} aria-label={p.ativo ? "Tirar do FN Home" : "Voltar ao FN Home"} className="fnml-btn-lista" style={{ ...btnLeve, padding: "6px 9px" }}
                         onClick={() => acao(p, { ativo: !p.ativo }, p.ativo ? "Saiu do FN Home ✓" : "Voltou ao FN Home ✓")}>
                         {p.ativo ? <EyeOff size={14} /> : <Eye size={14} />}
                       </button>
-                      <button title="Excluir" style={{ ...btnLeve, padding: "6px 9px", color: VERMELHO }} onClick={() => excluir(p)}><Trash2 size={14} /></button>
+                      <button title="Excluir" aria-label="Excluir" className="fnml-btn-lista" style={{ ...btnLeve, padding: "6px 9px", color: VERMELHO }} onClick={() => excluir(p)}><Trash2 size={14} /></button>
                     </>
                   )}
                 </div>
