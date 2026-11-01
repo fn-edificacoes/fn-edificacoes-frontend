@@ -19,7 +19,7 @@ import {
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
   ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle, Megaphone, Clock,
   Wrench, Paperclip, Menu, Receipt, Car, FileBarChart, Gauge, Settings, Landmark, Wallet, Archive, FileSpreadsheet, FileCheck,
-  Link2, Scale, Map as IconeMapa
+  Link2, Scale, Map as IconeMapa, PaintRoller, Rocket, HardHat
 } from "lucide-react";
 
 /* ============================================================
@@ -17626,7 +17626,7 @@ const PARCEIRO_TIPO_LABEL = { servico: "Parceiro", produto: "Afiliado" };
    (afiliados que vendem produto) são as duas áreas de benefícios dentro dela — mesmo
    cadastro de sempre (campo "tipo"), só a apresentação ao cliente muda por área. */
 const FN_AREA_INFO = {
-  servico: { titulo: "FN Clube", descricao: "Serviços selecionados para seu imóvel, com benefícios exclusivos para clientes FN." },
+  servico: { titulo: "FN Clube", descricao: "Prestadores de serviço homologados pela FN para cuidar do seu imóvel, com benefícios exclusivos para clientes FN." },
   /* "Aberta a todos" é de propósito: quem ainda não é cliente achava que a loja era fechada. */
   produto: { titulo: "Loja FN Home", descricao: "Produtos escolhidos pela equipe técnica da FN para equipar o seu imóvel. Aberta a todos: não precisa ser cliente nem ter cadastro." },
 };
@@ -19324,6 +19324,191 @@ function PaginaRetornoCobranca({ id }) {
   );
 }
 
+/* ---- "Vai reformar?": a Documentação ART/TRT no portal do cliente ----
+   Era o card "Precisa de mais um serviço?", e o cliente não entendia que a ART/TRT oferecida ali
+   é a da REFORMA do imóvel dele. Virou propaganda da documentação da reforma (pedido da Gerência,
+   nov/2026). A lista do que o cliente recebe é a mesma que o portal promete quando a documentação
+   fica pronta (STATUS_ATENDIMENTO_INFO): a documentação assinada e a placa de identificação de
+   obra — não prometa aqui o que a equipe não entrega. A frase da norma fica no que a NBR 16.280
+   pede: a reforma comunicada ao síndico antes de começar, com o responsável técnico. */
+const ENTREGAS_DOCUMENTACAO_REFORMA = [
+  "Documentação assinada pelo responsável técnico (ART/TRT)",
+  "Placa de identificação de obra",
+  "Os dois arquivos ficam aqui no portal para você baixar",
+];
+function CardDocumentacaoReforma({ imovel, onSolicitar, solicitando }) {
+  return (
+    <section style={{ borderRadius: 14, overflow: "hidden", border: `1px solid ${CINZA_BORDA}`, background: "#fff", minWidth: 0 }}>
+      <div style={{ color: "#fff", padding: "18px 20px", background: "radial-gradient(420px 220px at 100% 0%, rgba(44,117,181,.45), transparent 70%), linear-gradient(160deg, #12335B, #0B2140)" }}>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 11.5, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "#C8A44D" }}>
+          <HardHat size={14} /> Vai reformar?
+        </div>
+        <h3 style={{ margin: "8px 0 0", fontSize: 19, lineHeight: 1.25, fontWeight: 800, letterSpacing: "-.01em" }}>
+          Veja a documentação necessária para a sua reforma
+        </h3>
+        <p style={{ margin: "8px 0 0", fontSize: 13.5, lineHeight: 1.55, color: "rgba(255,255,255,.8)" }}>
+          Em condomínio, a NBR 16.280 pede que a reforma seja comunicada ao síndico antes de começar,
+          com a ART/TRT do responsável técnico pela obra.
+        </p>
+      </div>
+      <div style={{ padding: "16px 20px 18px" }}>
+        <div style={{ fontWeight: 700, fontSize: 14.5, color: AZUL_MARINHO }}>Documentação ART/TRT da reforma — a FN faz para você</div>
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "4px 0 12px", lineHeight: 1.5 }}>
+          É a documentação da reforma do seu imóvel
+          {imovel ? <> — <strong style={{ color: "#4a5a70" }}>{imovel}</strong></> : null}. Sem cadastro
+          novo: usamos os mesmos dados que você já enviou.
+        </p>
+        <div style={{ display: "grid", gap: 6, marginBottom: 14 }}>
+          {ENTREGAS_DOCUMENTACAO_REFORMA.map((t) => (
+            <div key={t} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13.5, color: "#334" }}>
+              <Check size={16} color="#2E7D32" style={{ flexShrink: 0, marginTop: 2 }} /> {t}
+            </div>
+          ))}
+        </div>
+        <button className="btn-solid" onClick={onSolicitar} disabled={solicitando}>
+          {solicitando ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} Solicitar a documentação da reforma
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/* ---- FN Reforma no portal do cliente (pedido da Gerência, nov/2026) ----
+   A FN ainda não atende reforma, mas o cliente já deixa o pedido. Ainda não existe rota no backend
+   para isso: o formulário monta a mensagem e abre o WhatsApp do atendimento (o mesmo número do
+   rodapé da página de entrada), já com o nome e o imóvel do cadastro. Nada fica gravado no
+   sistema — o pedido chega pelo WhatsApp. Quando a FN Reforma abrir, troque o WhatsApp por um POST
+   na API e dê à Gerência a lista dos pedidos.
+   As categorias são as do FN Casa Pronta (repositório fn-reformas, lib/casa-pronta.ts), na mesma
+   ordem: o pedido já chega com o nome que os fornecedores usam. */
+const WHATSAPP_ATENDIMENTO_FN = "5581983061305";
+const CATEGORIAS_REFORMA = ["Box e vidros", "Marmoraria", "Marcenaria", "Pintura", "Elétrica e iluminação", "Hidráulica", "Gesso e forro", "Pisos e revestimentos", "Climatização", "Cortinas e persianas", "Redes e telas", "Limpeza pós-obra", "Gás", "Outros"];
+const PRAZOS_REFORMA = ["O quanto antes", "Nos próximos 3 meses", "Ainda estou planejando"];
+
+function ChipEscolha({ ativo, onClick, children }) {
+  return (
+    <button type="button" onClick={onClick} aria-pressed={ativo}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 4, padding: "6px 11px", borderRadius: 20,
+        fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+        border: `1px solid ${ativo ? AZUL_MEDIO : CINZA_BORDA}`, background: ativo ? AZUL_MEDIO : "#fff", color: ativo ? "#fff" : AZUL_MARINHO,
+      }}>
+      {ativo && <Check size={12} />}{children}
+    </button>
+  );
+}
+
+function SecaoFnReforma({ nome, imoveis = [], aoVerDocumentacao }) {
+  const [categorias, setCategorias] = useState([]);
+  const [prazo, setPrazo] = useState("");
+  const [detalhes, setDetalhes] = useState("");
+  const [imovel, setImovel] = useState("");
+  const [erro, setErro] = useState("");
+  const [enviado, setEnviado] = useState(false);
+  // Os atendimentos chegam depois da primeira pintura da tela: sem escolha, vale o primeiro imóvel.
+  const imovelEscolhido = imovel || imoveis[0] || "";
+  const pronto = categorias.length > 0 || detalhes.trim().length >= 5;
+
+  const alternar = (c) => { setErro(""); setCategorias((atual) => (atual.includes(c) ? atual.filter((x) => x !== c) : [...atual, c])); };
+  const linhas = ["Olá, FN! Quero deixar meu pedido para a *FN Reforma*.", ""];
+  if (nome) linhas.push(`*Nome:* ${nome}`);
+  if (imovelEscolhido) linhas.push(`*Imóvel:* ${imovelEscolhido}`);
+  if (categorias.length) linhas.push(`*O que preciso:* ${categorias.join(", ")}`);
+  if (prazo) linhas.push(`*Para quando:* ${prazo}`);
+  if (detalhes.trim()) linhas.push(`*Detalhes:* ${detalhes.trim()}`);
+  linhas.push("", "_Pedido feito pela Área do Cliente._");
+  /* Link de verdade (e não window.open no clique): o iPhone abre o WhatsApp direto, e nenhum
+     bloqueador de pop-up segura um link que a própria pessoa tocou. */
+  const link = `https://wa.me/${WHATSAPP_ATENDIMENTO_FN}?text=${encodeURIComponent(linhas.join("\n"))}`;
+  const recomecar = () => { setCategorias([]); setPrazo(""); setDetalhes(""); setErro(""); setEnviado(false); };
+
+  return (
+    <Card icon={PaintRoller} titulo={<>FN Reforma<SeloEmBreve /></>}>
+      <p style={{ fontSize: 13.5, color: "#4a5a70", lineHeight: 1.55, margin: "0 0 14px" }}>
+        No momento a FN Reforma ainda não está funcionando, mas em breve também vamos atender a reforma
+        do seu imóvel. <strong>Já pode deixar o seu pedido aqui</strong>: assim que começarmos, a nossa
+        equipe fala com você.
+      </p>
+
+      {enviado ? (
+        <div style={{ background: "#E6F4EA", border: "1px solid #A5D6B0", borderRadius: 10, padding: "12px 14px", fontSize: 13.5, color: "#33683c", lineHeight: 1.5 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#2E7D32", fontWeight: 700, fontSize: 14.5, marginBottom: 4 }}>
+            <Check size={16} /> Seu pedido está pronto no WhatsApp
+          </div>
+          É só tocar em enviar por lá. Assim que a FN Reforma começar a atender, a nossa equipe entra em contato.
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 10, alignItems: "center" }}>
+            <a href={link} target="_blank" rel="noopener noreferrer" style={{ color: "#2E7D32", fontWeight: 700 }}>O WhatsApp não abriu? Toque aqui</a>
+            <button type="button" className="btn-ghost" style={{ color: AZUL_MARINHO, background: "#fff", padding: "6px 12px" }} onClick={recomecar}>
+              Fazer outro pedido
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gap: 14 }}>
+          <div>
+            <div style={lab}>O que você quer fazer no imóvel?</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 7 }}>
+              {CATEGORIAS_REFORMA.map((c) => (
+                <ChipEscolha key={c} ativo={categorias.includes(c)} onClick={() => alternar(c)}>{c}</ChipEscolha>
+              ))}
+            </div>
+          </div>
+          <div style={cell(true)}>
+            <label style={lab} htmlFor="fn-reforma-detalhes">Conte um pouco do que precisa</label>
+            <textarea id="fn-reforma-detalhes" style={{ ...inp, minHeight: 80, resize: "vertical" }} value={detalhes}
+              placeholder="Ex.: box do banheiro da suíte, bancada da cozinha e rede de proteção nas janelas."
+              onChange={(e) => { setErro(""); setDetalhes(e.target.value); }} />
+          </div>
+          <div>
+            <div style={lab}>Para quando?</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 7 }}>
+              {PRAZOS_REFORMA.map((p) => (
+                <ChipEscolha key={p} ativo={prazo === p} onClick={() => setPrazo(prazo === p ? "" : p)}>{p}</ChipEscolha>
+              ))}
+            </div>
+          </div>
+          {imoveis.length > 1 && (
+            <div style={cell(true)}>
+              <label style={lab} htmlFor="fn-reforma-imovel">Em qual imóvel?</label>
+              <select id="fn-reforma-imovel" style={inp} value={imovelEscolhido} onChange={(e) => setImovel(e.target.value)}>
+                {imoveis.map((i) => <option key={i} value={i}>{i}</option>)}
+              </select>
+            </div>
+          )}
+          {erro && (
+            <div style={{ background: "#FCEAEA", color: "#C62828", padding: "8px 10px", borderRadius: 8, fontSize: 12.5 }}>
+              <AlertTriangle size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} /> {erro}
+            </div>
+          )}
+          <div>
+            <a className="btn-solid" href={link} target="_blank" rel="noopener noreferrer"
+              style={{ textDecoration: "none", justifyContent: "center", padding: "11px 14px" }}
+              onClick={(e) => {
+                if (!pronto) { e.preventDefault(); setErro("Marque o que você quer fazer ou conte um pouco do que precisa."); return; }
+                setEnviado(true);
+              }}>
+              <Send size={15} /> Enviar pedido pelo WhatsApp
+            </a>
+            <p style={{ fontSize: 11.5, color: "#8593a8", margin: "6px 0 0" }}>
+              Vai para o WhatsApp da FN, (81) 98306-1305, já com o seu nome e o imóvel do cadastro.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {aoVerDocumentacao && (
+        <p style={{ fontSize: 12.5, color: "#65758b", margin: "14px 0 0", paddingTop: 12, borderTop: `1px solid ${CINZA_BORDA}`, lineHeight: 1.5 }}>
+          Vai reformar antes disso? A <strong>documentação ART/TRT da reforma</strong> a FN já faz.{" "}
+          <button type="button" onClick={aoVerDocumentacao}
+            style={{ background: "none", border: "none", padding: 0, color: AZUL_MEDIO, fontWeight: 700, cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>
+            Ver a documentação →
+          </button>
+        </p>
+      )}
+    </Card>
+  );
+}
+
 function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado = false }) {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
@@ -19451,21 +19636,51 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado 
     setSolicitandoDoc(false);
   };
 
-  /* Loja FN Home: abre direto na aba FN Home (a do FN Clube estava vazia e era a primeira coisa
-     que o cliente via). Para quem acabou de se cadastrar ela sobe para o topo, logo abaixo da
-     confirmação — o "Meu atendimento" ainda está vazio nessa hora. Para os demais fica no fim,
-     e o botão do cabeçalho leva até ela. */
+  /* Loja FN Home: só a loja, sem as abas FN Clube / FN Home (semAbas) — antes ela abria na aba FN
+     Home e a do FN Clube ficava ao lado, vazia; hoje o FN Clube tem seção própria, logo depois da
+     loja. Para quem acabou de se cadastrar a loja sobe para o topo, logo abaixo da confirmação — o
+     "Meu atendimento" ainda está vazio nessa hora. Para os demais fica no fim, e o botão do
+     cabeçalho leva até ela. */
   /* Mais larga que o resto do portal (720): os cartões de produto pedem espaço, como no site.
      justifySelf: "center" não centraliza o que é maior que a coluna (vazava só para a direita);
      a margem negativa de metade da sobra, sim. O % da margem é a largura da coluna. */
   const larguraLoja = "min(1100px, 100vw - 36px)";
+  const naLarguraDaLoja = { width: larguraLoja, marginLeft: `calc((100% - ${larguraLoja}) / 2)`, justifySelf: "start" };
   const loja = (
-    <div id="loja-fn-home" style={{ scrollMarginTop: 90, width: larguraLoja, marginLeft: `calc((100% - ${larguraLoja}) / 2)`, justifySelf: "start", display: "grid", gap: 12 }}>
+    <div id="loja-fn-home" style={{ scrollMarginTop: 90, ...naLarguraDaLoja, display: "grid", gap: 12 }}>
       <FaixaLojaFnHome compacta />
-      <SecaoParceirosVitrine notify={notify} clienteLogado={cliente} token={session.token} tipoInicial="produto" semDescricao />
+      <SecaoParceirosVitrine notify={notify} clienteLogado={cliente} token={session.token} tipoInicial="produto" semDescricao semAbas />
     </div>
   );
-  const irParaLoja = () => document.getElementById("loja-fn-home")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  /* Rola até a seção descontando o cabeçalho fixo, que no celular tem duas linhas: com um
+     scrollMarginTop fixo o título da seção ficava escondido atrás dele. */
+  const cabecalhoRef = useRef(null);
+  const irPara = (id) => {
+    const alvo = document.getElementById(id);
+    if (!alvo) return;
+    const folga = (cabecalhoRef.current?.offsetHeight || 0) + 12;
+    window.scrollTo({ top: alvo.getBoundingClientRect().top + window.scrollY - folga, behavior: "smooth" });
+  };
+  /* Imóveis dos atendimentos, sem repetir — vão no pedido da FN Reforma e no card da documentação. */
+  const imoveis = [...new Set(resultados.filter((d) => d.empreendimento)
+    .map((d) => `${d.empreendimento}${d.blocoTorre ? ` · ${d.blocoTorre}` : ""}`))];
+  const mostraDocumentacao = !carregando && resultados.length > 0 && !jaTemDocumentacao;
+  /* FN Clube e FN Reforma logo depois da loja (pedido da Gerência, nov/2026): as áreas da FN para o
+     imóvel ficam juntas, e cada uma tem o seu botão no cabeçalho. As duas ainda vão estrear: o FN
+     Clube mostra o aviso enquanto não houver parceiro homologado (AvisoFnClubeEmBreve) e a FN
+     Reforma já recebe pedido pelo WhatsApp (SecaoFnReforma). Lado a lado, na largura da loja, o
+     FN Clube ficava um card alto e vazio ao lado do formulário — por isso vão um embaixo do outro. */
+  const outrasAreas = (
+    <>
+      <div id="fn-clube" style={{ display: "grid", minWidth: 0 }}>
+        <SecaoParceirosVitrine notify={notify} clienteLogado={cliente} token={session.token} tipoInicial="servico" semAbas />
+      </div>
+      <div id="fn-reforma" style={{ display: "grid", minWidth: 0 }}>
+        <SecaoFnReforma nome={session.usuario.nome} imoveis={imoveis}
+          aoVerDocumentacao={mostraDocumentacao ? () => irPara("documentacao-reforma") : null} />
+      </div>
+    </>
+  );
   const primeiroNome = String(session.usuario.nome || "").trim().split(/\s+/)[0];
   // O cadastro fica no fim da página pública; sem isto o portal abria rolado lá para baixo.
   useEffect(() => { if (recemCadastrado) window.scrollTo(0, 0); }, []);
@@ -19474,8 +19689,11 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado 
     <div style={{ fontFamily: "'Inter', system-ui, sans-serif", color: "#1a2330", background: CINZA_CLARO, minHeight: "100vh" }}>
       <style>{estilos}</style>
 
-      <header className="no-print" style={{ background: AZUL_MARINHO, color: "#fff", position: "sticky", top: 0, zIndex: 20 }}>
-        <div style={{ maxWidth: 720, margin: "0 auto", padding: "12px 18px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+      {/* 1100 de largura (a da loja), e não 720 como o resto do portal: com Loja FN Home, FN Clube e
+          FN Reforma lado a lado, em 720 o nome e os botões desciam para uma segunda linha. No
+          celular os botões ficam só no ícone e dividem a linha com o nome (cabecalho-cliente). */}
+      <header ref={cabecalhoRef} className="no-print" style={{ background: AZUL_MARINHO, color: "#fff", position: "sticky", top: 0, zIndex: 20 }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto", padding: "12px 18px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{ width: "clamp(36px, 9vw, 44px)", height: "clamp(36px, 9vw, 44px)", borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
               <img src={LOGO_URL} alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
@@ -19486,13 +19704,20 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado 
             </div>
           </div>
           <div style={{ flex: 1 }} />
-          <div className="cabecalho-usuario" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
+          <div className="cabecalho-usuario cabecalho-cliente" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, marginLeft: "auto" }}>
             <div style={{ textAlign: "right", lineHeight: 1.2, minWidth: 0 }}>
               <div style={{ fontWeight: 700 }}>{session.usuario.nome}</div>
               <div style={{ opacity: 0.7 }}>{cliente?.cpfMascarado || ""}</div>
             </div>
-            <button className="btn-ghost" onClick={irParaLoja} title="Loja FN Home" aria-label="Loja FN Home">
+            {/* As áreas da FN para o imóvel, uma ao lado da outra; cada botão rola até a sua seção. */}
+            <button className="btn-ghost" onClick={() => irPara("loja-fn-home")} title="Loja FN Home" aria-label="Loja FN Home">
               <ShoppingBag size={14} /> <span className="rotulo-cabecalho">Loja FN Home</span>
+            </button>
+            <button className="btn-ghost" onClick={() => irPara("fn-clube")} title="FN Clube (em breve)" aria-label="FN Clube">
+              <Handshake size={14} /> <span className="rotulo-cabecalho">FN Clube</span>
+            </button>
+            <button className="btn-ghost" onClick={() => irPara("fn-reforma")} title="FN Reforma (em breve)" aria-label="FN Reforma">
+              <PaintRoller size={14} /> <span className="rotulo-cabecalho">FN Reforma</span>
             </button>
             <button className="btn-ghost" onClick={onLogout} title="Sair" aria-label="Sair"><X size={14} /> <span className="rotulo-cabecalho">Sair</span></button>
           </div>
@@ -19693,19 +19918,17 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado 
           </Card>
         )}
 
-        {!carregando && resultados.length > 0 && !jaTemDocumentacao && (
-          <Card icon={FileText} titulo="Precisa de mais um serviço?">
-            <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-              Peça a Documentação ART/TRT do seu imóvel sem preencher o cadastro de novo —
-              usamos os mesmos dados que você já enviou.
-            </p>
-            <button className="btn-solid" onClick={solicitarDocumentacao} disabled={solicitandoDoc}>
-              {solicitandoDoc ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} Solicitar Documentação ART/TRT
-            </button>
-          </Card>
+        {/* O imóvel só aparece com um imóvel só: com mais de um, quem escolhe de qual cadastro
+            saem os dados é o servidor (nova-solicitacao), e a tela poderia nomear o errado. */}
+        {mostraDocumentacao && (
+          <div id="documentacao-reforma" style={{ display: "grid", minWidth: 0 }}>
+            <CardDocumentacaoReforma imovel={imoveis.length === 1 ? imoveis[0] : ""}
+              onSolicitar={solicitarDocumentacao} solicitando={solicitandoDoc} />
+          </div>
         )}
 
         {!recemCadastrado && loja}
+        {outrasAreas}
 
         <CardPrivacidadeCliente token={session.token} notify={notify} />
       </main>
@@ -20595,10 +20818,42 @@ function CardProdutoVitrine({ p, onClick }) {
   );
 }
 
-/* semDescricao: no portal do cliente a faixa da loja já explica a área logo acima. */
-function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, somenteLogos = false, tipoInicial = "servico", semDescricao = false }) {
+/* Selo das áreas que ainda vão estrear (FN Clube, FN Reforma), ao lado do título do card. */
+function SeloEmBreve() {
+  return (
+    <span style={{ background: "#FFF4E0", color: "#B26A00", padding: "2px 8px", borderRadius: 20, fontSize: 10.5, fontWeight: 800, letterSpacing: ".04em", textTransform: "uppercase", whiteSpace: "nowrap", marginLeft: 8, verticalAlign: "2px" }}>
+      Em breve
+    </span>
+  );
+}
+
+/* FN Clube sem parceiro de serviço homologado (pedido da Gerência, nov/2026): no lugar de
+   "nenhum parceiro disponível", o aviso de que a área está em andamento e vai estrear. Quem
+   decide é a vitrine — o primeiro parceiro aprovado toma o lugar deste aviso, sem mexer aqui. */
+function AvisoFnClubeEmBreve() {
+  return (
+    <div style={{ display: "flex", gap: 12, alignItems: "flex-start", background: "#FFF8E8", border: "1px solid #F3DDAE", borderRadius: 12, padding: "12px 14px" }}>
+      <div style={{ width: 34, height: 34, borderRadius: 9, background: "#FFEBC2", display: "grid", placeItems: "center", flexShrink: 0 }}>
+        <Rocket size={17} color="#B26A00" />
+      </div>
+      <div style={{ fontSize: 13.5, lineHeight: 1.5, color: "#5d4a22" }}>
+        <strong style={{ display: "block", color: "#8A5300", fontSize: 14, marginBottom: 2 }}>Em andamento · estreia em breve</strong>
+        Os primeiros parceiros estão em homologação e o FN Clube vai estrear em breve. Estamos
+        trabalhando para reunir tudo o que o seu imóvel precisa em um só lugar.
+      </div>
+    </div>
+  );
+}
+
+/* semDescricao: no portal do cliente a faixa da loja já explica a área logo acima.
+   semAbas: mostra só a área de tipoInicial, sem os botões FN Clube / FN Home. É o jeito do portal
+   do cliente (nov/2026): a loja e o FN Clube têm cada um a sua seção e o seu botão no cabeçalho, e
+   a aba FN Clube dentro da loja virava uma segunda porta para o mesmo lugar. */
+function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, somenteLogos = false, tipoInicial = "servico", semDescricao = false, semAbas = false }) {
   const [parceiros, setParceiros] = useState([]);
-  const [carregando, setCarregando] = useState(false);
+  /* Começa carregando: começando em false, o FN Clube mostrava o aviso de "em breve" por um
+     instante antes de a lista de parceiros chegar. */
+  const [carregando, setCarregando] = useState(true);
   const [abaTipo, setAbaTipo] = useState(tipoInicial);
   const [selecionado, setSelecionado] = useState(null);
   const [carrinhoAberto, setCarrinhoAberto] = useState(false);
@@ -20625,36 +20880,47 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, so
      Projetos → Casa Pronta. */
   const filtrados = somenteLogos ? parceiros : (abaTipo === "produto" ? [] : parceiros.filter((p) => p.tipo === abaTipo));
   const info = FN_AREA_INFO[abaTipo] || FN_AREA_INFO.servico;
-  // O carrinho é dos parceiros do FN Clube; na loja ele só aparece se já tiver item.
-  const mostraCarrinho = abaTipo !== "produto" || carrinho.quantidadeTotal > 0;
+  const clubeEmBreve = !somenteLogos && abaTipo === "servico" && !carregando && filtrados.length === 0;
+  /* O carrinho é dos parceiros do FN Clube: na aba deles aparece sempre que houver parceiro (no
+     "em breve", só se já tiver item); na loja, só se já tiver item. Com semAbas a loja nunca mostra
+     o carrinho: no portal ele fica na seção do FN Clube, e duas cópias do carrinho na mesma página
+     (cada seção tem o seu useCarrinho) se desencontrariam. */
+  const mostraCarrinho = abaTipo === "produto"
+    ? !semAbas && carrinho.quantidadeTotal > 0
+    : !clubeEmBreve || carrinho.quantidadeTotal > 0;
+  const mostraAbas = !somenteLogos && !semAbas;
+  const iconeCard = somenteLogos ? Building2 : (abaTipo === "produto" ? ShoppingBag : Handshake);
 
   return (
-    <Card icon={!somenteLogos && abaTipo === "produto" ? ShoppingBag : Building2} titulo={somenteLogos ? "Benefícios Exclusivos FN" : info.titulo}>
-      {!somenteLogos && (
-        <>
-          {!semDescricao && <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>{info.descricao}</p>}
-          <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-            <button onClick={() => setAbaTipo("servico")}
-              className={abaTipo === "servico" ? "btn-solid" : "btn-ghost"}
-              style={abaTipo === "servico" ? {} : { color: AZUL_MARINHO, background: CINZA_CLARO }}>
-              FN Clube
-            </button>
-            <button onClick={() => setAbaTipo("produto")}
-              className={abaTipo === "produto" ? "btn-solid" : "btn-ghost"}
-              style={abaTipo === "produto" ? {} : { color: AZUL_MARINHO, background: CINZA_CLARO }}>
-              FN Home
-            </button>
-            <div style={{ flex: 1 }} />
-            {mostraCarrinho && (
-              <BotaoCarrinho quantidade={carrinho.quantidadeTotal} onClick={() => setCarrinhoAberto(true)}
-                style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} />
-            )}
-          </div>
-        </>
+    <Card icon={iconeCard} titulo={somenteLogos ? "Benefícios Exclusivos FN" : <>{info.titulo}{clubeEmBreve && <SeloEmBreve />}</>}>
+      {!somenteLogos && !semDescricao && <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>{info.descricao}</p>}
+      {!somenteLogos && (mostraAbas || mostraCarrinho) && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+          {mostraAbas && (
+            <>
+              <button onClick={() => setAbaTipo("servico")}
+                className={abaTipo === "servico" ? "btn-solid" : "btn-ghost"}
+                style={abaTipo === "servico" ? {} : { color: AZUL_MARINHO, background: CINZA_CLARO }}>
+                FN Clube
+              </button>
+              <button onClick={() => setAbaTipo("produto")}
+                className={abaTipo === "produto" ? "btn-solid" : "btn-ghost"}
+                style={abaTipo === "produto" ? {} : { color: AZUL_MARINHO, background: CINZA_CLARO }}>
+                FN Home
+              </button>
+            </>
+          )}
+          <div style={{ flex: 1 }} />
+          {mostraCarrinho && (
+            <BotaoCarrinho quantidade={carrinho.quantidadeTotal} onClick={() => setCarrinhoAberto(true)}
+              style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} />
+          )}
+        </div>
       )}
 
       {carregando && !mostraOfertasMl && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
-      {!carregando && filtrados.length === 0 && !(mostraOfertasMl && qtdOfertasMl > 0) && (
+      {clubeEmBreve && <AvisoFnClubeEmBreve />}
+      {!carregando && !clubeEmBreve && filtrados.length === 0 && !(mostraOfertasMl && qtdOfertasMl > 0) && (
         <p style={{ color: "#8593a8", fontSize: 14 }}>
           {mostraOfertasMl ? "Nenhum produto disponível no momento." : "Nenhum parceiro disponível no momento."}
         </p>
@@ -20832,6 +21098,11 @@ const estilos = `
     .rotulo-cabecalho { display: none; }
     .cabecalho-usuario { flex-wrap: wrap; justify-content: flex-end; max-width: 100%; }
     .cabecalho-usuario .btn-ghost { padding: 9px 10px; min-width: 40px; min-height: 40px; }
+    /* Portal do cliente: nome e os quatro botões (loja, FN Clube, FN Reforma, sair) numa linha só,
+       embaixo do logo. O nome quebra em duas linhas antes de o "Sair" descer para uma terceira. */
+    .cabecalho-cliente { flex-wrap: nowrap; width: 100%; }
+    .cabecalho-cliente > div:first-child { flex: 1 1 auto; }
+    .cabecalho-cliente .btn-ghost { flex-shrink: 0; justify-content: center; }
     .modal-acoes, .modal-acoes > div { flex-direction: column-reverse; width: 100%; }
     .modal-acoes button { width: 100%; min-height: 44px; }
     th { white-space: nowrap; }
