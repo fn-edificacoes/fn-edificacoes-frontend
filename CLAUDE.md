@@ -399,6 +399,14 @@ comissão só aparece no painel de afiliados de lá. Backend: `src/afiliados-mer
   o cartão vizinho ganhava um vão entre o nome e o preço, e no iPhone a foto vazava por cima do
   "Comprar". Foto que não abre vira o ícone (`FotoDoProduto`). A miniatura da lista (`Miniatura`)
   segue a mesma ideia — dentro de grade, a foto alta saía cortada.
+- **Descontos em destaque** (nov/2026, pedido da Gerência: "os descontos que a loja fornece na
+  propaganda deles"): `ofertaDe(p)` junta o "De" riscado (`preco_de` maior que o preço) e o texto do
+  anúncio (`desconto_texto`, "7% OFF no Pix"); o percentual do texto manda quando os dois existem, e sem
+  nenhum dos dois não há oferta — nada é inventado. Na loja: faixa "N produtos em promoção — até X% OFF"
+  (abre o filtro), chip **"Em promoção (N)"** antes das categorias, produtos com desconto primeiro (o
+  maior na frente; o resto na ordem de sempre), selo vermelho `-X%` na foto (`COR_OFERTA`), "De R$"
+  riscado, o texto do anúncio em verde e "Economize R$ X" quando há "De". O texto vai inteiro porque
+  "-7%" sem o "no Pix" prometeria o desconto no cartão. No cadastro: campo **"Desconto do anúncio"**.
 
 ## FN Home · Financeiro (vendas e comissões)
 

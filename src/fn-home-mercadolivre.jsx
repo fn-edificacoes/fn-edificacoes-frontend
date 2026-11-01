@@ -19,7 +19,7 @@
 
    Arquivo à parte como a Rede Nacional: o App.jsx só o encaixa e entrega o apiFetch. */
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ShoppingBag, ExternalLink, Plus, Pencil, Trash2, RefreshCcw, Loader2, X, Search, Upload, CalendarCheck, Eye, EyeOff, MousePointerClick, Sparkles, Bookmark, Check } from "lucide-react";
+import { ShoppingBag, ExternalLink, Plus, Pencil, Trash2, RefreshCcw, Loader2, X, Search, Upload, CalendarCheck, Eye, EyeOff, MousePointerClick, Sparkles, Bookmark, Check, Tag } from "lucide-react";
 
 const AZUL_MEDIO = "#2C75B5";
 const AZUL_MARINHO = "#12335B";
@@ -45,6 +45,22 @@ const fmtDia = (iso) => (iso ? new Date(iso).toLocaleDateString("pt-BR") : "");
 const diasDesde = (iso) => (iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) : null);
 const desconto = (p) => (p.preco_de && p.preco && Number(p.preco_de) > Number(p.preco)
   ? Math.round((1 - Number(p.preco) / Number(p.preco_de)) * 100) : null);
+
+/* O desconto que o anúncio do Mercado Livre mostra, para a vitrine pôr em destaque (pedido da
+   Gerência, nov/2026: "os descontos que a loja fornece na propaganda deles"). O texto vai como o
+   anúncio escreve ("7% OFF no Pix"): o selo "-7%" sozinho prometeria o desconto em qualquer
+   pagamento. Sem texto, vale o "De" riscado; o percentual do texto manda quando os dois existem.
+   Nada aqui inventa desconto: sem "De" maior que o preço e sem texto, não há oferta. */
+const COR_OFERTA = "#D93025";
+function ofertaDe(p) {
+  const peloDe = desconto(p);
+  const texto = String(p.desconto_texto || "").trim();
+  const doTexto = Number((/(\d{1,2})\s*%/.exec(texto) || [])[1]) || null;
+  const pct = doTexto || peloDe;
+  if (!pct) return null;
+  const economia = peloDe ? Number(p.preco_de) - Number(p.preco) : null;
+  return { pct, texto: texto || `${pct}% OFF`, economia };
+}
 
 /* O link que dá comissão é o que o portal de afiliados gera (mercadolivre.com/sec/…, ou o
    encurtador meli.la). Um link copiado da barra do navegador na página do produto abre o mesmo
@@ -205,6 +221,7 @@ export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true 
   const [categoria, setCategoria] = useState("");
   const [busca, setBusca] = useState("");
   const [limite, setLimite] = useState(PRODUTOS_POR_PAGINA);
+  const [soPromocao, setSoPromocao] = useState(false);
 
   useEffect(() => {
     let vivo = true;
@@ -225,9 +242,17 @@ export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true 
   // Sem acento e sem caixa: os títulos do Mercado Livre vêm ora "Lâmpada", ora "Lampada".
   const semAcento = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
   const termo = semAcento(busca.trim());
-  const filtrados = produtos.filter((p) => (!categoria || p.categoria === categoria) && (!termo || semAcento(p.titulo).includes(termo)));
+  /* Em promoção primeiro, o maior desconto na frente; o resto segue a ordem de sempre (o sort é
+     estável). É o que faz a loja abrir mostrando as ofertas. */
+  const ofertas = new Map(produtos.map((p) => [p.id, ofertaDe(p)]));
+  const emPromocao = produtos.filter((p) => ofertas.get(p.id)).length;
+  const maiorDesconto = Math.max(0, ...produtos.map((p) => ofertas.get(p.id)?.pct || 0));
+  const filtrados = produtos
+    .filter((p) => (!categoria || p.categoria === categoria) && (!termo || semAcento(p.titulo).includes(termo)) && (!soPromocao || ofertas.get(p.id)))
+    .sort((a, b) => (ofertas.get(b.id)?.pct || 0) - (ofertas.get(a.id)?.pct || 0));
   const visiveis = filtrados.slice(0, limite);
   const trocarCategoria = (c) => { setCategoria(c); setLimite(PRODUTOS_POR_PAGINA); };
+  const trocarPromocao = (sim) => { setSoPromocao(sim); setLimite(PRODUTOS_POR_PAGINA); };
 
   /* O botão é o próprio link do Mercado Livre: a compra não depende da nossa API. O aviso de
      clique vai junto, sem esperar resposta — se falhar, perde-se só a contagem. */
@@ -266,6 +291,7 @@ export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true 
         .fnh-nome { font-size: 15px; }
         .fnh-preco { font-size: 21px; }
         .fnh-comprar { font-size: 13.5px; padding: 10px 8px; }
+        .fnh-selo { font-size: 14px; padding: 5px 10px; top: 10px; left: 10px; }
         @media (max-width: 640px) {
           .fnh-grade { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
           .fnh-foto > img { padding: 10px; }
@@ -274,6 +300,7 @@ export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true 
           .fnh-nome { font-size: 13px; }
           .fnh-preco { font-size: 17px; }
           .fnh-comprar { font-size: 12.5px; padding: 9px 6px; }
+          .fnh-selo { font-size: 12px; padding: 4px 8px; top: 8px; left: 8px; }
         }
       `}</style>
 
@@ -297,9 +324,30 @@ export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true 
         </span>
       </div>
 
-      {categorias.length > 1 && (
+      {emPromocao > 0 && !soPromocao && (
+        <button type="button" onClick={() => trocarPromocao(true)}
+          style={{
+            width: "100%", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", textAlign: "left", cursor: "pointer",
+            margin: "0 0 12px", padding: "10px 14px", borderRadius: 12, border: `1px solid ${COR_OFERTA}33`, background: "#FDECEA", color: "#5f1410",
+          }}>
+          <Tag size={18} color={COR_OFERTA} />
+          <span style={{ flex: "1 1 200px", fontSize: 14 }}>
+            <strong>{emPromocao === 1 ? "1 produto em promoção" : `${emPromocao} produtos em promoção`}</strong>
+            {maiorDesconto > 0 && <> — até <strong style={{ color: COR_OFERTA }}>{maiorDesconto}% OFF</strong></>}
+          </span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: COR_OFERTA, whiteSpace: "nowrap" }}>Ver as ofertas →</span>
+        </button>
+      )}
+
+      {(categorias.length > 1 || emPromocao > 0) && (
         <div className="fnh-chips" role="group" aria-label="Categorias"
           style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4, marginBottom: 14 }}>
+          {emPromocao > 0 && (
+            <button aria-pressed={soPromocao} onClick={() => trocarPromocao(!soPromocao)}
+              style={{ ...chip(soPromocao), display: "inline-flex", alignItems: "center", gap: 5, ...(soPromocao ? { background: COR_OFERTA, borderColor: COR_OFERTA } : { color: COR_OFERTA, borderColor: `${COR_OFERTA}66` }) }}>
+              <Tag size={13} /> Em promoção ({emPromocao})
+            </button>
+          )}
           <button style={chip(!categoria)} onClick={() => trocarCategoria("")}>Todas ({produtos.length})</button>
           {categorias.map(([c, n]) => (
             <button key={c} style={chip(categoria === c)} onClick={() => trocarCategoria(categoria === c ? "" : c)}>{c} ({n})</button>
@@ -309,7 +357,7 @@ export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true 
 
       {filtrados.length === 0 && (
         <p style={{ fontSize: 13.5, color: "#65758b", textAlign: "center", padding: "24px 0" }}>
-          Nenhum produto encontrado{termo ? ` para "${busca.trim()}"` : ""}.
+          Nenhum produto {soPromocao ? "em promoção" : "encontrado"}{termo ? ` para "${busca.trim()}"` : ""}{categoria ? ` em ${categoria}` : ""}.
         </p>
       )}
 
@@ -317,13 +365,17 @@ export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true 
           celular — produto em coluna única vira rolagem sem fim. */}
       <div className="fnh-grade">
         {visiveis.map((p) => {
-          const off = desconto(p);
+          const oferta = ofertas.get(p.id);
+          const temDe = desconto(p);
           return (
-            <div key={p.id} className="fnh-card" style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column", background: "#fff", minWidth: 0, boxShadow: "0 1px 2px rgba(18,51,91,.04), 0 4px 14px rgba(18,51,91,.05)" }}>
+            <div key={p.id} className="fnh-card" style={{ border: `1px solid ${oferta ? `${COR_OFERTA}55` : CINZA_BORDA}`, borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column", background: "#fff", minWidth: 0, boxShadow: "0 1px 2px rgba(18,51,91,.04), 0 4px 14px rgba(18,51,91,.05)" }}>
               <div className="fnh-foto">
                 <FotoDoProduto src={p.foto} alt={p.titulo} />
-                {off && (
-                  <span style={{ position: "absolute", zIndex: 1, top: 10, left: 10, fontSize: 12, fontWeight: 700, color: "#fff", background: AZUL_MARINHO, borderRadius: 7, padding: "3px 8px" }}>-{off}%</span>
+                {oferta && (
+                  <span className="fnh-selo" aria-label={`${oferta.pct}% de desconto`}
+                    style={{ position: "absolute", zIndex: 1, fontWeight: 800, color: "#fff", background: COR_OFERTA, borderRadius: 8, letterSpacing: "-.01em", boxShadow: "0 2px 6px rgba(217,48,37,.35)" }}>
+                    -{oferta.pct}%
+                  </span>
                 )}
               </div>
               <div className="fnh-corpo" style={{ display: "flex", flexDirection: "column", flex: 1 }}>
@@ -334,10 +386,20 @@ export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true 
                   {p.titulo}
                 </div>
                 <div style={{ marginTop: "auto", paddingTop: 6 }}>
-                  {off && <div style={{ fontSize: 12, color: "#8593a8", textDecoration: "line-through" }}>{fmtReal(p.preco_de)}</div>}
+                  {temDe && <div style={{ fontSize: 12.5, color: "#8593a8" }}>De <span style={{ textDecoration: "line-through" }}>{fmtReal(p.preco_de)}</span></div>}
                   {p.preco
                     ? <div className="fnh-preco" style={{ fontWeight: 800, color: AZUL_MARINHO, letterSpacing: "-.02em", lineHeight: 1.2 }}>{fmtReal(p.preco)}</div>
                     : <div style={{ fontSize: 13, color: "#65758b" }}>Veja o preço no Mercado Livre</div>}
+                  {oferta && (
+                    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 3 }}>
+                      <span style={{ fontSize: 12.5, fontWeight: 800, color: VERDE }}>{oferta.texto}</span>
+                      {oferta.economia > 0 && (
+                        <span style={{ fontSize: 11.5, fontWeight: 700, color: VERDE, background: "#E8F5E9", borderRadius: 6, padding: "1px 6px" }}>
+                          Economize {fmtReal(oferta.economia)}
+                        </span>
+                      )}
+                    </div>
+                  )}
                   {p.preco && p.preco_conferido_em && (
                     <div style={{ fontSize: 11, color: "#8593a8" }}>Preço em {fmtDia(p.preco_conferido_em)}</div>
                   )}
@@ -470,7 +532,7 @@ function BlocoComissao({ p, salvar, ocupado, buscandoCategorias }) {
 }
 
 const formVazio = () => ({
-  id: null, link: "", titulo: "", categoria: "", preco: "", preco_de: "", comissao_percentual: "", foto: "", ativo: true,
+  id: null, link: "", titulo: "", categoria: "", preco: "", preco_de: "", desconto_texto: "", comissao_percentual: "", foto: "", ativo: true,
   // Categoria de cima do Mercado Livre e a % da tabela dela: só para a estimativa da comissão.
   // categoria_ml_nova = veio do Preencher agora e vai junto ao salvar.
   categoria_ml: "", comissao_tabela: null, categoria_ml_nova: false,
@@ -478,6 +540,7 @@ const formVazio = () => ({
 const paraForm = (p) => ({
   id: p.id, link: p.link || "", titulo: p.titulo || "", categoria: p.categoria || "",
   preco: p.preco != null ? String(Number(p.preco)) : "", preco_de: p.preco_de != null ? String(Number(p.preco_de)) : "",
+  desconto_texto: p.desconto_texto || "",
   comissao_percentual: p.comissao_percentual != null ? String(Number(p.comissao_percentual)) : "",
   foto: p.foto || "", ativo: p.ativo !== false,
   categoria_ml: p.categoria_ml || "", comissao_tabela: p.comissao_tabela ?? null, categoria_ml_nova: false,
@@ -652,6 +715,7 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
     const corpo = {
       link: form.link.trim(), titulo: form.titulo.trim(), categoria: form.categoria.trim(),
       preco: form.preco === "" ? null : form.preco, preco_de: form.preco_de === "" ? null : form.preco_de,
+      desconto_texto: form.desconto_texto.trim() || null,
       comissao_percentual: form.comissao_percentual === "" ? null : form.comissao_percentual,
       foto: form.foto, ativo: form.ativo,
       ...(form.categoria_ml_nova ? { categoria_ml: form.categoria_ml } : {}),
@@ -773,6 +837,11 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
           <Campo label={'Preço "De" (R$, opcional)'} dica="Só quando o anúncio mostra preço riscado.">
             <input style={inp} type="number" min="0" step="0.01" placeholder="249,90" value={form.preco_de} onChange={(e) => mudar("preco_de", e.target.value)} />
           </Campo>
+          {/* O desconto como o anúncio escreve — é o que a vitrine mostra em destaque. "no Pix" faz
+              diferença: sem ele, o cliente leria um desconto que o cartão não tem. */}
+          <Campo label="Desconto do anúncio (opcional)" dica={'Copie como aparece no Mercado Livre, ex.: "7% OFF no Pix" ou "33% OFF".'}>
+            <input style={inp} maxLength={40} placeholder="7% OFF no Pix" value={form.desconto_texto} onChange={(e) => mudar("desconto_texto", e.target.value)} />
+          </Campo>
           {/* Só para o Financeiro do FN Home dizer quanto a FN ganha por venda; a comissão de
               verdade continua no painel de afiliados do Mercado Livre. */}
           <Campo label="Sua comissão (%)" dica={dicaComissao}>
@@ -881,6 +950,7 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
                     <>
                       <strong style={{ color: AZUL_MARINHO, fontSize: 14 }}>{fmtReal(p.preco)}</strong>
                       {p.preco_de != null && <span style={{ color: "#8593a8", textDecoration: "line-through", marginLeft: 6 }}>{fmtReal(p.preco_de)}</span>}
+                      {p.desconto_texto && <span style={{ color: COR_OFERTA, fontWeight: 700, marginLeft: 6 }}>{p.desconto_texto}</span>}
                       <div style={{ color: velho ? AMBAR : "#8593a8", fontWeight: velho ? 700 : 400 }}>
                         {velho ? `Conferido há ${dias} dias` : `Conferido em ${fmtDia(p.preco_conferido_em)}`}
                       </div>
