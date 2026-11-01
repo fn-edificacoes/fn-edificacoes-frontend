@@ -304,6 +304,26 @@ export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true 
     for (const p of produtos) if (p.categoria) n.set(p.categoria, (n.get(p.categoria) || 0) + 1);
     return [...n.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "pt-BR"));
   }, [produtos]);
+
+  /* A fileira de categorias rola de lado. Sem barra visível, quem usa mouse não tinha como chegar às
+     categorias do fim — a Gerência mandou print com "Iluminação (" cortado (nov/2026). Agora há a
+     barra fina embaixo e as setas ‹ › nas pontas, que só aparecem quando há o que ver daquele lado. */
+  const fileira = useRef(null);
+  const [lados, setLados] = useState({ esq: false, dir: false });
+  useEffect(() => {
+    const el = fileira.current;
+    if (!el) return undefined;
+    const medir = () => setLados({ esq: el.scrollLeft > 4, dir: el.scrollLeft + el.clientWidth < el.scrollWidth - 4 });
+    medir();
+    el.addEventListener("scroll", medir, { passive: true });
+    window.addEventListener("resize", medir);
+    return () => { el.removeEventListener("scroll", medir); window.removeEventListener("resize", medir); };
+  }, [produtos]);
+  const rolarFileira = (sentido) => {
+    const el = fileira.current;
+    if (el) el.scrollBy({ left: sentido * Math.max(160, el.clientWidth * 0.7), behavior: "smooth" });
+  };
+
   if (produtos.length === 0) return null;
 
   // Sem acento e sem caixa: os títulos do Mercado Livre vêm ora "Lâmpada", ora "Lampada".
@@ -334,13 +354,22 @@ export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true 
 
   return (
     <div style={separar ? { marginTop: 22, paddingTop: 18, borderTop: `1px solid ${CINZA_BORDA}` } : {}}>
-      {/* Hover dos cartões e a fileira de categorias sem barra de rolagem: estilo em linha não tem
+      {/* Hover dos cartões e a barra de rolagem da fileira de categorias: estilo em linha não tem
           :hover nem pseudo-elemento. */}
       <style>{`
         .fnh-card { transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease; }
         .fnh-card:hover { border-color: #BFD3EA; box-shadow: 0 8px 22px rgba(18,51,91,.10); transform: translateY(-2px); }
-        .fnh-chips { scrollbar-width: none; }
-        .fnh-chips::-webkit-scrollbar { display: none; }
+        .fnh-chips { scrollbar-width: thin; scrollbar-color: #9DB2CC #EEF2F7; scroll-behavior: smooth; }
+        .fnh-chips::-webkit-scrollbar { height: 8px; }
+        .fnh-chips::-webkit-scrollbar-track { background: #EEF2F7; border-radius: 999px; }
+        .fnh-chips::-webkit-scrollbar-thumb { background: #9DB2CC; border-radius: 999px; }
+        .fnh-chips::-webkit-scrollbar-thumb:hover { background: #7E97B6; }
+        .fnh-seta { position: absolute; top: 0; bottom: 12px; width: 44px; display: flex; align-items: center; border: none; cursor: pointer; padding: 0; z-index: 1; color: ${AZUL_MARINHO}; }
+        .fnh-seta span { width: 30px; height: 30px; border-radius: 999px; background: #fff; border: 1px solid ${CINZA_BORDA}; box-shadow: 0 2px 6px rgba(18,51,91,.15); display: grid; place-items: center; font-size: 18px; font-weight: 700; line-height: 1; }
+        .fnh-seta--esq { left: 0; justify-content: flex-start; background: linear-gradient(90deg, #fff 55%, rgba(255,255,255,0)); }
+        .fnh-seta--dir { right: 0; justify-content: flex-end; background: linear-gradient(270deg, #fff 55%, rgba(255,255,255,0)); }
+        /* No celular o dedo arrasta a fileira; a seta só cobriria categoria. */
+        @media (hover: none) { .fnh-seta { display: none; } }
         @media (prefers-reduced-motion: reduce) { .fnh-card, .fnh-card:hover { transition: none; transform: none; } }
         /* Cartão grande como o do site institucional (out/2026, pedido da Gerência): ~220 px de
            largura e foto quadrada. No celular volta a duas colunas, com letra menor. */
@@ -407,8 +436,15 @@ export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true 
       )}
 
       {(categorias.length > 1 || emPromocao > 0) && (
-        <div className="fnh-chips" role="group" aria-label="Categorias"
-          style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4, marginBottom: 14 }}>
+        <div style={{ position: "relative", marginBottom: 14 }}>
+        {lados.esq && (
+          <button type="button" className="fnh-seta fnh-seta--esq" onClick={() => rolarFileira(-1)} aria-label="Ver categorias anteriores"><span>‹</span></button>
+        )}
+        {lados.dir && (
+          <button type="button" className="fnh-seta fnh-seta--dir" onClick={() => rolarFileira(1)} aria-label="Ver mais categorias"><span>›</span></button>
+        )}
+        <div ref={fileira} className="fnh-chips" role="group" aria-label="Categorias"
+          style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 10 }}>
           {emPromocao > 0 && (
             <button aria-pressed={soPromocao} onClick={() => trocarPromocao(!soPromocao)}
               style={{ ...chip(soPromocao), display: "inline-flex", alignItems: "center", gap: 5, ...(soPromocao ? { background: COR_OFERTA, borderColor: COR_OFERTA } : { color: COR_OFERTA, borderColor: `${COR_OFERTA}66` }) }}>
@@ -419,6 +455,7 @@ export function SecaoOfertasMercadoLivre({ apiFetch, aoCarregar, separar = true 
           {categorias.map(([c, n]) => (
             <button key={c} style={chip(categoria === c)} onClick={() => trocarCategoria(categoria === c ? "" : c)}>{c} ({n})</button>
           ))}
+        </div>
         </div>
       )}
 

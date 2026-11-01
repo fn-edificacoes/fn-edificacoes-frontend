@@ -365,7 +365,9 @@ comissão só aparece no painel de afiliados de lá. Backend: `src/afiliados-mer
   API falhar. O botão é o link do Mercado Livre direto; o clique é avisado à API sem esperar resposta.
   Cada card mostra a data do preço, e o rodapé diz que é link de afiliado e que entrega e garantia são
   do Mercado Livre e do vendedor. Busca (sem acento), categorias com contagem numa fileira que rola
-  de lado, e 24 produtos por vez com "Ver mais". **A aba FN Home não mostra cartão de parceiro**
+  de lado — com **barra de rolagem visível e setas ‹ ›** nas pontas (só aparecem quando há o que ver
+  daquele lado, e somem em tela de toque): sem elas, quem usa mouse não chegava às últimas categorias
+  (nov/2026) —, e 24 produtos por vez com "Ver mais". **A aba FN Home não mostra cartão de parceiro**
   (`SecaoParceirosVitrine`): o cartão "FN Home · Catálogo de móveis e decoração" saiu a pedido da
   Gerência (out/2026); o carrinho só aparece ali se já tiver item. O título da área é "Loja FN Home"
   e o texto diz que ela é aberta a todos, sem ser cliente.
