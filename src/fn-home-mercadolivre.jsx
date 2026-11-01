@@ -210,6 +210,73 @@ function FotoDoProduto({ src, alt }) {
   return <img src={src} alt={alt} loading="lazy" decoding="async" onError={() => setQuebrou(true)} />;
 }
 
+/* Chamada da loja na página de entrada do sistema (o "Cadastre-se"), pedida pela Gerência em
+   nov/2026: "divulgue melhor a FN Home". Quatro produtos — os de maior desconto primeiro, o resto
+   completa com quem tem foto — e o botão para a loja. Os cartões levam à loja, não direto ao
+   Mercado Livre: a ideia é o visitante ver a loja inteira. Some sem produto ou com a API fora. */
+export function DestaqueLojaFnHome({ apiFetch, href = "?pagina=fn-home" }) {
+  const [produtos, setProdutos] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    apiFetch("/api/afiliados/mercadolivre/vitrine")
+      .then((r) => { if (vivo) setProdutos(r?.produtos || []); })
+      .catch((e) => { console.warn("Destaque da loja FN Home não carregou:", e.message); if (vivo) setProdutos([]); });
+    return () => { vivo = false; };
+  }, []);
+  if (!produtos || produtos.length === 0) return null;
+
+  const comFoto = produtos.filter((p) => p.foto && !String(p.foto).startsWith("data:"));
+  const ofertas = new Map(comFoto.map((p) => [p.id, ofertaDe(p)]));
+  const emPromocao = produtos.filter((p) => ofertaDe(p)).length;
+  const maior = Math.max(0, ...produtos.map((p) => ofertaDe(p)?.pct || 0));
+  const quatro = [...comFoto].sort((a, b) => (ofertas.get(b.id)?.pct || 0) - (ofertas.get(a.id)?.pct || 0)).slice(0, 4);
+
+  return (
+    <section aria-label="Loja FN Home" style={{ background: `linear-gradient(135deg, ${AZUL_MARINHO} 0%, #1d4f86 60%, ${AZUL_MEDIO} 100%)`, color: "#fff", borderRadius: 16, padding: "18px 18px 16px", marginBottom: 18, boxShadow: "0 10px 26px rgba(18,51,91,.18)" }}>
+      <style>{`
+        .fnh-destaque-grade { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+        @media (max-width: 560px) { .fnh-destaque-grade { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+      `}</style>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <ShoppingBag size={18} />
+        <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: ".1em" }}>LOJA FN HOME</span>
+        <span style={{ fontSize: 11.5, fontWeight: 700, background: "rgba(255,255,255,.16)", borderRadius: 999, padding: "2px 9px" }}>Aberta a todos</span>
+      </div>
+      <div style={{ fontSize: 21, fontWeight: 800, lineHeight: 1.2, margin: "8px 0 2px" }}>Tudo para equipar o seu imóvel</div>
+      <div style={{ fontSize: 13.5, opacity: 0.9 }}>
+        {produtos.length} produtos escolhidos pela FN, comprados com a segurança do Mercado Livre
+        {emPromocao > 0 && maior > 0 && <> · <strong style={{ color: "#FFD54F" }}>até {maior}% OFF</strong></>}
+      </div>
+
+      <div className="fnh-destaque-grade" style={{ margin: "14px 0 14px" }}>
+        {quatro.map((p) => {
+          const oferta = ofertas.get(p.id);
+          return (
+            <a key={p.id} href={href} style={{ background: "#fff", borderRadius: 12, overflow: "hidden", textDecoration: "none", color: "#1a2330", display: "flex", flexDirection: "column", minWidth: 0 }}>
+              <span style={{ position: "relative", aspectRatio: "1 / 1", display: "block", background: "#fff" }}>
+                <img src={p.foto} alt="" loading="lazy" decoding="async" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain", padding: 8, boxSizing: "border-box" }}
+                  onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
+                {oferta && (
+                  <span style={{ position: "absolute", top: 6, left: 6, background: COR_OFERTA, color: "#fff", fontSize: 12, fontWeight: 800, borderRadius: 7, padding: "2px 7px" }}>-{oferta.pct}%</span>
+                )}
+              </span>
+              <span style={{ padding: "6px 8px 8px", display: "grid", gap: 1 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.3, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: "2.6em" }}>{p.titulo}</span>
+                {p.preco != null && <span style={{ fontSize: 15, fontWeight: 800, color: AZUL_MARINHO }}>{fmtReal(p.preco)}</span>}
+                {oferta && <span style={{ fontSize: 11, fontWeight: 700, color: VERDE }}>{oferta.texto}</span>}
+              </span>
+            </a>
+          );
+        })}
+      </div>
+
+      <a href={href} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "#fff", color: AZUL_MARINHO, borderRadius: 11, padding: "12px 14px", fontSize: 15, fontWeight: 800, textDecoration: "none" }}>
+        <ShoppingBag size={17} /> Ver a loja FN Home{emPromocao > 0 ? ` — ${emPromocao} ofertas` : ""} →
+      </a>
+    </section>
+  );
+}
+
 /* Quantos cartões aparecem antes do "Ver mais": com 70+ produtos numa grade só, o celular virava
    rolagem sem fim e a loja parecia desorganizada. Buscar ou escolher categoria mostra tudo dela. */
 const PRODUTOS_POR_PAGINA = 24;

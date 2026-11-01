@@ -5,7 +5,7 @@ import * as Fin from "./financeiro-regras.js";
 import AbaRedeNacional from "./rede-nacional.jsx";
 import AbaEmpreendimentosCadastro from "./empreendimentos-lista.jsx";
 import { Building as IconeEmpreendimento, ShoppingBag } from "lucide-react";
-import AbaProdutosMercadoLivre, { SecaoOfertasMercadoLivre, temRascunhoMercadoLivre } from "./fn-home-mercadolivre.jsx";
+import AbaProdutosMercadoLivre, { SecaoOfertasMercadoLivre, DestaqueLojaFnHome, temRascunhoMercadoLivre } from "./fn-home-mercadolivre.jsx";
 import AbaFinanceiroFnHome, { CardFnHomeNosIndicadores } from "./fn-home-financeiro.jsx";
 import AbaMapaAtuacao from "./mapa-atuacao.jsx";
 import { usePatologiaVoz, PainelPatologiaVoz, AvisoPendentesVoz } from "./patologia-voz.jsx";
@@ -1850,7 +1850,11 @@ function PortalCliente({ onIrParaLogin, onLogin }) {
         <div style={{ maxWidth: 720, margin: "0 auto", padding: "0 18px 14px", display: "flex", gap: 20, fontSize: 13, fontWeight: 700 }}>
           <a href="#solicitar-servico" style={{ color: "#fff", opacity: 0.85, textDecoration: "none" }}>Serviços FN</a>
           <a href="?pagina=fn-clube" style={{ color: "#fff", opacity: 0.85, textDecoration: "none" }}>FN Clube</a>
-          <a href="?pagina=fn-home" style={{ color: "#fff", opacity: 0.85, textDecoration: "none" }}>FN Home</a>
+          {/* A loja em destaque na barra (pedido da Gerência, nov/2026): é a única das três que
+              qualquer visitante pode usar agora, sem cadastro. */}
+          <a href="?pagina=fn-home" style={{ color: AZUL_MARINHO, background: "#FFD54F", borderRadius: 999, padding: "2px 10px", marginTop: -2, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 5 }}>
+            <ShoppingBag size={13} /> FN Home · Loja
+          </a>
         </div>
       </header>
       <main style={{ maxWidth: 720, margin: "0 auto", padding: "22px 18px 80px" }}>
@@ -1863,6 +1867,8 @@ function PortalCliente({ onIrParaLogin, onLogin }) {
         }}>
           <Lock size={20} /> SOU CLIENTE — ENTRAR
         </button>
+
+        <DestaqueLojaFnHome apiFetch={apiFetch} />
 
         {/* FN Serviços é a marca guarda-chuva das 3 áreas: contratando um serviço técnico, o
             cliente também passa a ter acesso ao FN Clube e ao FN Home. A navegação entre elas

@@ -399,6 +399,12 @@ comissão só aparece no painel de afiliados de lá. Backend: `src/afiliados-mer
   o cartão vizinho ganhava um vão entre o nome e o preço, e no iPhone a foto vazava por cima do
   "Comprar". Foto que não abre vira o ícone (`FotoDoProduto`). A miniatura da lista (`Miniatura`)
   segue a mesma ideia — dentro de grade, a foto alta saía cortada.
+- **Loja na página de entrada** (`PortalCliente`, a do "Cadastre-se"; nov/2026, pedido da Gerência:
+  "divulgue melhor a FN Home"): logo abaixo de "SOU CLIENTE — ENTRAR" vem `DestaqueLojaFnHome` (em
+  `fn-home-mercadolivre.jsx`) — faixa azul com "Tudo para equipar o seu imóvel", o total de produtos, "até
+  X% OFF", quatro produtos (maior desconto primeiro, só com foto https) e "Ver a loja FN Home — N ofertas".
+  Os cartões levam à loja (`?pagina=fn-home`), não ao Mercado Livre. Some sem produto ou com a API fora.
+  Na barra azul, "FN Home · Loja" virou uma pílula amarela.
 - **Descontos em destaque** (nov/2026, pedido da Gerência: "os descontos que a loja fornece na
   propaganda deles"): `ofertaDe(p)` junta o "De" riscado (`preco_de` maior que o preço) e o texto do
   anúncio (`desconto_texto`, "7% OFF no Pix"); o percentual do texto manda quando os dois existem, e sem
