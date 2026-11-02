@@ -105,6 +105,8 @@ src/voz-fila-offline.js     patologia por voz: gravações guardadas no celular 
 src/ia-creditos.jsx         Financeiro › Créditos de IA: gasto estimado da IA e limite de gravação por técnico
 src/fn-home-mercadolivre.jsx FN Home: produtos do Mercado Livre (cadastro da Gerência e vitrine)
 src/fn-home-financeiro.jsx  FN Home: vendas, comissão da FN, repasses, mais vendidos e cliques
+src/laudo-whatsapp.jsx      laudo aprovado pelo WhatsApp do cliente (link wa.me com a mensagem pronta)
+src/links-publicos.js       endereços que vão para o cliente: Área do Cliente e FN_HOME_URL
 ```
 
 Para achar algo no `App.jsx`, procure pela definição da componente
@@ -187,6 +189,18 @@ crédito colocado em cada empresa (OpenAI e Anthropic) com gasto e restante **es
 fica no painel delas, e a tela diz isso —, o gasto do mês por recurso e por pessoa, o limite padrão de
 gravação dos técnicos, o limite próprio de cada um (padrão, próprio em min/dia ou min/mês, sem limite) e
 os preços de tabela usados na conta. Tudo num `GET /api/financeiro/ia-creditos` e salvo num `PUT`.
+
+## Laudo pelo WhatsApp
+
+Depois de aprovar (`CardLaudosPendentes`), a fila mostra "✅ Laudo aprovado e enviado por e-mail" (ou
+o aviso de que o e-mail não saiu — o servidor aprova mesmo assim) com **"📲 Enviar também pelo
+WhatsApp"**; em Laudos realizados, a Gerência tem **"Reenviar WhatsApp"** nos entregues. É um `<a>`
+para `wa.me` (`src/laudo-whatsapp.jsx`): nada de API da Meta, e nada de `window.open` depois de
+`await`, que o navegador barra. O número sai do `telefone` do cadastro dono do laudo (`clienteDoDoc`).
+O link do laudo é a Área do Cliente (`src/links-publicos.js`): o e-mail só leva o PDF anexo e o Drive
+é privado. O cliente entra lá com o **e-mail**, não com o CPF. O clique avisa
+`POST /api/laudos/:docId/whatsapp-aberto`, que grava em `laudo_auditoria` — "aberto", porque quem envia
+é a pessoa.
 
 ## Revistoria
 
