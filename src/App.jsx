@@ -5,7 +5,7 @@ import * as Fin from "./financeiro-regras.js";
 import AbaRedeNacional from "./rede-nacional.jsx";
 import AbaEmpreendimentosCadastro from "./empreendimentos-lista.jsx";
 import { Building as IconeEmpreendimento, ShoppingBag } from "lucide-react";
-import AbaProdutosMercadoLivre, { SecaoOfertasMercadoLivre, DestaqueLojaFnHome, temRascunhoMercadoLivre } from "./fn-home-mercadolivre.jsx";
+import AbaProdutosMercadoLivre, { SecaoOfertasMercadoLivre, DestaqueLojaFnHome, AbaLojaParaCliente, temRascunhoMercadoLivre } from "./fn-home-mercadolivre.jsx";
 import AbaFinanceiroFnHome, { CardFnHomeNosIndicadores } from "./fn-home-financeiro.jsx";
 import AbaMapaAtuacao from "./mapa-atuacao.jsx";
 import { usePatologiaVoz, PainelPatologiaVoz, AvisoPendentesVoz } from "./patologia-voz.jsx";
@@ -586,8 +586,10 @@ const STATUS_INTERNO_OPCOES = ["Agendado", "Em vistoria", "Laudo em elaboração
 /* "arts" (ARTs de vistoria) não tem aba própria na barra de cima: é sub-aba de Documentação, ao
    lado das TRTs de reforma — quem organiza uma organiza a outra. Continua aqui porque é o que
    libera a tela. */
+/* "loja" é a Loja FN Home para o técnico mostrar ao cliente na vistoria (nov/2026): só leitura,
+   com o link para mandar pelo WhatsApp — nada de cadastro de produto. */
 const MODULOS_POR_PERFIL = {
-  vistoriador: ["laudos", "despesas"],
+  vistoriador: ["laudos", "loja", "despesas"],
   documentacao: ["documentacao", "arts", "despesas"],
   atendimento: ["clientes", "qualidade", "documentacao", "arts", "faq", "marketing", "vendas", "despesas"],
   vendas: ["vendas", "despesas"],
@@ -3724,7 +3726,7 @@ function AppInterno({ session, onLogout }) {
             aqui: é sub-aba de Documentação (abaTop "arts" acende a aba Documentação). */}
         {perfil !== "gerencia" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, borderTop: "1px solid rgba(255,255,255,.12)", overflowX: "auto" }}>
-            {[["laudos", "Laudos", FileText], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["documentacao", "Documentação", ClipboardCheck], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Fornecedores", Wrench], ["despesas", "Despesas", Receipt], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog], ["nacional", "Rede Nacional", Landmark], ["mapa", "Mapa de atuação", IconeMapa]]
+            {[["laudos", "Laudos", FileText], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["documentacao", "Documentação", ClipboardCheck], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Fornecedores", Wrench], ["loja", "Loja FN Home", ShoppingBag], ["despesas", "Despesas", Receipt], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog], ["nacional", "Rede Nacional", Landmark], ["mapa", "Mapa de atuação", IconeMapa]]
               .filter(([k]) => modulosPermitidos.includes(k))
               .map(([k, label, Icon]) => {
                 const ativa = abaTop === k || (k === "documentacao" && abaTop === "arts");
@@ -3889,6 +3891,7 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "despesas" && (
           <AbaMinhasDespesas fin={fin} clientes={clientesAtivos} usuarioAtual={session.usuario} telaEstreita={telaEstreita} notify={notify} />
         )}
+        {abaTop === "loja" && <AbaLojaParaCliente apiFetch={apiFetch} notify={notify} />}
         {abaTop === "gerencia" && String(abaGerencia).startsWith("fin-") && (
           <AbaFinanceiroDespesas sub={abaGerencia} fin={fin} clientes={clientes} docs={docs} precos={precos} usuarios={usuarios}
             usuarioAtual={session.usuario} telaEstreita={telaEstreita} notify={notify} token={token} updCliente={updCliente}
