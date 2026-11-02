@@ -10,6 +10,7 @@ import AbaFinanceiroFnHome, { CardFnHomeNosIndicadores } from "./fn-home-finance
 import AbaMapaAtuacao from "./mapa-atuacao.jsx";
 import { usePatologiaVoz, PainelPatologiaVoz, AvisoPendentesVoz } from "./patologia-voz.jsx";
 import AbaCreditosIA from "./ia-creditos.jsx";
+import { BotaoWhatsappLaudo } from "./laudo-whatsapp.jsx";
 import { AbaArtsVistoria, AbaFolhaPagamento, CardValoresCustos, useCustosOperacionais } from "./controle-financeiro.jsx";
 import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
@@ -2954,10 +2955,14 @@ function AppInterno({ session, onLogout }) {
   const aprovarLaudo = async (docId) => {
     try {
       const r = await apiFetch(`/api/docs/${docId}/aprovar`, { method: "POST", token });
-      notify(`Laudo aprovado e enviado para ${r.emailEnviadoPara} ✓`);
+      /* O servidor aprova mesmo quando o e-mail falha (emailEnviado: false) — antes a tela dizia
+         "enviado" nos dois casos. Devolve a resposta para a fila oferecer o WhatsApp em seguida. */
+      notify(r.emailEnviado === false
+        ? `Laudo aprovado, mas o e-mail não saiu${r.emailErro ? `: ${r.emailErro}` : ""}`
+        : `Laudo aprovado e enviado para ${r.emailEnviadoPara} ✓`);
       setLaudosPendentes((atual) => atual.filter((p) => p.doc_id !== docId));
       carregarDocs();
-      return true;
+      return r;
     } catch (e) {
       notify(`Não foi possível aprovar: ${e.message}`);
       return false;
@@ -9088,9 +9093,12 @@ function EditorLaudoGerencia({ laudo, onSalvar, onCancelar, salvando, patologias
   );
 }
 
-function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, assinatura, notify, patologiasBanco = [] }) {
+function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, assinatura, notify, patologiasBanco = [], clientes = [], docs = [], token }) {
   const [previewId, setPreviewId] = useState(null);
   const [aprovandoId, setAprovandoId] = useState(null);
+  /* O último laudo aprovado aqui, para oferecer o WhatsApp logo em seguida. A linha some da
+     fila na aprovação, então guarda uma cópia dela. */
+  const [aprovadoAgora, setAprovadoAgora] = useState(null);
   /* Devolver exige motivo: é ele que o técnico vê no topo do formulário ao reabrir o laudo. */
   const [devolvendoId, setDevolvendoId] = useState(null);
   const [motivoDevolucao, setMotivoDevolucao] = useState("");
@@ -9103,7 +9111,9 @@ function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, d
 
   const aprovar = async (docId) => {
     setAprovandoId(docId);
-    await aprovarLaudo(docId);
+    const linha = laudosPendentes.find((l) => l.doc_id === docId);
+    const r = await aprovarLaudo(docId);
+    if (r && linha) setAprovadoAgora({ laudo: linha, emailEnviado: r.emailEnviado !== false, emailErro: r.emailErro });
     setAprovandoId(null);
     if (previewId === docId) setPreviewId(null);
   };
@@ -9142,6 +9152,28 @@ function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, d
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
         Ao aprovar, o sistema gera o PDF final e envia automaticamente por e-mail para o endereço já cadastrado do cliente — sem precisar digitar nada.
       </p>
+
+      {aprovadoAgora && (() => {
+        const { laudo, emailEnviado, emailErro } = aprovadoAgora;
+        const doc = docs.find((d) => d.id === laudo.doc_id);
+        const cpfLimpo = String(laudo.cpf || "").replace(/\D/g, "");
+        const cliente = clienteDoDoc(doc, clientes)
+          || (cpfLimpo ? clientes.find((c) => !c.revistoriaDe && (c.cpf || "").replace(/\D/g, "") === cpfLimpo) : null);
+        return (
+          <div style={{ border: `1px solid ${emailEnviado ? "#a5d6a7" : "#f0c987"}`, background: emailEnviado ? "#EEF7EE" : "#FFF4E0", borderRadius: 10, padding: 12, marginBottom: 14, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 200, fontSize: 13.5 }}>
+              <strong style={{ color: emailEnviado ? "#2E7D32" : "#B26A00" }}>
+                {emailEnviado ? "✅ Laudo aprovado e enviado por e-mail" : "⚠️ Laudo aprovado, mas o e-mail não saiu"}
+              </strong>
+              <div style={{ fontSize: 12.5, color: "#65758b" }}>
+                {laudo.cliente}{!emailEnviado && emailErro ? ` · ${emailErro}` : ""}
+              </div>
+            </div>
+            <BotaoWhatsappLaudo laudo={laudo} cliente={cliente} emailEnviado={emailEnviado} apiFetch={apiFetch} token={token} />
+            <button className="icon-btn" title="Fechar aviso" onClick={() => setAprovadoAgora(null)}><X size={16} /></button>
+          </div>
+        );
+      })()}
 
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
       {!carregando && laudosPendentes.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum laudo aguardando aprovação no momento.</p>}
@@ -9845,7 +9877,11 @@ function AbaLaudosRealizados({ laudos: laudosRecebidos = [], carregando, recarre
                   )}
 
                   {ehGerencia && entregue && l.laudo_status !== "devolvido_correcao" && (
-                    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+                      {/* Mesmo texto do aviso pós-aprovação. A linha do e-mail só entra se ele saiu. */}
+                      <BotaoWhatsappLaudo laudo={l} rotulo="📲 Reenviar WhatsApp" emailEnviado={!!l.email_enviado_em}
+                        cliente={clienteDoDoc(docs.find((d) => d.id === l.doc_id) || { clienteId: l.cliente_id }, clientes)}
+                        apiFetch={apiFetch} token={token} />
                       <button className="btn-ghost" style={{ color: "#B26A00", background: "#FFF4E0" }} onClick={() => abrirDevolucao(l.doc_id)}>
                         <Undo2 size={14} /> Devolver para correção
                       </button>
@@ -11306,6 +11342,7 @@ function AbaGerenciaVisaoGeral({ token, docs, clientes, updCliente, padronizarEm
 
       <CardPainelLaudos painel={painel} carregando={painelCarregando} recarregar={carregarPainel} usuarios={usuarios} notify={notify} />
       <CardLaudosPendentes laudosPendentes={laudosPendentes} carregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} editarLaudo={editarLaudo} reenviarDrive={reenviarDrive} marcarEmAnalise={marcarEmAnalise}
+        clientes={clientes} docs={docs} token={token}
       painel={painel} painelCarregando={painelCarregando} carregarPainel={carregarPainel} assinatura={assinatura} notify={notify} patologiasBanco={patologiasBanco} />
 
       <CardCancelamentosPendentes clientes={clientes} usuarios={usuarios} updCliente={updCliente} notify={notify} />
