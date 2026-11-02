@@ -422,6 +422,9 @@ comissão só aparece no painel de afiliados de lá. Backend: `src/afiliados-mer
   X% OFF", quatro produtos (maior desconto primeiro, só com foto https) e "Ver a loja FN Home — N ofertas".
   Os cartões levam à loja (`?pagina=fn-home`), não ao Mercado Livre. Some sem produto ou com a API fora.
   Na barra azul, "FN Home · Loja" virou uma pílula amarela.
+  O fim da página não tem mais o card **"Benefícios Exclusivos FN"** (logos dos parceiros, só o do FN
+  Home): saiu a pedido da Gerência (nov/2026), junto com o modo `somenteLogos` da
+  `SecaoParceirosVitrine`, que só existia para ele.
 - **Descontos em destaque** (nov/2026, pedido da Gerência: "os descontos que a loja fornece na
   propaganda deles"): `ofertaDe(p)` junta o "De" riscado (`preco_de` maior que o preço) e o texto do
   anúncio (`desconto_texto`, "7% OFF no Pix"); o percentual do texto manda quando os dois existem, e sem

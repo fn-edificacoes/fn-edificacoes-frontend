@@ -1882,7 +1882,7 @@ function PortalCliente({ onIrParaLogin, onLogin }) {
         </div>
 
         <div id="solicitar-servico">
-          <AbaCliente notify={notify} onLogin={onLogin} onIrParaLogin={onIrParaLogin} />
+          <AbaCliente notify={notify} onLogin={onLogin} />
         </div>
       </main>
       <footer style={{ background: "#fff", borderTop: `1px solid ${CINZA_BORDA}`, padding: "22px 18px" }}>
@@ -17359,7 +17359,7 @@ function CartaoAtendimentoCliente({ doc, cpf, notify, emailConhecido }) {
 
 const OUTROS = "__outros__";
 
-function AbaCliente({ notify, onLogin, onIrParaLogin }) {
+function AbaCliente({ notify, onLogin }) {
   const [form, setForm] = useState(novoCadastroCliente());
   const [enviando, setEnviando] = useState(false);
 
@@ -17644,7 +17644,9 @@ function AbaCliente({ notify, onLogin, onIrParaLogin }) {
       </Card>
 
       <SecaoFeedbackVitrine notify={notify} />
-      <SecaoParceirosVitrine notify={notify} onIrParaLogin={onIrParaLogin} somenteLogos />
+      {/* O card "Benefícios Exclusivos FN" (logos dos parceiros) que ficava aqui saiu a pedido da
+          Gerência (nov/2026): sozinho, com só o logo do FN Home, não dizia nada. A loja já tem a
+          sua chamada no topo da página (DestaqueLojaFnHome). */}
     </div>
   );
 }
@@ -20886,7 +20888,7 @@ function AvisoFnClubeEmBreve() {
    semAbas: mostra só a área de tipoInicial, sem os botões FN Clube / FN Home. É o jeito do portal
    do cliente (nov/2026): a loja e o FN Clube têm cada um a sua seção e o seu botão no cabeçalho, e
    a aba FN Clube dentro da loja virava uma segunda porta para o mesmo lugar. */
-function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, somenteLogos = false, tipoInicial = "servico", semDescricao = false, semAbas = false }) {
+function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, tipoInicial = "servico", semDescricao = false, semAbas = false }) {
   const [parceiros, setParceiros] = useState([]);
   /* Começa carregando: começando em false, o FN Clube mostrava o aviso de "em breve" por um
      instante antes de a lista de parceiros chegar. */
@@ -20896,7 +20898,7 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, so
   const [carrinhoAberto, setCarrinhoAberto] = useState(false);
   const [qtdOfertasMl, setQtdOfertasMl] = useState(0);
   const carrinho = useCarrinho();
-  const mostraOfertasMl = !somenteLogos && abaTipo === "produto";
+  const mostraOfertasMl = abaTipo === "produto";
 
   useEffect(() => {
     (async () => {
@@ -20909,15 +20911,13 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, so
     })();
   }, []);
 
-  // Na página pública é só a vitrine de logos, sem separar por tipo — quem quer o detalhe
-  // (e resgatar) entra no portal do cliente, onde a área continua disponível.
   /* Na aba FN Home não entram cartões de parceiro: a loja é a grade de produtos lá embaixo. O
      cartão "FN Home · Catálogo de móveis e decoração" ficava sozinho em cima dela, sem nada
      dentro, e saiu a pedido da Gerência (out/2026) — parceiro que vende produto mora no FN
      Projetos → Casa Pronta. */
-  const filtrados = somenteLogos ? parceiros : (abaTipo === "produto" ? [] : parceiros.filter((p) => p.tipo === abaTipo));
+  const filtrados = abaTipo === "produto" ? [] : parceiros.filter((p) => p.tipo === abaTipo);
   const info = FN_AREA_INFO[abaTipo] || FN_AREA_INFO.servico;
-  const clubeEmBreve = !somenteLogos && abaTipo === "servico" && !carregando && filtrados.length === 0;
+  const clubeEmBreve = abaTipo === "servico" && !carregando && filtrados.length === 0;
   /* O carrinho é dos parceiros do FN Clube: na aba deles aparece sempre que houver parceiro (no
      "em breve", só se já tiver item); na loja, só se já tiver item. Com semAbas a loja nunca mostra
      o carrinho: no portal ele fica na seção do FN Clube, e duas cópias do carrinho na mesma página
@@ -20925,13 +20925,13 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, so
   const mostraCarrinho = abaTipo === "produto"
     ? !semAbas && carrinho.quantidadeTotal > 0
     : !clubeEmBreve || carrinho.quantidadeTotal > 0;
-  const mostraAbas = !somenteLogos && !semAbas;
-  const iconeCard = somenteLogos ? Building2 : (abaTipo === "produto" ? ShoppingBag : Handshake);
+  const mostraAbas = !semAbas;
+  const iconeCard = abaTipo === "produto" ? ShoppingBag : Handshake;
 
   return (
-    <Card icon={iconeCard} titulo={somenteLogos ? "Benefícios Exclusivos FN" : <>{info.titulo}{clubeEmBreve && <SeloEmBreve />}</>}>
-      {!somenteLogos && !semDescricao && <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>{info.descricao}</p>}
-      {!somenteLogos && (mostraAbas || mostraCarrinho) && (
+    <Card icon={iconeCard} titulo={<>{info.titulo}{clubeEmBreve && <SeloEmBreve />}</>}>
+      {!semDescricao && <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>{info.descricao}</p>}
+      {(mostraAbas || mostraCarrinho) && (
         <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
           {mostraAbas && (
             <>
@@ -20966,7 +20966,7 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, so
       {filtrados.length > 0 && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 12 }}>
           {filtrados.map((p) => (
-            !somenteLogos && abaTipo === "produto"
+            abaTipo === "produto"
               ? <CardProdutoVitrine key={p.id} p={p} onClick={() => setSelecionado(p)} />
               : <LogoParceiro key={p.id} p={p} onClick={() => setSelecionado(p)} />
           ))}
