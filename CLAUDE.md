@@ -105,6 +105,7 @@ src/voz-fila-offline.js     patologia por voz: gravações guardadas no celular 
 src/ia-creditos.jsx         Financeiro › Créditos de IA: gasto estimado da IA e limite de gravação por técnico
 src/fn-home-mercadolivre.jsx FN Home: produtos do Mercado Livre (cadastro da Gerência e vitrine)
 src/fn-home-financeiro.jsx  FN Home: vendas, comissão da FN, repasses, mais vendidos e cliques
+src/clube-fn.jsx            FN Clube: ramos, vitrine com desconto, Casa Pronta e o aviso da Gerência
 ```
 
 Para achar algo no `App.jsx`, procure pela definição da componente
@@ -415,6 +416,34 @@ comissão só aparece no painel de afiliados de lá. Backend: `src/afiliados-mer
   maior na frente; o resto na ordem de sempre), selo vermelho `-X%` na foto (`COR_OFERTA`), "De R$"
   riscado, o texto do anúncio em verde e "Economize R$ X" quando há "De". O texto vai inteiro porque
   "-7%" sem o "no Pix" prometeria o desconto no cartão. No cadastro: campo **"Desconto do anúncio"**.
+
+## FN Clube (parceiros com desconto para cliente FN)
+
+`src/clube-fn.jsx`, arquivo próprio como o FN Home (recebe `apiFetch` por prop). Pedido da Gerência
+(nov/2026): parceiros homologados que dão desconto exclusivo — restaurantes, farmácias, academias,
+terapias, lanchonetes… — junto com os colaboradores do Casa Pronta. Backend: `src/clube-fn.js`.
+
+- **Ramo** de cada parceiro de serviço (`RAMOS_CLUBE`: chave, rótulo e ícone; as chaves são as do
+  backend). Campo `SeletorRamo` no cadastro manual (`ModalCriarParceiroManual`, obrigatório para
+  serviço), na tela do convite (`TelaCadastroParceiro`, obrigatório), no "Completar meu perfil" do
+  parceiro e no perfil de venda da Gerência. A lista de parceiros mostra o ramo, ou "sem ramo no
+  Clube" em âmbar (esse só aparece em "Todos").
+- **Vitrine** (`VitrineClubeFn`, dentro de `SecaoParceirosVitrine` na aba FN Clube; a vitrine só de
+  logos não mudou): total e "descontos de até X%", busca sem acento, ramos com contagem (quebram linha
+  no computador, rolam de lado no celular) e cartões com o benefício em vermelho e selo `-X%` quando o
+  texto tem percentual — o texto vai inteiro, porque "-10%" sem "na mensalidade" prometeria mais. Quem
+  dá desconto em número vem primeiro. O cartão abre o `ModalBeneficioParceiro` de sempre: o cupom só
+  sai para cliente FN logado.
+- **Casa Pronta entra sozinho** em "Casa e reforma" (`GET /api/clube/casa-pronta`, que a API lê do FN
+  Projetos): empresa, área atendida e o desconto FN de cada serviço, sem preço. O botão é **"Pedir pela
+  FN"** (WhatsApp da FN com a mensagem pronta) — o cliente não fala direto com o parceiro, como no
+  Casa Pronta. No celular esses cartões ocupam a largura toda (a lista de serviços não cabia em meia tela).
+- `?pagina=fn-clube` abre com a faixa `FaixaClubeFn` e tem 1040 px (era 780).
+- **Gerência → FN Clube → Parceiros do Clube** (sub `clube-parceiros`): a mesma `AbaGerenciaParceiros`
+  da aba "Fornecedores" de Vendas/Atendimento (homologação, convite, prospecção, cupons, comissões),
+  que a Gerência tinha perdido quando o Casa Pronta saiu do sistema (set/2026), mais o aviso
+  `AvisoCasaProntaNoClube` (quantos entram sozinhos do Casa Pronta, ou que o FN Projetos não respondeu).
+  O sino de "parceiro aguardando homologação" agora também avisa a Gerência e leva para essa tela.
 
 ## FN Home · Financeiro (vendas e comissões)
 
