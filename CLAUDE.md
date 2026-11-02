@@ -120,7 +120,7 @@ O papel vem do backend no login, nunca é escolhido na tela. `App()` despacha po
 - `afiliado` → `PainelParceiro`
 - `cliente` → `PainelCliente`
 - os demais → `AppInterno`, filtrado por `MODULOS_POR_PERFIL`:
-  `vistoriador` (laudos), `documentacao`, `atendimento` (clientes, agendamento, documentação,
+  `vistoriador` (laudos, loja FN Home, despesas), `documentacao`, `atendimento` (clientes, agendamento, documentação,
   parceiros), `qualidade` (agendamento, só leitura), `vendas` (parceiros), `gerencia` (tudo).
 
 **Aba Documentação (Atendimento e Documentação):** duas sub-abas — **TRTs de reforma**
@@ -415,6 +415,13 @@ comissão só aparece no painel de afiliados de lá. Backend: `src/afiliados-mer
   maior na frente; o resto na ordem de sempre), selo vermelho `-X%` na foto (`COR_OFERTA`), "De R$"
   riscado, o texto do anúncio em verde e "Economize R$ X" quando há "De". O texto vai inteiro porque
   "-7%" sem o "no Pix" prometeria o desconto no cartão. No cadastro: campo **"Desconto do anúncio"**.
+- **Loja para o técnico mostrar ao cliente** (nov/2026, pedido da Gerência: "uma aba … para que eles
+  possam mostrar aos clientes"): o vistoriador tem o módulo `loja` ("Loja FN Home" na barra de cima, entre
+  Laudos e Despesas), que abre `AbaLojaParaCliente` (em `fn-home-mercadolivre.jsx`): caixa azul com
+  "Enviar pelo WhatsApp" (`wa.me` com a mensagem e o link `fnedificacoes.com.br/fn-home`; com o número do
+  cliente — 10/11 dígitos ganham o 55 — abre a conversa dele, sem número o WhatsApp pede o contato) e
+  "Copiar link", mais a loja inteira (`SecaoOfertasMercadoLivre separar={false}`). Só leitura: nada de
+  cadastro de produto, e o clique no "Comprar" conta como qualquer clique da vitrine.
 
 ## FN Home · Financeiro (vendas e comissões)
 
