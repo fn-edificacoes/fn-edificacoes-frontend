@@ -106,6 +106,8 @@ src/ia-creditos.jsx         Financeiro › Créditos de IA: gasto estimado da IA
 src/fn-home-mercadolivre.jsx FN Home: produtos do Mercado Livre (cadastro da Gerência e vitrine)
 src/fn-home-financeiro.jsx  FN Home: vendas, comissão da FN, repasses, mais vendidos e cliques
 src/clube-fn.jsx            FN Clube: ramos, vitrine com desconto, Casa Pronta e o aviso da Gerência
+src/laudo-whatsapp.jsx      laudo aprovado pelo WhatsApp do cliente (link wa.me com a mensagem pronta)
+src/links-publicos.js       endereços que vão para o cliente: Área do Cliente e FN_HOME_URL
 ```
 
 Para achar algo no `App.jsx`, procure pela definição da componente
@@ -121,7 +123,7 @@ O papel vem do backend no login, nunca é escolhido na tela. `App()` despacha po
 - `afiliado` → `PainelParceiro`
 - `cliente` → `PainelCliente`
 - os demais → `AppInterno`, filtrado por `MODULOS_POR_PERFIL`:
-  `vistoriador` (laudos), `documentacao`, `atendimento` (clientes, agendamento, documentação,
+  `vistoriador` (laudos, loja FN Home, despesas), `documentacao`, `atendimento` (clientes, agendamento, documentação,
   parceiros), `qualidade` (agendamento, só leitura), `vendas` (parceiros), `gerencia` (tudo).
 
 **Aba Documentação (Atendimento e Documentação):** duas sub-abas — **TRTs de reforma**
@@ -188,6 +190,18 @@ crédito colocado em cada empresa (OpenAI e Anthropic) com gasto e restante **es
 fica no painel delas, e a tela diz isso —, o gasto do mês por recurso e por pessoa, o limite padrão de
 gravação dos técnicos, o limite próprio de cada um (padrão, próprio em min/dia ou min/mês, sem limite) e
 os preços de tabela usados na conta. Tudo num `GET /api/financeiro/ia-creditos` e salvo num `PUT`.
+
+## Laudo pelo WhatsApp
+
+Depois de aprovar (`CardLaudosPendentes`), a fila mostra "✅ Laudo aprovado e enviado por e-mail" (ou
+o aviso de que o e-mail não saiu — o servidor aprova mesmo assim) com **"📲 Enviar também pelo
+WhatsApp"**; em Laudos realizados, a Gerência tem **"Reenviar WhatsApp"** nos entregues. É um `<a>`
+para `wa.me` (`src/laudo-whatsapp.jsx`): nada de API da Meta, e nada de `window.open` depois de
+`await`, que o navegador barra. O número sai do `telefone` do cadastro dono do laudo (`clienteDoDoc`).
+O link do laudo é a Área do Cliente (`src/links-publicos.js`): o e-mail só leva o PDF anexo e o Drive
+é privado. O cliente entra lá com o **e-mail**, não com o CPF. O clique avisa
+`POST /api/laudos/:docId/whatsapp-aberto`, que grava em `laudo_auditoria` — "aberto", porque quem envia
+é a pessoa.
 
 ## Revistoria
 
@@ -379,8 +393,9 @@ comissão só aparece no painel de afiliados de lá. Backend: `src/afiliados-mer
   centraliza — `justifySelf: "center"` vazava só para a direita. Os tamanhos dos cartões ficam nas
   classes `fnh-*` do `<style>` de `SecaoOfertasMercadoLivre`: ~210 px no computador, duas colunas abaixo
   de 640 px.
-- **No portal do cliente a loja abre na aba FN Home** (`tipoInicial="produto"`) e o cabeçalho tem o
-  botão "Loja FN Home", que rola até ela (`#loja-fn-home`). **Quem acabou de se cadastrar** pelo
+- **No portal do cliente a loja vem sem as abas** (`tipoInicial="produto"` + `semAbas`): o FN Clube tem
+  seção própria logo depois dela (ver "Portal do cliente: FN Clube, FN Reforma e a documentação da
+  reforma", abaixo), e o cabeçalho tem o botão "Loja FN Home", que rola até ela (`#loja-fn-home`). **Quem acabou de se cadastrar** pelo
   "Cadastre-se" entra com a confirmação do cadastro e a loja no topo da página, antes de "Meu
   atendimento" (`recemCadastrado`: o `AbaCliente` chama `onLogin(sessao, { recemCadastrado: true })`, o
   `App()` guarda só na memória — um F5 devolve a loja ao fim da página). Pedido da Gerência (out/2026).
@@ -416,6 +431,46 @@ comissão só aparece no painel de afiliados de lá. Backend: `src/afiliados-mer
   maior na frente; o resto na ordem de sempre), selo vermelho `-X%` na foto (`COR_OFERTA`), "De R$"
   riscado, o texto do anúncio em verde e "Economize R$ X" quando há "De". O texto vai inteiro porque
   "-7%" sem o "no Pix" prometeria o desconto no cartão. No cadastro: campo **"Desconto do anúncio"**.
+- **Loja para o técnico mostrar ao cliente** (nov/2026, pedido da Gerência: "uma aba … para que eles
+  possam mostrar aos clientes"): o vistoriador tem o módulo `loja` ("Loja FN Home" na barra de cima, entre
+  Laudos e Despesas), que abre `AbaLojaParaCliente` (em `fn-home-mercadolivre.jsx`): caixa azul com
+  "Enviar pelo WhatsApp" (`wa.me` com a mensagem e o link `fnedificacoes.com.br/fn-home`; com o número do
+  cliente — 10/11 dígitos ganham o 55 — abre a conversa dele, sem número o WhatsApp pede o contato) e
+  "Copiar link", mais a loja inteira (`SecaoOfertasMercadoLivre separar={false}`). Só leitura: nada de
+  cadastro de produto, e o clique no "Comprar" conta como qualquer clique da vitrine.
+
+## Portal do cliente: FN Clube, FN Reforma e a documentação da reforma
+
+Pedido da Gerência (nov/2026): o FN Clube ao lado da FN Home, a FN Reforma no portal mesmo antes de
+funcionar, e a Documentação ART/TRT dita com todas as letras como a **da reforma**.
+
+- **Cabeçalho do `PainelCliente`**: Loja FN Home, FN Clube, FN Reforma e Sair, cada botão rola até a sua
+  seção (`irPara`, que desconta a altura do cabeçalho fixo — no celular ele tem duas linhas, e o
+  `scrollMarginTop` fixo escondia o título). O cabeçalho tem 1100 px (a largura da loja), não 720: em 720
+  o nome e os quatro botões desciam para uma segunda linha. No celular os botões ficam só no ícone e
+  dividem a linha com o nome (`.cabecalho-cliente`, que só existe no portal do cliente: o nome quebra
+  em duas linhas antes de o "Sair" ir parar numa terceira).
+- **FN Clube** (`#fn-clube`): a mesma `SecaoParceirosVitrine`, com `tipoInicial="servico"` e `semAbas`.
+  Sem parceiro de serviço na vitrine, o título ganha o selo "Em breve" (`SeloEmBreve`) e, no lugar de
+  "Nenhum parceiro disponível", vem `AvisoFnClubeEmBreve` (em andamento, estreia em breve, "tudo o que o
+  seu imóvel precisa em um só lugar"). O primeiro parceiro aprovado toma o lugar do aviso sozinho — vale
+  também para `?pagina=fn-clube`. A seção começa "carregando" para o aviso não piscar antes da lista.
+  O carrinho: na seção do FN Clube só aparece com parceiro ou com item; com `semAbas`, a loja nunca o
+  mostra (cada seção tem o seu `useCarrinho`, e duas cópias na mesma página se desencontrariam).
+- **FN Reforma** (`#fn-reforma`, `SecaoFnReforma`): diz que ainda não está funcionando, mas que vai
+  atender, e já recebe o pedido — o que fazer (as categorias do FN Casa Pronta, `lib/casa-pronta.ts` do
+  fn-reformas, na mesma ordem), detalhes, para quando e, com mais de um imóvel, qual. **Não há rota no
+  backend**: o botão é um link `wa.me` para o WhatsApp do atendimento (o do rodapé) com a mensagem pronta,
+  nome e imóvel do cadastro. Nada fica gravado no sistema. Quando a FN Reforma abrir, troque por um POST
+  na API e dê à Gerência a lista dos pedidos.
+- **"Vai reformar?"** (`#documentacao-reforma`, `CardDocumentacaoReforma`): era o "Precisa de mais um
+  serviço?" — o cliente não entendia que a ART/TRT dali é a da reforma do imóvel. Mesma regra para
+  aparecer (com atendimento e sem documentação pedida) e o mesmo `nova-solicitacao`. A lista do que o
+  cliente recebe é a que o portal já promete quando a documentação fica pronta (`STATUS_ATENDIMENTO_INFO`:
+  documentação assinada e placa de identificação de obra) — não prometa ali o que a equipe não entrega.
+  A frase da NBR 16.280 fica no que a norma pede (reforma comunicada ao síndico antes de começar, com o
+  responsável técnico). O imóvel só aparece quando o cliente tem um só: com mais de um, quem escolhe de
+  qual cadastro saem os dados é o servidor. A FN Reforma tem um link para este card enquanto ele existir.
 
 ## FN Clube (parceiros com desconto para cliente FN)
 

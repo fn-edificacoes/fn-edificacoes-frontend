@@ -209,10 +209,16 @@ function CartaoCasaPronta({ p }) {
 }
 
 /* ---- A vitrine do Clube: ramos, busca, parceiros e o Casa Pronta ---- */
-export function VitrineClubeFn({ apiFetch, parceiros, carregando, aoEscolher }) {
+export function VitrineClubeFn({ apiFetch, parceiros, carregando, aoEscolher, aoCarregarCasaPronta }) {
   const casaPronta = useCasaPronta(apiFetch);
   const [ramo, setRamo] = useState("");
   const [busca, setBusca] = useState("");
+  /* Quem encaixa a vitrine (SecaoParceirosVitrine) decide o "em breve" do Clube vazio, e precisa
+     saber se o Casa Pronta trouxe alguém. */
+  useEffect(() => {
+    if (!casaPronta.carregando) aoCarregarCasaPronta?.(casaPronta.parceiros.length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [casaPronta.carregando, casaPronta.parceiros.length]);
 
   const termo = semAcento(busca.trim());
   const casaTexto = (p) => semAcento([p.empresa, p.cidade, p.cobertura, ...p.categorias, ...p.servicos.map((s) => s.nome)].join(" "));
@@ -235,15 +241,9 @@ export function VitrineClubeFn({ apiFetch, parceiros, carregando, aoEscolher }) 
   const listaCasa = (!ramo || ramo === "casa") ? casaPronta.parceiros.filter((p) => !termo || casaTexto(p).includes(termo)) : [];
   const maiorDesconto = Math.max(0, ...parceiros.map((p) => percentualDoBeneficio(p.beneficio) || 0), ...casaPronta.parceiros.map((p) => p.descontoMaximo || 0));
 
-  if (carregando && casaPronta.carregando) return <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>;
-  if (total === 0 && !carregando && !casaPronta.carregando) {
-    return (
-      <div style={{ background: CINZA_CLARO, borderRadius: 12, padding: "18px 16px", fontSize: 14, color: "#4a5a70", lineHeight: 1.5 }}>
-        Os primeiros parceiros do FN Clube estão chegando: restaurantes, farmácias, academias, terapias e os
-        parceiros do Casa Pronta para a sua casa. Volte em breve.
-      </div>
-    );
-  }
+  /* Clube vazio: o aviso "estreia em breve" é da SecaoParceirosVitrine (AvisoFnClubeEmBreve, no
+     App.jsx). Com um lado ainda buscando, mostra o que o outro já trouxe. */
+  if (total === 0) return carregando || casaPronta.carregando ? <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p> : null;
 
   return (
     <div style={{ display: "grid", gap: 14, minWidth: 0 }}>

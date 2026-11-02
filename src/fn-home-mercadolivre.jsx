@@ -210,6 +210,59 @@ function FotoDoProduto({ src, alt }) {
   return <img src={src} alt={alt} loading="lazy" decoding="async" onError={() => setQuebrou(true)} />;
 }
 
+/* O endereço curto da loja, para mandar ao cliente: é uma página do site (public/fn-home no
+   repositório do site) que leva a ?pagina=fn-home do sistema. Fica bem no WhatsApp e no panfleto. */
+const LINK_LOJA = "https://fnedificacoes.com.br/fn-home";
+
+/* Aba "Loja FN Home" do vistoriador (nov/2026, pedido da Gerência: "dentro do perfil dos
+   vistoriadores mostre o catálogo… para que eles possam mostrar aos clientes"). O técnico está com
+   o cliente na entrega das chaves — o momento em que falta luminária, tomada, organizador. A aba é a
+   loja de sempre (SecaoOfertasMercadoLivre) com, em cima, o jeito de deixar o link com o cliente:
+   WhatsApp (para o número dele, se o técnico digitar, ou escolhendo o contato) e copiar. */
+export function AbaLojaParaCliente({ apiFetch, notify }) {
+  const [telefone, setTelefone] = useState("");
+  const digitos = telefone.replace(/\D/g, "");
+  // Celular com DDD (10 ou 11 dígitos) ganha o 55 do Brasil; com o 55 já digitado, vai como está.
+  const numero = digitos.length === 10 || digitos.length === 11 ? `55${digitos}` : digitos.length >= 12 ? digitos : "";
+  const mensagem = `Olá! Aqui está a Loja FN Home, com produtos escolhidos pela FN para equipar o seu imóvel — tem ofertas e a compra é pelo Mercado Livre: ${LINK_LOJA}`;
+  const linkWhatsapp = `https://wa.me/${numero}?text=${encodeURIComponent(mensagem)}`;
+  const copiar = async () => {
+    try { await navigator.clipboard.writeText(LINK_LOJA); notify("Link da loja copiado ✓"); } catch { notify(`Não consegui copiar. O link é ${LINK_LOJA}`); }
+  };
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <section style={{ ...secao, background: `linear-gradient(135deg, ${AZUL_MARINHO} 0%, #1d4f86 60%, ${AZUL_MEDIO} 100%)`, color: "#fff", border: "none" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <ShoppingBag size={18} />
+          <strong style={{ fontSize: 16 }}>Mostre a loja ao cliente</strong>
+        </div>
+        <p style={{ fontSize: 13.5, opacity: 0.92, margin: "6px 0 12px", lineHeight: 1.5 }}>
+          Na entrega das chaves sempre falta alguma coisa. Mostre os produtos aqui mesmo ou deixe o link com o
+          cliente: a loja é aberta a todos, sem cadastro, e a compra é pelo Mercado Livre.
+        </p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <input value={telefone} onChange={(e) => setTelefone(e.target.value)} inputMode="tel" aria-label="WhatsApp do cliente (opcional)"
+            placeholder="WhatsApp do cliente (opcional)" style={{ ...inp, flex: "1 1 200px", width: "auto", border: "none" }} />
+          <a href={linkWhatsapp} target="_blank" rel="noopener noreferrer"
+            style={{ ...btn, background: "#1FA855", textDecoration: "none", padding: "9px 14px" }}>
+            Enviar pelo WhatsApp
+          </a>
+          <button type="button" onClick={copiar} style={{ ...btnLeve, padding: "9px 14px" }}>
+            <Check size={14} /> Copiar link
+          </button>
+        </div>
+        <div style={{ fontSize: 12, opacity: 0.8, marginTop: 8 }}>
+          {numero ? `Abre a conversa com ${telefone.trim()}.` : "Sem número, o WhatsApp pede para escolher o contato."} Link: {LINK_LOJA}
+        </div>
+      </section>
+      <section style={secao}>
+        <SecaoOfertasMercadoLivre apiFetch={apiFetch} separar={false} />
+      </section>
+    </div>
+  );
+}
+
 /* Chamada da loja na página de entrada do sistema (o "Cadastre-se"), pedida pela Gerência em
    nov/2026: "divulgue melhor a FN Home". Quatro produtos — os de maior desconto primeiro, o resto
    completa com quem tem foto — e o botão para a loja. Os cartões levam à loja, não direto ao
