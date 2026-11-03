@@ -15,7 +15,7 @@ export const CATEGORIAS_DESPESA = {
   "Operacional": ["Equipamentos de vistoria", "Ferramentas", "EPIs", "Materiais", "Manutenção de equipamentos", "Equipamentos eletrônicos", "Tablet", "Notebook", "Celular", "Câmeras", "Outros"],
   "Administrativo": ["Telefone", "Internet", "Sistema", "Softwares", "Assinaturas", "Domínio", "Hospedagem do site", "Contabilidade", "Serviços bancários", "Material de escritório", "Outros"],
   "Comercial e Marketing": ["Instagram", "Meta Ads", "Google Ads", "Tráfego pago", "Designer", "Social media", "Impressão", "Material gráfico", "Comissão", "Afiliados", "Parceiros", "Outros"],
-  "Profissionais e Prestadores": ["Engenheiro", "Arquiteto", "Técnico em edificações", "Vistoriador", "Salário e extras", "Prestador de serviço", "Freelancer", "Consultoria", "Outros"],
+  "Profissionais e Prestadores": ["Engenheiro", "Arquiteto", "Técnico em edificações", "Vistoriador", "Salário e extras", "Pró-labore", "Encargos da folha (INSS/FGTS)", "Prestador de serviço", "Freelancer", "Consultoria", "Outros"],
   "Tributos e Taxas": ["DAS MEI", "ISS", "Taxas municipais", "TRT", "ART", "RRT", "Taxas de conselho profissional", "Certificados", "Licenças", "Outros"],
 };
 export const CATEGORIAS = Object.keys(CATEGORIAS_DESPESA);
@@ -44,10 +44,18 @@ export const COR_STATUS_APROVACAO = {
 /* ---------- Grupos do relatório mensal e da pasta do contador ----------
    O relatório não lista as 60 subcategorias: agrupa no que a FN acompanha mês a mês. A mesma
    função decide a pasta do comprovante no ZIP, para a planilha e a pasta baterem. */
-export const GRUPOS_RELATORIO = ["Combustível", "Deslocamentos", "Prestadores", "Marketing", "Sistemas", "Equipamentos", "Administrativo", "Tributos", "Outros"];
+export const GRUPOS_RELATORIO = ["Combustível", "Deslocamentos", "Folha de pagamento", "Prestadores", "Marketing", "Sistemas", "Equipamentos", "Administrativo", "Tributos", "Outros"];
 const SUB_SISTEMAS = ["Sistema", "Softwares", "Assinaturas", "Domínio", "Hospedagem do site", "Internet", "Telefone"];
+/* Folha de pagamento: o que a Folha lança sozinha (origem "folha", e "tecnico" do pagamento de
+   técnico que veio antes dela) e vistoriador, salário e extras lançados à mão. Dentro de
+   "Prestadores" ela sumia no meio do engenheiro e do freelancer, e o relatório não dizia quanto
+   a equipe custa no mês. Pró-labore e encargos entram já pensando na ME: são folha no Fator R. */
+const SUB_FOLHA = ["Vistoriador", "Salário e extras", "Pró-labore", "Encargos da folha (INSS/FGTS)"];
+export const ehFolhaDePagamento = (d) => d?.origem === "folha" || d?.origem === "tecnico"
+  || (d?.categoria === "Profissionais e Prestadores" && SUB_FOLHA.includes(d?.subcategoria));
 export function grupoDoRelatorio(d) {
   const cat = d?.categoria, sub = d?.subcategoria;
+  if (ehFolhaDePagamento(d)) return "Folha de pagamento";
   if (cat === "Deslocamento") return sub === "Combustível" ? "Combustível" : "Deslocamentos";
   if (cat === "Profissionais e Prestadores") return "Prestadores";
   if (cat === "Comercial e Marketing") return "Marketing";
@@ -216,6 +224,18 @@ export function limiteEfetivo(config = {}, ano = new Date().getFullYear()) {
   const base = Number(config.limiteAnual) > 0 ? Number(config.limiteAnual) : LIMITE_MEI_PADRAO;
   return config.limiteProporcional ? limiteProporcionalMei(config.dataAbertura, ano, base) : base;
 }
+/* Referências da ME (Simples Nacional) para a preparação da mudança — só mostradas, nunca
+   decidem nada: R$ 360 mil/ano é o teto da ME (acima vira EPP) e 28% é a linha do Fator R
+   (folha ÷ receita bruta de 12 meses) quando este módulo foi escrito. Quem confirma é a
+   contabilidade. */
+export const LIMITE_ME_PADRAO = 360000;
+export const FATOR_R_REFERENCIA = 0.28;
+/* "AAAA-MM" de n meses antes/depois. */
+export const somarMeses = (mes, n) => {
+  const [a, m] = String(mes).split("-").map(Number);
+  const t = a * 12 + (m - 1) + n;
+  return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, "0")}`;
+};
 export function situacaoMei(faturamento, limite) {
   const pct = limite > 0 ? (faturamento / limite) * 100 : 0;
   let faixa;
