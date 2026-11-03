@@ -16,7 +16,7 @@
    Arquivo à parte como o FN Home: o App.jsx encaixa e entrega o apiFetch. As chaves dos ramos
    são as de RAMOS_CLUBE no backend (src/clube-fn.js) — ramo novo precisa entrar nos dois. */
 import React, { useEffect, useMemo, useState } from "react";
-import { Hammer, Utensils, Sandwich, Soup, Pill, Dumbbell, Leaf, Stethoscope, Sparkles, PawPrint, GraduationCap, Store, Search, Building2, Check, MapPin, MessageCircle, Info } from "lucide-react";
+import { Hammer, Utensils, Sandwich, Soup, Pill, Dumbbell, Leaf, Stethoscope, Sparkles, PawPrint, GraduationCap, Store, Search, Building2, Check, MapPin, MessageCircle, Info, Eye, EyeOff, Loader2 } from "lucide-react";
 
 const AZUL_MEDIO = "#2C75B5";
 const AZUL_MARINHO = "#12335B";
@@ -315,6 +315,138 @@ export function AvisoCasaProntaNoClube({ apiFetch }) {
             : `${n} ${n === 1 ? "parceiro homologado aparece" : "parceiros homologados aparecem"} sozinhos no Clube, em Casa e reforma, com o desconto FN de cada serviço.`}
         {" "}Para incluir ou tirar alguém de lá, homologue ou suspenda no FN Projetos → Casa Pronta (Gerência → Reformas). O cliente pede esses serviços pela FN.
       </div>
+    </div>
+  );
+}
+
+/* ---- Se o cliente vê o FN Clube ----
+   Pedido da Gerência (nov/2026): "mantenha oculto pro cliente ainda; coloque uma aba na gerência
+   para ativar ou ocultar". A escolha mora no servidor (GET /api/clube/visibilidade, chave 'clube_fn'
+   do backend) e vale para todos os clientes; sem escolha gravada, o Clube está oculto.
+   O portal do cliente, a página de entrada, a página pública e a avaliação perguntam antes de
+   mostrar o Clube ou de levar a ele. Uma pergunta por carga de página, dividida entre quem pergunta.
+   Sem resposta, fica oculto: o pedido foi esconder, e mostrar por engano é pior que esconder. */
+let perguntaVisibilidade = null;
+export function clubeVisivelParaClientes(apiFetch, { renovar = false } = {}) {
+  if (!perguntaVisibilidade || renovar) {
+    perguntaVisibilidade = apiFetch("/api/clube/visibilidade").then((r) => r?.visivel === true, () => false);
+  }
+  return perguntaVisibilidade;
+}
+/* null enquanto pergunta — e nada do Clube aparece até a resposta, para não piscar na tela. */
+export function useClubeVisivel(apiFetch) {
+  const [visivel, setVisivel] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    clubeVisivelParaClientes(apiFetch).then((v) => { if (vivo) setVisivel(v); });
+    return () => { vivo = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return visivel;
+}
+
+/* ---- Gerência → FN Clube → Ativar ou ocultar ----
+   O botão de mostrar pede confirmação: a partir do clique, todo cliente vê o Clube. Ocultar não
+   pede — esconder de novo não tem risco. Embaixo vai a prévia da seção (children, a mesma
+   SecaoParceirosVitrine do portal do cliente), para a Gerência ver o que vai aparecer antes de ligar. */
+const quandoFoi = (iso) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+};
+export function AbaVisibilidadeClube({ apiFetch, token, notify, children }) {
+  const [estado, setEstado] = useState(null); // { visivel, atualizadoEm, atualizadoPor }
+  const [erro, setErro] = useState("");
+  const [confirmando, setConfirmando] = useState(false);
+  const [salvando, setSalvando] = useState(false);
+
+  useEffect(() => {
+    let vivo = true;
+    apiFetch("/api/clube/visibilidade/detalhe", { token })
+      .then((r) => { if (vivo) setEstado(r); })
+      .catch((e) => { if (vivo) setErro(e.message); });
+    return () => { vivo = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const mudar = async (visivel) => {
+    setSalvando(true);
+    try {
+      const r = await apiFetch("/api/clube/visibilidade", { method: "PUT", token, body: { visivel } });
+      setEstado(r);
+      setConfirmando(false);
+      clubeVisivelParaClientes(apiFetch, { renovar: true });
+      notify?.(visivel ? "FN Clube visível para os clientes ✓" : "FN Clube oculto para os clientes ✓");
+    } catch (e) {
+      notify?.(`Não foi possível salvar: ${e.message}`);
+    }
+    setSalvando(false);
+  };
+
+  const visivel = estado?.visivel === true;
+  const cor = visivel
+    ? { fundo: "#E6F4EA", borda: "#b9dfc4", texto: "#1E5E2F" }
+    : { fundo: "#FFF8E8", borda: "#F3DDAE", texto: "#6b5320" };
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <section style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 14, padding: 20, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 14 }}>
+          <div style={{ width: 30, height: 30, borderRadius: 8, background: CINZA_CLARO, display: "grid", placeItems: "center" }}>
+            {visivel ? <Eye size={16} color={AZUL_MEDIO} /> : <EyeOff size={16} color={AZUL_MEDIO} />}
+          </div>
+          <h3 style={{ margin: 0, fontSize: 15, color: AZUL_MARINHO }}>FN Clube para os clientes</h3>
+        </div>
+
+        {erro && <p style={{ margin: 0, color: "#C62828", fontSize: 13.5 }}>Não foi possível ler a situação do FN Clube: {erro}</p>}
+        {!estado && !erro && <p style={{ margin: 0, color: "#8593a8", fontSize: 13.5 }}>Carregando…</p>}
+
+        {estado && (
+          <>
+            <div style={{ background: cor.fundo, border: `1px solid ${cor.borda}`, color: cor.texto, borderRadius: 12, padding: "13px 15px", fontSize: 13.5, lineHeight: 1.55 }}>
+              <strong style={{ display: "block", fontSize: 15, marginBottom: 3 }}>
+                {visivel ? "Visível para os clientes" : "Oculto para os clientes"}
+              </strong>
+              {visivel
+                ? "Os clientes veem o FN Clube: o botão e a seção no portal do cliente, o link na página de entrada e a página do FN Clube, com os parceiros homologados e os do Casa Pronta."
+                : "Os clientes não veem o FN Clube: o botão e a seção saem do portal do cliente, o link sai da página de entrada e a página do FN Clube mostra só \"em breve\". Os parceiros continuam sendo cadastrados e homologados em Parceiros do Clube."}
+              <div style={{ marginTop: 6, fontSize: 12.5, opacity: 0.85 }}>
+                {estado.atualizadoEm
+                  ? `Última mudança: ${quandoFoi(estado.atualizadoEm)}${estado.atualizadoPor ? `, por ${estado.atualizadoPor}` : ""}.`
+                  : "O FN Clube começa oculto e ainda não foi ativado."}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              {visivel ? (
+                <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} disabled={salvando} onClick={() => mudar(false)}>
+                  {salvando ? <Loader2 size={14} className="spin" /> : <EyeOff size={14} />} Ocultar dos clientes
+                </button>
+              ) : confirmando ? (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", background: CINZA_CLARO, borderRadius: 10, padding: "10px 12px" }}>
+                  <span style={{ fontSize: 13, color: AZUL_MARINHO }}>A partir de agora, todos os clientes passam a ver o FN Clube. Confirma?</span>
+                  <button className="btn-solid" style={{ background: "#1E7D3C" }} disabled={salvando} onClick={() => mudar(true)}>
+                    {salvando ? <Loader2 size={14} className="spin" /> : <Check size={14} />} Sim, mostrar aos clientes
+                  </button>
+                  <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: "#fff" }} disabled={salvando} onClick={() => setConfirmando(false)}>Cancelar</button>
+                </div>
+              ) : (
+                <button className="btn-solid" onClick={() => setConfirmando(true)}>
+                  <Eye size={14} /> Mostrar o FN Clube aos clientes
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </section>
+
+      {children && (
+        <div style={{ display: "grid", gap: 8, minWidth: 0 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#65758b", textTransform: "uppercase", letterSpacing: ".06em", padding: "0 2px" }}>
+            Prévia · é assim que o cliente vê a seção FN Clube{visivel ? "" : " depois de ativada"}
+          </div>
+          {children}
+        </div>
+      )}
     </div>
   );
 }
