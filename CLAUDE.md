@@ -451,7 +451,8 @@ comissão só aparece no painel de afiliados de lá. Backend: `src/afiliados-mer
 Pedido da Gerência (nov/2026): o FN Clube ao lado da FN Home, a FN Reforma no portal mesmo antes de
 funcionar, e a Documentação ART/TRT dita com todas as letras como a **da reforma**.
 
-- **Cabeçalho do `PainelCliente`**: Loja FN Home, FN Clube, FN Reforma e Sair, cada botão rola até a sua
+- **Cabeçalho do `PainelCliente`**: Loja FN Home, FN Clube (só com o Clube ativado pela Gerência — ver
+  "Ativar ou ocultar" em FN Clube, abaixo), FN Reforma e Sair, cada botão rola até a sua
   seção (`irPara`, que desconta a altura do cabeçalho fixo — no celular ele tem duas linhas, e o
   `scrollMarginTop` fixo escondia o título). O cabeçalho tem 1100 px (a largura da loja), não 720: em 720
   o nome e os quatro botões desciam para uma segunda linha. No celular os botões ficam só no ícone e
@@ -506,6 +507,16 @@ terapias, lanchonetes… — junto com os colaboradores do Casa Pronta. Backend:
   que a Gerência tinha perdido quando o Casa Pronta saiu do sistema (set/2026), mais o aviso
   `AvisoCasaProntaNoClube` (quantos entram sozinhos do Casa Pronta, ou que o FN Projetos não respondeu).
   O sino de "parceiro aguardando homologação" agora também avisa a Gerência e leva para essa tela.
+- **Ativar ou ocultar** (Gerência → FN Clube → "Ativar ou ocultar", sub `clube-visibilidade`,
+  `AbaVisibilidadeClube`; nov/2026, pedido da Gerência: "mantenha oculto pro cliente ainda"). A chave
+  mora no servidor (`GET /api/clube/visibilidade`) e vale para todos; **sem escolha gravada, o Clube
+  fica oculto**. As telas perguntam por `useClubeVisivel`/`clubeVisivelParaClientes` (em `clube-fn.jsx`,
+  uma pergunta por carga de página; sem resposta, oculto). Oculto quer dizer: sem o botão e a seção
+  `#fn-clube` no `PainelCliente`, sem o link "FN Clube" na barra da página de entrada e da página
+  pública, `?pagina=fn-clube` só com o `AvisoFnClubeEmBreve` e o atalho para a loja, e a avaliação
+  (`PaginaAvaliarPublica`) levando a `?pagina=fn-home`. Mostrar pede confirmação; ocultar, não. A aba
+  traz a prévia da seção (a mesma `SecaoParceirosVitrine` do portal). Parceiros continuam sendo
+  cadastrados e homologados em "Parceiros do Clube", e as rotas de dados continuam abertas.
 
 ## FN Home · Financeiro (vendas e comissões)
 

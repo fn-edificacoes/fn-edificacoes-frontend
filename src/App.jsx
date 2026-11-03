@@ -6,7 +6,7 @@ import AbaRedeNacional from "./rede-nacional.jsx";
 import AbaEmpreendimentosCadastro from "./empreendimentos-lista.jsx";
 import { Building as IconeEmpreendimento, ShoppingBag } from "lucide-react";
 import AbaProdutosMercadoLivre, { SecaoOfertasMercadoLivre, DestaqueLojaFnHome, AbaLojaParaCliente, temRascunhoMercadoLivre } from "./fn-home-mercadolivre.jsx";
-import { VitrineClubeFn, FaixaClubeFn, SeletorRamo, AvisoCasaProntaNoClube, rotuloDoRamo } from "./clube-fn.jsx";
+import { VitrineClubeFn, FaixaClubeFn, SeletorRamo, AvisoCasaProntaNoClube, rotuloDoRamo, useClubeVisivel, clubeVisivelParaClientes, AbaVisibilidadeClube } from "./clube-fn.jsx";
 import AbaFinanceiroFnHome, { CardFnHomeNosIndicadores } from "./fn-home-financeiro.jsx";
 import AbaMapaAtuacao from "./mapa-atuacao.jsx";
 import { usePatologiaVoz, PainelPatologiaVoz, AvisoPendentesVoz } from "./patologia-voz.jsx";
@@ -1897,6 +1897,8 @@ function TelaCriarSenhaCliente({ token, onConcluido, onPedirNovoLink }) {
 function PortalCliente({ onIrParaLogin, onLogin }) {
   const [toast, setToast] = useState("");
   const notify = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
+  /* O FN Clube só aparece quando a Gerência liga (Gerência → FN Clube → Ativar ou ocultar). */
+  const clubeVisivel = useClubeVisivel(apiFetch);
 
   return (
     <div style={{ minHeight: "100vh", background: CINZA_CLARO, fontFamily: "'Inter', system-ui, sans-serif" }}>
@@ -1915,7 +1917,7 @@ function PortalCliente({ onIrParaLogin, onLogin }) {
             até os blocos explicativos mais abaixo. */}
         <div style={{ maxWidth: 720, margin: "0 auto", padding: "0 18px 14px", display: "flex", gap: 20, fontSize: 13, fontWeight: 700 }}>
           <a href="#solicitar-servico" style={{ color: "#fff", opacity: 0.85, textDecoration: "none" }}>Serviços FN</a>
-          <a href="?pagina=fn-clube" style={{ color: "#fff", opacity: 0.85, textDecoration: "none" }}>FN Clube</a>
+          {clubeVisivel && <a href="?pagina=fn-clube" style={{ color: "#fff", opacity: 0.85, textDecoration: "none" }}>FN Clube</a>}
           {/* A loja em destaque na barra (pedido da Gerência, nov/2026): é a única das três que
               qualquer visitante pode usar agora, sem cadastro. */}
           <a href="?pagina=fn-home" style={{ color: AZUL_MARINHO, background: "#FFD54F", borderRadius: 999, padding: "2px 10px", marginTop: -2, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 5 }}>
@@ -2330,6 +2332,8 @@ const GERENCIA_MENU_LATERAL = [
      que a Gerência tinha perdido quando o Casa Pronta saiu do sistema (set/2026). */
   { titulo: "FN Clube", itens: [
     { aba: "gerencia", sub: "clube-parceiros", label: "Parceiros do Clube", Icon: Users },
+    /* Se o cliente vê o Clube (nov/2026: "mantenha oculto pro cliente ainda"). Começa oculto. */
+    { aba: "gerencia", sub: "clube-visibilidade", label: "Ativar ou ocultar", Icon: Eye },
   ] },
   { titulo: "FN Nacional", itens: [
     { aba: "nacional", label: "Rede Nacional", Icon: Landmark },
@@ -16823,6 +16827,15 @@ function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, de
       </div>
     );
   }
+  if (sub === "clube-visibilidade") {
+    /* A prévia é a mesma seção do portal do cliente (FN Clube, sem as abas): a Gerência vê o que
+       vai aparecer antes de ligar. */
+    return (
+      <AbaVisibilidadeClube apiFetch={apiFetch} token={token} notify={notify}>
+        <SecaoParceirosVitrine notify={notify} tipoInicial="servico" semAbas />
+      </AbaVisibilidadeClube>
+    );
+  }
   if (sub === "fn-home-ml") {
     return <AbaProdutosMercadoLivre token={token} apiFetch={apiFetch} notify={notify} redimensionar={redimensionar} />;
   }
@@ -17224,10 +17237,16 @@ function PaginaAvaliarPublica({ id, tipo, servico }) {
   // está fresca, em vez de deixar essa venda pra outro contato, em outro dia.
   useEffect(() => {
     if (!enviado) return;
-    const t = setTimeout(() => {
-      window.location.href = `${window.location.origin}${window.location.pathname}?pagina=fn-clube`;
-    }, 2500);
-    return () => clearTimeout(t);
+    let vivo = true;
+    let t;
+    /* Com o FN Clube oculto pela Gerência, o convite vai para a loja FN Home, aberta a todos. */
+    clubeVisivelParaClientes(apiFetch).then((clube) => {
+      if (!vivo) return;
+      t = setTimeout(() => {
+        window.location.href = `${window.location.origin}${window.location.pathname}?pagina=${clube ? "fn-clube" : "fn-home"}`;
+      }, 2500);
+    });
+    return () => { vivo = false; clearTimeout(t); };
   }, [enviado]);
 
   return (
@@ -18520,6 +18539,9 @@ function PaginaBeneficiosFn({ tipo }) {
   const ehLoja = tipo === "produto";
   const largura = ehLoja ? 1160 : 1040;
   const [qtdProdutos, setQtdProdutos] = useState(null);
+  /* Com o FN Clube oculto pela Gerência, a página dele mostra só o "em breve" — quem chega por um
+     link antigo ou pelo site não vê parceiro nenhum — e o link "FN Clube" sai da barra. */
+  const clubeVisivel = useClubeVisivel(apiFetch);
   return (
     <div style={{ minHeight: "100vh", background: CINZA_CLARO, fontFamily: "'Inter', system-ui, sans-serif" }}>
       {/* Página aberta direto pelo link, fora do AppInterno/PainelCliente que injetam os estilos:
@@ -18539,7 +18561,7 @@ function PaginaBeneficiosFn({ tipo }) {
         </div>
         <div style={{ maxWidth: largura, margin: "0 auto", padding: "0 18px 14px", display: "flex", gap: 20, fontSize: 13, fontWeight: 700 }}>
           <a href={`${home}#solicitar-servico`} style={{ color: "#fff", opacity: 0.85, textDecoration: "none" }}>Serviços FN</a>
-          <a href="?pagina=fn-clube" style={{ color: "#fff", opacity: tipo === "servico" ? 1 : 0.85, textDecoration: "none" }}>FN Clube</a>
+          {clubeVisivel && <a href="?pagina=fn-clube" style={{ color: "#fff", opacity: tipo === "servico" ? 1 : 0.85, textDecoration: "none" }}>FN Clube</a>}
           <a href="?pagina=fn-home" style={{ color: "#fff", opacity: tipo === "produto" ? 1 : 0.85, textDecoration: "none" }}>FN Home</a>
         </div>
       </header>
@@ -18552,12 +18574,25 @@ function PaginaBeneficiosFn({ tipo }) {
               <SecaoOfertasMercadoLivre apiFetch={apiFetch} aoCarregar={setQtdProdutos} separar={false} />
             </section>
           </div>
-        ) : (
+        ) : clubeVisivel ? (
           <div style={{ display: "grid", gap: 20 }}>
             <FaixaClubeFn />
             <SecaoParceirosVitrine notify={notify} tipoInicial={tipo} clienteLogado={clienteLogado} token={tokenCliente}
               onIrParaLogin={() => { window.location.href = `${window.location.origin}${window.location.pathname}`; }} />
           </div>
+        ) : (
+          <section style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 18, padding: "clamp(16px, 3vw, 28px)", display: "grid", gap: 14 }}>
+            {clubeVisivel === null ? (
+              <p style={{ color: "#8593a8", fontSize: 14, margin: 0 }}>Carregando…</p>
+            ) : (
+              <>
+                <AvisoFnClubeEmBreve />
+                <a href="?pagina=fn-home" className="btn-solid" style={{ textDecoration: "none", justifySelf: "start" }}>
+                  <ShoppingBag size={14} /> Enquanto isso, conheça a Loja FN Home
+                </a>
+              </>
+            )}
+          </section>
         )}
       </main>
       {toast && (
@@ -19756,6 +19791,9 @@ function SecaoFnReforma({ nome, imoveis = [], aoVerDocumentacao }) {
 
 function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado = false }) {
   const [carregando, setCarregando] = useState(true);
+  /* Seção e botão do FN Clube só com o Clube ligado pela Gerência (Gerência → FN Clube → Ativar ou
+     ocultar). Enquanto pergunta, nenhum dos dois aparece. */
+  const clubeVisivel = useClubeVisivel(apiFetch);
   const [erro, setErro] = useState("");
   const [cliente, setCliente] = useState(null);
   const [resultados, setResultados] = useState([]);
@@ -19917,9 +19955,11 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado 
      FN Clube ficava um card alto e vazio ao lado do formulário — por isso vão um embaixo do outro. */
   const outrasAreas = (
     <>
-      <div id="fn-clube" style={{ display: "grid", minWidth: 0 }}>
-        <SecaoParceirosVitrine notify={notify} clienteLogado={cliente} token={session.token} tipoInicial="servico" semAbas />
-      </div>
+      {clubeVisivel && (
+        <div id="fn-clube" style={{ display: "grid", minWidth: 0 }}>
+          <SecaoParceirosVitrine notify={notify} clienteLogado={cliente} token={session.token} tipoInicial="servico" semAbas />
+        </div>
+      )}
       <div id="fn-reforma" style={{ display: "grid", minWidth: 0 }}>
         <SecaoFnReforma nome={session.usuario.nome} imoveis={imoveis}
           aoVerDocumentacao={mostraDocumentacao ? () => irPara("documentacao-reforma") : null} />
@@ -19958,9 +19998,11 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado 
             <button className="btn-ghost" onClick={() => irPara("loja-fn-home")} title="Loja FN Home" aria-label="Loja FN Home">
               <ShoppingBag size={14} /> <span className="rotulo-cabecalho">Loja FN Home</span>
             </button>
-            <button className="btn-ghost" onClick={() => irPara("fn-clube")} title="FN Clube (em breve)" aria-label="FN Clube">
-              <Handshake size={14} /> <span className="rotulo-cabecalho">FN Clube</span>
-            </button>
+            {clubeVisivel && (
+              <button className="btn-ghost" onClick={() => irPara("fn-clube")} title="FN Clube" aria-label="FN Clube">
+                <Handshake size={14} /> <span className="rotulo-cabecalho">FN Clube</span>
+              </button>
+            )}
             <button className="btn-ghost" onClick={() => irPara("fn-reforma")} title="FN Reforma (em breve)" aria-label="FN Reforma">
               <PaintRoller size={14} /> <span className="rotulo-cabecalho">FN Reforma</span>
             </button>
