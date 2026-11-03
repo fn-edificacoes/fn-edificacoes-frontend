@@ -594,10 +594,22 @@ O app não usa router; as páginas públicas são interceptadas no começo de `A
 das 78 contas ainda estavam com ela — o e-mail de um cliente bastava para abrir o laudo do
 imóvel dele. Hoje a senha provisória nasce aleatória e ninguém a conhece.
 
-Quem precisa entrar usa **"Receba um link por e-mail"** (`PrimeiroAcessoPorEmail`), que
-serve aos dois casos — primeiro acesso e senha esquecida — para cliente, parceiro e equipe.
-A resposta é sempre a mesma frase, exista ou não o e-mail: senão a tela vira uma forma de
-descobrir quem é cliente da FN.
+Quem esqueceu a senha resolve sozinho: **"Esqueci minha senha"**, logo abaixo do campo da senha
+(pedido da Gerência, nov/2026 — antes era uma linha cinza embaixo do "Entrar" que ninguém achava),
+abre `PedirLinkDeSenha` no lugar do formulário, já com o e-mail digitado. **"Primeiro acesso? Crie sua
+senha"** abre a mesma tela. Os dois pedem `POST /api/clientes/solicitar-senha`, que vale para cliente,
+parceiro e equipe. A resposta é sempre a mesma frase, exista ou não o e-mail: senão a tela vira uma
+forma de descobrir quem é cliente da FN. Recusa (limite de pedidos) aparece em vermelho, com o
+formulário para tentar de novo.
+
+O link do e-mail (30 minutos, vale uma vez só) abre `?criar-senha=` → `TelaCriarSenhaCliente`
+("Defina sua senha", texto que serve aos dois casos), e a pessoa já entra. **"Link vencido ou já
+usado? Peça um novo"** volta ao login já no pedido do link (`recuperacaoNoLogin`, no `App()`).
+O **suporte pelo WhatsApp continua** (`WHATSAPP_ATENDIMENTO_FN`, mensagem pronta): "Sem e-mail no
+cadastro? Fale com a FN pelo WhatsApp" no login, e a caixa "Não tem e-mail no cadastro ou o link não
+chegou?" no pedido do link. Esse link não se chama "esqueci minha senha" de propósito: dois botões com
+o mesmo nome levavam a pessoa para lados diferentes. `TelaLogin` e `TelaCriarSenhaCliente` carregam o
+`estilos` — sem ele o "Entrar" saía como botão cinza do navegador.
 
 Um 401 vindo do servidor encerra a sessão e volta para o login com o motivo à vista (ver
 `ligarSessaoAoApi`, no topo do arquivo). Um 403 não faz isso de propósito — quase sempre é
