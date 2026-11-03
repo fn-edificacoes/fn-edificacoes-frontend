@@ -140,7 +140,7 @@ export function AbaArtsVistoria({ token, apiFetch, notify, perfil, clientes = []
         .sort((a, b) => (a.data || "9999").localeCompare(b.data || "9999") || a.c.nome.localeCompare(b.c.nome, "pt-BR"));
       const comArt = g.pessoas.filter((p) => p.art);
       const feitasSemArt = semArt.filter((p) => p.feita).length;
-      const vigentes = g.arts.filter((a) => a.validaAte >= hoje() && a.pessoas.length < a.capacidade);
+      const vigentes = g.arts.filter((a) => a.tipo !== "individual" && a.validaAte >= hoje() && a.pessoas.length < a.capacidade);
       return { ...g, nome, semArt, comArt, feitasSemArt, vigentes };
     }).sort((a, b) => b.feitasSemArt - a.feitasSemArt || b.semArt.length - a.semArt.length || a.nome.localeCompare(b.nome, "pt-BR"));
   }, [clientes, arts, artDoCliente, aPartirDe]);
@@ -150,30 +150,43 @@ export function AbaArtsVistoria({ token, apiFetch, notify, perfil, clientes = []
 
   const mesAtual = hoje().slice(0, 7);
   const artsDoMes = arts.filter((a) => a.emitidaEm.slice(0, 7) === mesAtual);
+  const individuaisDoMes = artsDoMes.filter((a) => a.tipo === "individual").length;
   const cobertas = arts.reduce((s, a) => s + a.pessoas.length, 0);
   const totalSemArt = grupos.reduce((s, g) => s + g.semArt.length, 0);
   const totalFeitasSemArt = grupos.reduce((s, g) => s + g.feitasSemArt, 0);
-  /* O que a ART múltipla poupou: cada pessoa coberta custaria uma ART individual. */
-  const economia = Math.max(0, cobertas * config.artValor - arts.length * config.artValor);
+  /* O que a ART múltipla poupou: cada pessoa coberta custaria uma ART individual. A individual
+     não poupa nada (é uma por pessoa), então fica fora da conta. */
+  const coletivas = arts.filter((a) => a.tipo !== "individual");
+  const cobertasColetivas = coletivas.reduce((s, a) => s + a.pessoas.length, 0);
+  const economia = Math.max(0, cobertasColetivas * config.artValor - coletivas.length * config.artValor);
 
-  const trocarArt = (nova) => setArts((atual) => atual.some((a) => a.id === nova.id) ? atual.map((a) => (a.id === nova.id ? nova : a)) : [nova, ...atual]);
+  /* A individual chega em lote (uma ART por pessoa marcada): aceita uma ou várias. */
+  const trocarArt = (novas) => setArts((atual) => {
+    let lista = atual;
+    [].concat(novas).forEach((nova) => {
+      lista = lista.some((a) => a.id === nova.id) ? lista.map((a) => (a.id === nova.id ? nova : a)) : [nova, ...lista];
+    });
+    return lista;
+  });
 
   return (
     <div style={{ display: "grid", gap: 0 }}>
       <Caixa icon={FileCheck} titulo="ARTs de vistoria por empreendimento"
         acoes={<button style={btnLeve} onClick={carregar}><RefreshCcw size={14} className={carregando ? "spin" : ""} /> Atualizar</button>}>
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-          Uma ART múltipla de vistoria custa <strong>{brl(config.artValor)}</strong> e cobre até <strong>{config.artCapacidade} pessoas</strong> do
+          Uma ART múltipla (coletiva) de vistoria custa <strong>{brl(config.artValor)}</strong> e cobre até <strong>{config.artCapacidade} pessoas</strong> do
           mesmo empreendimento, por <strong>{config.artValidadeDias} dias</strong> a partir da emissão. Quem ainda não está em nenhuma ART aparece
-          em "Sem ART": junte essas pessoas na próxima ART — ou numa ART vigente que ainda tem vaga — em vez de fazer individual.
-          Cada ART emitida já entra sozinha como despesa no Financeiro.
+          em "Sem ART": junte essas pessoas na próxima ART — ou numa ART vigente que ainda tem vaga.
+          Quando a construtora exige o documento <strong>individual</strong>, marque a pessoa e use <strong>ART individual</strong>: cada uma
+          ganha a sua, também por {brl(config.artValor)}. Cada ART emitida já entra sozinha como despesa no Financeiro.
         </p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 14 }}>
-          <Kpi rotulo="ARTs emitidas no mês" valor={artsDoMes.length} apoio={`${brl(artsDoMes.length * config.artValor)} · ${arts.length} no total`} />
+          <Kpi rotulo="ARTs emitidas no mês" valor={artsDoMes.length}
+            apoio={`${brl(artsDoMes.reduce((s, a) => s + a.valor, 0))}${individuaisDoMes ? ` · ${individuaisDoMes} individual(is)` : ""} · ${arts.length} no total`} />
           <Kpi rotulo="Pessoas cobertas" valor={cobertas} apoio="em todas as ARTs" cor={VERDE} />
           <Kpi rotulo="Sem ART" valor={totalSemArt} apoio={`vistorias desde ${dataBr(aPartirDe)}`} cor={totalSemArt ? AMBAR : VERDE} />
           <Kpi rotulo="Vistoria feita sem ART" valor={totalFeitasSemArt} apoio="precisam entrar numa ART" cor={totalFeitasSemArt ? VERMELHO : VERDE} />
-          <Kpi rotulo="Economia vs. individual" valor={brl(economia)} apoio={`${cobertas} pessoas em ${arts.length} ART(s)`} cor={VERDE} />
+          <Kpi rotulo="Economia vs. individual" valor={brl(economia)} apoio={`${cobertasColetivas} pessoas em ${coletivas.length} ART(s) coletiva(s)`} cor={VERDE} />
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <div style={{ display: "grid", gap: 4, flex: 1, minWidth: 200 }}>
@@ -207,7 +220,7 @@ export function AbaArtsVistoria({ token, apiFetch, notify, perfil, clientes = []
 
 function GrupoEmpreendimento({ g, config, perfil, token, apiFetch, notify, clientePorId, trocarArt, recarregar, aberto, alternar }) {
   const [marcados, setMarcados] = useState({});
-  const [emitindo, setEmitindo] = useState(false);
+  const [emitindo, setEmitindo] = useState(null); // null | "coletiva" | "individual"
   const [form, setForm] = useState({ numero: "", emitidaEm: hoje(), observacoes: "" });
   const [enviando, setEnviando] = useState(false);
   const selecionados = g.semArt.filter((p) => marcados[p.c.id]);
@@ -221,18 +234,25 @@ function GrupoEmpreendimento({ g, config, perfil, token, apiFetch, notify, clien
      quem decide é quem emite. */
   const foraDaJanela = (inicio, fim) => selecionados.filter((p) => p.data && (p.data < inicio || p.data > fim));
 
+  const individual = emitindo === "individual";
   const emitir = async () => {
     if (!selecionados.length) return;
-    if (selecionados.length > config.artCapacidade) { notify(`Uma ART cobre no máximo ${config.artCapacidade} pessoas.`); return; }
+    if (!individual && selecionados.length > config.artCapacidade) { notify(`Uma ART cobre no máximo ${config.artCapacidade} pessoas.`); return; }
     setEnviando(true);
     try {
       const r = await apiFetch("/api/arts-vistoria", { method: "POST", token, body: {
+        tipo: individual ? "individual" : "coletiva",
         empreendimento: g.nome, numero: form.numero, emitidaEm: form.emitidaEm, observacoes: form.observacoes,
         clienteIds: selecionados.map((p) => p.c.id),
       } });
-      trocarArt(r.art);
-      setMarcados({}); setEmitindo(false); setForm({ numero: "", emitidaEm: hoje(), observacoes: "" });
-      notify(`ART emitida com ${r.art.pessoas.length} pessoa(s) ✓ — ${brl(r.art.valor)} lançado nas despesas`);
+      if (individual) {
+        trocarArt(r.arts);
+        notify(`${r.arts.length} ART(s) individual(is) emitida(s) ✓ — ${brl(r.arts.reduce((s, a) => s + a.valor, 0))} lançado nas despesas`);
+      } else {
+        trocarArt(r.art);
+        notify(`ART emitida com ${r.art.pessoas.length} pessoa(s) ✓ — ${brl(r.art.valor)} lançado nas despesas`);
+      }
+      setMarcados({}); setEmitindo(null); setForm({ numero: "", emitidaEm: hoje(), observacoes: "" });
     } catch (e) { notify(`Não foi possível emitir a ART: ${e.message}`); }
     setEnviando(false);
   };
@@ -278,7 +298,7 @@ function GrupoEmpreendimento({ g, config, perfil, token, apiFetch, notify, clien
           {g.arts.length > 0 && (
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead><tr>{["ART nº", "Emissão", "Válida até", "Ocupação", "Situação", "Custo", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+                <thead><tr>{["ART nº", "Emissão", "Válida até", "Ocupação / pessoa", "Situação", "Custo", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
                 <tbody>
                   {g.arts.map((a) => (
                     <LinhaArt key={a.id} art={a} perfil={perfil} clientePorId={clientePorId} tirar={tirar} excluir={excluirArt}
@@ -339,13 +359,26 @@ function GrupoEmpreendimento({ g, config, perfil, token, apiFetch, notify, clien
                     </button>
                   );
                 })}
-                {!emitindo && <button style={g.vigentes.length ? btnLeve : btn} onClick={() => setEmitindo(true)}><FileCheck size={14} /> Emitir nova ART ({brl(config.artValor)})</button>}
+                {!emitindo && <button style={g.vigentes.length ? btnLeve : btn} onClick={() => setEmitindo("coletiva")}><FileCheck size={14} /> Emitir nova ART coletiva ({brl(config.artValor)})</button>}
+                {!emitindo && (
+                  <button style={btnLeve} onClick={() => setEmitindo("individual")}
+                    title="Para construtora que exige o documento individual: uma ART por pessoa marcada">
+                    <FileCheck size={14} /> ART individual {selecionados.length > 1 ? `para cada uma (${selecionados.length} × ${brl(config.artValor)})` : `(${brl(config.artValor)})`}
+                  </button>
+                )}
               </div>
               {emitindo && (
                 <div style={{ display: "grid", gap: 10 }}>
+                  {individual && (
+                    <div style={{ fontSize: 12.5, color: "#4a5a70" }}>
+                      <strong>ART individual:</strong> {selecionados.length === 1 ? "uma ART só desta pessoa" : `${selecionados.length} ARTs, uma para cada pessoa marcada`} — {brl(selecionados.length * config.artValor)} nas despesas.
+                    </div>
+                  )}
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    <div style={{ display: "grid", gap: 4 }}><label style={lab}>Número da ART</label>
-                      <input style={inp} value={form.numero} onChange={(e) => setForm({ ...form, numero: e.target.value })} placeholder="pode preencher depois" /></div>
+                    {(!individual || selecionados.length === 1) && (
+                      <div style={{ display: "grid", gap: 4 }}><label style={lab}>Número da ART</label>
+                        <input style={inp} value={form.numero} onChange={(e) => setForm({ ...form, numero: e.target.value })} placeholder="pode preencher depois" /></div>
+                    )}
                     <div style={{ display: "grid", gap: 4 }}><label style={lab}>Data de emissão</label>
                       <input style={inp} type="date" value={form.emitidaEm} onChange={(e) => setForm({ ...form, emitidaEm: e.target.value })} /></div>
                     <div style={{ display: "grid", gap: 4, flex: 1, minWidth: 180 }}><label style={lab}>Observação</label>
@@ -358,10 +391,12 @@ function GrupoEmpreendimento({ g, config, perfil, token, apiFetch, notify, clien
                     <Aviso>{fora.length} pessoa(s) com vistoria fora dessa validade: {fora.map((p) => `${p.c.nome} (${dataBr(p.data)})`).join(", ")}.</Aviso>
                   )}
                   <div style={{ display: "flex", gap: 8 }}>
-                    <button style={btn} disabled={enviando || selecionados.length > config.artCapacidade || !form.emitidaEm} onClick={emitir}>
-                      <Check size={14} /> Emitir ART com {selecionados.length} pessoa(s)
+                    <button style={btn} disabled={enviando || (!individual && selecionados.length > config.artCapacidade) || !form.emitidaEm} onClick={emitir}>
+                      <Check size={14} /> {individual
+                        ? (selecionados.length === 1 ? "Emitir ART individual" : `Emitir ${selecionados.length} ARTs individuais`)
+                        : `Emitir ART com ${selecionados.length} pessoa(s)`}
                     </button>
-                    <button style={btnLeve} onClick={() => setEmitindo(false)}>Cancelar</button>
+                    <button style={btnLeve} onClick={() => setEmitindo(null)}>Cancelar</button>
                   </div>
                 </div>
               )}
@@ -385,19 +420,27 @@ function LinhaArt({ art, perfil, clientePorId, tirar, excluir, salvar }) {
   const [editando, setEditando] = useState(false);
   const [form, setForm] = useState({ numero: art.numero, emitidaEm: art.emitidaEm });
   const vigente = art.validaAte >= hoje();
+  /* Individual: uma pessoa só, então o nome vai direto na linha em vez da lista de ocupação. */
+  const individual = art.tipo === "individual";
+  const pessoaIndividual = individual ? clientePorId[art.pessoas[0]?.clienteId] : null;
   return (
     <>
       <tr>
         <td style={{ ...td, fontWeight: 700 }}>
           {editando ? <input style={{ ...inp, width: 130 }} value={form.numero} onChange={(e) => setForm({ ...form, numero: e.target.value })} />
             : (art.numero || <span style={{ color: AMBAR }}>sem número</span>)}
+          {individual && <div style={{ marginTop: 3 }}><Pilula cor="#6E36BE" fundo="#F1EAFB">Individual</Pilula></div>}
         </td>
         <td style={{ ...td, whiteSpace: "nowrap" }}>
           {editando ? <input style={inp} type="date" value={form.emitidaEm} onChange={(e) => setForm({ ...form, emitidaEm: e.target.value })} /> : dataBr(art.emitidaEm)}
         </td>
         <td style={{ ...td, whiteSpace: "nowrap" }}>{dataBr(art.validaAte)}</td>
         <td style={{ ...td, whiteSpace: "nowrap" }}>
-          <button style={{ ...btnLeve, padding: "3px 8px", fontSize: 12 }} onClick={() => setVendo(!vendo)}>{art.pessoas.length}/{art.capacidade} {vendo ? "▲" : "▼"}</button>
+          {individual ? (
+            <span style={{ fontSize: 12.5 }}>{pessoaIndividual ? `${pessoaIndividual.nome}${pessoaIndividual.blocoTorre ? ` · ${pessoaIndividual.blocoTorre}` : ""}` : "(cadastro excluído)"}</span>
+          ) : (
+            <button style={{ ...btnLeve, padding: "3px 8px", fontSize: 12 }} onClick={() => setVendo(!vendo)}>{art.pessoas.length}/{art.capacidade} {vendo ? "▲" : "▼"}</button>
+          )}
         </td>
         <td style={td}>{vigente ? <Pilula cor={VERDE} fundo="#E6F4EC">Vigente</Pilula> : <Pilula cor="#65758b" fundo={CINZA_CLARO}>Vencida</Pilula>}</td>
         <td style={tdN}>{brl(art.valor)}</td>

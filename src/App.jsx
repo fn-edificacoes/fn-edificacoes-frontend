@@ -688,6 +688,21 @@ function sugestoesEmail(valor) {
 }
 
 const SERVICO_DOCUMENTACAO = SERVICO_OPCOES[1];
+/* Como cada serviço aparece nas telas de escolha. O valor gravado continua o de SERVICO_OPCOES
+   (o backend e os relatórios comparam por ele); muda só o que se lê. "Documentação ART/TRT"
+   sozinho fazia quem ia receber as chaves e precisava da ART de vistoria escolher a ART de
+   reforma — por isso o "(reforma)" e a explicação de cada um. */
+const ROTULO_SERVICO = {
+  [SERVICO_OPCOES[0]]: "Vistoria de entrega de chaves",
+  [SERVICO_DOCUMENTACAO]: "ART/TRT de reforma",
+  [SERVICO_OPCOES[2]]: "Outro serviço",
+};
+const EXPLICACAO_SERVICO = {
+  [SERVICO_OPCOES[0]]: "Vai receber as chaves do imóvel novo? Um técnico da FN vistoria o apartamento e você recebe o laudo. Se a sua construtora pede ART de vistoria, ela já faz parte deste serviço — não precisa pedir à parte.",
+  [SERVICO_DOCUMENTACAO]: "Vai reformar o apartamento? É o documento que o condomínio ou a construtora pede para liberar a obra de reforma. Não é a ART da vistoria de entrega de chaves.",
+  [SERVICO_OPCOES[2]]: "Laudo técnico, perícia ou outro serviço. Conte o que precisa nas observações.",
+};
+const rotuloServico = (s) => ROTULO_SERVICO[s] || s;
 const ehServicoDocumentacao = (c) => c?.servico === SERVICO_DOCUMENTACAO;
 /* Revistoria: retorno ao mesmo imóvel, pedido pelo cliente depois do laudo entregue. Não
    aparece em SERVICO_OPCOES porque ninguém escolhe isso no cadastro — ela nasce do botão no
@@ -2533,6 +2548,20 @@ function AppInterno({ session, onLogout }) {
       return false;
     }
   };
+  /* Pedido de ART/TRT de reforma que era vistoria: o servidor troca o serviço, devolve o
+     cadastro ao começo da fila de vistoria e explica quando não dá (documento de reforma
+     anexado, registro de documentação com o mesmo CPF). */
+  const converterParaVistoria = async (cliente) => {
+    try {
+      const r = await apiFetch(`/api/clientes/${cliente.id}/converter-para-vistoria`, { method: "POST", token });
+      await carregarClientes();
+      notify(`${cliente.nome} agora é Vistoria de entrega de chaves ✓ — está no Agendamento, em Análise.${r.avisos?.length ? ` ${r.avisos.join(" ")}` : ""}`);
+      return true;
+    } catch (e) {
+      notify(`Não foi possível mudar para vistoria: ${e.message}`);
+      return false;
+    }
+  };
   /* ---- Carga da base antiga de clientes (Gerência → Importar base) ----
      Rota própria, e não o POST /api/clientes do portal: o cadastro público dispara o fluxo
      inteiro — análise do Atendimento, e-mail de boas-vindas, entrada na fila de agendamento —,
@@ -3939,7 +3968,8 @@ function AppInterno({ session, onLogout }) {
 
         {abaTop === "documentacao" && (
           <AbaDocumentacao docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} carregando={docsCarregando} notify={notify} clientes={clientesAtivos} updCliente={updCliente} excluirCliente={delCliente} perfil={perfil}
-            documentosArt={documentosArt} enviarDocumentoArt={enviarDocumentoArt} excluirDocumentoArt={excluirDocumentoArt} precos={precos} />
+            documentosArt={documentosArt} enviarDocumentoArt={enviarDocumentoArt} excluirDocumentoArt={excluirDocumentoArt} precos={precos}
+            converterParaVistoria={converterParaVistoria} />
         )}
         {abaTop === "arts" && (
           <AbaArtsVistoria token={token} apiFetch={apiFetch} notify={notify} perfil={perfil} clientes={clientesAtivos}
@@ -4604,7 +4634,7 @@ function CamposCadastroCliente({ dados, onChange }) {
             {/* Revistoria não está em SERVICO_OPCOES (nasce do portal do cliente); mantém o
                 valor salvo na lista para uma edição qualquer não transformá-la em vistoria. */}
             {ehRevistoria(dados) && <option value={SERVICO_REVISTORIA}>{SERVICO_REVISTORIA}</option>}
-            {SERVICO_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
+            {SERVICO_OPCOES.map((o) => <option key={o} value={o}>{o === SERVICO_DOCUMENTACAO ? "Documentação ART/TRT (reforma)" : o}</option>)}
           </select>
         </div>
         <Field label="Construtora" value={dados.construtora} onChange={(v) => set({ construtora: v })} />
@@ -8152,8 +8182,17 @@ function DadosParaDocumentacao({ cliente, notify }) {
 /* sugestao: o valor da documentação que o Financeiro já conta enquanto ninguém lança
    (sugestaoDeCobranca — tabela do empreendimento, pelo nome normalizado). onSalvarCobranca:
    { salvar(id, patch), notify }, o mesmo contrato da LinhaCobranca do Setor de cobrança. */
-function CardDocumentosArt({ cliente, documentos = [], sugestao = { valor: 0, origem: null }, enviarDocumento, excluirDocumento, onSalvarCobranca = null, atualizarEmpreendimento, empreendimentosComPreco = [], notify, onExcluirCadastro }) {
+function CardDocumentosArt({ cliente, documentos = [], sugestao = { valor: 0, origem: null }, enviarDocumento, excluirDocumento, onSalvarCobranca = null, atualizarEmpreendimento, empreendimentosComPreco = [], notify, onExcluirCadastro, onConverterParaVistoria = null }) {
   const [enviandoTipo, setEnviandoTipo] = useState(null);
+  const [convertendo, setConvertendo] = useState(false);
+  const converter = async () => {
+    if (!window.confirm(`Mudar o pedido de ${cliente.nome} para Vistoria de entrega de chaves?\n\n`
+      + "Os dados e o login do cliente continuam os mesmos. O cadastro sai da Documentação e entra no Agendamento como pré-cadastro, "
+      + "para o Atendimento aprovar e marcar a vistoria. A ART de vistoria se organiza depois, em ARTs de vistoria.")) return;
+    setConvertendo(true);
+    await onConverterParaVistoria(cliente);
+    setConvertendo(false);
+  };
   const [editandoEmpreendimento, setEditandoEmpreendimento] = useState(false);
   const [novoEmpreendimento, setNovoEmpreendimento] = useState(cliente.empreendimento || "");
   const doTipo = (tipo) => documentos.find((d) => d.tipo === tipo);
@@ -8276,11 +8315,28 @@ function CardDocumentosArt({ cliente, documentos = [], sugestao = { valor: 0, or
           O cliente só consegue baixar depois que os dois documentos estiverem anexados.
         </div>
       )}
+
+      {/* O cliente que vai receber as chaves e precisa de ART de vistoria às vezes preenche o
+          pedido de ART de reforma. Mudar o serviço aproveita o cadastro e o login dele; com
+          documento de reforma anexado não dá (o servidor também recusa). */}
+      {onConverterParaVistoria && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${CINZA_BORDA}`, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12.5, color: "#4a5a70", flex: 1, minWidth: 220 }}>
+            {documentos.length
+              ? "Era vistoria? Para mudar o serviço, remova antes os documentos de reforma anexados."
+              : <>Era vistoria? Se o cliente vai receber as chaves e precisa de <strong>ART de vistoria</strong>, mude o serviço — os dados e o login dele continuam.</>}
+          </span>
+          <button className="btn-ghost" style={{ color: AZUL_MEDIO, background: "#fff", padding: "6px 12px" }}
+            onClick={converter} disabled={convertendo || documentos.length > 0}>
+            {convertendo ? <Loader2 size={14} className="spin" /> : <RefreshCcw size={14} />} Mudar para Vistoria
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
-function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, clientes = [], updCliente, excluirCliente, perfil, documentosArt = [], enviarDocumentoArt, excluirDocumentoArt, precos = [] }) {
+function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, clientes = [], updCliente, excluirCliente, perfil, documentosArt = [], enviarDocumentoArt, excluirDocumentoArt, precos = [], converterParaVistoria = null }) {
   const [removendoCliente, setRemovendoCliente] = useState(null); // cadastro (clientes) do pedido a apagar
 
   /* Cadastros de "Documentação ART/TRT" vêm direto do portal do cliente pra cá (pulam o
@@ -8313,7 +8369,8 @@ function AbaDocumentacao({ docs, addDoc, updDoc, delDoc, carregando, notify, cli
                 atualizarEmpreendimento={(id, empreendimento) => updCliente(id, { empreendimento })}
                 empreendimentosComPreco={precos.filter((p) => p.precoDocumentacao > 0).map((p) => p.empreendimento)}
                 notify={notify}
-                onExcluirCadastro={perfil === "gerencia" ? setRemovendoCliente : null} />
+                onExcluirCadastro={perfil === "gerencia" ? setRemovendoCliente : null}
+                onConverterParaVistoria={converterParaVistoria} />
             ))}
           </div>
         </Card>
@@ -17182,6 +17239,38 @@ function CardAssinaturaGerencia({ assinatura, salvarAssinatura, removerAssinatur
   );
 }
 
+/* Escolha do serviço no cadastro público: um cartão por serviço, com o que ele é. Era um
+   <select> com "Documentação ART/TRT" ao lado da vistoria, e quem ia receber as chaves e
+   precisava da ART de vistoria escolhia a ART de reforma — o pedido caía na Documentação e
+   ninguém agendava a vistoria. */
+function EscolhaDeServico({ valor, onChange }) {
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 8 }}>
+        {SERVICO_OPCOES.map((o) => {
+          const ativo = valor === o;
+          return (
+            <button key={o} type="button" onClick={() => onChange(o)} aria-pressed={ativo}
+              style={{ textAlign: "left", background: ativo ? "#EAF2FB" : "#fff", border: `2px solid ${ativo ? AZUL_MEDIO : CINZA_BORDA}`, borderRadius: 10, padding: "10px 12px", cursor: "pointer", display: "grid", gap: 4 }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 700, fontSize: 13.5, color: AZUL_MARINHO }}>
+                <span style={{ width: 14, height: 14, borderRadius: "50%", border: `2px solid ${ativo ? AZUL_MEDIO : "#9AA7B8"}`, background: ativo ? AZUL_MEDIO : "#fff", boxShadow: ativo ? "inset 0 0 0 2px #fff" : "none", flexShrink: 0 }} />
+                {rotuloServico(o)}
+              </span>
+              <span style={{ fontSize: 12, color: "#4a5a70", lineHeight: 1.45 }}>{EXPLICACAO_SERVICO[o]}</span>
+            </button>
+          );
+        })}
+      </div>
+      {valor === SERVICO_DOCUMENTACAO && (
+        <div style={{ background: "#FFF4E0", color: "#8A5300", borderRadius: 8, padding: "8px 10px", fontSize: 12.5 }}>
+          <AlertTriangle size={13} style={{ verticalAlign: "-2px", marginRight: 5 }} />
+          A construtora pediu <strong>ART de vistoria</strong> para a entrega das chaves? Então escolha <strong>Vistoria de entrega de chaves</strong> — a ART de vistoria vem junto com ela.
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ================= Aba: Cliente (autocadastro e acompanhamento) ================= */
 /* Critérios de avaliação por serviço — os mesmos nomes que o backend valida.
    Uma nota só não diz onde melhorar: quem achou o técnico ótimo e o laudo confuso
@@ -17661,7 +17750,7 @@ function AbaCliente({ notify, onLogin }) {
             </div>
             <div style={{ fontSize: 13.5, color: "#33683c" }}>
               {cadastroRealizado === SERVICO_DOCUMENTACAO
-                ? "Sua solicitação de Documentação ART/TRT já foi para a nossa equipe de Documentação. Entre com seu e-mail e senha para acompanhar — quando ficar pronta, você baixa os documentos por lá."
+                ? "Sua solicitação de ART/TRT de reforma já foi para a nossa equipe de Documentação. Entre com seu e-mail e senha para acompanhar — quando ficar pronta, você baixa os documentos por lá."
                 : "Recebemos seus dados. Nossa equipe entra em contato para confirmar o atendimento. Entre com seu e-mail e senha para acompanhar."}
             </div>
             {/* Só aparece quando o cadastro não abriu o portal sozinho (lá a loja já vem aberta). */}
@@ -17678,10 +17767,8 @@ function AbaCliente({ notify, onLogin }) {
         </p>
         <Grid>
           <div style={cell(true)}>
-            <label style={lab}>Serviço desejado</label>
-            <select style={inp} value={form.servico} onChange={(e) => setF("servico", e.target.value)}>
-              {SERVICO_OPCOES.map((o) => <option key={o} value={o}>{o}</option>)}
-            </select>
+            <label style={lab}>Qual serviço você precisa?</label>
+            <EscolhaDeServico valor={form.servico} onChange={(v) => setF("servico", v)} />
           </div>
           <Field label="Nome completo" value={form.nome} onChange={(v) => setF("nome", somenteLetras(v))} full />
           <div style={cell(false)}>
