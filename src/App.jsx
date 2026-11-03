@@ -5,7 +5,8 @@ import * as Fin from "./financeiro-regras.js";
 import AbaRedeNacional from "./rede-nacional.jsx";
 import AbaEmpreendimentosCadastro from "./empreendimentos-lista.jsx";
 import { Building as IconeEmpreendimento, ShoppingBag } from "lucide-react";
-import AbaProdutosMercadoLivre, { SecaoOfertasMercadoLivre, DestaqueLojaFnHome, temRascunhoMercadoLivre } from "./fn-home-mercadolivre.jsx";
+import AbaProdutosMercadoLivre, { SecaoOfertasMercadoLivre, DestaqueLojaFnHome, AbaLojaParaCliente, temRascunhoMercadoLivre } from "./fn-home-mercadolivre.jsx";
+import { VitrineClubeFn, FaixaClubeFn, SeletorRamo, AvisoCasaProntaNoClube, rotuloDoRamo } from "./clube-fn.jsx";
 import AbaFinanceiroFnHome, { CardFnHomeNosIndicadores } from "./fn-home-financeiro.jsx";
 import AbaMapaAtuacao from "./mapa-atuacao.jsx";
 import { usePatologiaVoz, PainelPatologiaVoz, AvisoPendentesVoz } from "./patologia-voz.jsx";
@@ -586,8 +587,10 @@ const STATUS_INTERNO_OPCOES = ["Agendado", "Em vistoria", "Laudo em elaboração
 /* "arts" (ARTs de vistoria) não tem aba própria na barra de cima: é sub-aba de Documentação, ao
    lado das TRTs de reforma — quem organiza uma organiza a outra. Continua aqui porque é o que
    libera a tela. */
+/* "loja" é a Loja FN Home para o técnico mostrar ao cliente na vistoria (nov/2026): só leitura,
+   com o link para mandar pelo WhatsApp — nada de cadastro de produto. */
 const MODULOS_POR_PERFIL = {
-  vistoriador: ["laudos", "despesas"],
+  vistoriador: ["laudos", "loja", "despesas"],
   documentacao: ["documentacao", "arts", "despesas"],
   atendimento: ["clientes", "qualidade", "documentacao", "arts", "faq", "marketing", "vendas", "despesas"],
   vendas: ["vendas", "despesas"],
@@ -1393,13 +1396,14 @@ function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], ava
 
   // --- Parceiros novos aguardando homologação: sem isto, ninguém era avisado — o cadastro
   // só aparecia se alguém abrisse a aba "Parceiros" por conta própria e reparasse na tabela. ---
-  if (["vendas", "atendimento"].includes(perfil)) {
+  if (["vendas", "atendimento", "gerencia"].includes(perfil)) {
     const aguardandoHomologacao = parceiros.filter((p) => p.status === "em_analise");
     if (aguardandoHomologacao.length) {
       itens.push({
         id: "parceiros-em-analise", urgente: true,
         texto: `${aguardandoHomologacao.length} parceiro(s) aguardando homologação`,
-        onde: { aba: "vendas" },
+        // A Gerência não tem a aba "Fornecedores": a mesma tela é FN Clube → Parceiros do Clube.
+        onde: perfil === "gerencia" ? { aba: "gerencia", sub: "clube-parceiros" } : { aba: "vendas" },
       });
     }
   }
@@ -2247,6 +2251,12 @@ const GERENCIA_MENU_LATERAL = [
   { titulo: "FN Home", itens: [
     { aba: "gerencia", sub: "fn-home-ml", label: "Produtos Mercado Livre", Icon: ShoppingBag },
     { aba: "gerencia", sub: "fn-home-financeiro", label: "Vendas e comissões", Icon: Wallet },
+  ] },
+  /* FN Clube (nov/2026): os parceiros que dão desconto a cliente FN. É a mesma tela da aba
+     "Fornecedores" de Vendas/Atendimento — homologação, convite, prospecção, cupons e comissões —,
+     que a Gerência tinha perdido quando o Casa Pronta saiu do sistema (set/2026). */
+  { titulo: "FN Clube", itens: [
+    { aba: "gerencia", sub: "clube-parceiros", label: "Parceiros do Clube", Icon: Users },
   ] },
   { titulo: "FN Nacional", itens: [
     { aba: "nacional", label: "Rede Nacional", Icon: Landmark },
@@ -3724,7 +3734,7 @@ function AppInterno({ session, onLogout }) {
             aqui: é sub-aba de Documentação (abaTop "arts" acende a aba Documentação). */}
         {perfil !== "gerencia" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, borderTop: "1px solid rgba(255,255,255,.12)", overflowX: "auto" }}>
-            {[["laudos", "Laudos", FileText], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["documentacao", "Documentação", ClipboardCheck], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Fornecedores", Wrench], ["despesas", "Despesas", Receipt], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog], ["nacional", "Rede Nacional", Landmark], ["mapa", "Mapa de atuação", IconeMapa]]
+            {[["laudos", "Laudos", FileText], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["documentacao", "Documentação", ClipboardCheck], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Fornecedores", Wrench], ["loja", "Loja FN Home", ShoppingBag], ["despesas", "Despesas", Receipt], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog], ["nacional", "Rede Nacional", Landmark], ["mapa", "Mapa de atuação", IconeMapa]]
               .filter(([k]) => modulosPermitidos.includes(k))
               .map(([k, label, Icon]) => {
                 const ativa = abaTop === k || (k === "documentacao" && abaTop === "arts");
@@ -3889,6 +3899,7 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "despesas" && (
           <AbaMinhasDespesas fin={fin} clientes={clientesAtivos} usuarioAtual={session.usuario} telaEstreita={telaEstreita} notify={notify} />
         )}
+        {abaTop === "loja" && <AbaLojaParaCliente apiFetch={apiFetch} notify={notify} />}
         {abaTop === "gerencia" && String(abaGerencia).startsWith("fin-") && (
           <AbaFinanceiroDespesas sub={abaGerencia} fin={fin} clientes={clientes} docs={docs} precos={precos} usuarios={usuarios}
             usuarioAtual={session.usuario} telaEstreita={telaEstreita} notify={notify} token={token} updCliente={updCliente}
@@ -16646,6 +16657,21 @@ function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, de
   if (sub === "empreendimentos") {
     return <AbaEmpreendimentosCadastro token={token} apiFetch={apiFetch} notify={notify} aoMudar={carregarEmpreendimentosRef} />;
   }
+  if (sub === "clube-parceiros") {
+    return (
+      <div style={{ display: "grid", gap: 16 }}>
+        <AvisoCasaProntaNoClube apiFetch={apiFetch} />
+        <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
+          criarParceiroManual={criarParceiroManual} podeExcluir excluirParceiro={excluirParceiro}
+          salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo}
+          vales={vales} valesCarregando={valesCarregando} vendas={vendas} vendasCarregando={vendasCarregando} atualizarVenda={atualizarVenda}
+          notify={notify} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem}
+          prospeccaoParceiros={prospeccaoParceiros} prospeccaoParceirosCarregando={prospeccaoParceirosCarregando}
+          atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
+          importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao} meuConvite={meuConvite} />
+      </div>
+    );
+  }
   if (sub === "fn-home-ml") {
     return <AbaProdutosMercadoLivre token={token} apiFetch={apiFetch} notify={notify} redimensionar={redimensionar} />;
   }
@@ -17665,7 +17691,7 @@ const PARCEIRO_TIPO_LABEL = { servico: "Parceiro", produto: "Afiliado" };
    (afiliados que vendem produto) são as duas áreas de benefícios dentro dela — mesmo
    cadastro de sempre (campo "tipo"), só a apresentação ao cliente muda por área. */
 const FN_AREA_INFO = {
-  servico: { titulo: "FN Clube", descricao: "Prestadores de serviço homologados pela FN para cuidar do seu imóvel, com benefícios exclusivos para clientes FN." },
+  servico: { titulo: "FN Clube", descricao: "Restaurantes, farmácias, academias, terapias e prestadores homologados pela FN para cuidar do seu imóvel, com desconto exclusivo para clientes FN." },
   /* "Aberta a todos" é de propósito: quem ainda não é cliente achava que a loja era fechada. */
   produto: { titulo: "Loja FN Home", descricao: "Produtos escolhidos pela equipe técnica da FN para equipar o seu imóvel. Aberta a todos: não precisa ser cliente nem ter cadastro." },
 };
@@ -17719,6 +17745,8 @@ function mapParceiroDaApi(p) {
     instagram: p.instagram || "", site: p.site || "", logo: p.logo || "", email: p.email || "",
     comissao: safeParseArray(p.comissao),
     beneficio: p.beneficio || "", descricaoBeneficio: p.descricao_beneficio || p.descricaoBeneficio || "",
+    /* Ramo no FN Clube (restaurantes, farmácias…) — chaves e rótulos em clube-fn.jsx. */
+    ramo: p.ramo || "",
     avaliacao: p.avaliacao || "",
     comissoesPendentes: Number(p.comissoes_pendentes || 0),
     /* Quem convidou este parceiro — é o que liga o cadastro ao vendedor, do aviso da
@@ -17791,7 +17819,7 @@ function resumoDaProposta(comissao = []) {
 const novoCadastroParceiro = () => ({
   email: "", senha: "", tipo: "servico", empresa: "", responsavel: "", cnpj: "",
   cidade: "", uf: "", whatsapp: "", instagram: "", site: "", logo: "",
-  comissao: [novaComissaoLinha()], beneficio: "", descricaoBeneficio: "",
+  comissao: [novaComissaoLinha()], beneficio: "", descricaoBeneficio: "", ramo: "",
 });
 
 /* ---- Modal interno: Vendas/Gerência cadastra um parceiro em nome dele (ex.: negociou por
@@ -17814,6 +17842,7 @@ function ModalCriarParceiroManual({ onFechar, criarParceiroManual, notify }) {
     if (!form.empresa.trim() || !form.responsavel.trim()) { setErro("Informe a empresa e o responsável."); return; }
     if (!form.cidade.trim() || !form.uf.trim()) { setErro("Informe cidade e UF."); return; }
     if (!form.whatsapp.trim()) { setErro("Informe um WhatsApp para contato."); return; }
+    if (form.tipo === "servico" && !form.ramo) { setErro("Escolha o ramo do parceiro no FN Clube."); return; }
     const comissaoValida = form.comissao.filter((l) => l.name.trim() && l.p !== "");
     if (comissaoValida.length === 0) { setErro("Adicione ao menos uma categoria de comissão com percentual."); return; }
 
@@ -17844,6 +17873,9 @@ function ModalCriarParceiroManual({ onFechar, criarParceiroManual, notify }) {
               {PARCEIRO_TIPO_OPCOES.map((o) => <option key={o.valor} value={o.valor}>{o.label}</option>)}
             </select>
           </div>
+          {form.tipo === "servico" && (
+            <SeletorRamo valor={form.ramo} aoMudar={(v) => setF("ramo", v)} estiloCelula={cell()} estiloRotulo={lab} estiloCampo={inp} />
+          )}
           <Field label="CNPJ/CPF" value={form.cnpj} onChange={(v) => setF("cnpj", v)} />
           <Field label="Empresa" value={form.empresa} onChange={(v) => setF("empresa", v)} full />
           <Field label="Responsável" value={form.responsavel} onChange={(v) => setF("responsavel", v)} />
@@ -18324,9 +18356,10 @@ function PaginaBeneficiosFn({ tipo }) {
   const clienteLogado = sessaoAtual?.usuario?.role === "cliente" ? sessaoAtual.usuario : null;
   const tokenCliente = clienteLogado ? sessaoAtual.token : undefined;
   /* A loja ocupa a largura do site institucional (1160): com 780 os cartões ficavam pequenos, e
-     a Gerência pediu a loja "grande, bonita" como lá (out/2026). O FN Clube segue estreito. */
+     a Gerência pediu a loja "grande, bonita" como lá (out/2026). O FN Clube ganhou cartões com o
+     desconto e a faixa própria (nov/2026) e passou de 780 para 1040. */
   const ehLoja = tipo === "produto";
-  const largura = ehLoja ? 1160 : 780;
+  const largura = ehLoja ? 1160 : 1040;
   const [qtdProdutos, setQtdProdutos] = useState(null);
   return (
     <div style={{ minHeight: "100vh", background: CINZA_CLARO, fontFamily: "'Inter', system-ui, sans-serif" }}>
@@ -18361,8 +18394,11 @@ function PaginaBeneficiosFn({ tipo }) {
             </section>
           </div>
         ) : (
-          <SecaoParceirosVitrine notify={notify} tipoInicial={tipo} clienteLogado={clienteLogado} token={tokenCliente}
-            onIrParaLogin={() => { window.location.href = `${window.location.origin}${window.location.pathname}`; }} />
+          <div style={{ display: "grid", gap: 20 }}>
+            <FaixaClubeFn />
+            <SecaoParceirosVitrine notify={notify} tipoInicial={tipo} clienteLogado={clienteLogado} token={tokenCliente}
+              onIrParaLogin={() => { window.location.href = `${window.location.origin}${window.location.pathname}`; }} />
+          </div>
         )}
       </main>
       {toast && (
@@ -18415,6 +18451,7 @@ function TelaCadastroParceiro({ convite, onVoltar, onIrParaLogin }) {
     if (!form.empresa.trim() || !form.responsavel.trim()) { setErro("Informe a empresa e o responsável."); return; }
     if (!form.cidade.trim() || !form.uf.trim()) { setErro("Informe cidade e UF."); return; }
     if (!form.whatsapp.trim()) { setErro("Informe um WhatsApp para contato."); return; }
+    if (form.tipo === "servico" && !form.ramo) { setErro("Escolha o ramo da sua empresa (restaurante, farmácia, academia…)."); return; }
 
     setEnviando(true);
     try {
@@ -18530,6 +18567,10 @@ function TelaCadastroParceiro({ convite, onVoltar, onIrParaLogin }) {
                 {PARCEIRO_TIPO_OPCOES.map((o) => <option key={o.valor} value={o.valor}>{o.label}</option>)}
               </select>
             </div>
+            {form.tipo === "servico" && (
+              <SeletorRamo valor={form.ramo} aoMudar={(v) => setF("ramo", v)} rotulo="Ramo da empresa"
+                estiloCelula={cell()} estiloRotulo={lab} estiloCampo={inp} />
+            )}
             <Field label="CNPJ/CPF" value={form.cnpj} onChange={(v) => setF("cnpj", v)} />
             <Field label="Empresa" value={form.empresa} onChange={(v) => setF("empresa", v)} full />
             <Field label="Responsável" value={form.responsavel} onChange={(v) => setF("responsavel", v)} />
@@ -18636,6 +18677,7 @@ function CardPerfilParceiro({ parceiro, token, onSalvo }) {
         ? parceiro.comissao.map((c) => ({ name: c.name || "", d: c.d ?? "", p: c.p ?? "" }))
         : [novaComissaoLinha()],
       beneficio: parceiro.beneficio || "", descricaoBeneficio: parceiro.descricaoBeneficio || "",
+      ramo: parceiro.ramo || "",
     });
     setErro("");
     setEditando(true);
@@ -18681,6 +18723,10 @@ function CardPerfilParceiro({ parceiro, token, onSalvo }) {
           <Field label="UF" value={form.uf} onChange={(v) => setF("uf", v.toUpperCase().slice(0, 2))} />
           <Field label="Instagram" value={form.instagram} onChange={(v) => setF("instagram", v)} />
           <Field label="Site" value={form.site} onChange={(v) => setF("site", v)} />
+          {parceiro.tipo !== "produto" && (
+            <SeletorRamo valor={form.ramo} aoMudar={(v) => setF("ramo", v)} rotulo="Ramo da empresa"
+              estiloCelula={cell()} estiloRotulo={lab} estiloCampo={inp} />
+          )}
         </Grid>
         <div style={{ ...cell(true), marginTop: 12 }}>
           <label style={lab}>Logo da empresa</label>
@@ -20199,6 +20245,7 @@ function ModalPerfilParceiroAdmin({ parceiro, onFechar, atualizarParceiro, notif
     logo: parceiro.logo || "",
     beneficio: parceiro.beneficio || "",
     descricao_beneficio: parceiro.descricaoBeneficio ?? parceiro.descricao_beneficio ?? "",
+    ramo: parceiro.ramo || "",
   });
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
@@ -20259,6 +20306,9 @@ function ModalPerfilParceiroAdmin({ parceiro, onFechar, atualizarParceiro, notif
           <Field label="UF" value={form.uf} onChange={(v) => set("uf", v.toUpperCase().slice(0, 2))} />
           <Field label="Instagram" value={form.instagram} onChange={(v) => set("instagram", v)} />
           <Field label="Site" value={form.site} onChange={(v) => set("site", v)} />
+          {parceiro.tipo !== "produto" && (
+            <SeletorRamo valor={form.ramo} aoMudar={(v) => set("ramo", v)} estiloCelula={cell()} estiloRotulo={lab} estiloCampo={inp} />
+          )}
         </Grid>
 
         <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${CINZA_BORDA}` }}>
@@ -20400,7 +20450,13 @@ function CardParceiros({ parceiros, carregando, atualizarParceiro, podeExcluir =
                       </div>
                     )}
                   </td>
-                  <td style={{ padding: "8px 10px" }}>{PARCEIRO_TIPO_LABEL[p.tipo] || p.tipo}</td>
+                  <td style={{ padding: "8px 10px" }}>
+                    {PARCEIRO_TIPO_LABEL[p.tipo] || p.tipo}
+                    {/* Parceiro de serviço sem ramo só aparece em "Todos" no FN Clube. */}
+                    {p.tipo !== "produto" && (p.ramo
+                      ? <div style={{ fontSize: 12, color: "#65758b" }}>{rotuloDoRamo(p.ramo)}</div>
+                      : <div style={{ fontSize: 11.5, fontWeight: 700, color: "#B26A00" }}>sem ramo no Clube</div>)}
+                  </td>
                   <td style={{ padding: "8px 10px", fontSize: 12 }}>
                     {p.comissao.length > 0 ? resumoDaProposta(p.comissao) : "—"}
                   </td>
@@ -20897,8 +20953,14 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, ti
   const [selecionado, setSelecionado] = useState(null);
   const [carrinhoAberto, setCarrinhoAberto] = useState(false);
   const [qtdOfertasMl, setQtdOfertasMl] = useState(0);
+  /* Parceiros do Casa Pronta que a VitrineClubeFn achou (null enquanto busca): com eles o Clube não
+     está "em breve", mesmo sem parceiro próprio ainda. */
+  const [qtdCasaPronta, setQtdCasaPronta] = useState(null);
   const carrinho = useCarrinho();
   const mostraOfertasMl = abaTipo === "produto";
+  /* FN Clube organizado por ramo, com o desconto em destaque e o Casa Pronta junto (nov/2026) —
+     ver clube-fn.jsx. */
+  const ehClube = abaTipo === "servico";
 
   useEffect(() => {
     (async () => {
@@ -20917,7 +20979,7 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, ti
      Projetos → Casa Pronta. */
   const filtrados = abaTipo === "produto" ? [] : parceiros.filter((p) => p.tipo === abaTipo);
   const info = FN_AREA_INFO[abaTipo] || FN_AREA_INFO.servico;
-  const clubeEmBreve = abaTipo === "servico" && !carregando && filtrados.length === 0;
+  const clubeEmBreve = abaTipo === "servico" && !carregando && filtrados.length === 0 && qtdCasaPronta === 0;
   /* O carrinho é dos parceiros do FN Clube: na aba deles aparece sempre que houver parceiro (no
      "em breve", só se já tiver item); na loja, só se já tiver item. Com semAbas a loja nunca mostra
      o carrinho: no portal ele fica na seção do FN Clube, e duas cópias do carrinho na mesma página
@@ -20955,15 +21017,18 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, ti
         </div>
       )}
 
-      {carregando && !mostraOfertasMl && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {carregando && !mostraOfertasMl && !ehClube && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
       {clubeEmBreve && <AvisoFnClubeEmBreve />}
-      {!carregando && !clubeEmBreve && filtrados.length === 0 && !(mostraOfertasMl && qtdOfertasMl > 0) && (
+      {!carregando && !ehClube && !clubeEmBreve && filtrados.length === 0 && !(mostraOfertasMl && qtdOfertasMl > 0) && (
         <p style={{ color: "#8593a8", fontSize: 14 }}>
           {mostraOfertasMl ? "Nenhum produto disponível no momento." : "Nenhum parceiro disponível no momento."}
         </p>
       )}
 
-      {filtrados.length > 0 && (
+      {ehClube && <VitrineClubeFn apiFetch={apiFetch} parceiros={filtrados} carregando={carregando} aoEscolher={setSelecionado}
+        aoCarregarCasaPronta={setQtdCasaPronta} />}
+
+      {filtrados.length > 0 && !ehClube && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 12 }}>
           {filtrados.map((p) => (
             abaTipo === "produto"

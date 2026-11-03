@@ -105,6 +105,7 @@ src/voz-fila-offline.js     patologia por voz: gravações guardadas no celular 
 src/ia-creditos.jsx         Financeiro › Créditos de IA: gasto estimado da IA e limite de gravação por técnico
 src/fn-home-mercadolivre.jsx FN Home: produtos do Mercado Livre (cadastro da Gerência e vitrine)
 src/fn-home-financeiro.jsx  FN Home: vendas, comissão da FN, repasses, mais vendidos e cliques
+src/clube-fn.jsx            FN Clube: ramos, vitrine com desconto, Casa Pronta e o aviso da Gerência
 src/laudo-whatsapp.jsx      laudo aprovado pelo WhatsApp do cliente (link wa.me com a mensagem pronta)
 src/links-publicos.js       endereços que vão para o cliente: Área do Cliente e FN_HOME_URL
 ```
@@ -122,7 +123,7 @@ O papel vem do backend no login, nunca é escolhido na tela. `App()` despacha po
 - `afiliado` → `PainelParceiro`
 - `cliente` → `PainelCliente`
 - os demais → `AppInterno`, filtrado por `MODULOS_POR_PERFIL`:
-  `vistoriador` (laudos), `documentacao`, `atendimento` (clientes, agendamento, documentação,
+  `vistoriador` (laudos, loja FN Home, despesas), `documentacao`, `atendimento` (clientes, agendamento, documentação,
   parceiros), `qualidade` (agendamento, só leitura), `vendas` (parceiros), `gerencia` (tudo).
 
 **Aba Documentação (Atendimento e Documentação):** duas sub-abas — **TRTs de reforma**
@@ -289,6 +290,10 @@ cadastro rápido (`ModalDespesa`) de qualquer tela.
   regra 100/80 calculada **no servidor**, salário fixo do Atendimento (R$ 400) e extras. "Pagar"
   vira uma despesa; o comprovante se anexa ali mesmo (`fin.anexar`). `SalariosFixos` muda o valor
   de alguém, inclui ou tira da folha fixa. Nada disso aparece para o atendente ou o técnico.
+  **Fechamento do dia**: o vistoriador recebe no fim de cada dia — escolhe o dia, paga, anexa o
+  comprovante na mesma linha. "Marcar o mês todo como pago" (mês já pago fora do sistema) registra
+  um pagamento por dia para cada vistoriador. `FormPagamento` tem "Lançar como despesa" — desmarcar
+  quando o pagamento já foi lançado à mão em Despesas. `SalariosFixos` tem o mês de início ("Desde").
 - Não existe mais custo fixo por empreendimento: a coluna saiu de Preços por empreendimento e a
   Rede Nacional mostra o valor do técnico pela regra do dia (`valor_tecnico_regra`).
 - `CardValoresCustos` (Configurações Fiscais): valores do técnico, da ART e o salário fixo do Atendimento.
@@ -433,6 +438,13 @@ comissão só aparece no painel de afiliados de lá. Backend: `src/afiliados-mer
   maior na frente; o resto na ordem de sempre), selo vermelho `-X%` na foto (`COR_OFERTA`), "De R$"
   riscado, o texto do anúncio em verde e "Economize R$ X" quando há "De". O texto vai inteiro porque
   "-7%" sem o "no Pix" prometeria o desconto no cartão. No cadastro: campo **"Desconto do anúncio"**.
+- **Loja para o técnico mostrar ao cliente** (nov/2026, pedido da Gerência: "uma aba … para que eles
+  possam mostrar aos clientes"): o vistoriador tem o módulo `loja` ("Loja FN Home" na barra de cima, entre
+  Laudos e Despesas), que abre `AbaLojaParaCliente` (em `fn-home-mercadolivre.jsx`): caixa azul com
+  "Enviar pelo WhatsApp" (`wa.me` com a mensagem e o link `fnedificacoes.com.br/fn-home`; com o número do
+  cliente — 10/11 dígitos ganham o 55 — abre a conversa dele, sem número o WhatsApp pede o contato) e
+  "Copiar link", mais a loja inteira (`SecaoOfertasMercadoLivre separar={false}`). Só leitura: nada de
+  cadastro de produto, e o clique no "Comprar" conta como qualquer clique da vitrine.
 
 ## Portal do cliente: FN Clube, FN Reforma e a documentação da reforma
 
@@ -466,6 +478,34 @@ funcionar, e a Documentação ART/TRT dita com todas as letras como a **da refor
   A frase da NBR 16.280 fica no que a norma pede (reforma comunicada ao síndico antes de começar, com o
   responsável técnico). O imóvel só aparece quando o cliente tem um só: com mais de um, quem escolhe de
   qual cadastro saem os dados é o servidor. A FN Reforma tem um link para este card enquanto ele existir.
+
+## FN Clube (parceiros com desconto para cliente FN)
+
+`src/clube-fn.jsx`, arquivo próprio como o FN Home (recebe `apiFetch` por prop). Pedido da Gerência
+(nov/2026): parceiros homologados que dão desconto exclusivo — restaurantes, farmácias, academias,
+terapias, lanchonetes… — junto com os colaboradores do Casa Pronta. Backend: `src/clube-fn.js`.
+
+- **Ramo** de cada parceiro de serviço (`RAMOS_CLUBE`: chave, rótulo e ícone; as chaves são as do
+  backend). Campo `SeletorRamo` no cadastro manual (`ModalCriarParceiroManual`, obrigatório para
+  serviço), na tela do convite (`TelaCadastroParceiro`, obrigatório), no "Completar meu perfil" do
+  parceiro e no perfil de venda da Gerência. A lista de parceiros mostra o ramo, ou "sem ramo no
+  Clube" em âmbar (esse só aparece em "Todos").
+- **Vitrine** (`VitrineClubeFn`, dentro de `SecaoParceirosVitrine` na aba FN Clube; a vitrine só de
+  logos não mudou): total e "descontos de até X%", busca sem acento, ramos com contagem (quebram linha
+  no computador, rolam de lado no celular) e cartões com o benefício em vermelho e selo `-X%` quando o
+  texto tem percentual — o texto vai inteiro, porque "-10%" sem "na mensalidade" prometeria mais. Quem
+  dá desconto em número vem primeiro. O cartão abre o `ModalBeneficioParceiro` de sempre: o cupom só
+  sai para cliente FN logado.
+- **Casa Pronta entra sozinho** em "Casa e reforma" (`GET /api/clube/casa-pronta`, que a API lê do FN
+  Projetos): empresa, área atendida e o desconto FN de cada serviço, sem preço. O botão é **"Pedir pela
+  FN"** (WhatsApp da FN com a mensagem pronta) — o cliente não fala direto com o parceiro, como no
+  Casa Pronta. No celular esses cartões ocupam a largura toda (a lista de serviços não cabia em meia tela).
+- `?pagina=fn-clube` abre com a faixa `FaixaClubeFn` e tem 1040 px (era 780).
+- **Gerência → FN Clube → Parceiros do Clube** (sub `clube-parceiros`): a mesma `AbaGerenciaParceiros`
+  da aba "Fornecedores" de Vendas/Atendimento (homologação, convite, prospecção, cupons, comissões),
+  que a Gerência tinha perdido quando o Casa Pronta saiu do sistema (set/2026), mais o aviso
+  `AvisoCasaProntaNoClube` (quantos entram sozinhos do Casa Pronta, ou que o FN Projetos não respondeu).
+  O sino de "parceiro aguardando homologação" agora também avisa a Gerência e leva para essa tela.
 
 ## FN Home · Financeiro (vendas e comissões)
 
