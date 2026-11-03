@@ -4021,6 +4021,27 @@ function dataDesejadaValida(valor) {
   return d.getUTCMonth() === mes - 1 && d.getUTCDate() === dia;
 }
 
+/* Data que existe, mas longe demais para ser agendamento de vistoria. Um cadastro de
+   03/11/2026 foi gravado como 03/11/2027: a data é válida, o servidor aceitou, e o cliente
+   ficou "Vistoria agendada" sem aparecer no calendário do mês — só no fim das "Próximas", um
+   ano à frente. Vistoria se marca para dias ou semanas; mais de 6 meses adiante é quase sempre
+   o ano digitado errado. Não é recusa: quem salva confirma (ver confirmarDataDistante). */
+const MESES_DATA_DISTANTE = 6;
+function dataDesejadaDistante(valor, hoje = new Date()) {
+  if (!valor || !dataDesejadaValida(valor)) return false;
+  return valor > paraChaveISO(new Date(hoje.getFullYear(), hoje.getMonth() + MESES_DATA_DISTANTE, hoje.getDate()));
+}
+// O que precisa de correção na data do cadastro, para mostrar junto do campo e nas listas.
+function avisoDataDesejada(valor) {
+  if (!dataDesejadaValida(valor)) return "Data inválida — confira dia, mês e ano.";
+  if (dataDesejadaDistante(valor)) return `Mais de ${MESES_DATA_DISTANTE} meses à frente (${valor.slice(0, 4)}) — confira o ano.`;
+  return "";
+}
+function confirmarDataDistante(data) {
+  if (!dataDesejadaDistante(data)) return true;
+  return window.confirm(`A data ficou ${data.split("-").reverse().join("/")}, a mais de ${MESES_DATA_DISTANTE} meses de hoje — ela não aparece na agenda deste mês. O ano está certo?`);
+}
+
 /* ================= Notificações: solicitações de clientes pendentes ================= */
 function NotificacoesClientes({ clientes, preencherComCliente, usuarioAtualId, style }) {
   /* Só o que já está na agenda dele, e nada mais:
@@ -4099,8 +4120,10 @@ function NotificacoesClientes({ clientes, preencherComCliente, usuarioAtualId, s
                   mostrar "01/01/0001" parecia defeito do sistema e não dizia o que fazer. O
                   servidor passou a recusar essas datas; as que já estavam gravadas avisam aqui. */}
               {dataDesejadaValida(c.dataDesejada) ? (
-                <div style={{ fontSize: 12.5, color: AZUL_MARINHO, fontWeight: 700, whiteSpace: "nowrap" }}>
+                <div style={{ fontSize: 12.5, color: dataDesejadaDistante(c.dataDesejada) ? "#C62828" : AZUL_MARINHO, fontWeight: 700, whiteSpace: "nowrap" }}
+                  title={dataDesejadaDistante(c.dataDesejada) ? `Data a mais de ${MESES_DATA_DISTANTE} meses daqui — provavelmente o ano está errado. Peça ao Atendimento para conferir.` : undefined}>
                   {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` às ${c.horarioDesejado}` : ""}
+                  {dataDesejadaDistante(c.dataDesejada) && " — confira o ano"}
                 </div>
               ) : (
                 <div style={{ fontSize: 12.5, color: "#C62828", fontWeight: 700, whiteSpace: "nowrap" }}
@@ -4441,7 +4464,8 @@ function KanbanClientes({ clientes, docs, onAbrir }) {
                 <div style={{ fontSize: 12, color: "#65758b", marginTop: 2 }}>
                   {c.empreendimento || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}
                 </div>
-                <div style={{ fontSize: 11.5, color: "#8593a8", marginTop: 4 }}>
+                <div style={{ fontSize: 11.5, color: avisoDataDesejada(c.dataDesejada) ? "#C62828" : "#8593a8", fontWeight: avisoDataDesejada(c.dataDesejada) ? 700 : 400, marginTop: 4 }}
+                  title={avisoDataDesejada(c.dataDesejada) || undefined}>
                   {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""}
                 </div>
                 {c.observacoes && (
@@ -4511,7 +4535,13 @@ function CamposCadastroCliente({ dados, onChange }) {
         <Field label="Endereço completo" value={dados.endereco} onChange={(v) => set({ endereco: v })} full />
         <Field label="CEP" value={dados.cep} onChange={(v) => set({ cep: v })} />
         <Field label="Bloco / Apto" value={dados.blocoTorre} onChange={(v) => set({ blocoTorre: v })} />
-        <Field label="Data desejada" type="date" value={dados.dataDesejada} onChange={(v) => set({ dataDesejada: v })} />
+        <div style={cell(false)}>
+          <label style={lab}>Data desejada</label>
+          <input style={inp} type="date" value={dados.dataDesejada || ""} onChange={(e) => set({ dataDesejada: e.target.value })} />
+          {avisoDataDesejada(dados.dataDesejada) && (
+            <span style={{ fontSize: 11.5, color: "#C62828", fontWeight: 600 }}>{avisoDataDesejada(dados.dataDesejada)}</span>
+          )}
+        </div>
         <div style={cell(false)}>
           <label style={lab}>Horário desejado</label>
           <select style={inp} value={dados.horarioDesejado || ""} onChange={(e) => set({ horarioDesejado: e.target.value })}>
@@ -4617,6 +4647,7 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
   const salvar = async () => {
     const patch = camposAlterados(originalEdicao.current, editando);
     if (Object.keys(patch).length === 0) { setEditando(null); return; }
+    if ("dataDesejada" in patch && !confirmarDataDistante(patch.dataDesejada)) return;
     try {
       /* Fechar o modal e dizer "atualizado ✓" sem o servidor ter aceitado escondia a falha:
          a lista já mostra o valor novo (atualização otimista), e a pessoa só descobria na
@@ -4649,8 +4680,40 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
     .filter((e) => contagemPorEtapa[e])
     .filter((e) => !(escondeEmVistoria && e === "Em vistoria"));
 
+  /* Cadastros cuja data não cai em agenda nenhuma: ano digitado errado (ver
+     dataDesejadaDistante) ou data que não existe. Ficavam "agendados" sem aparecer no
+     calendário, e só quem procurasse pelo nome descobria. Cancelado já não é compromisso. */
+  const datasParaConferir = daVistoria.filter((c) => c.status !== "Cancelado" && avisoDataDesejada(c.dataDesejada));
+
   return (
     <div style={{ display: "grid", gap: 16 }}>
+      {datasParaConferir.length > 0 && (
+        <div style={{ background: "#FFF4E0", border: "1px solid #F3D19C", borderRadius: 12, padding: "12px 14px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#B26A00", fontWeight: 700, fontSize: 14 }}>
+            <AlertTriangle size={16} />
+            {datasParaConferir.length === 1 ? "1 cadastro com data para conferir" : `${datasParaConferir.length} cadastros com data para conferir`}
+          </div>
+          <p style={{ fontSize: 12.5, color: "#7A5A1F", margin: "4px 0 10px" }}>
+            Data a mais de {MESES_DATA_DISTANTE} meses daqui, ou que não existe: o cadastro não aparece no calendário do mês. Quase sempre é o ano digitado errado.
+          </p>
+          <div style={{ display: "grid", gap: 6 }}>
+            {datasParaConferir.map((c) => (
+              <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", background: "#fff", borderRadius: 8, padding: "8px 10px" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <strong style={{ fontSize: 13 }}>{c.nome}</strong>
+                  <div style={{ fontSize: 12, color: "#65758b" }}>
+                    {c.empreendimento || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""} · {etapaClienteCompleta(c, docs)}
+                  </div>
+                </div>
+                <span style={{ fontSize: 12.5, color: "#C62828", fontWeight: 700, whiteSpace: "nowrap" }}>
+                  {c.dataDesejada.split("-").reverse().join("/")}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""}
+                </span>
+                <button className="btn-mini" onClick={() => abrirEdicao(c)}><Edit3 size={13} /> Corrigir</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {etapasComClientes.length > 0 && (
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           {etapasComClientes.map((etapa) => (
@@ -6555,6 +6618,9 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
   const doDiaSelecionado = diaSelecionado
     ? clientes.filter((c) => c.dataDesejada === diaSelecionado && (!filtroEtapa || etapaVistoriaCliente(c, docs) === filtroEtapa))
     : [];
+  // Com o ano errado ou data que não existe, o cadastro some do mês certo (ver dataDesejadaDistante).
+  const comDataParaConferir = clientes.filter((c) =>
+    c.status !== "Cancelado" && !ehServicoDocumentacao(c) && avisoDataDesejada(c.dataDesejada));
 
   // Veio de uma confirmação de vistoria feita na sub-aba Vistoria — pula direto pro
   // mês/dia certo e já abre o painel lateral, sem precisar navegar manualmente.
@@ -6599,6 +6665,17 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
           Veja quem está vistoriando o quê em cada dia. Clique num dia pra ver a agenda completa e agendar uma nova vistoria.
         </p>
+        {comDataParaConferir.length > 0 && (
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 8, background: "#FFF4E0", color: "#B26A00", borderRadius: 8, padding: "8px 12px", fontSize: 12.5, margin: "-4px 0 14px" }}>
+            <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>
+              {comDataParaConferir.length === 1 ? "1 cadastro está" : `${comDataParaConferir.length} cadastros estão`} com data a mais de {MESES_DATA_DISTANTE} meses
+              daqui ou inválida e não {comDataParaConferir.length === 1 ? "aparece" : "aparecem"} no mês certo
+              ({comDataParaConferir.slice(0, 3).map((c) => `${c.nome} · ${c.dataDesejada.split("-").reverse().join("/")}`).join("; ")}{comDataParaConferir.length > 3 ? "; …" : ""}).
+              Corrija em Clientes › Editar cliente.
+            </span>
+          </div>
+        )}
         <CalendarioAgendamento clientes={clientes} vistoriadores={vistoriadores} docs={docs}
           mesRef={mesRef} setMesRef={setMesRef} diaSelecionado={diaSelecionado} setDiaSelecionado={setDiaSelecionado}
           filtroTecnicos={filtroTecnicos} aoTrocarFiltro={toggleFiltroTecnico}
@@ -10308,6 +10385,7 @@ function AbaPerfilCliente({ clientes = [], token, notify, atualizarCliente, rese
     // perfil.cliente é o cadastro como veio do servidor ao abrir (ver camposAlterados).
     const patch = camposAlterados(mapClienteDaApi(perfil.cliente), form);
     if (Object.keys(patch).length === 0) { notify("Nada mudou no cadastro."); return; }
+    if ("dataDesejada" in patch && !confirmarDataDistante(patch.dataDesejada)) return;
     setSalvando(true);
     try {
       /* Só recarrega e comemora se o servidor aceitou — a lista de clientes é atualizada de
@@ -17453,6 +17531,8 @@ function AbaCliente({ notify, onLogin, onIrParaLogin }) {
     if (!form.senha.trim() || form.senha.length < 6) { notify("Crie uma senha de no mínimo 6 caracteres para acessar seu portal"); return; }
     if (!form.email.trim()) { notify("Informe um e-mail para criar a senha do portal"); return; }
     if (!form.aceiteTermos) { notify("Marque o aceite da política de privacidade para continuar"); return; }
+    if (form.dataDesejada && form.dataDesejada < paraChaveISO(new Date())) { notify("A data desejada precisa ser de hoje em diante — confira o ano"); return; }
+    if (form.dataDesejada && !confirmarDataDistante(form.dataDesejada)) return;
     const construtoraFinal = construtoraSel === OUTROS ? construtoraOutros.trim() : construtoraSel;
     const empreendimentoFinal = empreendimentoSel === OUTROS ? empreendimentoOutros.trim() : empreendimentoSel;
     const precisaCadastroEmpreendimento = construtoraSel === OUTROS || empreendimentoSel === OUTROS;
@@ -17638,7 +17718,13 @@ function AbaCliente({ notify, onLogin, onIrParaLogin }) {
           <Field label="Bloco / Apto" value={form.blocoTorre} onChange={(v) => setFMaiusc("blocoTorre", v)} />
           {form.servico === SERVICO_OPCOES[0] && (
             <>
-              <Field label="Data desejada" type="date" value={form.dataDesejada} onChange={(v) => setF("dataDesejada", v)} />
+              <div style={cell(false)}>
+                <label style={lab}>Data desejada</label>
+                <input style={inp} type="date" min={paraChaveISO(new Date())} value={form.dataDesejada} onChange={(e) => setF("dataDesejada", e.target.value)} />
+                {avisoDataDesejada(form.dataDesejada) && (
+                  <span style={{ fontSize: 11.5, color: "#C62828", fontWeight: 600 }}>{avisoDataDesejada(form.dataDesejada)}</span>
+                )}
+              </div>
               <div style={cell(false)}>
                 <label style={lab}>Horário desejado</label>
                 <select style={inp} value={form.horarioDesejado} onChange={(e) => setF("horarioDesejado", e.target.value)}>
@@ -19215,6 +19301,7 @@ function ModalPedirRevistoria({ atendimento, onFechar, onEnviar }) {
     setErro("");
     if (!data || !horario) { setErro("Escolha a data e o horário desejados."); return; }
     if (data < hojeISO) { setErro("A data precisa ser de hoje em diante."); return; }
+    if (!confirmarDataDistante(data)) return;
     if (!motivo.trim()) { setErro("Conte o que precisa ser revisto."); return; }
     setEnviando(true);
     const ok = await onEnviar({ dataDesejada: data, horarioDesejado: horario, observacoes: motivo.trim() });
