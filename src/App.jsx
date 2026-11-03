@@ -1645,69 +1645,96 @@ function ModalTrocarSenha({ token, onFechar, notify }) {
 
 /* ================= Componente principal ================= */
 /* ================= Login (equipe, clientes e parceiros) ================= */
-/* Primeiro acesso e recuperação de senha do cliente, no mesmo lugar: os dois casos terminam
-   em "receba um link no seu e-mail", e separá-los só obrigaria a pessoa a saber em qual dos
-   dois ela está. A resposta é sempre a mesma frase, exista ou não o e-mail — senão a tela vira
-   uma forma de descobrir quem é cliente da FN. */
-function PrimeiroAcessoPorEmail() {
-  const [aberto, setAberto] = useState(false);
-  const [email, setEmail] = useState("");
+/* "Esqueci minha senha" e primeiro acesso, no mesmo caminho: os dois terminam em "receba um link
+   no seu e-mail" (POST /api/clientes/solicitar-senha), que vale para cliente, parceiro e equipe. O
+   link abre ?criar-senha=, onde a própria pessoa define a senha e já entra.
+   Até nov/2026 isso era uma linha cinza embaixo do "Entrar" ("Primeiro acesso ou esqueceu a
+   senha? Receba um link por e-mail"), e quem esquecia a senha não a achava. A Gerência pediu um
+   botão de "esqueceu a senha": ele fica logo abaixo do campo da senha e abre esta tela no lugar do
+   formulário, já com o e-mail que a pessoa tinha digitado.
+   A resposta é sempre a mesma frase, exista ou não o e-mail — senão a tela vira uma forma de
+   descobrir quem é cliente da FN. O WhatsApp continua como saída para quem não tem e-mail no
+   cadastro ou não recebeu o link. */
+const linkDeTexto = { background: "none", border: "none", padding: 0, color: AZUL_MEDIO, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" };
+
+function PedirLinkDeSenha({ motivo = "esqueci", emailInicial = "", onVoltar }) {
+  const [email, setEmail] = useState(emailInicial);
   const [enviando, setEnviando] = useState(false);
   const [mensagem, setMensagem] = useState("");
+  const [erro, setErro] = useState("");
+  const primeiroAcesso = motivo === "primeiro-acesso";
 
   const pedir = async () => {
-    if (!email.trim()) return;
-    setEnviando(true);
+    const alvo = email.trim();
+    if (!alvo.includes("@")) { setErro("Digite o e-mail do seu cadastro."); return; }
+    setErro(""); setEnviando(true);
     try {
-      const r = await apiFetch("/api/clientes/solicitar-senha", { method: "POST", body: { email } });
+      const r = await apiFetch("/api/clientes/solicitar-senha", { method: "POST", body: { email: alvo } });
       setMensagem(r.mensagem || "Se esse e-mail estiver cadastrado, você vai receber um link em instantes.");
     } catch (e) {
-      setMensagem(e.message);
+      /* Erro aqui é limite de pedidos ou servidor fora: fica em vermelho, com o formulário na
+         tela para tentar de novo. Antes ele aparecia na mesma caixa verde do "link enviado". */
+      setErro(e.message);
     }
     setEnviando(false);
   };
 
-  if (!aberto) {
-    return (
-      <p style={{ textAlign: "center", color: "#8593a8", fontSize: 12, margin: "14px 0 0" }}>
-        Primeiro acesso ou esqueceu a senha?{" "}
-        <button type="button" onClick={() => setAberto(true)}
-          style={{ background: "none", border: "none", color: AZUL_MEDIO, fontSize: 12, cursor: "pointer", padding: 0, textDecoration: "underline" }}>
-          Receba um link por e-mail
-        </button>
-      </p>
-    );
-  }
+  const textoWhatsapp = `Olá! Preciso de ajuda para entrar no sistema da FN Edificações: ${primeiroAcesso ? "é o meu primeiro acesso" : "esqueci minha senha"}.`
+    + (email.trim() ? ` Meu e-mail de cadastro: ${email.trim()}` : "");
 
   return (
-    <div style={{ marginTop: 14, borderTop: `1px solid ${CINZA_BORDA}`, paddingTop: 14 }}>
-      <label style={lab}>Seu e-mail cadastrado</label>
-      {mensagem ? (
-        <p style={{ fontSize: 12.5, color: "#2E7D32", background: "#E6F4EA", borderRadius: 8, padding: "9px 11px", margin: "6px 0 0" }}>
-          {mensagem}
-        </p>
-      ) : (
-        <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
-          <input style={{ ...inp, flex: 1, minWidth: 170 }} type="email" value={email} placeholder="voce@email.com"
-            onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && pedir()} />
-          <button type="button" className="btn-solid" style={{ width: "auto", padding: "9px 14px" }}
-            onClick={pedir} disabled={enviando}>
-            {enviando ? <Loader2 size={14} className="spin" /> : <Mail size={14} />} Enviar
-          </button>
-        </div>
-      )}
-      <p style={{ fontSize: 11.5, color: "#8593a8", margin: "8px 0 0" }}>
-        O link vale por 30 minutos e leva à tela de criar uma senha só sua.
+    <>
+      <h2 style={{ textAlign: "center", color: AZUL_MARINHO, fontSize: 18, margin: "0 0 4px" }}>
+        {primeiroAcesso ? "Primeiro acesso" : "Esqueceu a senha?"}
+      </h2>
+      <p style={{ textAlign: "center", color: "#65758b", fontSize: 13, margin: "0 0 20px", lineHeight: 1.5 }}>
+        Digite o e-mail do seu cadastro. Enviamos um link para você criar {primeiroAcesso ? "a sua senha" : "uma senha nova"}.
       </p>
-    </div>
+
+      {mensagem ? (
+        <div style={{ background: "#E6F4EA", color: "#1E5E2F", borderRadius: 8, padding: "11px 13px", fontSize: 13, lineHeight: 1.5 }}>
+          <strong style={{ display: "block", marginBottom: 4 }}>{mensagem}</strong>
+          Confira também a caixa de spam ou lixo eletrônico. O link vale por 30 minutos e funciona uma vez só.
+          <div style={{ marginTop: 8 }}>
+            <button type="button" onClick={() => setMensagem("")} style={{ ...linkDeTexto, fontSize: 12.5 }}>Não chegou? Enviar de novo</button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div style={cell(true)}>
+            <label style={lab}>E-mail do cadastro</label>
+            <input style={inp} type="email" value={email} placeholder="voce@email.com" autoFocus
+              onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && pedir()} />
+          </div>
+          {erro && (
+            <div style={{ marginTop: 12, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>{erro}</div>
+          )}
+          <button type="button" className="btn-solid" style={{ width: "100%", justifyContent: "center", marginTop: 16, padding: "11px" }} disabled={enviando} onClick={pedir}>
+            {enviando ? <><Loader2 size={15} className="spin" /> Enviando…</> : <><Mail size={15} /> Enviar link por e-mail</>}
+          </button>
+        </>
+      )}
+
+      <a href={`https://wa.me/${WHATSAPP_ATENDIMENTO_FN}?text=${encodeURIComponent(textoWhatsapp)}`} target="_blank" rel="noopener noreferrer"
+        style={{ display: "block", marginTop: 16, padding: "10px 12px", borderRadius: 8, background: "#fff", border: "1px solid #CFE8D6", color: "#1B7F4B", fontSize: 12.5, textAlign: "center", textDecoration: "none", lineHeight: 1.45 }}>
+        Não tem e-mail no cadastro ou o link não chegou?<br /><strong>Fale com a FN pelo WhatsApp</strong>
+      </a>
+
+      <button type="button" onClick={onVoltar} style={{ width: "100%", marginTop: 14, background: "none", border: "none", color: AZUL_MEDIO, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+        ← Voltar para o login
+      </button>
+    </>
   );
 }
 
-function TelaLogin({ onLogin, onVoltar }) {
+function TelaLogin({ onLogin, onVoltar, recuperacaoInicial = null }) {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [erro, setErro] = useState("");
   const [carregando, setCarregando] = useState(false);
+  /* null: o formulário de entrar. "esqueci" ou "primeiro-acesso": o pedido do link por e-mail
+     (PedirLinkDeSenha), no lugar do formulário. */
+  const [recuperacao, setRecuperacao] = useState(recuperacaoInicial);
 
   const entrar = async () => {
     if (!email || !senha) { setErro("Informe e-mail e senha."); return; }
@@ -1723,68 +1750,88 @@ function TelaLogin({ onLogin, onVoltar }) {
 
   return (
     <div style={{ minHeight: "100vh", background: CINZA_CLARO, display: "grid", placeItems: "center", padding: 18, fontFamily: "'Inter', system-ui, sans-serif" }}>
+      {/* Os botões daqui usam as classes de `estilos` (.btn-solid, .spin), que só entravam nas
+          telas de dentro do sistema: sem esta tag, o "Entrar" saía como botão cinza do navegador. */}
+      <style>{estilos}</style>
       <div style={{ background: "#fff", borderRadius: 16, padding: "32px 30px", width: "100%", maxWidth: 380, boxShadow: "0 10px 30px rgba(18,51,91,.12)" }}>
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}>
           <img src={LOGO_URL} alt="FN Edificações" style={{ height: "clamp(56px, 14vw, 72px)", width: "auto" }} />
         </div>
-        <h2 style={{ textAlign: "center", color: AZUL_MARINHO, fontSize: 18, margin: "0 0 4px" }}>Entrar no sistema</h2>
-        {/* A porta é a mesma para todo mundo: equipe, cliente e parceiro/filiado entram com
-            e-mail e senha, e o papel gravado no login decide qual painel abre. Dizer só
-            "equipe" aqui fazia parceiro e cliente acharem que a tela não era para eles. */}
-        <p style={{ textAlign: "center", color: "#65758b", fontSize: 13, margin: "0 0 20px" }}>Acesso da equipe, clientes e parceiros FN</p>
 
-        <div style={cell(true)}>
-          <label style={lab}>E-mail</label>
-          <input style={inp} type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && entrar()} autoFocus />
-        </div>
-        <div style={{ ...cell(true), marginTop: 12 }}>
-          <label style={lab}>Senha</label>
-          <input style={inp} type="password" value={senha} onChange={(e) => setSenha(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && entrar()} />
-        </div>
+        {recuperacao ? (
+          <PedirLinkDeSenha motivo={recuperacao} emailInicial={email} onVoltar={() => setRecuperacao(null)} />
+        ) : (
+          <>
+            <h2 style={{ textAlign: "center", color: AZUL_MARINHO, fontSize: 18, margin: "0 0 4px" }}>Entrar no sistema</h2>
+            {/* A porta é a mesma para todo mundo: equipe, cliente e parceiro/filiado entram com
+                e-mail e senha, e o papel gravado no login decide qual painel abre. Dizer só
+                "equipe" aqui fazia parceiro e cliente acharem que a tela não era para eles. */}
+            <p style={{ textAlign: "center", color: "#65758b", fontSize: 13, margin: "0 0 20px" }}>Acesso da equipe, clientes e parceiros FN</p>
 
-        {erro && (
-          <div style={{ marginTop: 12, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>{erro}</div>
+            <div style={cell(true)}>
+              <label style={lab}>E-mail</label>
+              <input style={inp} type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && entrar()} autoFocus />
+            </div>
+            <div style={{ ...cell(true), marginTop: 12 }}>
+              <label style={lab}>Senha</label>
+              <input style={inp} type="password" value={senha} onChange={(e) => setSenha(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && entrar()} />
+            </div>
+            {/* Colado no campo da senha, que é onde quem esqueceu procura. */}
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 7 }}>
+              <button type="button" onClick={() => setRecuperacao("esqueci")} style={linkDeTexto}>Esqueci minha senha</button>
+            </div>
+
+            {erro && (
+              <div style={{ marginTop: 12, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>{erro}</div>
+            )}
+
+            <button type="button" className="btn-solid" style={{ width: "100%", justifyContent: "center", marginTop: 16, padding: "11px" }} disabled={carregando} onClick={entrar}>
+              {carregando ? <><Loader2 size={15} className="spin" /> Entrando…</> : "Entrar"}
+            </button>
+
+            {/* Aqui já esteve escrita a senha padrão do primeiro acesso — a mesma para todos os
+                clientes, à vista de qualquer visitante. Quem soubesse o e-mail de um cliente abria a
+                conta dele e via laudo, documentos e dados pessoais. Agora o caminho é o link por
+                e-mail: só entra quem recebe na própria caixa. */}
+            <p style={{ textAlign: "center", color: "#8593a8", fontSize: 12.5, margin: "14px 0 0" }}>
+              Primeiro acesso?{" "}
+              <button type="button" onClick={() => setRecuperacao("primeiro-acesso")} style={{ ...linkDeTexto, fontSize: 12.5 }}>Crie sua senha</button>
+            </p>
+            {/* O suporte pelo WhatsApp continua para quem não tem e-mail no cadastro. Não se chama
+                "esqueci minha senha": esse nome é do botão do link por e-mail, e dois botões com o
+                mesmo nome mandavam a pessoa para lados diferentes. */}
+            <div style={{ textAlign: "center", marginTop: 6, fontSize: 12.5 }}>
+              <a href={`https://wa.me/${WHATSAPP_ATENDIMENTO_FN}?text=${encodeURIComponent("Olá! Não tenho e-mail no cadastro e preciso de ajuda para entrar no sistema da FN Edificações.")}`}
+                target="_blank" rel="noopener noreferrer" style={{ color: "#8593a8", textDecoration: "none" }}>
+                Sem e-mail no cadastro? Fale com a FN pelo WhatsApp
+              </a>
+            </div>
+
+            <button type="button" onClick={onVoltar} style={{ width: "100%", marginTop: 14, background: "none", border: "none", color: AZUL_MEDIO, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+              ← Sou cliente e quero me cadastrar
+            </button>
+
+            {/* Não há mais botão de cadastro de parceiro aqui: parceiro entra por convite de um
+                vendedor (link com o código dele). Quem chegava sozinho por esta tela virava fila
+                para a Gerência sem ninguém saber de onde tinha vindo. O aviso fica: quem já é
+                parceiro entra por aqui. */}
+            <p style={{ color: "#8593a8", fontSize: 12, margin: "10px 0 0", textAlign: "center" }}>
+              Já é parceiro? Entre com o mesmo e-mail e senha do cadastro.
+            </p>
+          </>
         )}
-
-        <button type="button" className="btn-solid" style={{ width: "100%", justifyContent: "center", marginTop: 18, padding: "11px" }} disabled={carregando} onClick={entrar}>
-          {carregando ? <><Loader2 size={15} className="spin" /> Entrando…</> : "Entrar"}
-        </button>
-
-        {/* Aqui já esteve escrita a senha padrão do primeiro acesso — a mesma para todos os
-            clientes, à vista de qualquer visitante. Quem soubesse o e-mail de um cliente abria a
-            conta dele e via laudo, documentos e dados pessoais. Agora o caminho é o link por
-            e-mail: só entra quem recebe na própria caixa. */}
-        <PrimeiroAcessoPorEmail />
-        {/* Continua valendo para quem não tem e-mail no cadastro — só deixou de se chamar
-            "esqueci minha senha", porque agora existe caminho automático para isso logo acima
-            e dois links com o mesmo nome mandavam a pessoa para lados diferentes. */}
-        <div style={{ display: "flex", justifyContent: "center", marginTop: 6, fontSize: 12.5 }}>
-          <a href="https://wa.me/5581983061305" target="_blank" rel="noopener noreferrer" style={{ color: "#8593a8", textDecoration: "none" }}>
-            Sem e-mail no cadastro? Fale com a FN
-          </a>
-        </div>
-
-        <button type="button" onClick={onVoltar} style={{ width: "100%", marginTop: 14, background: "none", border: "none", color: AZUL_MEDIO, fontSize: 13, cursor: "pointer" }}>
-          ← Sou cliente e quero me cadastrar
-        </button>
-
-        {/* Não há mais botão de cadastro de parceiro aqui: parceiro entra por convite de um
-            vendedor (link com o código dele). Quem chegava sozinho por esta tela virava fila
-            para a Gerência sem ninguém saber de onde tinha vindo. O aviso fica: quem já é
-            parceiro entra por aqui. */}
-        <p style={{ color: "#8593a8", fontSize: 12, margin: "10px 0 0", textAlign: "center" }}>
-          Já é parceiro? Entre com o mesmo e-mail e senha do cadastro.
-        </p>
       </div>
     </div>
   );
 }
 
-/* Tela do link enviado por e-mail (?criar-senha=<token>) — primeiro acesso do cliente ao
-   portal, ou recuperação depois que a Gerência já reabriu o caminho (ver rota no backend). */
-function TelaCriarSenhaCliente({ token, onConcluido }) {
+/* Tela do link enviado por e-mail (?criar-senha=<token>): primeiro acesso ou "Esqueci minha
+   senha", de cliente, parceiro ou equipe — de quem é a conta, o servidor sabe pelo token. A pessoa
+   define a senha e já entra. O texto serve aos dois casos: antes dizia "Criar sua senha · Portal do
+   Cliente" também para o técnico que só tinha esquecido a dele. */
+function TelaCriarSenhaCliente({ token, onConcluido, onPedirNovoLink }) {
   const [senha, setSenha] = useState("");
   const [confirmacao, setConfirmacao] = useState("");
   const [erro, setErro] = useState("");
@@ -1803,16 +1850,17 @@ function TelaCriarSenhaCliente({ token, onConcluido }) {
 
   return (
     <div style={{ minHeight: "100vh", background: CINZA_CLARO, display: "grid", placeItems: "center", padding: 18, fontFamily: "'Inter', system-ui, sans-serif" }}>
+      <style>{estilos}</style>
       <div style={{ background: "#fff", borderRadius: 16, padding: "32px 30px", width: "100%", maxWidth: 380, boxShadow: "0 10px 30px rgba(18,51,91,.12)" }}>
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}>
           <img src={LOGO_URL} alt="FN Edificações" style={{ height: "clamp(56px, 14vw, 72px)", width: "auto" }} />
         </div>
-        <h2 style={{ textAlign: "center", color: AZUL_MARINHO, fontSize: 18, margin: "0 0 4px" }}>Criar sua senha</h2>
-        <p style={{ textAlign: "center", color: "#65758b", fontSize: 13, margin: "0 0 20px" }}>Portal do Cliente FN Edificações</p>
+        <h2 style={{ textAlign: "center", color: AZUL_MARINHO, fontSize: 18, margin: "0 0 4px" }}>Defina sua senha</h2>
+        <p style={{ textAlign: "center", color: "#65758b", fontSize: 13, margin: "0 0 20px" }}>Para entrar no sistema da FN Edificações</p>
 
         <div style={cell(true)}>
           <label style={lab}>Nova senha</label>
-          <input style={inp} type="password" value={senha} onChange={(e) => setSenha(e.target.value)} autoFocus />
+          <input style={inp} type="password" value={senha} onChange={(e) => setSenha(e.target.value)} placeholder="mínimo 6 caracteres" autoFocus />
         </div>
         <div style={{ ...cell(true), marginTop: 12 }}>
           <label style={lab}>Confirme a senha</label>
@@ -1825,8 +1873,21 @@ function TelaCriarSenhaCliente({ token, onConcluido }) {
         )}
 
         <button type="button" className="btn-solid" style={{ width: "100%", justifyContent: "center", marginTop: 18, padding: "11px" }} disabled={enviando} onClick={confirmar}>
-          {enviando ? <><Loader2 size={15} className="spin" /> Salvando…</> : "Criar senha e entrar"}
+          {enviando ? <><Loader2 size={15} className="spin" /> Salvando…</> : "Salvar senha e entrar"}
         </button>
+
+        {/* O link vale 30 minutos e uma vez só (o servidor confere). Vencido, a pessoa pede outro
+            daqui mesmo: o botão abre o login já no pedido do link. */}
+        <p style={{ textAlign: "center", color: "#8593a8", fontSize: 12.5, margin: "16px 0 0" }}>
+          Link vencido ou já usado?{" "}
+          <button type="button" onClick={onPedirNovoLink} style={{ ...linkDeTexto, fontSize: 12.5 }}>Peça um novo</button>
+        </p>
+        <div style={{ textAlign: "center", marginTop: 6, fontSize: 12.5 }}>
+          <a href={`https://wa.me/${WHATSAPP_ATENDIMENTO_FN}?text=${encodeURIComponent("Olá! Preciso de ajuda para criar a minha senha do sistema da FN Edificações.")}`}
+            target="_blank" rel="noopener noreferrer" style={{ color: "#8593a8", textDecoration: "none" }}>
+            Precisa de ajuda? Fale com a FN pelo WhatsApp
+          </a>
+        </div>
       </div>
     </div>
   );
@@ -2100,6 +2161,9 @@ function ModalCarrinho({ itens, alterarQuantidade, remover, total, onFechar, tok
 export default function App() {
   const [session, setSessionEstado] = useState(() => carregarSessaoSalva());
   const [mostrarLogin, setMostrarLogin] = useState(false);
+  /* "Peça um novo" na tela do link de senha abre o login já no pedido do link ("esqueci"). Fica
+     aqui porque as duas telas são irmãs no App(). */
+  const [recuperacaoNoLogin, setRecuperacaoNoLogin] = useState(null);
   const [linkParceiroFechado, setLinkParceiroFechado] = useState(false);
   /* Quem acabou de se cadastrar pelo "Cadastre-se" entra no portal com a loja FN Home aberta
      em cima. Só na memória: um F5 depois volta ao portal de sempre. */
@@ -2185,6 +2249,14 @@ export default function App() {
           const url = new URL(window.location.href);
           url.searchParams.delete("criar-senha");
           window.history.replaceState({}, "", url.toString());
+        }}
+        onPedirNovoLink={() => {
+          const url = new URL(window.location.href);
+          url.searchParams.delete("criar-senha");
+          window.history.replaceState({}, "", url.toString());
+          // Já logado (abriu o link com a sessão aberta), não há login para mostrar.
+          if (!session) setRecuperacaoNoLogin("esqueci");
+          setMostrarLogin(true);
         }} />
     );
   }
@@ -2206,7 +2278,8 @@ export default function App() {
       );
     }
     return mostrarLogin
-      ? <TelaLogin onLogin={setSession} onVoltar={() => setMostrarLogin(false)} />
+      ? <TelaLogin onLogin={(s) => { setRecuperacaoNoLogin(null); setSession(s); }} recuperacaoInicial={recuperacaoNoLogin}
+          onVoltar={() => { setMostrarLogin(false); setRecuperacaoNoLogin(null); }} />
       : <PortalCliente onIrParaLogin={() => setMostrarLogin(true)}
           onLogin={(s, opcoes) => { setRecemCadastrado(!!opcoes?.recemCadastrado); setSession(s); }} />;
   }
