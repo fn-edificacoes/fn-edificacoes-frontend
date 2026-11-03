@@ -41,7 +41,7 @@ const DESLOCAR_ROTULO = { RN: [26, -6], PB: [34, 0], PE: [40, 7], AL: [32, 9], S
 
 const btn = { display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: 8, border: `1px solid ${CINZA_BORDA}`, background: "#fff", color: AZUL_MARINHO, fontSize: 13, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" };
 const sel = { padding: "7px 10px", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, fontSize: 13, background: "#fff", fontFamily: "inherit" };
-const th = { textAlign: "left", fontSize: 11.5, fontWeight: 700, color: "#5a6a80", padding: "7px 8px", borderBottom: `1px solid ${CINZA_BORDA}`, whiteSpace: "nowrap" };
+const th = { textAlign: "left", fontSize: 11.5, fontWeight: 700, color: "#5a6a80", padding: "7px 8px", borderBottom: `1px solid ${CINZA_BORDA}`, whiteSpace: "nowrap", position: "sticky", top: 0, background: "#fff", zIndex: 1 };
 const td = { fontSize: 13, padding: "7px 8px", borderBottom: `1px solid ${CINZA_CLARO}`, whiteSpace: "nowrap" };
 const tdNum = { ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" };
 
@@ -295,7 +295,7 @@ function VisaoBrasil({ dados, metrica, regionalDaUf, abrir }) {
         <section style={{ flex: "2 1 300px", background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 14, padding: 14, minWidth: 0 }}>
           <h4 style={{ margin: "0 0 8px", color: AZUL_MARINHO, fontSize: 14 }}>Estados</h4>
           <p style={{ fontSize: 12, color: "#5a6a80", marginTop: 0 }}>Clique num estado (no mapa ou aqui) para ver os municípios.</p>
-          <div style={{ overflowX: "auto" }}>
+          <div style={{ overflow: "auto", maxHeight: "60vh" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead><tr><th style={th}>Estado</th><th style={th}>Regional</th><th style={{ ...th, textAlign: "right" }}>Clientes</th><th style={{ ...th, textAlign: "right" }}>Empreend.</th><th style={{ ...th, textAlign: "right" }}>Parceiros</th></tr></thead>
               <tbody>
@@ -472,7 +472,7 @@ function VisaoRegional({ uf, dados, metrica, regional }) {
 
         <section style={{ flex: "2 1 300px", background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 14, padding: 14, minWidth: 0 }}>
           <h4 style={{ margin: "0 0 8px", color: AZUL_MARINHO, fontSize: 14 }}>Municípios</h4>
-          <div style={{ overflowX: "auto" }}>
+          <div style={{ overflow: "auto", maxHeight: "60vh" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead><tr><th style={th}>Município</th><th style={{ ...th, textAlign: "right" }}>Clientes</th><th style={{ ...th, textAlign: "right" }}>Empreend.</th><th style={{ ...th, textAlign: "right" }}>Parceiros</th></tr></thead>
               <tbody>
