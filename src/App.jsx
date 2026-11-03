@@ -4149,6 +4149,32 @@ function confirmarDataDistante(data) {
   return window.confirm(`A data ficou ${data.split("-").reverse().join("/")}, a mais de ${MESES_DATA_DISTANTE} meses de hoje — ela não aparece na agenda deste mês. O ano está certo?`);
 }
 
+/* Vistoria com a data vencida e ainda sem laudo. Ficava escondida: o calendário abre no mês
+   atual, e no kanban de Clientes ela se mistura com as de amanhã — em 03/11/2026 eram 9 das
+   26 da coluna "Vistoria agendada", a mais antiga de 27/07. As duas etapas pedem coisas
+   diferentes: "Vistoria agendada" vencida é vistoria que ninguém iniciou no sistema (iniciar
+   já passa para "Em vistoria") — ou não aconteceu e precisa remarcar, ou o técnico foi e não
+   registrou; "Em vistoria" vencida é laudo começado e não enviado. Data inválida ou distante
+   fica de fora: já tem o aviso dela (ver avisoDataDesejada). Mais antigas primeiro. */
+function vistoriasAtrasadas(clientes = [], docs = [], hojeISO = paraChaveISO(new Date())) {
+  return clientes
+    .filter((c) => c.dataDesejada && c.dataDesejada < hojeISO && !avisoDataDesejada(c.dataDesejada))
+    .map((c) => ({ c, etapa: etapaVistoriaCliente(c, docs) }))
+    .filter(({ etapa }) => etapa === "Vistoria agendada" || etapa === "Em vistoria")
+    .sort((a, b) => a.c.dataDesejada.localeCompare(b.c.dataDesejada) || (a.c.horarioDesejado || "").localeCompare(b.c.horarioDesejado || ""));
+}
+// Dias corridos entre a data (AAAA-MM-DD, hora local) e hoje — diasDesde mede horas, em UTC.
+function haDias(dataISO) {
+  const d = Math.round((new Date(`${paraChaveISO(new Date())}T00:00:00`) - new Date(`${dataISO}T00:00:00`)) / 86400000);
+  return `há ${d} ${d === 1 ? "dia" : "dias"}`;
+}
+/* Agendar num dia que já passou cria uma vistoria atrasada no mesmo instante. Devolve o
+   motivo para recusar, ou "" quando a data serve. */
+function motivoDataVencida(c) {
+  if (!c?.dataDesejada || c.dataDesejada >= paraChaveISO(new Date())) return "";
+  return `A data deste cadastro (${c.dataDesejada.split("-").reverse().join("/")}) já passou. Corrija a data em Clientes › Editar cliente antes de agendar.`;
+}
+
 /* ================= Notificações: solicitações de clientes pendentes ================= */
 function NotificacoesClientes({ clientes, preencherComCliente, usuarioAtualId, style }) {
   /* Só o que já está na agenda dele, e nada mais:
@@ -4551,6 +4577,8 @@ function KanbanClientes({ clientes, docs, onAbrir }) {
     (porEtapa[et] = porEtapa[et] || []).push(c);
   });
   const etapas = [...ETAPAS_CLIENTE.filter((e) => porEtapa[e]), ...Object.keys(porEtapa).filter((e) => !ETAPAS_CLIENTE.includes(e))];
+  // Data vencida sem laudo: a mesma regra do aviso do Agendamento (ver vistoriasAtrasadas).
+  const atrasadas = new Set(vistoriasAtrasadas(clientes, docs).map(({ c }) => c.id));
 
   return (
     <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 8 }}>
@@ -4571,9 +4599,10 @@ function KanbanClientes({ clientes, docs, onAbrir }) {
                 <div style={{ fontSize: 12, color: "#65758b", marginTop: 2 }}>
                   {c.empreendimento || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}
                 </div>
-                <div style={{ fontSize: 11.5, color: avisoDataDesejada(c.dataDesejada) ? "#C62828" : "#8593a8", fontWeight: avisoDataDesejada(c.dataDesejada) ? 700 : 400, marginTop: 4 }}
-                  title={avisoDataDesejada(c.dataDesejada) || undefined}>
+                <div style={{ fontSize: 11.5, color: avisoDataDesejada(c.dataDesejada) || atrasadas.has(c.id) ? "#C62828" : "#8593a8", fontWeight: avisoDataDesejada(c.dataDesejada) || atrasadas.has(c.id) ? 700 : 400, marginTop: 4 }}
+                  title={avisoDataDesejada(c.dataDesejada) || (atrasadas.has(c.id) ? "A data já passou e o laudo não foi enviado — veja em Agendamento › Calendário de vistorias." : undefined)}>
                   {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""}
+                  {atrasadas.has(c.id) && ` · atrasada ${haDias(c.dataDesejada)}`}
                 </div>
                 {c.observacoes && (
                   <div style={{ fontSize: 11.5, color: "#9AA6B5", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -6387,6 +6416,8 @@ function PainelDiaAgendamento({ diaISO, clientes = [], todosClientes = [], visto
       return;
     }
     const jaEstaNaAgenda = c.status === "Vistoria agendada" || c.status === "Em vistoria";
+    // Trocar o técnico de uma vistoria atrasada é permitido (é assim que se repassa); agendar nova num dia que já passou, não.
+    if (!jaEstaNaAgenda && motivoDataVencida(c)) { notify(motivoDataVencida(c)); return; }
     setTrocandoIds([c.id]);
     try {
       const ok = await updCliente(c.id, jaEstaNaAgenda
@@ -6587,6 +6618,7 @@ function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesParaAgend
     if (!clienteId) { setErro("Escolha o cliente."); return; }
     if (!vistoriadorId) { setErro("Escolha o técnico responsável."); return; }
     if (!data || !hora) { setErro("Este cliente não definiu data/horário no cadastro."); return; }
+    if (motivoDataVencida(clienteEscolhido)) { setErro(motivoDataVencida(clienteEscolhido)); return; }
     const conflito = vistoriaNoMesmoHorario(todosClientes, { clienteId, vistoriadorId, data, horario: hora });
     if (conflito) {
       const nomeTecnico = vistoriadores.find((v) => String(v.id) === String(vistoriadorId))?.nome || "O técnico";
@@ -6684,6 +6716,7 @@ function useAprovacaoAnalise(clientes, vistoriadores, updCliente, notify) {
         notify("Agendamento aprovado ✓ — falta escalar o técnico");
         return;
       }
+      if (motivoDataVencida(c)) { notify(motivoDataVencida(c)); return; }
       const conflito = vistoriaNoMesmoHorario(clientes, {
         clienteId: c.id, vistoriadorId, data: c.dataDesejada, horario: c.horarioDesejado,
       });
@@ -6707,6 +6740,125 @@ function useAprovacaoAnalise(clientes, vistoriadores, updCliente, notify) {
   return { aprovar, recusar, clienteAprovado, setClienteAprovado };
 }
 
+/* ================= Agendamento · Vistorias atrasadas sem laudo =================
+   Fica dentro do Calendário de vistorias, fechado: o resumo diz quantas são e por quê, e a
+   lista separa as que nunca foram iniciadas das que esperam o laudo (ver vistoriasAtrasadas).
+   "Ver no dia" abre o painel da data, onde se troca o técnico ou cancela. "Remarcar" só nas
+   não iniciadas — a iniciada já tem técnico em campo, o que falta é o laudo. */
+function BlocoVistoriasAtrasadas({ atrasadas = [], vistoriadores = [], todosClientes = [], podeAgir = false, updCliente, notify, onAbrirDia }) {
+  const [aberto, setAberto] = useState(false);
+  const [remarcando, setRemarcando] = useState(null); // { id, data, hora }
+  const [salvando, setSalvando] = useState(false);
+  if (atrasadas.length === 0) return null;
+
+  const hojeISO = paraChaveISO(new Date());
+  const naoIniciadas = atrasadas.filter((a) => a.etapa === "Vistoria agendada");
+  const semLaudo = atrasadas.filter((a) => a.etapa === "Em vistoria");
+  const nomeTecnico = (id) => vistoriadores.find((v) => String(v.id) === String(id))?.nome || null;
+
+  const remarcar = async (c) => {
+    const { data, hora } = remarcando;
+    if (!data || !dataDesejadaValida(data)) { notify("Escolha a nova data."); return; }
+    if (data < hojeISO) { notify("A nova data precisa ser de hoje em diante."); return; }
+    if (!confirmarDataDistante(data)) return;
+    const conflito = vistoriaNoMesmoHorario(todosClientes, { clienteId: c.id, vistoriadorId: c.vistoriadorId, data, horario: hora });
+    if (conflito) {
+      notify(`${nomeTecnico(c.vistoriadorId) || "O técnico"} já tem vistoria às ${hora} nesse dia (${conflito.nome}). Escolha outro horário.`);
+      return;
+    }
+    setSalvando(true);
+    try {
+      if (await updCliente(c.id, { dataDesejada: data, horarioDesejado: hora })) {
+        notify(`Vistoria de ${c.nome} remarcada para ${data.split("-").reverse().join("/")}${hora ? ` às ${hora}` : ""} ✓`);
+        setRemarcando(null);
+      }
+    } catch (e) { notify(`Não foi possível remarcar: ${e.message}`); }
+    setSalvando(false);
+  };
+
+  const linha = ({ c, etapa }) => {
+    const tecnico = nomeTecnico(c.vistoriadorId);
+    const editando = remarcando?.id === c.id;
+    return (
+      <div key={c.id} style={{ background: "#fff", borderRadius: 8, padding: "8px 10px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span title={tecnico || "Sem técnico"} style={{ background: tecnico ? corDoTecnico(c.vistoriadorId) : "#EEF1F5", color: tecnico ? "#fff" : "#65758b", borderRadius: 6, padding: "2px 7px", fontSize: 11, fontWeight: 800 }}>
+            {tecnico ? siglaDoNome(tecnico) : "—"}
+          </span>
+          <div style={{ flex: 1, minWidth: 160 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              <strong style={{ fontSize: 13 }}>{c.nome}</strong>
+              {ehRevistoria(c) && <SeloRevistoria seq={c.revistoriaSeq} />}
+            </div>
+            <div style={{ fontSize: 12, color: "#65758b" }}>
+              {c.empreendimento || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""} · {tecnico || "sem técnico"}
+            </div>
+          </div>
+          <span style={{ fontSize: 12.5, color: "#C62828", fontWeight: 700, whiteSpace: "nowrap" }}>
+            {c.dataDesejada.split("-").reverse().join("/")}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""} · {haDias(c.dataDesejada)}
+          </span>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button className="btn-mini" onClick={() => onAbrirDia(c.dataDesejada, etapa)}><Eye size={13} /> Ver no dia</button>
+            {podeAgir && etapa === "Vistoria agendada" && !editando && (
+              <button className="btn-mini" onClick={() => setRemarcando({ id: c.id, data: "", hora: c.horarioDesejado || "" })}><CalendarDays size={13} /> Remarcar</button>
+            )}
+          </div>
+        </div>
+        {editando && (
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+            <div style={cell(false)}>
+              <label style={lab}>Nova data</label>
+              <input style={inp} type="date" min={hojeISO} value={remarcando.data} onChange={(e) => setRemarcando({ ...remarcando, data: e.target.value })} />
+            </div>
+            <div style={cell(false)}>
+              <label style={lab}>Horário</label>
+              <select style={inp} value={remarcando.hora} onChange={(e) => setRemarcando({ ...remarcando, hora: e.target.value })}>
+                <option value="">selecionar…</option>
+                {remarcando.hora && !HORARIOS_COMERCIAIS.includes(remarcando.hora) && <option value={remarcando.hora}>{remarcando.hora}</option>}
+                {HORARIOS_COMERCIAIS.map((h) => <option key={h} value={h}>{h}</option>)}
+              </select>
+            </div>
+            <button className="btn-solid" style={{ width: "auto", padding: "9px 14px" }} disabled={salvando} onClick={() => remarcar(c)}>
+              {salvando ? "Salvando…" : "Salvar nova data"}
+            </button>
+            <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setRemarcando(null)}>Cancelar</button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ background: "#FCEAEA", border: "1px solid #F2C4C4", borderRadius: 10, padding: "10px 12px", margin: "-4px 0 14px" }}>
+      <button onClick={() => setAberto(!aberto)} aria-expanded={aberto}
+        style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
+        <Clock size={15} color="#C62828" style={{ flexShrink: 0 }} />
+        <strong style={{ flex: 1, fontSize: 13.5, color: "#C62828" }}>
+          {atrasadas.length === 1 ? "1 vistoria atrasada sem laudo" : `${atrasadas.length} vistorias atrasadas sem laudo`}
+        </strong>
+        <span style={{ fontSize: 12.5, color: AZUL_MEDIO, fontWeight: 600, whiteSpace: "nowrap" }}>{aberto ? "Esconder" : "Ver lista"}</span>
+      </button>
+      <p style={{ fontSize: 12.5, color: "#7A2E2E", margin: "4px 0 0" }}>
+        A data já passou e o laudo não foi enviado, então elas só aparecem no calendário do mês em que estavam marcadas.
+        {naoIniciadas.length > 0 && ` ${naoIniciadas.length} nunca ${naoIniciadas.length === 1 ? "foi iniciada" : "foram iniciadas"} no sistema: se não aconteceu, remarque.`}
+        {semLaudo.length > 0 && ` ${semLaudo.length} ${semLaudo.length === 1 ? "foi iniciada" : "foram iniciadas"} e ${semLaudo.length === 1 ? "espera" : "esperam"} o laudo do técnico.`}
+      </p>
+      {aberto && (
+        <div style={{ display: "grid", gap: 12, marginTop: 10 }}>
+          {[["Agendadas e não iniciadas", naoIniciadas], ["Iniciadas, laudo não enviado", semLaudo]]
+            .filter(([, lista]) => lista.length > 0)
+            .map(([titulo, lista]) => (
+              <div key={titulo}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#7A2E2E", marginBottom: 6 }}>{titulo} · {lista.length}</div>
+                <div style={{ display: "grid", gap: 6 }}>{lista.map(linha)}</div>
+              </div>
+            ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ================= Agendamento · Análise: aprovação de clientes + calendário operacional ================= */
 function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, ehGerencia = false, onAgendarAgora, diaParaAbrir, aoAbrirDia, filtroEtapa = null, aoTrocarEtapa }) {
   const [mesRef, setMesRef] = useState(() => { const h = new Date(); return new Date(h.getFullYear(), h.getMonth(), 1); });
@@ -6728,6 +6880,15 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
   // Com o ano errado ou data que não existe, o cadastro some do mês certo (ver dataDesejadaDistante).
   const comDataParaConferir = clientes.filter((c) =>
     c.status !== "Cancelado" && !ehServicoDocumentacao(c) && avisoDataDesejada(c.dataDesejada));
+  const atrasadas = vistoriasAtrasadas(clientes, docs);
+  /* Abre o painel do dia da vistoria atrasada. Se a etapa filtrada pelos indicadores não for a
+     dela, o filtro sai — senão o painel abriria sem a vistoria que a pessoa clicou. */
+  const abrirDiaAtrasada = (dataISO, etapa) => {
+    if (filtroEtapa && filtroEtapa !== etapa) aoTrocarEtapa?.(null);
+    const [ano, mes] = dataISO.split("-").map(Number);
+    setMesRef(new Date(ano, mes - 1, 1));
+    setDiaSelecionado(dataISO);
+  };
 
   // Veio de uma confirmação de vistoria feita na sub-aba Vistoria — pula direto pro
   // mês/dia certo e já abre o painel lateral, sem precisar navegar manualmente.
@@ -6772,6 +6933,8 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
           Veja quem está vistoriando o quê em cada dia. Clique num dia pra ver a agenda completa e agendar uma nova vistoria.
         </p>
+        <BlocoVistoriasAtrasadas atrasadas={atrasadas} vistoriadores={vistoriadores} todosClientes={clientes}
+          podeAgir={podeAgir} updCliente={updCliente} notify={notify} onAbrirDia={abrirDiaAtrasada} />
         {comDataParaConferir.length > 0 && (
           <div style={{ display: "flex", alignItems: "flex-start", gap: 8, background: "#FFF4E0", color: "#B26A00", borderRadius: 8, padding: "8px 12px", fontSize: 12.5, margin: "-4px 0 14px" }}>
             <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
