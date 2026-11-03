@@ -3,7 +3,15 @@ import * as Rascunho from "./rascunho-local.js";
 import { listarAmbientes, paraItemDeLaudo, todasParaImportacao } from "./patologias-consulta.js";
 import * as Fin from "./financeiro-regras.js";
 import AbaRedeNacional from "./rede-nacional.jsx";
+import AbaEmpreendimentosCadastro from "./empreendimentos-lista.jsx";
+import { Building as IconeEmpreendimento, ShoppingBag } from "lucide-react";
+import AbaProdutosMercadoLivre, { SecaoOfertasMercadoLivre, DestaqueLojaFnHome, AbaLojaParaCliente, temRascunhoMercadoLivre } from "./fn-home-mercadolivre.jsx";
+import { VitrineClubeFn, FaixaClubeFn, SeletorRamo, AvisoCasaProntaNoClube, rotuloDoRamo, useClubeVisivel, clubeVisivelParaClientes, AbaVisibilidadeClube } from "./clube-fn.jsx";
+import AbaFinanceiroFnHome, { CardFnHomeNosIndicadores } from "./fn-home-financeiro.jsx";
 import AbaMapaAtuacao from "./mapa-atuacao.jsx";
+import { usePatologiaVoz, PainelPatologiaVoz, AvisoPendentesVoz } from "./patologia-voz.jsx";
+import AbaCreditosIA from "./ia-creditos.jsx";
+import { BotaoWhatsappLaudo } from "./laudo-whatsapp.jsx";
 import { AbaArtsVistoria, AbaFolhaPagamento, CardValoresCustos, useCustosOperacionais } from "./controle-financeiro.jsx";
 import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
@@ -13,7 +21,7 @@ import {
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
   ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle, Megaphone, Clock,
   Wrench, Paperclip, Menu, Receipt, Car, FileBarChart, Gauge, Settings, Landmark, Wallet, Archive, FileSpreadsheet, FileCheck,
-  Map as IconeMapa
+  Link2, Scale, Map as IconeMapa, PaintRoller, Rocket, HardHat
 } from "lucide-react";
 
 /* ============================================================
@@ -132,6 +140,9 @@ async function apiFetch(caminho, { method = "GET", body, token } = {}) {
     if (resp.status === 401 && token && aoPerderSessao) aoPerderSessao(dados?.erro || "");
 
     const falha = new Error(dados?.erro || (resp.status >= 500 ? MSG_API_FORA : `Erro ${resp.status}`));
+    /* O status vai junto para quem precisa distinguir "o servidor recusou" de "não houve
+       resposta" (erro sem status) — a fila sem sinal da patologia por voz só reenvia o segundo. */
+    falha.status = resp.status;
     if (!STATUS_PASSAGEIROS.includes(resp.status)) throw falha;
     ultimoErro = falha;
   }
@@ -199,6 +210,9 @@ function mapClienteDaApi(c) {
     /* Como o dinheiro entrou (Pix, dinheiro, Mercado Pago…) — junto com pagoEm, é o que se
        confere no extrato. */
     formaPagamento: c.forma_pagamento || "",
+    /* Em que conta o dinheiro caiu (id de /api/contas-recebimento): a PJ do Mercado Pago ou outra
+       que a Gerência cadastrou. Só diz onde conferir — a receita é a mesma em qualquer conta. */
+    contaRecebimento: c.conta_recebimento || "",
     /* O servidor já diz se este cadastro virou laudo. Sem isso, quem não recebe os registros
        de "docs" (o Atendimento) não conseguia distinguir vistoria em campo de vistoria
        entregue — e contava as duas como "Em vistoria". */
@@ -573,8 +587,10 @@ const STATUS_INTERNO_OPCOES = ["Agendado", "Em vistoria", "Laudo em elaboração
 /* "arts" (ARTs de vistoria) não tem aba própria na barra de cima: é sub-aba de Documentação, ao
    lado das TRTs de reforma — quem organiza uma organiza a outra. Continua aqui porque é o que
    libera a tela. */
+/* "loja" é a Loja FN Home para o técnico mostrar ao cliente na vistoria (nov/2026): só leitura,
+   com o link para mandar pelo WhatsApp — nada de cadastro de produto. */
 const MODULOS_POR_PERFIL = {
-  vistoriador: ["laudos", "despesas"],
+  vistoriador: ["laudos", "loja", "despesas"],
   documentacao: ["documentacao", "arts", "despesas"],
   atendimento: ["clientes", "qualidade", "documentacao", "arts", "faq", "marketing", "vendas", "despesas"],
   vendas: ["vendas", "despesas"],
@@ -1395,13 +1411,14 @@ function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], ava
 
   // --- Parceiros novos aguardando homologação: sem isto, ninguém era avisado — o cadastro
   // só aparecia se alguém abrisse a aba "Parceiros" por conta própria e reparasse na tabela. ---
-  if (["vendas", "atendimento"].includes(perfil)) {
+  if (["vendas", "atendimento", "gerencia"].includes(perfil)) {
     const aguardandoHomologacao = parceiros.filter((p) => p.status === "em_analise");
     if (aguardandoHomologacao.length) {
       itens.push({
         id: "parceiros-em-analise", urgente: true,
         texto: `${aguardandoHomologacao.length} parceiro(s) aguardando homologação`,
-        onde: { aba: "vendas" },
+        // A Gerência não tem a aba "Fornecedores": a mesma tela é FN Clube → Parceiros do Clube.
+        onde: perfil === "gerencia" ? { aba: "gerencia", sub: "clube-parceiros" } : { aba: "vendas" },
       });
     }
   }
@@ -1643,69 +1660,96 @@ function ModalTrocarSenha({ token, onFechar, notify }) {
 
 /* ================= Componente principal ================= */
 /* ================= Login (equipe, clientes e parceiros) ================= */
-/* Primeiro acesso e recuperação de senha do cliente, no mesmo lugar: os dois casos terminam
-   em "receba um link no seu e-mail", e separá-los só obrigaria a pessoa a saber em qual dos
-   dois ela está. A resposta é sempre a mesma frase, exista ou não o e-mail — senão a tela vira
-   uma forma de descobrir quem é cliente da FN. */
-function PrimeiroAcessoPorEmail() {
-  const [aberto, setAberto] = useState(false);
-  const [email, setEmail] = useState("");
+/* "Esqueci minha senha" e primeiro acesso, no mesmo caminho: os dois terminam em "receba um link
+   no seu e-mail" (POST /api/clientes/solicitar-senha), que vale para cliente, parceiro e equipe. O
+   link abre ?criar-senha=, onde a própria pessoa define a senha e já entra.
+   Até nov/2026 isso era uma linha cinza embaixo do "Entrar" ("Primeiro acesso ou esqueceu a
+   senha? Receba um link por e-mail"), e quem esquecia a senha não a achava. A Gerência pediu um
+   botão de "esqueceu a senha": ele fica logo abaixo do campo da senha e abre esta tela no lugar do
+   formulário, já com o e-mail que a pessoa tinha digitado.
+   A resposta é sempre a mesma frase, exista ou não o e-mail — senão a tela vira uma forma de
+   descobrir quem é cliente da FN. O WhatsApp continua como saída para quem não tem e-mail no
+   cadastro ou não recebeu o link. */
+const linkDeTexto = { background: "none", border: "none", padding: 0, color: AZUL_MEDIO, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" };
+
+function PedirLinkDeSenha({ motivo = "esqueci", emailInicial = "", onVoltar }) {
+  const [email, setEmail] = useState(emailInicial);
   const [enviando, setEnviando] = useState(false);
   const [mensagem, setMensagem] = useState("");
+  const [erro, setErro] = useState("");
+  const primeiroAcesso = motivo === "primeiro-acesso";
 
   const pedir = async () => {
-    if (!email.trim()) return;
-    setEnviando(true);
+    const alvo = email.trim();
+    if (!alvo.includes("@")) { setErro("Digite o e-mail do seu cadastro."); return; }
+    setErro(""); setEnviando(true);
     try {
-      const r = await apiFetch("/api/clientes/solicitar-senha", { method: "POST", body: { email } });
+      const r = await apiFetch("/api/clientes/solicitar-senha", { method: "POST", body: { email: alvo } });
       setMensagem(r.mensagem || "Se esse e-mail estiver cadastrado, você vai receber um link em instantes.");
     } catch (e) {
-      setMensagem(e.message);
+      /* Erro aqui é limite de pedidos ou servidor fora: fica em vermelho, com o formulário na
+         tela para tentar de novo. Antes ele aparecia na mesma caixa verde do "link enviado". */
+      setErro(e.message);
     }
     setEnviando(false);
   };
 
-  if (!aberto) {
-    return (
-      <p style={{ textAlign: "center", color: "#8593a8", fontSize: 12, margin: "14px 0 0" }}>
-        Primeiro acesso ou esqueceu a senha?{" "}
-        <button type="button" onClick={() => setAberto(true)}
-          style={{ background: "none", border: "none", color: AZUL_MEDIO, fontSize: 12, cursor: "pointer", padding: 0, textDecoration: "underline" }}>
-          Receba um link por e-mail
-        </button>
-      </p>
-    );
-  }
+  const textoWhatsapp = `Olá! Preciso de ajuda para entrar no sistema da FN Edificações: ${primeiroAcesso ? "é o meu primeiro acesso" : "esqueci minha senha"}.`
+    + (email.trim() ? ` Meu e-mail de cadastro: ${email.trim()}` : "");
 
   return (
-    <div style={{ marginTop: 14, borderTop: `1px solid ${CINZA_BORDA}`, paddingTop: 14 }}>
-      <label style={lab}>Seu e-mail cadastrado</label>
-      {mensagem ? (
-        <p style={{ fontSize: 12.5, color: "#2E7D32", background: "#E6F4EA", borderRadius: 8, padding: "9px 11px", margin: "6px 0 0" }}>
-          {mensagem}
-        </p>
-      ) : (
-        <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
-          <input style={{ ...inp, flex: 1, minWidth: 170 }} type="email" value={email} placeholder="voce@email.com"
-            onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && pedir()} />
-          <button type="button" className="btn-solid" style={{ width: "auto", padding: "9px 14px" }}
-            onClick={pedir} disabled={enviando}>
-            {enviando ? <Loader2 size={14} className="spin" /> : <Mail size={14} />} Enviar
-          </button>
-        </div>
-      )}
-      <p style={{ fontSize: 11.5, color: "#8593a8", margin: "8px 0 0" }}>
-        O link vale por 30 minutos e leva à tela de criar uma senha só sua.
+    <>
+      <h2 style={{ textAlign: "center", color: AZUL_MARINHO, fontSize: 18, margin: "0 0 4px" }}>
+        {primeiroAcesso ? "Primeiro acesso" : "Esqueceu a senha?"}
+      </h2>
+      <p style={{ textAlign: "center", color: "#65758b", fontSize: 13, margin: "0 0 20px", lineHeight: 1.5 }}>
+        Digite o e-mail do seu cadastro. Enviamos um link para você criar {primeiroAcesso ? "a sua senha" : "uma senha nova"}.
       </p>
-    </div>
+
+      {mensagem ? (
+        <div style={{ background: "#E6F4EA", color: "#1E5E2F", borderRadius: 8, padding: "11px 13px", fontSize: 13, lineHeight: 1.5 }}>
+          <strong style={{ display: "block", marginBottom: 4 }}>{mensagem}</strong>
+          Confira também a caixa de spam ou lixo eletrônico. O link vale por 30 minutos e funciona uma vez só.
+          <div style={{ marginTop: 8 }}>
+            <button type="button" onClick={() => setMensagem("")} style={{ ...linkDeTexto, fontSize: 12.5 }}>Não chegou? Enviar de novo</button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div style={cell(true)}>
+            <label style={lab}>E-mail do cadastro</label>
+            <input style={inp} type="email" value={email} placeholder="voce@email.com" autoFocus
+              onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && pedir()} />
+          </div>
+          {erro && (
+            <div style={{ marginTop: 12, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>{erro}</div>
+          )}
+          <button type="button" className="btn-solid" style={{ width: "100%", justifyContent: "center", marginTop: 16, padding: "11px" }} disabled={enviando} onClick={pedir}>
+            {enviando ? <><Loader2 size={15} className="spin" /> Enviando…</> : <><Mail size={15} /> Enviar link por e-mail</>}
+          </button>
+        </>
+      )}
+
+      <a href={`https://wa.me/${WHATSAPP_ATENDIMENTO_FN}?text=${encodeURIComponent(textoWhatsapp)}`} target="_blank" rel="noopener noreferrer"
+        style={{ display: "block", marginTop: 16, padding: "10px 12px", borderRadius: 8, background: "#fff", border: "1px solid #CFE8D6", color: "#1B7F4B", fontSize: 12.5, textAlign: "center", textDecoration: "none", lineHeight: 1.45 }}>
+        Não tem e-mail no cadastro ou o link não chegou?<br /><strong>Fale com a FN pelo WhatsApp</strong>
+      </a>
+
+      <button type="button" onClick={onVoltar} style={{ width: "100%", marginTop: 14, background: "none", border: "none", color: AZUL_MEDIO, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+        ← Voltar para o login
+      </button>
+    </>
   );
 }
 
-function TelaLogin({ onLogin, onVoltar }) {
+function TelaLogin({ onLogin, onVoltar, recuperacaoInicial = null }) {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [erro, setErro] = useState("");
   const [carregando, setCarregando] = useState(false);
+  /* null: o formulário de entrar. "esqueci" ou "primeiro-acesso": o pedido do link por e-mail
+     (PedirLinkDeSenha), no lugar do formulário. */
+  const [recuperacao, setRecuperacao] = useState(recuperacaoInicial);
 
   const entrar = async () => {
     if (!email || !senha) { setErro("Informe e-mail e senha."); return; }
@@ -1721,68 +1765,88 @@ function TelaLogin({ onLogin, onVoltar }) {
 
   return (
     <div style={{ minHeight: "100vh", background: CINZA_CLARO, display: "grid", placeItems: "center", padding: 18, fontFamily: "'Inter', system-ui, sans-serif" }}>
+      {/* Os botões daqui usam as classes de `estilos` (.btn-solid, .spin), que só entravam nas
+          telas de dentro do sistema: sem esta tag, o "Entrar" saía como botão cinza do navegador. */}
+      <style>{estilos}</style>
       <div style={{ background: "#fff", borderRadius: 16, padding: "32px 30px", width: "100%", maxWidth: 380, boxShadow: "0 10px 30px rgba(18,51,91,.12)" }}>
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}>
           <img src={LOGO_URL} alt="FN Edificações" style={{ height: "clamp(56px, 14vw, 72px)", width: "auto" }} />
         </div>
-        <h2 style={{ textAlign: "center", color: AZUL_MARINHO, fontSize: 18, margin: "0 0 4px" }}>Entrar no sistema</h2>
-        {/* A porta é a mesma para todo mundo: equipe, cliente e parceiro/filiado entram com
-            e-mail e senha, e o papel gravado no login decide qual painel abre. Dizer só
-            "equipe" aqui fazia parceiro e cliente acharem que a tela não era para eles. */}
-        <p style={{ textAlign: "center", color: "#65758b", fontSize: 13, margin: "0 0 20px" }}>Acesso da equipe, clientes e parceiros FN</p>
 
-        <div style={cell(true)}>
-          <label style={lab}>E-mail</label>
-          <input style={inp} type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && entrar()} autoFocus />
-        </div>
-        <div style={{ ...cell(true), marginTop: 12 }}>
-          <label style={lab}>Senha</label>
-          <input style={inp} type="password" value={senha} onChange={(e) => setSenha(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && entrar()} />
-        </div>
+        {recuperacao ? (
+          <PedirLinkDeSenha motivo={recuperacao} emailInicial={email} onVoltar={() => setRecuperacao(null)} />
+        ) : (
+          <>
+            <h2 style={{ textAlign: "center", color: AZUL_MARINHO, fontSize: 18, margin: "0 0 4px" }}>Entrar no sistema</h2>
+            {/* A porta é a mesma para todo mundo: equipe, cliente e parceiro/filiado entram com
+                e-mail e senha, e o papel gravado no login decide qual painel abre. Dizer só
+                "equipe" aqui fazia parceiro e cliente acharem que a tela não era para eles. */}
+            <p style={{ textAlign: "center", color: "#65758b", fontSize: 13, margin: "0 0 20px" }}>Acesso da equipe, clientes e parceiros FN</p>
 
-        {erro && (
-          <div style={{ marginTop: 12, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>{erro}</div>
+            <div style={cell(true)}>
+              <label style={lab}>E-mail</label>
+              <input style={inp} type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && entrar()} autoFocus />
+            </div>
+            <div style={{ ...cell(true), marginTop: 12 }}>
+              <label style={lab}>Senha</label>
+              <input style={inp} type="password" value={senha} onChange={(e) => setSenha(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && entrar()} />
+            </div>
+            {/* Colado no campo da senha, que é onde quem esqueceu procura. */}
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 7 }}>
+              <button type="button" onClick={() => setRecuperacao("esqueci")} style={linkDeTexto}>Esqueci minha senha</button>
+            </div>
+
+            {erro && (
+              <div style={{ marginTop: 12, background: "#FCEAEA", color: "#C62828", padding: "9px 12px", borderRadius: 8, fontSize: 12.5 }}>{erro}</div>
+            )}
+
+            <button type="button" className="btn-solid" style={{ width: "100%", justifyContent: "center", marginTop: 16, padding: "11px" }} disabled={carregando} onClick={entrar}>
+              {carregando ? <><Loader2 size={15} className="spin" /> Entrando…</> : "Entrar"}
+            </button>
+
+            {/* Aqui já esteve escrita a senha padrão do primeiro acesso — a mesma para todos os
+                clientes, à vista de qualquer visitante. Quem soubesse o e-mail de um cliente abria a
+                conta dele e via laudo, documentos e dados pessoais. Agora o caminho é o link por
+                e-mail: só entra quem recebe na própria caixa. */}
+            <p style={{ textAlign: "center", color: "#8593a8", fontSize: 12.5, margin: "14px 0 0" }}>
+              Primeiro acesso?{" "}
+              <button type="button" onClick={() => setRecuperacao("primeiro-acesso")} style={{ ...linkDeTexto, fontSize: 12.5 }}>Crie sua senha</button>
+            </p>
+            {/* O suporte pelo WhatsApp continua para quem não tem e-mail no cadastro. Não se chama
+                "esqueci minha senha": esse nome é do botão do link por e-mail, e dois botões com o
+                mesmo nome mandavam a pessoa para lados diferentes. */}
+            <div style={{ textAlign: "center", marginTop: 6, fontSize: 12.5 }}>
+              <a href={`https://wa.me/${WHATSAPP_ATENDIMENTO_FN}?text=${encodeURIComponent("Olá! Não tenho e-mail no cadastro e preciso de ajuda para entrar no sistema da FN Edificações.")}`}
+                target="_blank" rel="noopener noreferrer" style={{ color: "#8593a8", textDecoration: "none" }}>
+                Sem e-mail no cadastro? Fale com a FN pelo WhatsApp
+              </a>
+            </div>
+
+            <button type="button" onClick={onVoltar} style={{ width: "100%", marginTop: 14, background: "none", border: "none", color: AZUL_MEDIO, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+              ← Sou cliente e quero me cadastrar
+            </button>
+
+            {/* Não há mais botão de cadastro de parceiro aqui: parceiro entra por convite de um
+                vendedor (link com o código dele). Quem chegava sozinho por esta tela virava fila
+                para a Gerência sem ninguém saber de onde tinha vindo. O aviso fica: quem já é
+                parceiro entra por aqui. */}
+            <p style={{ color: "#8593a8", fontSize: 12, margin: "10px 0 0", textAlign: "center" }}>
+              Já é parceiro? Entre com o mesmo e-mail e senha do cadastro.
+            </p>
+          </>
         )}
-
-        <button type="button" className="btn-solid" style={{ width: "100%", justifyContent: "center", marginTop: 18, padding: "11px" }} disabled={carregando} onClick={entrar}>
-          {carregando ? <><Loader2 size={15} className="spin" /> Entrando…</> : "Entrar"}
-        </button>
-
-        {/* Aqui já esteve escrita a senha padrão do primeiro acesso — a mesma para todos os
-            clientes, à vista de qualquer visitante. Quem soubesse o e-mail de um cliente abria a
-            conta dele e via laudo, documentos e dados pessoais. Agora o caminho é o link por
-            e-mail: só entra quem recebe na própria caixa. */}
-        <PrimeiroAcessoPorEmail />
-        {/* Continua valendo para quem não tem e-mail no cadastro — só deixou de se chamar
-            "esqueci minha senha", porque agora existe caminho automático para isso logo acima
-            e dois links com o mesmo nome mandavam a pessoa para lados diferentes. */}
-        <div style={{ display: "flex", justifyContent: "center", marginTop: 6, fontSize: 12.5 }}>
-          <a href="https://wa.me/5581983061305" target="_blank" rel="noopener noreferrer" style={{ color: "#8593a8", textDecoration: "none" }}>
-            Sem e-mail no cadastro? Fale com a FN
-          </a>
-        </div>
-
-        <button type="button" onClick={onVoltar} style={{ width: "100%", marginTop: 14, background: "none", border: "none", color: AZUL_MEDIO, fontSize: 13, cursor: "pointer" }}>
-          ← Sou cliente e quero me cadastrar
-        </button>
-
-        {/* Não há mais botão de cadastro de parceiro aqui: parceiro entra por convite de um
-            vendedor (link com o código dele). Quem chegava sozinho por esta tela virava fila
-            para a Gerência sem ninguém saber de onde tinha vindo. O aviso fica: quem já é
-            parceiro entra por aqui. */}
-        <p style={{ color: "#8593a8", fontSize: 12, margin: "10px 0 0", textAlign: "center" }}>
-          Já é parceiro? Entre com o mesmo e-mail e senha do cadastro.
-        </p>
       </div>
     </div>
   );
 }
 
-/* Tela do link enviado por e-mail (?criar-senha=<token>) — primeiro acesso do cliente ao
-   portal, ou recuperação depois que a Gerência já reabriu o caminho (ver rota no backend). */
-function TelaCriarSenhaCliente({ token, onConcluido }) {
+/* Tela do link enviado por e-mail (?criar-senha=<token>): primeiro acesso ou "Esqueci minha
+   senha", de cliente, parceiro ou equipe — de quem é a conta, o servidor sabe pelo token. A pessoa
+   define a senha e já entra. O texto serve aos dois casos: antes dizia "Criar sua senha · Portal do
+   Cliente" também para o técnico que só tinha esquecido a dele. */
+function TelaCriarSenhaCliente({ token, onConcluido, onPedirNovoLink }) {
   const [senha, setSenha] = useState("");
   const [confirmacao, setConfirmacao] = useState("");
   const [erro, setErro] = useState("");
@@ -1801,16 +1865,17 @@ function TelaCriarSenhaCliente({ token, onConcluido }) {
 
   return (
     <div style={{ minHeight: "100vh", background: CINZA_CLARO, display: "grid", placeItems: "center", padding: 18, fontFamily: "'Inter', system-ui, sans-serif" }}>
+      <style>{estilos}</style>
       <div style={{ background: "#fff", borderRadius: 16, padding: "32px 30px", width: "100%", maxWidth: 380, boxShadow: "0 10px 30px rgba(18,51,91,.12)" }}>
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}>
           <img src={LOGO_URL} alt="FN Edificações" style={{ height: "clamp(56px, 14vw, 72px)", width: "auto" }} />
         </div>
-        <h2 style={{ textAlign: "center", color: AZUL_MARINHO, fontSize: 18, margin: "0 0 4px" }}>Criar sua senha</h2>
-        <p style={{ textAlign: "center", color: "#65758b", fontSize: 13, margin: "0 0 20px" }}>Portal do Cliente FN Edificações</p>
+        <h2 style={{ textAlign: "center", color: AZUL_MARINHO, fontSize: 18, margin: "0 0 4px" }}>Defina sua senha</h2>
+        <p style={{ textAlign: "center", color: "#65758b", fontSize: 13, margin: "0 0 20px" }}>Para entrar no sistema da FN Edificações</p>
 
         <div style={cell(true)}>
           <label style={lab}>Nova senha</label>
-          <input style={inp} type="password" value={senha} onChange={(e) => setSenha(e.target.value)} autoFocus />
+          <input style={inp} type="password" value={senha} onChange={(e) => setSenha(e.target.value)} placeholder="mínimo 6 caracteres" autoFocus />
         </div>
         <div style={{ ...cell(true), marginTop: 12 }}>
           <label style={lab}>Confirme a senha</label>
@@ -1823,8 +1888,21 @@ function TelaCriarSenhaCliente({ token, onConcluido }) {
         )}
 
         <button type="button" className="btn-solid" style={{ width: "100%", justifyContent: "center", marginTop: 18, padding: "11px" }} disabled={enviando} onClick={confirmar}>
-          {enviando ? <><Loader2 size={15} className="spin" /> Salvando…</> : "Criar senha e entrar"}
+          {enviando ? <><Loader2 size={15} className="spin" /> Salvando…</> : "Salvar senha e entrar"}
         </button>
+
+        {/* O link vale 30 minutos e uma vez só (o servidor confere). Vencido, a pessoa pede outro
+            daqui mesmo: o botão abre o login já no pedido do link. */}
+        <p style={{ textAlign: "center", color: "#8593a8", fontSize: 12.5, margin: "16px 0 0" }}>
+          Link vencido ou já usado?{" "}
+          <button type="button" onClick={onPedirNovoLink} style={{ ...linkDeTexto, fontSize: 12.5 }}>Peça um novo</button>
+        </p>
+        <div style={{ textAlign: "center", marginTop: 6, fontSize: 12.5 }}>
+          <a href={`https://wa.me/${WHATSAPP_ATENDIMENTO_FN}?text=${encodeURIComponent("Olá! Preciso de ajuda para criar a minha senha do sistema da FN Edificações.")}`}
+            target="_blank" rel="noopener noreferrer" style={{ color: "#8593a8", textDecoration: "none" }}>
+            Precisa de ajuda? Fale com a FN pelo WhatsApp
+          </a>
+        </div>
       </div>
     </div>
   );
@@ -1834,6 +1912,8 @@ function TelaCriarSenhaCliente({ token, onConcluido }) {
 function PortalCliente({ onIrParaLogin, onLogin }) {
   const [toast, setToast] = useState("");
   const notify = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
+  /* O FN Clube só aparece quando a Gerência liga (Gerência → FN Clube → Ativar ou ocultar). */
+  const clubeVisivel = useClubeVisivel(apiFetch);
 
   return (
     <div style={{ minHeight: "100vh", background: CINZA_CLARO, fontFamily: "'Inter', system-ui, sans-serif" }}>
@@ -1852,8 +1932,12 @@ function PortalCliente({ onIrParaLogin, onLogin }) {
             até os blocos explicativos mais abaixo. */}
         <div style={{ maxWidth: 720, margin: "0 auto", padding: "0 18px 14px", display: "flex", gap: 20, fontSize: 13, fontWeight: 700 }}>
           <a href="#solicitar-servico" style={{ color: "#fff", opacity: 0.85, textDecoration: "none" }}>Serviços FN</a>
-          <a href="?pagina=fn-clube" style={{ color: "#fff", opacity: 0.85, textDecoration: "none" }}>FN Clube</a>
-          <a href="?pagina=fn-home" style={{ color: "#fff", opacity: 0.85, textDecoration: "none" }}>FN Home</a>
+          {clubeVisivel && <a href="?pagina=fn-clube" style={{ color: "#fff", opacity: 0.85, textDecoration: "none" }}>FN Clube</a>}
+          {/* A loja em destaque na barra (pedido da Gerência, nov/2026): é a única das três que
+              qualquer visitante pode usar agora, sem cadastro. */}
+          <a href="?pagina=fn-home" style={{ color: AZUL_MARINHO, background: "#FFD54F", borderRadius: 999, padding: "2px 10px", marginTop: -2, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 5 }}>
+            <ShoppingBag size={13} /> FN Home · Loja
+          </a>
         </div>
       </header>
       <main style={{ maxWidth: 720, margin: "0 auto", padding: "22px 18px 80px" }}>
@@ -1867,6 +1951,8 @@ function PortalCliente({ onIrParaLogin, onLogin }) {
           <Lock size={20} /> SOU CLIENTE — ENTRAR
         </button>
 
+        <DestaqueLojaFnHome apiFetch={apiFetch} />
+
         {/* FN Serviços é a marca guarda-chuva das 3 áreas: contratando um serviço técnico, o
             cliente também passa a ter acesso ao FN Clube e ao FN Home. A navegação entre elas
             fica só na barra azul do topo — sem repetir os blocos aqui embaixo. */}
@@ -1878,7 +1964,7 @@ function PortalCliente({ onIrParaLogin, onLogin }) {
         </div>
 
         <div id="solicitar-servico">
-          <AbaCliente notify={notify} onLogin={onLogin} onIrParaLogin={onIrParaLogin} />
+          <AbaCliente notify={notify} onLogin={onLogin} />
         </div>
       </main>
       <footer style={{ background: "#fff", borderTop: `1px solid ${CINZA_BORDA}`, padding: "22px 18px" }}>
@@ -1984,9 +2070,11 @@ function useCarrinho() {
 
 /* Botão do carrinho para o cabeçalho — usado em toda página que vende (vitrine pública,
    portfólio do parceiro, painel do cliente). */
-function BotaoCarrinho({ quantidade, onClick }) {
+/* btn-ghost é texto branco para fundo escuro (o cabeçalho do portfólio). Na vitrine, que é card
+   branco, quem chama passa as cores — sem isso o ícone sumia no fundo. */
+function BotaoCarrinho({ quantidade, onClick, style }) {
   return (
-    <button type="button" onClick={onClick} className="btn-ghost" style={{ position: "relative", padding: "8px 10px" }} title="Carrinho">
+    <button type="button" onClick={onClick} className="btn-ghost" style={{ position: "relative", padding: "8px 10px", ...style }} title="Carrinho">
       <ShoppingCart size={16} />
       {quantidade > 0 && (
         <span style={{
@@ -2090,7 +2178,13 @@ function ModalCarrinho({ itens, alterarQuantidade, remover, total, onFechar, tok
 export default function App() {
   const [session, setSessionEstado] = useState(() => carregarSessaoSalva());
   const [mostrarLogin, setMostrarLogin] = useState(false);
+  /* "Peça um novo" na tela do link de senha abre o login já no pedido do link ("esqueci"). Fica
+     aqui porque as duas telas são irmãs no App(). */
+  const [recuperacaoNoLogin, setRecuperacaoNoLogin] = useState(null);
   const [linkParceiroFechado, setLinkParceiroFechado] = useState(false);
+  /* Quem acabou de se cadastrar pelo "Cadastre-se" entra no portal com a loja FN Home aberta
+     em cima. Só na memória: um F5 depois volta ao portal de sempre. */
+  const [recemCadastrado, setRecemCadastrado] = useState(false);
 
   const setSession = (s) => { guardarSessao(s); setSessionEstado(s); };
 
@@ -2172,6 +2266,14 @@ export default function App() {
           const url = new URL(window.location.href);
           url.searchParams.delete("criar-senha");
           window.history.replaceState({}, "", url.toString());
+        }}
+        onPedirNovoLink={() => {
+          const url = new URL(window.location.href);
+          url.searchParams.delete("criar-senha");
+          window.history.replaceState({}, "", url.toString());
+          // Já logado (abriu o link com a sessão aberta), não há login para mostrar.
+          if (!session) setRecuperacaoNoLogin("esqueci");
+          setMostrarLogin(true);
         }} />
     );
   }
@@ -2193,14 +2295,17 @@ export default function App() {
       );
     }
     return mostrarLogin
-      ? <TelaLogin onLogin={setSession} onVoltar={() => setMostrarLogin(false)} />
-      : <PortalCliente onIrParaLogin={() => setMostrarLogin(true)} onLogin={setSession} />;
+      ? <TelaLogin onLogin={(s) => { setRecuperacaoNoLogin(null); setSession(s); }} recuperacaoInicial={recuperacaoNoLogin}
+          onVoltar={() => { setMostrarLogin(false); setRecuperacaoNoLogin(null); }} />
+      : <PortalCliente onIrParaLogin={() => setMostrarLogin(true)}
+          onLogin={(s, opcoes) => { setRecemCadastrado(!!opcoes?.recemCadastrado); setSession(s); }} />;
   }
   if (session.usuario.role === "afiliado") {
     return <PainelParceiro session={session} onLogout={() => { setSession(null); setMostrarLogin(false); }} />;
   }
   if (session.usuario.role === "cliente") {
-    return <PainelCliente session={session} onLogout={() => { setSession(null); setMostrarLogin(false); }} onSessaoAtualizada={setSession} />;
+    return <PainelCliente session={session} recemCadastrado={recemCadastrado}
+      onLogout={() => { setSession(null); setMostrarLogin(false); setRecemCadastrado(false); }} onSessaoAtualizada={setSession} />;
   }
   return <AppInterno session={session} onLogout={() => { setSession(null); setMostrarLogin(false); }} />;
 }
@@ -2227,6 +2332,23 @@ const GERENCIA_MENU_LATERAL = [
     { aba: "marketing", label: "Marketing", Icon: Megaphone },
     { aba: "gerencia", sub: "perfil-cliente", label: "Perfil do cliente", Icon: User },
     { aba: "gerencia", sub: "prospeccao", label: "Prospecção", Icon: TrendingUp },
+    /* A lista de construtora/empreendimento que o cliente vê no "Cadastre-se". */
+    { aba: "gerencia", sub: "empreendimentos", label: "Empreendimentos", Icon: IconeEmpreendimento },
+  ] },
+  /* Os parceiros do FN Home são cuidados no FN Projetos (Casa Pronta › Fornecedores); aqui fica
+     o que é da própria FN: os produtos do Mercado Livre com o link de afiliado dela, e o financeiro
+     das vendas (o mesmo que abre ao lado da Conciliação Mercado Pago). */
+  { titulo: "FN Home", itens: [
+    { aba: "gerencia", sub: "fn-home-ml", label: "Produtos Mercado Livre", Icon: ShoppingBag },
+    { aba: "gerencia", sub: "fn-home-financeiro", label: "Vendas e comissões", Icon: Wallet },
+  ] },
+  /* FN Clube (nov/2026): os parceiros que dão desconto a cliente FN. É a mesma tela da aba
+     "Fornecedores" de Vendas/Atendimento — homologação, convite, prospecção, cupons e comissões —,
+     que a Gerência tinha perdido quando o Casa Pronta saiu do sistema (set/2026). */
+  { titulo: "FN Clube", itens: [
+    { aba: "gerencia", sub: "clube-parceiros", label: "Parceiros do Clube", Icon: Users },
+    /* Se o cliente vê o Clube (nov/2026: "mantenha oculto pro cliente ainda"). Começa oculto. */
+    { aba: "gerencia", sub: "clube-visibilidade", label: "Ativar ou ocultar", Icon: Eye },
   ] },
   { titulo: "FN Nacional", itens: [
     { aba: "nacional", label: "Rede Nacional", Icon: Landmark },
@@ -2247,10 +2369,12 @@ const GERENCIA_MENU_LATERAL = [
     { aba: "gerencia", sub: "fin-despesas", label: "Despesas", Icon: Receipt },
     { aba: "gerencia", sub: "fin-folha", label: "Folha de pagamento", Icon: Wallet },
     { aba: "gerencia", sub: "fin-conferencia", label: "Conferência de pagamentos", Icon: Check },
+    { aba: "gerencia", sub: "fin-conciliacao", label: "Conciliação Mercado Pago", Icon: Scale },
     { aba: "gerencia", sub: "fin-notas", label: "Notas e Comprovantes", Icon: FileCheck },
     { aba: "gerencia", sub: "fin-deslocamentos", label: "Deslocamentos", Icon: Car },
     { aba: "gerencia", sub: "fin-relatorios", label: "Relatórios", Icon: FileBarChart },
     { aba: "gerencia", sub: "fin-indicadores", label: "Indicadores financeiros", Icon: Gauge },
+    { aba: "gerencia", sub: "fin-ia", label: "Créditos de IA", Icon: Sparkles },
     { aba: "gerencia", sub: "fin-config", label: "Configurações Fiscais", Icon: Settings },
   ] },
   { titulo: "Sistema", itens: [
@@ -2312,6 +2436,10 @@ function AppInterno({ session, onLogout }) {
   const [dados, setDados] = useState(() => ({ ...DADOS_INICIAIS, rt: { ...DADOS_INICIAIS.rt, nome: session.usuario.nome || "" } }));
   const [itens, setItens] = useState(() => [novoItem()]);
   const [clienteAtualId, setClienteAtualId] = useState(null); // id do cliente carregado no laudo em edição — necessário para "Enviar para gerência"
+  /* Patologia por voz (src/patologia-voz.jsx): gravações e itens a revisar da vistoria aberta.
+     Fica aqui, e não na aba, porque o "Enviar para gerência" precisa saber dos pendentes. */
+  const voz = usePatologiaVoz({ apiFetch, token, clienteId: clienteAtualId, perfil, usuarioId: session.usuario.id });
+  const [avisoVozAberto, setAvisoVozAberto] = useState(false);
   /* Trava do laudo após o envio à gerência.
      Isto já existiu como useState solto com um botão de "desbloquear" ao lado: o próprio
      técnico reabria o laudo que tinha acabado de enviar, e um F5 destravava sozinho. Como o
@@ -2329,6 +2457,10 @@ function AppInterno({ session, onLogout }) {
     if (!modulosPermitidos.includes(abaTop)) setAbaTop(modulosPermitidos[0]);
     // O vistoriador entra direto na agenda dele — é o ponto de partida do trabalho.
     if (perfil === "vistoriador") setAba("agenda");
+  }, [perfil]);
+  // Veio do botão "Enviar ao FN Home" (favorito no Chrome): abre direto no cadastro, que se preenche.
+  useEffect(() => {
+    if (perfil === "gerencia" && temRascunhoMercadoLivre()) { setAbaTop("gerencia"); setAbaGerencia("fn-home-ml"); }
   }, [perfil]);
 
   const [docs, setDocs] = useState([]);
@@ -2460,7 +2592,8 @@ function AppInterno({ session, onLogout }) {
   };
   const removerEmpreendimento = async (empreendimento) => {
     try {
-      const r = await apiFetch("/api/empreendimentos-ref", { method: "DELETE", token, body: { empreendimento } });
+      // Na querystring: o servidor não lê corpo de DELETE, e no corpo o nome nunca chegava lá.
+      const r = await apiFetch(`/api/empreendimentos-ref?empreendimento=${encodeURIComponent(empreendimento)}`, { method: "DELETE", token });
       notify(r.cadastrosUsando
         ? `Removido da lista. Atenção: ${r.cadastrosUsando} cadastro(s) ainda usam esse nome — trate em "Padronização".`
         : "Empreendimento removido ✓");
@@ -2825,8 +2958,9 @@ function AppInterno({ session, onLogout }) {
   /* ---- Preço de vistoria por empreendimento (alimenta o Financeiro) ---- */
   const [precos, setPrecos] = useState([]);
   const [precosCarregando, setPrecosCarregando] = useState(false);
-  /* Lista oficial de empreendimentos (vem da planilha do Drive, tabela empreendimentos_ref).
-     É ela que a Gerência usa para fixar os preços — em vez de digitar o nome na mão. */
+  /* Lista oficial de empreendimentos: a da planilha do Drive mais os que a Gerência adiciona em
+     Gerência → Empreendimentos (a mesma do formulário público). É ela que a Gerência usa para
+     fixar os preços — em vez de digitar o nome na mão. */
   const [empreendimentosRef, setEmpreendimentosRef] = useState([]);
   const carregarEmpreendimentosRef = async () => {
     try {
@@ -2854,6 +2988,13 @@ function AppInterno({ session, onLogout }) {
     setPrecosCarregando(false);
   };
   useEffect(() => { carregarPrecos(); }, []);
+  /* Contas de recebimento e comprovantes do Pix: quem dá baixa (Gerência e Atendimento). */
+  useEffect(() => { if (perfil === "gerencia" || perfil === "atendimento") carregarRecebimentos(token); }, []);
+  /* Aviso do limite do MEI (só Gerência): espera as três listas da primeira carga. */
+  useAvisoLimiteMei({
+    ativo: perfil === "gerencia" && clientes.length > 0 && !clientesCarregando && !docsCarregando && !precosCarregando,
+    token, clientes, docs, precos, notify,
+  });
   /* precos: { precoVistoria?, precoDocumentacao? } — o que não vier mantém o valor atual. */
   const salvarPreco = async (empreendimento, precos) => {
     try {
@@ -2930,10 +3071,14 @@ function AppInterno({ session, onLogout }) {
   const aprovarLaudo = async (docId) => {
     try {
       const r = await apiFetch(`/api/docs/${docId}/aprovar`, { method: "POST", token });
-      notify(`Laudo aprovado e enviado para ${r.emailEnviadoPara} ✓`);
+      /* O servidor aprova mesmo quando o e-mail falha (emailEnviado: false) — antes a tela dizia
+         "enviado" nos dois casos. Devolve a resposta para a fila oferecer o WhatsApp em seguida. */
+      notify(r.emailEnviado === false
+        ? `Laudo aprovado, mas o e-mail não saiu${r.emailErro ? `: ${r.emailErro}` : ""}`
+        : `Laudo aprovado e enviado para ${r.emailEnviadoPara} ✓`);
       setLaudosPendentes((atual) => atual.filter((p) => p.doc_id !== docId));
       carregarDocs();
-      return true;
+      return r;
     } catch (e) {
       notify(`Não foi possível aprovar: ${e.message}`);
       return false;
@@ -3290,13 +3435,19 @@ function AppInterno({ session, onLogout }) {
      tela da vistoria depois que a aba "Dados do laudo" saiu. */
   const setD = (grupo, campo, val) => setDados((d) => ({ ...d, [grupo]: { ...d[grupo], [campo]: val } }));
   const setFotoCliente = (foto) => setDados((d) => ({ ...d, fotoCliente: foto }));
-  const enviarParaGerencia = async () => {
+  const enviarParaGerencia = async ({ ignorarPendentesVoz = false } = {}) => {
     if (!clienteAtualId) { notify("Selecione um cliente cadastrado em \"Dados do laudo\" antes de enviar."); return; }
     /* Na revistoria a foto com o cliente não é exigida: a visita é um retorno, muitas vezes
        com o imóvel já ocupado e sem ninguém para posar — cobrar a foto ali só travaria o
        laudo. A obrigatoriedade continua valendo na vistoria de entrega. */
     if (!dados.fotoCliente && !ehRevistoria(clienteEmEdicao)) {
       notify("Anexe a foto com o cliente antes de enviar (obrigatória).");
+      return;
+    }
+    /* Só item confirmado entra no laudo. Gravação por voz ainda pendente não trava o envio,
+       mas o técnico vê a lista antes e decide (ver AvisoPendentesVoz). */
+    if (!ignorarPendentesVoz && voz.pendentes.length) {
+      setAvisoVozAberto(true);
       return;
     }
     setEnviandoParaGerencia(true);
@@ -3689,7 +3840,7 @@ function AppInterno({ session, onLogout }) {
             aqui: é sub-aba de Documentação (abaTop "arts" acende a aba Documentação). */}
         {perfil !== "gerencia" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, borderTop: "1px solid rgba(255,255,255,.12)", overflowX: "auto" }}>
-            {[["laudos", "Laudos", FileText], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["documentacao", "Documentação", ClipboardCheck], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Fornecedores", Wrench], ["despesas", "Despesas", Receipt], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog], ["nacional", "Rede Nacional", Landmark], ["mapa", "Mapa de atuação", IconeMapa]]
+            {[["laudos", "Laudos", FileText], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["documentacao", "Documentação", ClipboardCheck], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Fornecedores", Wrench], ["loja", "Loja FN Home", ShoppingBag], ["despesas", "Despesas", Receipt], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog], ["nacional", "Rede Nacional", Landmark], ["mapa", "Mapa de atuação", IconeMapa]]
               .filter(([k]) => modulosPermitidos.includes(k))
               .map(([k, label, Icon]) => {
                 const ativa = abaTop === k || (k === "documentacao" && abaTop === "arts");
@@ -3791,7 +3942,7 @@ function AppInterno({ session, onLogout }) {
             statusLaudo={laudoNoServidor?.laudoStatusLabel} devolvido={laudoDevolvido}
             motivoDevolucao={laudoNoServidor?.motivo_devolucao} patologiasBanco={patologiasBanco}
             minhaAssinatura={minhaAssinatura} salvarMinhaAssinatura={salvarMinhaAssinatura} removerMinhaAssinatura={removerMinhaAssinatura}
-            token={token} clienteId={clienteAtualId} />
+            token={token} clienteId={clienteAtualId} voz={voz} />
         )}
         {abaTop === "laudos" && aba === "elaboracao" && (
           <AbaElaboracaoLaudo itens={itens} setItens={setItens} updItem={updItem} escolherPatologia={escolherPatologia}
@@ -3855,12 +4006,15 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "despesas" && (
           <AbaMinhasDespesas fin={fin} clientes={clientesAtivos} usuarioAtual={session.usuario} telaEstreita={telaEstreita} notify={notify} />
         )}
+        {abaTop === "loja" && <AbaLojaParaCliente apiFetch={apiFetch} notify={notify} />}
         {abaTop === "gerencia" && String(abaGerencia).startsWith("fin-") && (
           <AbaFinanceiroDespesas sub={abaGerencia} fin={fin} clientes={clientes} docs={docs} precos={precos} usuarios={usuarios}
-            usuarioAtual={session.usuario} telaEstreita={telaEstreita} notify={notify} token={token} updCliente={updCliente} />
+            usuarioAtual={session.usuario} telaEstreita={telaEstreita} notify={notify} token={token} updCliente={updCliente}
+            recarregarClientes={carregarClientes} />
         )}
         {abaTop === "gerencia" && !String(abaGerencia).startsWith("fin-") && (
           <AbaGerencia sub={abaGerencia} fin={fin} usuarioAtual={session.usuario} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem}
+            aoAbrirFnHome={() => setAbaGerencia("fn-home-financeiro")}
             importarClientesHistorico={importarClientesHistorico}
             prospeccaoParceiros={prospeccaoParceiros} prospeccaoParceirosCarregando={prospeccaoParceirosCarregando}
             atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
@@ -3874,7 +4028,7 @@ function AppInterno({ session, onLogout }) {
             salvarItemCatalogo={salvarItemCatalogoAdmin} excluirItemCatalogo={excluirItemCatalogoAdmin}
             vales={vales} valesCarregando={valesCarregando}
             vendas={vendas} vendasCarregando={vendasCarregando} atualizarVenda={atualizarVenda}
-            precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef}
+            precos={precos} precosCarregando={precosCarregando} salvarPreco={salvarPreco} empreendimentosRef={empreendimentosRef} carregarEmpreendimentosRef={carregarEmpreendimentosRef}
             padronizarEmpreendimento={padronizarEmpreendimento} excluirCliente={delCliente}
             prospeccao={prospeccao} prospeccaoCarregando={prospeccaoCarregando} atualizarProspeccao={atualizarProspeccao}
             publicarProspeccaoDrive={publicarProspeccaoDrive}
@@ -3923,6 +4077,11 @@ function AppInterno({ session, onLogout }) {
 
       {toast && <div className="no-print" style={toastStyle}><Check size={15} /> {toast}</div>}
 
+      {avisoVozAberto && (
+        <AvisoPendentesVoz pendentes={voz.pendentes}
+          onVoltar={() => setAvisoVozAberto(false)}
+          onEnviarMesmoAssim={() => { setAvisoVozAberto(false); enviarParaGerencia({ ignorarPendentesVoz: true }); }} />
+      )}
       <ConfirmModal aberto={confirmandoDesbloqueio} titulo="Laudo fora de edição"
         mensagem={"Depois de enviado, o laudo continua editável por você até a gerência começar a analisar. "
           + "Deste ponto em diante ele é responsabilidade dela — ou já virou documento emitido, com PDF arquivado e "
@@ -3967,6 +4126,27 @@ function dataDesejadaValida(valor) {
   if (ano < 2020 || ano > 2100) return false;
   const d = new Date(Date.UTC(ano, mes - 1, dia));
   return d.getUTCMonth() === mes - 1 && d.getUTCDate() === dia;
+}
+
+/* Data que existe, mas longe demais para ser agendamento de vistoria. Um cadastro de
+   03/11/2026 foi gravado como 03/11/2027: a data é válida, o servidor aceitou, e o cliente
+   ficou "Vistoria agendada" sem aparecer no calendário do mês — só no fim das "Próximas", um
+   ano à frente. Vistoria se marca para dias ou semanas; mais de 6 meses adiante é quase sempre
+   o ano digitado errado. Não é recusa: quem salva confirma (ver confirmarDataDistante). */
+const MESES_DATA_DISTANTE = 6;
+function dataDesejadaDistante(valor, hoje = new Date()) {
+  if (!valor || !dataDesejadaValida(valor)) return false;
+  return valor > paraChaveISO(new Date(hoje.getFullYear(), hoje.getMonth() + MESES_DATA_DISTANTE, hoje.getDate()));
+}
+// O que precisa de correção na data do cadastro, para mostrar junto do campo e nas listas.
+function avisoDataDesejada(valor) {
+  if (!dataDesejadaValida(valor)) return "Data inválida — confira dia, mês e ano.";
+  if (dataDesejadaDistante(valor)) return `Mais de ${MESES_DATA_DISTANTE} meses à frente (${valor.slice(0, 4)}) — confira o ano.`;
+  return "";
+}
+function confirmarDataDistante(data) {
+  if (!dataDesejadaDistante(data)) return true;
+  return window.confirm(`A data ficou ${data.split("-").reverse().join("/")}, a mais de ${MESES_DATA_DISTANTE} meses de hoje — ela não aparece na agenda deste mês. O ano está certo?`);
 }
 
 /* ================= Notificações: solicitações de clientes pendentes ================= */
@@ -4047,8 +4227,10 @@ function NotificacoesClientes({ clientes, preencherComCliente, usuarioAtualId, s
                   mostrar "01/01/0001" parecia defeito do sistema e não dizia o que fazer. O
                   servidor passou a recusar essas datas; as que já estavam gravadas avisam aqui. */}
               {dataDesejadaValida(c.dataDesejada) ? (
-                <div style={{ fontSize: 12.5, color: AZUL_MARINHO, fontWeight: 700, whiteSpace: "nowrap" }}>
+                <div style={{ fontSize: 12.5, color: dataDesejadaDistante(c.dataDesejada) ? "#C62828" : AZUL_MARINHO, fontWeight: 700, whiteSpace: "nowrap" }}
+                  title={dataDesejadaDistante(c.dataDesejada) ? `Data a mais de ${MESES_DATA_DISTANTE} meses daqui — provavelmente o ano está errado. Peça ao Atendimento para conferir.` : undefined}>
                   {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` às ${c.horarioDesejado}` : ""}
+                  {dataDesejadaDistante(c.dataDesejada) && " — confira o ano"}
                 </div>
               ) : (
                 <div style={{ fontSize: 12.5, color: "#C62828", fontWeight: 700, whiteSpace: "nowrap" }}
@@ -4389,7 +4571,8 @@ function KanbanClientes({ clientes, docs, onAbrir }) {
                 <div style={{ fontSize: 12, color: "#65758b", marginTop: 2 }}>
                   {c.empreendimento || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}
                 </div>
-                <div style={{ fontSize: 11.5, color: "#8593a8", marginTop: 4 }}>
+                <div style={{ fontSize: 11.5, color: avisoDataDesejada(c.dataDesejada) ? "#C62828" : "#8593a8", fontWeight: avisoDataDesejada(c.dataDesejada) ? 700 : 400, marginTop: 4 }}
+                  title={avisoDataDesejada(c.dataDesejada) || undefined}>
                   {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""}
                 </div>
                 {c.observacoes && (
@@ -4459,7 +4642,13 @@ function CamposCadastroCliente({ dados, onChange }) {
         <Field label="Endereço completo" value={dados.endereco} onChange={(v) => set({ endereco: v })} full />
         <Field label="CEP" value={dados.cep} onChange={(v) => set({ cep: v })} />
         <Field label="Bloco / Apto" value={dados.blocoTorre} onChange={(v) => set({ blocoTorre: v })} />
-        <Field label="Data desejada" type="date" value={dados.dataDesejada} onChange={(v) => set({ dataDesejada: v })} />
+        <div style={cell(false)}>
+          <label style={lab}>Data desejada</label>
+          <input style={inp} type="date" value={dados.dataDesejada || ""} onChange={(e) => set({ dataDesejada: e.target.value })} />
+          {avisoDataDesejada(dados.dataDesejada) && (
+            <span style={{ fontSize: 11.5, color: "#C62828", fontWeight: 600 }}>{avisoDataDesejada(dados.dataDesejada)}</span>
+          )}
+        </div>
         <div style={cell(false)}>
           <label style={lab}>Horário desejado</label>
           <select style={inp} value={dados.horarioDesejado || ""} onChange={(e) => set({ horarioDesejado: e.target.value })}>
@@ -4565,6 +4754,7 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
   const salvar = async () => {
     const patch = camposAlterados(originalEdicao.current, editando);
     if (Object.keys(patch).length === 0) { setEditando(null); return; }
+    if ("dataDesejada" in patch && !confirmarDataDistante(patch.dataDesejada)) return;
     try {
       /* Fechar o modal e dizer "atualizado ✓" sem o servidor ter aceitado escondia a falha:
          a lista já mostra o valor novo (atualização otimista), e a pessoa só descobria na
@@ -4597,8 +4787,40 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
     .filter((e) => contagemPorEtapa[e])
     .filter((e) => !(escondeEmVistoria && e === "Em vistoria"));
 
+  /* Cadastros cuja data não cai em agenda nenhuma: ano digitado errado (ver
+     dataDesejadaDistante) ou data que não existe. Ficavam "agendados" sem aparecer no
+     calendário, e só quem procurasse pelo nome descobria. Cancelado já não é compromisso. */
+  const datasParaConferir = daVistoria.filter((c) => c.status !== "Cancelado" && avisoDataDesejada(c.dataDesejada));
+
   return (
     <div style={{ display: "grid", gap: 16 }}>
+      {datasParaConferir.length > 0 && (
+        <div style={{ background: "#FFF4E0", border: "1px solid #F3D19C", borderRadius: 12, padding: "12px 14px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#B26A00", fontWeight: 700, fontSize: 14 }}>
+            <AlertTriangle size={16} />
+            {datasParaConferir.length === 1 ? "1 cadastro com data para conferir" : `${datasParaConferir.length} cadastros com data para conferir`}
+          </div>
+          <p style={{ fontSize: 12.5, color: "#7A5A1F", margin: "4px 0 10px" }}>
+            Data a mais de {MESES_DATA_DISTANTE} meses daqui, ou que não existe: o cadastro não aparece no calendário do mês. Quase sempre é o ano digitado errado.
+          </p>
+          <div style={{ display: "grid", gap: 6 }}>
+            {datasParaConferir.map((c) => (
+              <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", background: "#fff", borderRadius: 8, padding: "8px 10px" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <strong style={{ fontSize: 13 }}>{c.nome}</strong>
+                  <div style={{ fontSize: 12, color: "#65758b" }}>
+                    {c.empreendimento || "—"}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""} · {etapaClienteCompleta(c, docs)}
+                  </div>
+                </div>
+                <span style={{ fontSize: 12.5, color: "#C62828", fontWeight: 700, whiteSpace: "nowrap" }}>
+                  {c.dataDesejada.split("-").reverse().join("/")}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""}
+                </span>
+                <button className="btn-mini" onClick={() => abrirEdicao(c)}><Edit3 size={13} /> Corrigir</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {etapasComClientes.length > 0 && (
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           {etapasComClientes.map((etapa) => (
@@ -4953,6 +5175,11 @@ function LinhaCobranca({ cliente, sugerido, origemSugestao = null, tecnico, pode
   const pagoEmInicial = diaLocalDe(cliente.pagoEm) || ((cliente.pagamento || "Pendente") !== "Pendente" ? "" : hojeLocal());
   const [pagoEm, setPagoEm] = useState(pagoEmInicial);
   const [forma, setForma] = useState(cliente.formaPagamento || "Pix");
+  /* Em que conta o dinheiro caiu. Pix e transferência pedem a conta: a PJ do Mercado Pago é
+     conferida sozinha pela conciliação; a conta secundária, pelo comprovante anexado aqui. */
+  const recebimentos = useRecebimentos();
+  const [conta, setConta] = useState(cliente.contaRecebimento || "");
+  const [anexando, setAnexando] = useState(false);
   const [salvando, setSalvando] = useState(false);
   /* O pagamento pelo link muda o cadastro por fora (webhook do Mercado Pago). Sem isto, a
      linha continuava mostrando "Pendente" no seletor até alguém recarregar a página. */
@@ -4961,13 +5188,18 @@ function LinhaCobranca({ cliente, sugerido, origemSugestao = null, tecnico, pode
     setRecebido(cliente.valorRecebido != null ? String(cliente.valorRecebido) : "");
     setPagoEm(pagoEmInicial);
     setForma(cliente.formaPagamento || "Pix");
-  }, [cliente.pagamento, cliente.valorRecebido, cliente.pagoEm, cliente.formaPagamento]);
+    setConta(cliente.contaRecebimento || "");
+  }, [cliente.pagamento, cliente.valorRecebido, cliente.pagoEm, cliente.formaPagamento, cliente.contaRecebimento]);
 
   const entrouDinheiro = pagamento !== "Pendente";
+  /* Dinheiro em espécie não cai em conta; "Mercado Pago" é o link, que já grava a conta PJ. */
+  const pedeConta = entrouDinheiro && forma !== "Dinheiro" && forma !== "Mercado Pago" && recebimentos.contas.length > 0;
+  const contasDaLinha = recebimentos.contas.filter((c) => c.ativa || c.id === conta);
   const mudou = String(valor) !== (lancado ? String(cliente.valorCobrado) : textoSugerido)
     || pagamento !== (cliente.pagamento || "Pendente")
     || String(recebido) !== (cliente.valorRecebido != null ? String(cliente.valorRecebido) : "")
-    || (entrouDinheiro && (pagoEm !== pagoEmInicial || forma !== (cliente.formaPagamento || "Pix")));
+    || (entrouDinheiro && (pagoEm !== pagoEmInicial || forma !== (cliente.formaPagamento || "Pix")))
+    || (pedeConta && conta !== (cliente.contaRecebimento || ""));
   /* Ainda não lançado, o botão fica aceso mesmo sem mexer em nada: confirmar a sugestão como ela
      veio é justamente o trabalho. Antes ele só acendia depois de alguma alteração, e quem queria
      lançar os R$ 250 sugeridos precisava apagar e redigitar o mesmo número. */
@@ -4990,14 +5222,24 @@ function LinhaCobranca({ cliente, sugerido, origemSugestao = null, tecnico, pode
     const jaPagoSemData = !pagoEm && (cliente.pagamento || "Pendente") === pagamento && !cliente.pagoEm;
     if (entrouDinheiro && !jaPagoSemData && !/^\d{4}-\d{2}-\d{2}$/.test(pagoEm)) { onSalvar.notify("Informe a data em que o pagamento entrou."); return; }
     if (entrouDinheiro && pagoEm > hojeLocal()) { onSalvar.notify("A data do pagamento não pode ser no futuro."); return; }
+    /* Baixa nova por Pix ou transferência pede a conta: sem ela, o contador não sabe em que extrato
+       procurar. Baixa antiga sem conta continua salvando outras mudanças. */
+    const baixaNova = (cliente.pagamento || "Pendente") === "Pendente";
+    if (pedeConta && !conta && baixaNova && (forma === "Pix" || forma === "Transferência")) {
+      onSalvar.notify("Escolha em qual conta o dinheiro caiu.");
+      return;
+    }
     setSalvando(true);
     /* "Mercado Pago" quem grava é o link; se a linha já veio assim, a forma não é reenviada. */
     const formaParaGravar = forma === "Mercado Pago" ? undefined : forma;
     await onSalvar.salvar(cliente.id, {
       valorCobrado: numero, valorRecebido: recebidoNum, pagamento,
       ...(entrouDinheiro
-        ? { ...(pagoEm ? { pagoEm } : {}), ...(formaParaGravar ? { formaPagamento: formaParaGravar } : {}) }
-        : { pagoEm: null, formaPagamento: null }),
+        ? {
+          ...(pagoEm ? { pagoEm } : {}), ...(formaParaGravar ? { formaPagamento: formaParaGravar } : {}),
+          ...(pedeConta ? { contaRecebimento: conta || null } : forma === "Dinheiro" ? { contaRecebimento: null } : {}),
+        }
+        : { pagoEm: null, formaPagamento: null, contaRecebimento: null }),
     });
     /* Em "Pago" o recebido é gravado igual ao cobrado; sem espelhar aqui, o campo local
        continuaria vazio e o botão Salvar ficaria aceso como se houvesse mudança pendente. */
@@ -5099,6 +5341,15 @@ function LinhaCobranca({ cliente, sugerido, origemSugestao = null, tecnico, pode
             </select>
           </div>
         )}
+        {pedeConta && (
+          <div style={{ ...cell(), minWidth: 190 }}>
+            <label style={lab}>Caiu em qual conta</label>
+            <select style={{ ...inp, ...(!conta ? { border: "1px solid #f0c987" } : {}) }} value={conta} disabled={!podeAgir} onChange={(e) => setConta(e.target.value)}>
+              <option value="">— escolha —</option>
+              {contasDaLinha.map((c) => <option key={c.id} value={c.id}>{c.nome}{c.ativa ? "" : " (desativada)"}</option>)}
+            </select>
+          </div>
+        )}
         {podeAgir && (
           <button className="btn-solid" style={{ width: "auto", padding: "9px 14px" }}
             onClick={salvar} disabled={salvando || !podeSalvar}
@@ -5107,6 +5358,11 @@ function LinhaCobranca({ cliente, sugerido, origemSugestao = null, tecnico, pode
           </button>
         )}
       </div>
+
+      {(cliente.pagamento === "Pago" || cliente.pagamento === "Parcial") && recebimentos.carregado
+        && cliente.formaPagamento !== "Mercado Pago" && cliente.formaPagamento !== "Dinheiro" && (
+        <BlocoComprovanteRecebimento cliente={cliente} podeAgir={podeAgir} notify={onSalvar.notify} />
+      )}
 
       {podeAgir && gerarLink && lancado && (
         <BlocoLinkPagamento cliente={cliente} cobranca={cobranca} gerarLink={gerarLink} notify={onSalvar.notify} />
@@ -5123,6 +5379,53 @@ function LinhaCobranca({ cliente, sugerido, origemSugestao = null, tecnico, pode
         <div style={{ fontSize: 11.5, color: "#8593a8" }}>
           Último lançamento em {fmtDataHora(cliente.cobrancaEm)}
         </div>
+      )}
+    </div>
+  );
+}
+
+/* Comprovante do Pix de um cadastro já baixado. É a conferência das contas que o sistema não lê
+   sozinho (a conta secundária): o arquivo vai para o Drive, na pasta do mês e da conta em que o
+   dinheiro caiu, e a Conciliação aponta quem ficou sem. Na conta PJ do Mercado Pago ele é opcional
+   — a conciliação já confere pelo próprio Mercado Pago. */
+function BlocoComprovanteRecebimento({ cliente, podeAgir, notify }) {
+  const rec = useRecebimentos();
+  const [enviando, setEnviando] = useState(false);
+  const lista = rec.comprovantesDe(cliente.id);
+  const conta = rec.contas.find((c) => c.id === cliente.contaRecebimento);
+  const precisa = conta?.conferencia === "comprovante";
+  const anexar = async (arquivos) => {
+    setEnviando(true);
+    for (const arquivo of arquivos) {
+      try { await rec.anexar(cliente.id, arquivo); notify("Comprovante anexado ✓"); }
+      catch (e) { notify(`Não foi possível anexar ${arquivo.name || "o comprovante"}: ${e.message}`); }
+    }
+    setEnviando(false);
+  };
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5 }}>
+      <span style={{ color: lista.length ? "#1B7F4B" : precisa ? "#B26A00" : "#65758b", fontWeight: 600 }}>
+        {lista.length ? `Comprovante (${lista.length}):` : precisa ? `Sem comprovante — anexe o Pix para a conferência da conta "${conta.nome}".` : "Comprovante do Pix:"}
+      </span>
+      {lista.map((a) => (
+        <span key={a.id} style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+          <button className="btn-mini" onClick={() => rec.abrir(a).catch((e) => notify(e.message))} title={`Enviado por ${a.enviadoPor || "—"} em ${fmtDataHora(a.enviadoEm)}`}>
+            <Paperclip size={11} /> {String(a.nomeArquivo || "comprovante").slice(0, 28)}
+          </button>
+          {podeAgir && (
+            <button className="btn-mini" title="Remover comprovante" style={{ background: "#fff", color: "#C62828", border: "1px solid #f3b9b9" }}
+              onClick={() => { if (window.confirm("Remover este comprovante?")) rec.remover(a.id).catch((e) => notify(e.message)); }}>
+              <Trash2 size={11} />
+            </button>
+          )}
+        </span>
+      ))}
+      {podeAgir && (
+        <label className="btn-mini" style={{ cursor: enviando ? "wait" : "pointer" }}>
+          {enviando ? <Loader2 size={11} className="spin" /> : <Upload size={11} />} {lista.length ? "Anexar outro" : "Anexar comprovante"}
+          <input type="file" accept="image/*,application/pdf" multiple hidden disabled={enviando}
+            onChange={(e) => { const arquivos = [...(e.target.files || [])]; e.target.value = ""; if (arquivos.length) anexar(arquivos); }} />
+        </label>
       )}
     </div>
   );
@@ -6422,6 +6725,9 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
   const doDiaSelecionado = diaSelecionado
     ? clientes.filter((c) => c.dataDesejada === diaSelecionado && (!filtroEtapa || etapaVistoriaCliente(c, docs) === filtroEtapa))
     : [];
+  // Com o ano errado ou data que não existe, o cadastro some do mês certo (ver dataDesejadaDistante).
+  const comDataParaConferir = clientes.filter((c) =>
+    c.status !== "Cancelado" && !ehServicoDocumentacao(c) && avisoDataDesejada(c.dataDesejada));
 
   // Veio de uma confirmação de vistoria feita na sub-aba Vistoria — pula direto pro
   // mês/dia certo e já abre o painel lateral, sem precisar navegar manualmente.
@@ -6466,6 +6772,17 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
           Veja quem está vistoriando o quê em cada dia. Clique num dia pra ver a agenda completa e agendar uma nova vistoria.
         </p>
+        {comDataParaConferir.length > 0 && (
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 8, background: "#FFF4E0", color: "#B26A00", borderRadius: 8, padding: "8px 12px", fontSize: 12.5, margin: "-4px 0 14px" }}>
+            <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>
+              {comDataParaConferir.length === 1 ? "1 cadastro está" : `${comDataParaConferir.length} cadastros estão`} com data a mais de {MESES_DATA_DISTANTE} meses
+              daqui ou inválida e não {comDataParaConferir.length === 1 ? "aparece" : "aparecem"} no mês certo
+              ({comDataParaConferir.slice(0, 3).map((c) => `${c.nome} · ${c.dataDesejada.split("-").reverse().join("/")}`).join("; ")}{comDataParaConferir.length > 3 ? "; …" : ""}).
+              Corrija em Clientes › Editar cliente.
+            </span>
+          </div>
+        )}
         <CalendarioAgendamento clientes={clientes} vistoriadores={vistoriadores} docs={docs}
           mesRef={mesRef} setMesRef={setMesRef} diaSelecionado={diaSelecionado} setDiaSelecionado={setDiaSelecionado}
           filtroTecnicos={filtroTecnicos} aoTrocarFiltro={toggleFiltroTecnico}
@@ -7192,7 +7509,7 @@ function AbaLaudoAnterior({ laudo, carregando, cliente, assinatura }) {
   );
 }
 
-function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, dados, setD, fotoCliente, setFotoCliente, fotoClienteObrigatoria = true, notify, setAba, bloqueado, onPedirDesbloqueio, enviadoAindaEditavel = false, statusLaudo, devolvido, motivoDevolucao, patologiasBanco = [], minhaAssinatura, salvarMinhaAssinatura, removerMinhaAssinatura, token, clienteId }) {
+function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, removerFoto, contagem, dados, setD, fotoCliente, setFotoCliente, fotoClienteObrigatoria = true, notify, setAba, bloqueado, onPedirDesbloqueio, enviadoAindaEditavel = false, statusLaudo, devolvido, motivoDevolucao, patologiasBanco = [], minhaAssinatura, salvarMinhaAssinatura, removerMinhaAssinatura, token, clienteId, voz = null }) {
   const fotoClienteRef = useRef();        // câmera (capture="environment")
   const fotoClienteGaleriaRef = useRef(); // galeria do aparelho
   const [seletorAberto, setSeletorAberto] = useState(false);
@@ -7378,6 +7695,17 @@ function AbaItens({ itens, setItens, updItem, escolherPatologia, addFotos, remov
           );
         })}
       </div>
+
+      {/* Patologia por voz: aparece só para quem a flag liberou. O item confirmado entra aqui
+          como um item comum; o vazio do começo é ocupado, como no "Conferir por ambiente". */}
+      {voz?.habilitado && clienteId && !bloqueado && (
+        <PainelPatologiaVoz voz={voz} patologiasBanco={patologiasBanco} ambientes={LOCAIS} notify={notify} redimensionar={redimensionar}
+          onConfirmado={(novo) => setItens((l) => {
+            if (novo?.vozItemId && l.some((x) => x.vozItemId === novo.vozItemId)) return l; // confirmação repetida
+            const soVazio = l.length === 1 && !l[0].patologia && !l[0].local && !l[0].descricao && !l[0].fotos?.length;
+            return [...(soVazio ? [] : l), { ...novoItem(), ...novo }];
+          })} />
+      )}
 
       {itens.map((item, idx) => (
         <ItemCard key={item.id} item={item} num={idx + 1}
@@ -8344,6 +8672,17 @@ function rotuloPeriodo(periodo) {
   if (periodo.granularidade === "trimestre") return `${periodo.indice + 1}º trimestre de ${periodo.ano}`;
   return `${MESES_LONGOS[periodo.indice]} de ${periodo.ano}`;
 }
+/* O recorte em datas (AAAA-MM-DD), para o que vem pronto do servidor — o bloco do FN Home nos
+   Indicadores. "Todo o período" vai sem datas. */
+function datasDoPeriodo(periodo) {
+  if (!periodo || periodo.granularidade === "tudo") return { de: null, ate: null };
+  const dois = (n) => String(n).padStart(2, "0");
+  const [primeiro, ultimo] = periodo.granularidade === "ano" ? [0, 11]
+    : periodo.granularidade === "trimestre" ? [periodo.indice * 3, periodo.indice * 3 + 2]
+    : [periodo.indice, periodo.indice];
+  const fim = new Date(periodo.ano, ultimo + 1, 0).getDate();
+  return { de: `${periodo.ano}-${dois(primeiro + 1)}-01`, ate: `${periodo.ano}-${dois(ultimo + 1)}-${dois(fim)}` };
+}
 /* O recorte imediatamente anterior ao escolhido, para a comparação nos cartões. "Todo o
    período" não tem anterior — ali a comparação some, em vez de comparar com algo inventado. */
 function periodoAnterior(periodo) {
@@ -8976,9 +9315,12 @@ function EditorLaudoGerencia({ laudo, onSalvar, onCancelar, salvando, patologias
   );
 }
 
-function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, assinatura, notify, patologiasBanco = [] }) {
+function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, assinatura, notify, patologiasBanco = [], clientes = [], docs = [], token }) {
   const [previewId, setPreviewId] = useState(null);
   const [aprovandoId, setAprovandoId] = useState(null);
+  /* O último laudo aprovado aqui, para oferecer o WhatsApp logo em seguida. A linha some da
+     fila na aprovação, então guarda uma cópia dela. */
+  const [aprovadoAgora, setAprovadoAgora] = useState(null);
   /* Devolver exige motivo: é ele que o técnico vê no topo do formulário ao reabrir o laudo. */
   const [devolvendoId, setDevolvendoId] = useState(null);
   const [motivoDevolucao, setMotivoDevolucao] = useState("");
@@ -8991,7 +9333,9 @@ function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, d
 
   const aprovar = async (docId) => {
     setAprovandoId(docId);
-    await aprovarLaudo(docId);
+    const linha = laudosPendentes.find((l) => l.doc_id === docId);
+    const r = await aprovarLaudo(docId);
+    if (r && linha) setAprovadoAgora({ laudo: linha, emailEnviado: r.emailEnviado !== false, emailErro: r.emailErro });
     setAprovandoId(null);
     if (previewId === docId) setPreviewId(null);
   };
@@ -9030,6 +9374,28 @@ function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, d
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
         Ao aprovar, o sistema gera o PDF final e envia automaticamente por e-mail para o endereço já cadastrado do cliente — sem precisar digitar nada.
       </p>
+
+      {aprovadoAgora && (() => {
+        const { laudo, emailEnviado, emailErro } = aprovadoAgora;
+        const doc = docs.find((d) => d.id === laudo.doc_id);
+        const cpfLimpo = String(laudo.cpf || "").replace(/\D/g, "");
+        const cliente = clienteDoDoc(doc, clientes)
+          || (cpfLimpo ? clientes.find((c) => !c.revistoriaDe && (c.cpf || "").replace(/\D/g, "") === cpfLimpo) : null);
+        return (
+          <div style={{ border: `1px solid ${emailEnviado ? "#a5d6a7" : "#f0c987"}`, background: emailEnviado ? "#EEF7EE" : "#FFF4E0", borderRadius: 10, padding: 12, marginBottom: 14, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 200, fontSize: 13.5 }}>
+              <strong style={{ color: emailEnviado ? "#2E7D32" : "#B26A00" }}>
+                {emailEnviado ? "✅ Laudo aprovado e enviado por e-mail" : "⚠️ Laudo aprovado, mas o e-mail não saiu"}
+              </strong>
+              <div style={{ fontSize: 12.5, color: "#65758b" }}>
+                {laudo.cliente}{!emailEnviado && emailErro ? ` · ${emailErro}` : ""}
+              </div>
+            </div>
+            <BotaoWhatsappLaudo laudo={laudo} cliente={cliente} emailEnviado={emailEnviado} apiFetch={apiFetch} token={token} />
+            <button className="icon-btn" title="Fechar aviso" onClick={() => setAprovadoAgora(null)}><X size={16} /></button>
+          </div>
+        );
+      })()}
 
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
       {!carregando && laudosPendentes.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum laudo aguardando aprovação no momento.</p>}
@@ -9733,7 +10099,11 @@ function AbaLaudosRealizados({ laudos: laudosRecebidos = [], carregando, recarre
                   )}
 
                   {ehGerencia && entregue && l.laudo_status !== "devolvido_correcao" && (
-                    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+                      {/* Mesmo texto do aviso pós-aprovação. A linha do e-mail só entra se ele saiu. */}
+                      <BotaoWhatsappLaudo laudo={l} rotulo="📲 Reenviar WhatsApp" emailEnviado={!!l.email_enviado_em}
+                        cliente={clienteDoDoc(docs.find((d) => d.id === l.doc_id) || { clienteId: l.cliente_id }, clientes)}
+                        apiFetch={apiFetch} token={token} />
                       <button className="btn-ghost" style={{ color: "#B26A00", background: "#FFF4E0" }} onClick={() => abrirDevolucao(l.doc_id)}>
                         <Undo2 size={14} /> Devolver para correção
                       </button>
@@ -10149,6 +10519,7 @@ function AbaPerfilCliente({ clientes = [], token, notify, atualizarCliente, rese
     // perfil.cliente é o cadastro como veio do servidor ao abrir (ver camposAlterados).
     const patch = camposAlterados(mapClienteDaApi(perfil.cliente), form);
     if (Object.keys(patch).length === 0) { notify("Nada mudou no cadastro."); return; }
+    if ("dataDesejada" in patch && !confirmarDataDistante(patch.dataDesejada)) return;
     setSalvando(true);
     try {
       /* Só recarrega e comemora se o servidor aceitou — a lista de clientes é atualizada de
@@ -11194,6 +11565,7 @@ function AbaGerenciaVisaoGeral({ token, docs, clientes, updCliente, padronizarEm
 
       <CardPainelLaudos painel={painel} carregando={painelCarregando} recarregar={carregarPainel} usuarios={usuarios} notify={notify} />
       <CardLaudosPendentes laudosPendentes={laudosPendentes} carregando={laudosPendentesCarregando} aprovarLaudo={aprovarLaudo} devolverLaudo={devolverLaudo} editarLaudo={editarLaudo} reenviarDrive={reenviarDrive} marcarEmAnalise={marcarEmAnalise}
+        clientes={clientes} docs={docs} token={token}
       painel={painel} painelCarregando={painelCarregando} carregarPainel={carregarPainel} assinatura={assinatura} notify={notify} patologiasBanco={patologiasBanco} />
 
       <CardCancelamentosPendentes clientes={clientes} usuarios={usuarios} updCliente={updCliente} notify={notify} />
@@ -12160,7 +12532,7 @@ function CardPrecoEmpreendimento({ precos, carregando, salvarPreco, empreendimen
   return (
     <Card icon={DollarSign} titulo="Preços por empreendimento">
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-        Empreendimentos da lista oficial (planilha do Drive). Defina o valor da vistoria e o da documentação ART/TRT —
+        Empreendimentos da lista oficial (planilha do Drive e os adicionados em Gerência → Empreendimentos). Defina o valor da vistoria e o da documentação ART/TRT —
         o setor de Documentação vê o preço fixado aqui ao trabalhar no serviço, e os valores alimentam a receita no Financeiro.
       </p>
 
@@ -12751,6 +13123,76 @@ const lerArquivoComoDataUrl = (arquivo) => new Promise((resolver, rejeitar) => {
   leitor.readAsDataURL(arquivo);
 });
 
+/* ---------- Contas de recebimento e comprovante do Pix (src/recebimentos.js no backend) ----------
+   Num lugar só, fora dos componentes: cada linha do Setor de cobrança mostra a conta e o
+   comprovante do seu cadastro, e buscar a lista em cada linha seriam dezenas de pedidos iguais a
+   cada abertura da tela. O AppInterno carrega uma vez (Gerência e Atendimento); quem anexa,
+   remove ou cadastra conta mexe na lista daqui, e todas as telas que usam useRecebimentos
+   acompanham. */
+const CONTA_MP_PJ = "mp_pj";
+const recebimentosEstado = { token: null, contas: [], comprovantes: [], carregado: false, ouvintes: new Set() };
+const avisarRecebimentos = () => recebimentosEstado.ouvintes.forEach((f) => f());
+async function carregarRecebimentos(token) {
+  recebimentosEstado.token = token;
+  try {
+    const [rc, rp] = await Promise.all([
+      apiFetch("/api/contas-recebimento", { token }),
+      apiFetch("/api/comprovantes-recebimento", { token }),
+    ]);
+    recebimentosEstado.contas = rc.contas || [];
+    recebimentosEstado.comprovantes = rp.comprovantes || [];
+    recebimentosEstado.carregado = true;
+  } catch (e) { console.warn("Contas de recebimento indisponíveis:", e.message); }
+  avisarRecebimentos();
+}
+/* As funções devolvem o resultado ou lançam o erro com a mensagem do servidor — quem chama é que
+   sabe se avisa no notify ou mostra na própria tela. */
+function useRecebimentos() {
+  const [, setVersao] = useState(0);
+  useEffect(() => {
+    const ouvir = () => setVersao((v) => v + 1);
+    recebimentosEstado.ouvintes.add(ouvir);
+    return () => { recebimentosEstado.ouvintes.delete(ouvir); };
+  }, []);
+  const { token, contas, comprovantes, carregado } = recebimentosEstado;
+  const anexar = async (clienteId, arquivo) => {
+    let dataUrl = await lerArquivoComoDataUrl(arquivo);
+    let mimeType = arquivo.type || "application/pdf";
+    /* Mesma redução do comprovante de despesa: print do Pix e foto de celular ficam legíveis em 1600px. */
+    if (mimeType.startsWith("image/") && !/hei[cf]/.test(mimeType)) { dataUrl = await redimensionar(dataUrl, 1600); mimeType = "image/jpeg"; }
+    const nome = mimeType === "image/jpeg" ? String(arquivo.name || "comprovante").replace(/\.[^.]+$/, "") + ".jpg" : arquivo.name;
+    const r = await apiFetch(`/api/clientes/${clienteId}/comprovantes`, { method: "POST", token, body: { nomeArquivo: nome, mimeType, arquivoBase64: dataUrl } });
+    recebimentosEstado.comprovantes = [r.comprovante, ...recebimentosEstado.comprovantes];
+    avisarRecebimentos();
+    return r.comprovante;
+  };
+  const remover = async (id) => {
+    await apiFetch(`/api/comprovantes-recebimento/${id}`, { method: "DELETE", token });
+    recebimentosEstado.comprovantes = recebimentosEstado.comprovantes.filter((a) => a.id !== id);
+    avisarRecebimentos();
+  };
+  const baixar = (comprovante) => baixarComToken(`/api/comprovantes-recebimento/${comprovante.id}/arquivo`, token);
+  /* A aba abre ANTES do download: aberta depois de um await, o navegador trata como pop-up. */
+  const abrir = async (comprovante) => {
+    const janela = window.open("", "_blank");
+    try {
+      const url = URL.createObjectURL(await baixar(comprovante));
+      if (janela) janela.location.href = url; else window.location.href = url;
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) { janela?.close(); throw e; }
+  };
+  const trocarContas = (lista) => { recebimentosEstado.contas = lista || []; avisarRecebimentos(); };
+  const adicionarConta = async (nome) => trocarContas((await apiFetch("/api/contas-recebimento", { method: "POST", token, body: { nome } })).contas);
+  const atualizarConta = async (id, dados) => trocarContas((await apiFetch(`/api/contas-recebimento/${id}`, { method: "PATCH", token, body: dados })).contas);
+  return {
+    carregado, contas, contasAtivas: contas.filter((c) => c.ativa),
+    contasPorComprovante: contas.filter((c) => c.conferencia === "comprovante"),
+    nomeDaConta: (id) => contas.find((c) => c.id === id)?.nome || "",
+    comprovantesDe: (clienteId) => comprovantes.filter((a) => a.clienteId === clienteId),
+    anexar, remover, baixar, abrir, adicionarConta, atualizarConta,
+  };
+}
+
 /* Estado do módulo, num lugar só. Carrega quando alguém abre uma tela do Financeiro — não no
    login: o técnico que só vai fazer vistoria não precisa baixar a lista de despesas. */
 function useFinanceiro({ token, perfil, notify, ativo }) {
@@ -12867,6 +13309,38 @@ function useFinanceiro({ token, perfil, notify, ativo }) {
 
   return { ehGerencia, despesas, receitas, config, carregando, carregado, carregar, salvarDespesa, anexar, removerAnexo,
     baixarAnexo, abrirAnexo, decidir, excluir, salvarReceita, excluirReceita, salvarConfig };
+}
+
+/* Aviso do limite do MEI por e-mail. Roda uma vez por sessão da Gerência, quando cadastros,
+   registros e preços já chegaram: faz a mesma conta do painel Situação Tributária
+   (situacaoMeiDoAno) e manda o número ao servidor, que lembra até que faixa (80, 90, 100, 120%)
+   já avisou e só manda e-mail na faixa nova. A conta fica aqui porque a receita sai da ficha,
+   e a ficha mora no front. Falhar aqui não atrapalha ninguém: o painel continua mostrando. */
+function useAvisoLimiteMei({ ativo, token, clientes, docs, precos, notify }) {
+  const verificado = useRef(false);
+  useEffect(() => {
+    if (!ativo || verificado.current) return;
+    verificado.current = true;
+    (async () => {
+      try {
+        const [rc, rr] = await Promise.all([
+          apiFetch("/api/financeiro/config", { token }),
+          apiFetch("/api/financeiro/receitas", { token }),
+        ]);
+        const config = rc.config || {};
+        if ((config.regime || "MEI") !== "MEI") return;
+        const ano = new Date().getFullYear();
+        const m = situacaoMeiDoAno({ config, receitas: rr.receitas || [], clientes, docs, precos, ano });
+        const r = await apiFetch("/api/financeiro/aviso-mei", { method: "POST", token, body: {
+          ano, faturamento: Math.round(m.receita.total * 100) / 100, limite: m.limite,
+          projetado: m.projecao ? Math.round(m.projecao.projetado) : 0,
+        } });
+        if (r.avisado) {
+          notify(`O faturamento de ${ano} chegou a ${Fin.pct(r.pct)} do limite do MEI — ${r.emails ? "aviso enviado por e-mail à Gerência" : "o e-mail de aviso não saiu"}.`);
+        }
+      } catch (e) { console.warn("Aviso do limite do MEI não verificado:", e.message); }
+    })();
+  }, [ativo]);
 }
 
 /* ---------- Receita de um recorte ----------
@@ -13893,18 +14367,26 @@ function TabelaRentabilidade({ linhas, rotulo, rodape, quantidade = null }) {
 }
 
 /* Barra do MEI: faturamento do ano contra o limite configurado. */
-function PainelSituacaoTributaria({ fin, clientes, docs, precos, ano = new Date().getFullYear() }) {
-  const config = fin.config || {};
-  /* No ano da abertura, o faturamento começa na data de abertura — o limite proporcional já
-     conta só os meses de atividade, e somar o que veio antes compararia um ano inteiro de
-     receita com um limite de poucos meses (a FN abriu o CNPJ em setembro, com a operação
-     rodando desde julho). */
+/* O número do limite do MEI, num lugar só: o painel Situação Tributária e o aviso por e-mail
+   (useAvisoLimiteMei) mostram a mesma conta.
+   No ano da abertura, o faturamento começa na data de abertura — o limite proporcional já
+   conta só os meses de atividade, e somar o que veio antes compararia um ano inteiro de
+   receita com um limite de poucos meses (a FN abriu o CNPJ em setembro, com a operação
+   rodando desde julho). */
+function situacaoMeiDoAno({ config = {}, receitas = [], clientes, docs, precos, ano }) {
   const abertura = /^\d{4}-\d{2}-\d{2}$/.test(String(config.dataAbertura || "")) ? config.dataAbertura : "";
   const desde = abertura && Number(abertura.slice(0, 4)) === Number(ano) ? abertura : "";
-  const receita = receitaDoPeriodo({ clientes, docs, precos, receitas: fin.receitas, periodo: { granularidade: "ano", ano, indice: 0 }, base: config.baseFaturamento || "cobrado", aPartirDe: desde });
+  const receita = receitaDoPeriodo({ clientes, docs, precos, receitas, periodo: { granularidade: "ano", ano, indice: 0 }, base: config.baseFaturamento || "cobrado", aPartirDe: desde });
   const limite = Fin.limiteEfetivo(config, ano);
-  const s = Fin.situacaoMei(receita.total, limite);
-  const regime = config.regime || "MEI";
+  return {
+    receita, limite, desde, regime: config.regime || "MEI",
+    s: Fin.situacaoMei(receita.total, limite), projecao: Fin.projecaoMei(receita.total, limite, ano, desde),
+  };
+}
+
+function PainelSituacaoTributaria({ fin, clientes, docs, precos, ano = new Date().getFullYear() }) {
+  const config = fin.config || {};
+  const { receita, limite, desde, regime, s, projecao } = situacaoMeiDoAno({ config, receitas: fin.receitas, clientes, docs, precos, ano });
   return (
     <Card icon={Landmark} titulo="Situação Tributária">
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
@@ -13927,7 +14409,24 @@ function PainelSituacaoTributaria({ fin, clientes, docs, precos, ano = new Date(
           </div>
           <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
             {s.alertas.map((a) => <AvisoFin key={a} tom={s.pct >= 100 ? "erro" : "atencao"}>{a}</AvisoFin>)}
+            {s.pct >= 100 && (
+              <AvisoFin tom="erro">
+                Pela regra do MEI, até 20% acima do limite ({Fin.brl(limite * 1.2)}) a empresa paga um DAS complementar sobre o que
+                passou e vira ME em janeiro; acima disso, o desenquadramento pode valer desde janeiro. Confirme com a contabilidade.
+              </AvisoFin>
+            )}
             {s.pct < 100 && <p style={{ fontSize: 13, color: "#4a5a70", margin: 0 }}>Ainda cabem <strong>{Fin.brl(s.restante)}</strong> no limite deste ano.</p>}
+            {projecao && (
+              <p style={{ fontSize: 13, color: projecao.mesEstouro != null ? "#A12020" : "#4a5a70", margin: 0 }}>
+                No ritmo atual, {ano} fecha perto de <strong>{Fin.brl(projecao.projetado)}</strong>
+                {projecao.mesEstouro != null
+                  ? <> — o limite seria alcançado em <strong>{Fin.MESES_NOMES[projecao.mesEstouro].toLowerCase()}</strong>. Planeje a mudança de regime com a contabilidade antes disso.</>
+                  : "."}
+              </p>
+            )}
+            <p style={{ fontSize: 12, color: "#65758b", margin: 0 }}>
+              A Gerência recebe um e-mail quando o faturamento chega a 80%, 90%, 100% e 120% do limite (uma vez por faixa, por ano).
+            </p>
           </div>
         </>
       ) : (
@@ -14568,20 +15067,577 @@ function AbaConferenciaPagamentos({ clientes = [], docs = [], precos = [], updCl
   );
 }
 
-function AbaFinanceiroDespesas({ sub, fin, clientes = [], docs = [], precos = [], usuarios = [], usuarioAtual, telaEstreita, notify, token, updCliente }) {
+/* ============================================================
+   Conciliação Mercado Pago
+   ============================================================
+   O extrato da conta do Mercado Pago (lido da API dele, no servidor — /api/financeiro/conciliacao)
+   lado a lado com o que o sistema registrou. O que precisa de alguém aparece primeiro:
+   - entrou sem link (Pix direto na chave da conta): diga de que cadastro é. A sugestão vem do CPF
+     do pagador, quando o Mercado Pago informa, de baixa à mão com o mesmo valor e do valor em
+     aberto na ficha;
+   - link pago sem baixa: o aviso do Mercado Pago (webhook) não chegou;
+   - estorno: o dinheiro voltou e o cadastro ainda diz Pago — o webhook não desfaz baixa;
+   - no sistema sem pagamento: baixa à mão como "Mercado Pago" que nenhum pagamento confirma.
+   "Vincular" e "Dar baixa" mandam só o id do pagamento: valor e data o servidor confere no
+   Mercado Pago. A planilha do contador é a mesma conta do Financeiro (receitaDoPeriodo, caixa). */
+const FORMA_MERCADO_PAGO = {
+  credit_card: "Cartão de crédito", debit_card: "Cartão de débito", account_money: "Saldo Mercado Pago",
+  ticket: "Boleto", bank_transfer: "Transferência", atm: "Lotérica",
+};
+const formaDoMercadoPago = (p) => (p.meio === "pix" ? "Pix" : FORMA_MERCADO_PAGO[p.forma] || p.forma || "—");
+const soDigitosDe = (s) => String(s || "").replace(/\D/g, "");
+
+/* A aba do Mercado Pago tem dois lados: a conciliação da conta e o financeiro das vendas do FN
+   Home, cujo carrinho recebe nessa mesma conta (pedido da Gerência, out/2026). O financeiro do FN
+   Home também abre por FN Home → Vendas e comissões — é a mesma tela (src/fn-home-financeiro.jsx). */
+function AbaMercadoPago(props) {
+  const [lado, setLado] = useState("conciliacao");
+  const aba = (id, rotulo, Icone) => {
+    const ativo = lado === id;
+    return (
+      <button key={id} type="button" role="tab" aria-selected={ativo} onClick={() => setLado(id)}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 14px", borderRadius: 9, cursor: "pointer",
+          fontSize: 13.5, fontWeight: 700, whiteSpace: "nowrap",
+          background: ativo ? AZUL_MEDIO : "#fff", color: ativo ? "#fff" : AZUL_MARINHO,
+          border: `1px solid ${ativo ? AZUL_MEDIO : CINZA_BORDA}`,
+        }}>
+        <Icone size={15} /> {rotulo}
+      </button>
+    );
+  };
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <div role="tablist" aria-label="Mercado Pago" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {aba("conciliacao", "Conciliação da conta", Scale)}
+        {aba("fn-home", "Financeiro do FN Home", Wallet)}
+      </div>
+      {lado === "conciliacao"
+        ? <AbaConciliacaoMercadoPago {...props} />
+        : <AbaFinanceiroFnHome token={props.token} apiFetch={apiFetch} notify={props.notify} />}
+    </div>
+  );
+}
+
+function AbaConciliacaoMercadoPago({ token, fin, clientes = [], docs = [], precos = [], notify, recarregarClientes }) {
+  const mesHoje = hojeLocal().slice(0, 7);
+  const [mes, setMes] = useState(mesHoje);
+  const [dados, setDados] = useState(null);
+  const [carregando, setCarregando] = useState(false);
+  const [falha, setFalha] = useState("");
+  const [escolha, setEscolha] = useState({});
+  const [busca, setBusca] = useState({});
+  const [trabalhando, setTrabalhando] = useState(null);
+  const [gerandoPlanilha, setGerandoPlanilha] = useState(false);
+  const [zipando, setZipando] = useState(null);
+  const rec = useRecebimentos();
+
+  /* O mês corrente vai só até hoje: o Mercado Pago não tem amanhã, e a planilha do mês aberto é parcial. */
+  const intervalo = (m) => {
+    const [a, mm] = m.split("-").map(Number);
+    const ultimo = `${m}-${String(Fin.ultimoDiaDoMes(a, mm - 1)).padStart(2, "0")}`;
+    return { de: `${m}-01`, ate: ultimo > hojeLocal() ? hojeLocal() : ultimo };
+  };
+  const buscar = async (m = mes) => {
+    if (!/^\d{4}-\d{2}$/.test(m) || m > mesHoje) return;
+    const { de, ate } = intervalo(m);
+    setCarregando(true);
+    setFalha("");
+    try { setDados(await apiFetch(`/api/financeiro/conciliacao?de=${de}&ate=${ate}`, { token })); }
+    catch (e) { setDados(null); setFalha(e.message); }
+    setCarregando(false);
+  };
+  useEffect(() => { buscar(mes); }, [mes]);
+
+  const precoPorChave = useMemo(() => {
+    const mapa = {};
+    precos.forEach((p) => { mapa[normalizarChaveEmpreendimento(p.empreendimento)] = p; });
+    return mapa;
+  }, [precos]);
+  const fichas = useMemo(() => clientes.filter((c) => c.status !== "Cancelado")
+    .map((c) => ({ c, f: fichaFinanceira(c, docDoCliente(c, docs), precoPorChave) })), [clientes, docs, precoPorChave]);
+
+  const pagamentos = dados?.pagamentos || [];
+  const soNoSistema = dados?.soNoSistema || [];
+  const semCadastro = pagamentos.filter((p) => p.situacao === "sem_cadastro");
+  const faltaBaixa = pagamentos.filter((p) => p.situacao === "falta_baixa");
+  const estornos = pagamentos.filter((p) => p.situacao === "estornado");
+  const duplicados = pagamentos.filter((p) => p.situacao === "duplicado");
+  const outros = pagamentos.filter((p) => p.situacao === "outro");
+  const conferidos = pagamentos.filter((p) => p.situacao === "conferido" || p.situacao === "marketplace");
+  /* Contas conferidas pelo comprovante (a conta secundária): o que entrou nelas no mês, pela data do
+     pagamento — a mesma ficha do Financeiro em regime de caixa —, e quem está sem comprovante. */
+  const recebidosNoMes = fichas.filter(({ f }) => f.recebido > 0 && String(f.dataPagamento || "").startsWith(mes));
+  const idsPorComprovante = new Set(rec.contasPorComprovante.map((c) => c.id));
+  const naContaSecundaria = recebidosNoMes.filter(({ c }) => idsPorComprovante.has(c.contaRecebimento))
+    .sort((a, b) => String(a.f.dataPagamento).localeCompare(String(b.f.dataPagamento)));
+  const semComprovante = naContaSecundaria.filter(({ c }) => rec.comprovantesDe(c.id).length === 0);
+  /* O recebido do mês por conta. "Conta não informada" é baixa antiga, ou forma que não pediu
+     conta (boleto, cartão): só aparece para ninguém achar que o total sumiu. */
+  const totalPorConta = {};
+  recebidosNoMes.forEach(({ c, f }) => {
+    const chave = c.contaRecebimento ? (rec.nomeDaConta(c.contaRecebimento) || "Conta removida")
+      : c.formaPagamento === "Mercado Pago" ? rec.nomeDaConta(CONTA_MP_PJ) || "Mercado Pago PJ (CNPJ)"
+      : c.formaPagamento === "Dinheiro" ? "Dinheiro" : "Conta não informada";
+    totalPorConta[chave] = (totalPorConta[chave] || 0) + f.recebido;
+  });
+  const pendencias = semCadastro.length + faltaBaixa.length + duplicados.length + soNoSistema.length
+    + estornos.filter((p) => p.pagoNoCadastro).length + semComprovante.length;
+  const porForma = {};
+  pagamentos.filter((p) => p.status === "approved").forEach((p) => { const k = formaDoMercadoPago(p); porForma[k] = (porForma[k] || 0) + p.valor; });
+
+  /* De quem é este dinheiro? O Mercado Pago não informa o nome de quem paga Pix direto na chave
+     (conferido num Pix real: os campos vêm vazios, e o "documento" é o CNPJ do próprio Mercado
+     Pago — ver pagadorDe, no backend). A sugestão sai do que o sistema sabe, nesta ordem:
+     0. CPF do pagador — só vem em pagamento pelo link;
+     1. baixa à mão no mesmo dia e com o mesmo valor — o Pix que o Atendimento já conferiu pelo
+        comprovante, com qualquer forma marcada (quase sempre "Pix");
+     2. baixa à mão como "Mercado Pago" com o mesmo valor, em outro dia;
+     3. valor em aberto igual — num empreendimento de preço único bate com muita gente, por isso
+        vem ordenado pela data do serviço mais próxima do pagamento.
+     Cadastro que já tem pagamento do Mercado Pago registrado não entra como baixa à mão: o valor
+     e o dia bateriam com outro Pix por coincidência. */
+  const comPagamentoMp = new Set(dados?.clientesComPagamento || []);
+  const manuaisMercadoPago = new Set(soNoSistema.filter((x) => x.tipo === "baixa_manual").map((x) => x.clienteId));
+  const sugestoes = (p) => {
+    const doc = p.pagador?.documento || "";
+    const quando = new Date(p.aprovadoEm || Date.now()).getTime();
+    const diaDoPix = diaLocalDe(p.aprovadoEm);
+    const distanciaAte = (iso) => (iso ? Math.abs(new Date(`${iso}T12:00:00`).getTime() - quando) : Infinity);
+    const lista = [];
+    fichas.forEach(({ c, f }) => {
+      const baixaAMao = ["Pago", "Parcial"].includes(f.situacao) && Math.abs(f.recebido - p.valor) < 0.01 && !comPagamentoMp.has(c.id);
+      let motivo = null, peso = 9, detalhe = "", distancia = Infinity;
+      if (doc.length >= 11 && soDigitosDe(c.cpf) === doc) { motivo = "CPF do pagador"; peso = 0; }
+      else if (baixaAMao && diaDoPix && f.dataPagamento === diaDoPix) { motivo = "baixa à mão no mesmo dia"; peso = 1; }
+      else if (baixaAMao && manuaisMercadoPago.has(c.id)) {
+        motivo = "baixa à mão como Mercado Pago"; peso = 2; detalhe = `pago em ${fmtData(f.dataPagamento)}`; distancia = distanciaAte(f.dataPagamento);
+      } else if (f.situacao !== "Pago" && f.valor > 0 && Math.abs(f.valor - f.recebido - p.valor) < 0.01) {
+        motivo = "valor em aberto igual"; peso = 3; detalhe = `serviço ${fmtData(f.dataServico)}`; distancia = distanciaAte(f.dataServico);
+      }
+      if (!motivo) return;
+      lista.push({ c, motivo, detalhe, peso, distancia });
+    });
+    return lista.sort((a, b) => a.peso - b.peso || a.distancia - b.distancia).slice(0, 5);
+  };
+  const encontrados = (texto) => {
+    const t = semAcento(texto).trim();
+    if (t.length < 2) return [];
+    const digitos = soDigitosDe(texto);
+    return fichas.filter(({ c }) => semAcento(c.nome).includes(t) || semAcento(c.empreendimento).includes(t)
+      || (digitos.length >= 4 && soDigitosDe(c.cpf).includes(digitos))).slice(0, 8);
+  };
+
+  const registrar = async (p, clienteId) => {
+    setTrabalhando(p.id);
+    try {
+      await apiFetch("/api/financeiro/conciliacao/baixar", { method: "POST", token, body: { paymentId: p.id, clienteId: clienteId || undefined } });
+      notify(clienteId ? "Pagamento vinculado ao cadastro ✓" : "Baixa registrada ✓");
+      await Promise.all([buscar(), recarregarClientes ? recarregarClientes() : null]);
+    } catch (e) { notify(`Não foi possível registrar: ${e.message}`); }
+    setTrabalhando(null);
+  };
+
+  /* Recebimentos do mês para a contabilidade: tudo o que entrou (Mercado Pago, Pix em outra
+     conta, dinheiro) mais as outras receitas recebidas — a mesma conta do Financeiro em regime de
+     caixa —, com a tarifa e o número do pagamento do Mercado Pago quando houver. */
+  const baixarPlanilha = async () => {
+    const [ano, mm] = mes.split("-").map(Number);
+    setGerandoPlanilha(true);
+    try {
+      const r = await apiFetch("/api/cobrancas", { token });
+      const doMp = {};
+      (r.cobrancas || []).filter((b) => b.status === "paga").forEach((b) => {
+        const x = doMp[b.clienteId] || (doMp[b.clienteId] = { taxa: 0, ids: [] });
+        x.taxa += Number(b.taxa) || 0;
+        if (b.mpPaymentId) x.ids.push(b.mpPaymentId);
+      });
+      const receita = receitaDoPeriodo({ clientes, docs, precos, receitas: fin.receitas, periodo: { granularidade: "mes", ano, indice: mm - 1 }, base: "recebido" });
+      const arred = (v) => Math.round((Number(v) || 0) * 100) / 100;
+      const linhas = receita.atendimentos.map((c) => {
+        const f = fichaFinanceira(c, docDoCliente(c, docs), precoPorChave);
+        const mp = doMp[c.id];
+        const valor = arred(receita.valorDe(c));
+        const taxa = arred(mp?.taxa);
+        const comprovantes = rec.comprovantesDe(c.id).length;
+        return {
+          data: f.dataPagamento || f.dataServico, cliente: c.nome, documento: c.cpf, servico: c.servico || "",
+          empreendimento: [c.empreendimento, c.blocoTorre].filter(Boolean).join(" · "), forma: f.formaPagamento || (mp ? "Mercado Pago" : ""),
+          /* Em que extrato o contador procura: a conta da baixa, ou a PJ quando veio pelo Mercado Pago. */
+          conta: rec.nomeDaConta(c.contaRecebimento) || (mp || f.formaPagamento === "Mercado Pago" ? rec.nomeDaConta(CONTA_MP_PJ) || "Mercado Pago PJ (CNPJ)" : ""),
+          comprovante: comprovantes ? `Sim (${comprovantes})` : mp ? "Mercado Pago" : "Não",
+          valor, taxa, liquido: arred(valor - taxa), ids: (mp?.ids || []).join(", "), origem: "Atendimento",
+        };
+      });
+      receita.avulsas.filter((x) => receita.valorAvulsa(x) > 0).forEach((x) => linhas.push({
+        data: x.data, cliente: x.clienteNome || "", documento: "", servico: x.servico || x.descricao, empreendimento: x.empreendimento || "",
+        forma: "", conta: "", comprovante: "", valor: arred(receita.valorAvulsa(x)), taxa: 0, liquido: arred(receita.valorAvulsa(x)), ids: "", origem: "Outras receitas",
+      }));
+      linhas.sort((a, b) => String(a.data).localeCompare(String(b.data)));
+      const soma = (k) => arred(linhas.reduce((s, l) => s + (Number(l[k]) || 0), 0));
+      linhas.push({ data: "", cliente: "TOTAL", documento: "", servico: "", empreendimento: "", forma: "", conta: "", comprovante: "", valor: soma("valor"), taxa: soma("taxa"), liquido: soma("liquido"), ids: "", origem: "" });
+      const colunas = [
+        ["Data do pagamento", (l) => Fin.dataBr(l.data)], ["Cliente", (l) => l.cliente], ["CPF/CNPJ", (l) => Fin.formatarCpfCnpj(l.documento)],
+        ["Serviço", (l) => l.servico], ["Empreendimento", (l) => l.empreendimento], ["Forma de recebimento", (l) => l.forma],
+        ["Conta de recebimento", (l) => l.conta], ["Comprovante", (l) => l.comprovante],
+        ["Valor recebido", (l) => l.valor], ["Tarifa Mercado Pago", (l) => l.taxa], ["Valor líquido", (l) => l.liquido],
+        ["Pagamento no Mercado Pago", (l) => l.ids], ["Origem", (l) => l.origem],
+      ];
+      Fin.baixarBlob(Fin.gerarXlsx(linhas, colunas, "Recebimentos"), `recebimentos-fn-${mes}.xlsx`);
+    } catch (e) { notify(`Não foi possível gerar a planilha: ${e.message}`); }
+    setGerandoPlanilha(false);
+  };
+
+  /* Os comprovantes do Pix do mês num ZIP, uma pasta por conta — o que o contador pede junto com
+     a planilha. Um por vez, como o ZIP de despesas: em paralelo o Drive devolve erro de cota. */
+  const baixarComprovantesDoMes = async () => {
+    const lista = recebidosNoMes.flatMap(({ c, f }) => rec.comprovantesDe(c.id).map((a) => ({ c, f, a })));
+    if (!lista.length) { notify("Nenhum comprovante anexado aos recebimentos deste mês."); return; }
+    const limpo = (s) => String(s || "").replace(/[\\/:*?"<>|]+/g, "-").trim().slice(0, 80);
+    setZipando({ feito: 0, total: lista.length });
+    const arquivos = [];
+    let falhas = 0;
+    for (const [i, { c, f, a }] of lista.entries()) {
+      try {
+        const blob = await rec.baixar(a);
+        const extensao = (String(a.nomeArquivo).match(/\.[a-z0-9]{2,5}$/i)?.[0] || (a.mimeType === "application/pdf" ? ".pdf" : ".jpg")).toLowerCase();
+        const conta = limpo(rec.nomeDaConta(c.contaRecebimento) || "Conta não informada");
+        arquivos.push({
+          caminho: `${conta}/${f.dataPagamento} - ${limpo(c.nome)} - ${fmtReal(f.recebido).replace(/\s/g, " ")} - ${i + 1}${extensao}`,
+          dados: new Uint8Array(await blob.arrayBuffer()),
+        });
+      } catch { falhas += 1; }
+      setZipando({ feito: i + 1, total: lista.length });
+    }
+    setZipando(null);
+    if (!arquivos.length) { notify("Não foi possível baixar os comprovantes agora. Tente de novo em instantes."); return; }
+    Fin.baixarBlob(Fin.criarZip(arquivos), `comprovantes-recebimentos-fn-${mes}.zip`);
+    notify(falhas ? `ZIP gerado, mas ${falhas} comprovante(s) não baixaram — gere de novo para tentar incluí-los.` : "ZIP dos comprovantes gerado ✓");
+  };
+
+  const th = { textAlign: "left", padding: "7px 9px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}`, whiteSpace: "nowrap", fontSize: 12.5 };
+  const td = { padding: "7px 9px", borderBottom: `1px solid ${CINZA_BORDA}`, fontSize: 13, verticalAlign: "top" };
+  const quemPagou = (p) => (
+    <>
+      <strong>{p.pagador?.nome || <span style={{ fontWeight: 400, color: "#65758b" }}>Nome não informado pelo Mercado Pago</span>}</strong>
+      <div style={{ fontSize: 11.5, color: "#65758b" }}>
+        {[formaDoMercadoPago(p), p.pagador?.documento ? Fin.formatarCpfCnpj(p.pagador.documento) : "", p.pagador?.banco, p.descricao].filter(Boolean).join(" · ")}
+      </div>
+    </>
+  );
+  const cadastro = (x) => (
+    <><strong>{x.clienteNome || "—"}</strong><div style={{ fontSize: 11.5, color: "#65758b" }}>{x.servico || "—"}{x.empreendimento ? ` · ${x.empreendimento}` : ""}</div></>
+  );
+  const tabela = (cabecalhos, linhas) => (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead><tr>{cabecalhos.map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+        <tbody>{linhas}</tbody>
+      </table>
+    </div>
+  );
+  const nadaA = (texto) => <p style={{ fontSize: 13, color: "#1B7F4B", margin: 0 }}>{texto} ✓</p>;
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <h2 style={{ margin: 0, fontSize: 18, color: AZUL_MARINHO }}>Conciliação Mercado Pago</h2>
+      <p style={{ fontSize: 13, color: "#65758b", margin: 0 }}>
+        O que entrou na conta do Mercado Pago da FN, conferido com os cadastros. Pagamento por link entra sozinho; o que entrou sem link
+        (Pix direto na chave) aparece aqui para você dizer de quem é. Para não precisar disso, mande sempre o link gerado no Setor de cobrança.
+      </p>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div>
+          <label style={{ ...lab, display: "block", marginBottom: 4 }}>Mês</label>
+          <input type="month" style={{ ...inp, width: "auto" }} value={mes} max={mesHoje} onChange={(e) => e.target.value && setMes(e.target.value)} />
+        </div>
+        <button className="btn-mini" onClick={() => buscar()} disabled={carregando}>
+          {carregando ? <Loader2 size={12} className="spin" /> : <RefreshCcw size={12} />} Conferir de novo
+        </button>
+        <button className="btn-solid" style={{ width: "auto" }} onClick={baixarPlanilha} disabled={gerandoPlanilha}>
+          {gerandoPlanilha ? <Loader2 size={14} className="spin" /> : <FileSpreadsheet size={14} />} Planilha do mês para o contador
+        </button>
+        <button className="btn-mini" onClick={baixarComprovantesDoMes} disabled={!!zipando}>
+          {zipando ? <><Loader2 size={12} className="spin" /> {zipando.feito}/{zipando.total}</> : <><Archive size={12} /> Comprovantes do mês (.zip)</>}
+        </button>
+      </div>
+      {Object.keys(totalPorConta).length > 0 && (
+        <p style={{ fontSize: 12.5, color: "#4a5a70", margin: 0 }}>
+          <strong>Recebido no mês por conta</strong> (cadastros, pela data do pagamento):{" "}
+          {Object.entries(totalPorConta).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}: ${fmtReal(v)}`).join(" · ")}
+        </p>
+      )}
+      {falha && <AvisoFin tom="erro">{falha}</AvisoFin>}
+      {carregando && !dados && <p style={{ fontSize: 13, color: "#65758b", margin: 0 }}><Loader2 size={13} className="spin" /> Consultando o Mercado Pago…</p>}
+
+      {dados && (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }}>
+            <KpiCard label="Entrou no Mercado Pago" valor={fmtReal(dados.totais.bruto)} Icon={DollarSign} percentual={`${dados.totais.quantidade} pagamento(s)`} />
+            <KpiCard label="Tarifas do Mercado Pago" valor={fmtReal(dados.totais.taxa)} Icon={Receipt} cor="#B26A00" />
+            <KpiCard label="Caiu na conta (líquido)" valor={fmtReal(dados.totais.liquido)} Icon={Wallet} cor="#1B7F4B" />
+            <KpiCard label="Precisa de conferência" valor={pendencias} Icon={AlertTriangle} cor={pendencias ? "#C62828" : "#1B7F4B"} />
+          </div>
+          {Object.keys(porForma).length > 0 && (
+            <p style={{ fontSize: 12.5, color: "#4a5a70", margin: 0 }}>
+              {Object.entries(porForma).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}: ${fmtReal(v)}`).join(" · ")}
+              {dados.totais.estornado > 0 && <> · <span style={{ color: "#A12020" }}>estornado: {fmtReal(dados.totais.estornado)}</span></>}
+            </p>
+          )}
+
+          <Card icon={Link2} titulo={`Entrou sem link — de quem é? (${semCadastro.length})`}>
+            <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
+              Pix ou pagamento que chegou na conta sem passar por um link do sistema. Escolha o cadastro e vincule: o cadastro fica pago com
+              a data e o valor do Mercado Pago, e a tarifa vira despesa. Se o cadastro já estava pago à mão, o vínculo só registra de onde
+              veio o dinheiro — não soma de novo.
+            </p>
+            <p style={{ fontSize: 13, color: "#8a5300", margin: "0 0 10px" }}>
+              O Mercado Pago não informa o nome de quem paga Pix direto na chave — só o banco. Confira data, hora, valor e banco com o
+              comprovante que o cliente mandou. Pagamento pelo link já chega com o cadastro certo.
+            </p>
+            {semCadastro.length === 0 ? nadaA("Nada sem cadastro neste mês.") : tabela(["Data", "Valor", "Quem pagou", "De quem é"], semCadastro.map((p) => {
+              const sug = sugestoes(p);
+              const achados = encontrados(busca[p.id]);
+              const escolhido = escolha[p.id] ? clientes.find((c) => c.id === escolha[p.id]) : null;
+              return (
+                <tr key={p.id}>
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtDataHora(p.aprovadoEm)}</td>
+                  <td style={{ ...td, whiteSpace: "nowrap", fontWeight: 700 }}>{fmtReal(p.valor)}</td>
+                  <td style={td}>{quemPagou(p)}</td>
+                  <td style={{ ...td, minWidth: 260 }}>
+                    {sug.length > 0 && (
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+                        {sug.map(({ c, motivo, detalhe }) => (
+                          <button key={c.id} className="btn-mini" title={motivo}
+                            style={escolha[p.id] === c.id ? { background: "#1B7F4B", color: "#fff" } : undefined}
+                            onClick={() => setEscolha((e) => ({ ...e, [p.id]: c.id }))}>
+                            {escolha[p.id] === c.id ? "✓ " : ""}{c.nome} <span style={{ opacity: .75 }}>· {motivo}{detalhe ? ` · ${detalhe}` : ""}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <input style={{ ...inp, padding: "5px 8px" }} placeholder="Buscar por nome, CPF ou empreendimento" value={busca[p.id] || ""}
+                      onChange={(e) => setBusca((b) => ({ ...b, [p.id]: e.target.value }))} />
+                    {achados.length > 0 && (
+                      <div style={{ display: "grid", gap: 4, marginTop: 4 }}>
+                        {achados.map(({ c, f }) => (
+                          <button key={c.id} className="btn-mini" style={{ justifyContent: "flex-start", ...(escolha[p.id] === c.id ? { background: AZUL_MARINHO, color: "#fff" } : {}) }}
+                            onClick={() => { setEscolha((e) => ({ ...e, [p.id]: c.id })); setBusca((b) => ({ ...b, [p.id]: "" })); }}>
+                            {c.nome} · {c.empreendimento || "—"} · {f.situacao} {f.valor ? fmtReal(f.valor) : ""}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <button className="btn-solid" style={{ marginTop: 6, width: "auto" }} disabled={!escolhido || trabalhando === p.id}
+                      onClick={() => { if (window.confirm(`Vincular ${fmtReal(p.valor)} ao cadastro de ${escolhido.nome}?`)) registrar(p, escolhido.id); }}>
+                      {trabalhando === p.id ? <Loader2 size={13} className="spin" /> : <Link2 size={13} />} {escolhido ? `Vincular a ${escolhido.nome}` : "Escolha o cadastro"}
+                    </button>
+                  </td>
+                </tr>
+              );
+            }))}
+          </Card>
+
+          <Card icon={Clock} titulo={`Pago pelo link, sem baixa no sistema (${faltaBaixa.length})`}>
+            <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
+              O cliente pagou o link, mas o aviso do Mercado Pago não chegou ao sistema. "Dar baixa" faz o que o aviso faria.
+            </p>
+            {faltaBaixa.length === 0 ? nadaA("Todos os links pagos já têm baixa.") : tabela(["Data", "Valor", "Cadastro", ""], faltaBaixa.map((p) => (
+              <tr key={p.id}>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtDataHora(p.aprovadoEm)}</td>
+                <td style={{ ...td, whiteSpace: "nowrap", fontWeight: 700 }}>{fmtReal(p.valor)}</td>
+                <td style={td}>
+                  {cadastro(p)}
+                  {p.linkCancelado && (
+                    <div style={{ fontSize: 11.5, color: "#A12020" }}>
+                      O link tinha sido cancelado por uma baixa à mão. Confira se o cliente não pagou duas vezes antes de dar baixa.
+                    </div>
+                  )}
+                </td>
+                <td style={{ ...td, textAlign: "right" }}>
+                  <button className="btn-mini" disabled={trabalhando === p.id} onClick={() => registrar(p, null)}>
+                    {trabalhando === p.id ? <Loader2 size={12} className="spin" /> : <Check size={12} />} Dar baixa
+                  </button>
+                </td>
+              </tr>
+            )))}
+          </Card>
+
+          {(estornos.length > 0 || duplicados.length > 0 || outros.length > 0) && (
+            <Card icon={Undo2} titulo={`Estornos e casos para olhar (${estornos.length + duplicados.length + outros.length})`}>
+              <div style={{ display: "grid", gap: 8 }}>
+                {estornos.filter((p) => p.pagoNoCadastro).length > 0 && (
+                  <AvisoFin tom="erro">
+                    Dinheiro devolvido ao cliente e o cadastro ainda diz Pago. Ajuste no Setor de cobrança (Pendente ou Parcial), senão o
+                    Financeiro conta uma receita que voltou.
+                  </AvisoFin>
+                )}
+                {duplicados.length > 0 && (
+                  <AvisoFin tom="atencao">O mesmo link foi pago duas vezes. Devolva o pagamento repetido pelo painel do Mercado Pago.</AvisoFin>
+                )}
+                {tabela(["Data", "Valor", "Situação", "Cadastro"], [...estornos, ...duplicados, ...outros].map((p) => (
+                  <tr key={p.id}>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtDataHora(p.aprovadoEm)}</td>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtReal(p.valor)}</td>
+                    <td style={td}>
+                      {p.situacao === "estornado" ? `Estornado${p.valorEstornado ? ` (${fmtReal(p.valorEstornado)})` : ""}` : p.situacao === "duplicado" ? "Pago duas vezes" : p.status}
+                      {p.pagoNoCadastro && <div style={{ fontSize: 11.5, color: "#A12020" }}>ainda Pago no cadastro</div>}
+                    </td>
+                    <td style={td}>{p.clienteNome ? cadastro(p) : quemPagou(p)}</td>
+                  </tr>
+                )))}
+              </div>
+            </Card>
+          )}
+
+          <Card icon={AlertTriangle} titulo={`Pago no sistema, sem pagamento no Mercado Pago (${soNoSistema.length})`}>
+            <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
+              Baixa feita à mão como "Mercado Pago" (ou link pago) que nenhum pagamento deste mês confirma. Se o Pix aparece lá em cima, em
+              "Entrou sem link", vincule a este cadastro. Se não entrou dinheiro nenhum, corrija a baixa no Setor de cobrança.
+            </p>
+            {soNoSistema.length === 0 ? nadaA("Toda baixa pelo Mercado Pago tem pagamento.") : tabela(["Pago em", "Valor", "Cadastro", "Como"], soNoSistema.map((x) => (
+              <tr key={`${x.tipo}-${x.cobrancaId || x.clienteId}`}>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtData(x.pagoEm)}</td>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtReal(x.valor)}</td>
+                <td style={td}>{cadastro(x)}</td>
+                <td style={{ ...td, color: "#65758b" }}>{x.tipo === "link" ? `link · pagamento ${x.mpPaymentId || "—"}` : "baixa à mão"}</td>
+              </tr>
+            )))}
+          </Card>
+
+          <Card icon={Check} titulo={`Conferidos (${conferidos.length})`}>
+            {conferidos.length === 0 ? <p style={{ fontSize: 13, color: "#65758b", margin: 0 }}>Nenhum pagamento conferido neste mês.</p> : (
+              <details>
+                <summary style={{ cursor: "pointer", fontSize: 13, color: AZUL_MARINHO }}>Ver os {conferidos.length} pagamentos</summary>
+                <div style={{ marginTop: 8 }}>
+                  {tabela(["Data", "Valor", "Tarifa", "Líquido", "Forma", "Cadastro"], conferidos.map((p) => (
+                    <tr key={p.id}>
+                      <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtDataHora(p.aprovadoEm)}</td>
+                      <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtReal(p.valor)}</td>
+                      <td style={{ ...td, whiteSpace: "nowrap", color: "#B26A00" }}>{fmtReal(p.taxa)}</td>
+                      <td style={{ ...td, whiteSpace: "nowrap", color: "#1B7F4B" }}>{fmtReal(p.liquido)}</td>
+                      <td style={td}>{formaDoMercadoPago(p)}</td>
+                      <td style={td}>{p.situacao === "marketplace" ? <span style={{ color: "#65758b" }}>Pedido do marketplace{p.pedidoPago ? "" : " (sem baixa no pedido)"}</span> : cadastro(p)}</td>
+                    </tr>
+                  )))}
+                </div>
+              </details>
+            )}
+          </Card>
+          <p style={{ fontSize: 11.5, color: "#8593a8", margin: 0 }}>Consultado no Mercado Pago em {fmtDataHora(dados.consultadoEm)}.</p>
+        </>
+      )}
+
+      {/* Fora do bloco do Mercado Pago de propósito: a conta secundária se confere pelo comprovante,
+          e a lista dela continua aqui mesmo se a consulta ao Mercado Pago falhar. */}
+      {rec.carregado && (rec.contasPorComprovante.length === 0 ? (
+        <Card icon={Wallet} titulo="Outras contas de recebimento">
+          <p style={{ fontSize: 13, color: "#65758b", margin: 0 }}>
+            Se a FN também recebe em outra conta, cadastre-a em Financeiro › Configurações Fiscais › Contas de recebimento. A conferência
+            dela é pelo comprovante do Pix, anexado na baixa do cliente (Agendamento › Cobrança).
+          </p>
+        </Card>
+      ) : (
+        <Card icon={Wallet} titulo={`Contas conferidas pelo comprovante — ${naContaSecundaria.length} recebimento(s), ${semComprovante.length} sem comprovante`}>
+          <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
+            O que caiu em {rec.contasPorComprovante.map((c) => `"${c.nome}"`).join(", ")} neste mês, pela baixa do Setor de cobrança. Essas contas não
+            têm ligação com o sistema: a conferência é o comprovante do Pix. Tudo aqui é faturamento da FN — entra no MEI e na planilha do contador.
+          </p>
+          {semComprovante.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <AvisoFin tom="atencao">{semComprovante.length} recebimento(s) sem comprovante. Anexe o Pix que o cliente mandou, aqui mesmo ou na cobrança dele.</AvisoFin>
+            </div>
+          )}
+          {naContaSecundaria.length === 0 ? <p style={{ fontSize: 13, color: "#65758b", margin: 0 }}>Nenhum recebimento nessas contas neste mês.</p>
+            : tabela(["Pago em", "Valor", "Cadastro", "Conta", "Comprovante"], naContaSecundaria.map(({ c, f }) => (
+              <tr key={c.id}>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtData(f.dataPagamento)}</td>
+                <td style={{ ...td, whiteSpace: "nowrap", fontWeight: 700 }}>{fmtReal(f.recebido)}</td>
+                <td style={td}>{cadastro({ clienteNome: c.nome, servico: c.servico, empreendimento: [c.empreendimento, c.blocoTorre].filter(Boolean).join(" · ") })}</td>
+                <td style={td}>{rec.nomeDaConta(c.contaRecebimento)}</td>
+                <td style={{ ...td, minWidth: 220 }}><BlocoComprovanteRecebimento cliente={c} podeAgir notify={notify} /></td>
+              </tr>
+            )))}
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+/* Contas de recebimento (Configurações Fiscais). A PJ do Mercado Pago é fixa — é a dos links e da
+   conciliação automática. As outras a Gerência cadastra aqui, e a conferência delas é pelo
+   comprovante do Pix. Desativar só tira a conta da lista da baixa: o que já caiu nela continua lá. */
+function CardContasRecebimento({ notify }) {
+  const rec = useRecebimentos();
+  const [nome, setNome] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const adicionar = async () => {
+    if (nome.trim().length < 2) { notify("Dê um nome à conta (por exemplo: Mercado Pago secundária)."); return; }
+    setSalvando(true);
+    try { await rec.adicionarConta(nome.trim()); setNome(""); notify("Conta cadastrada ✓"); }
+    catch (e) { notify(`Não foi possível cadastrar: ${e.message}`); }
+    setSalvando(false);
+  };
+  const alternar = async (c) => {
+    try { await rec.atualizarConta(c.id, { ativa: !c.ativa }); notify(c.ativa ? "Conta desativada" : "Conta reativada ✓"); }
+    catch (e) { notify(`Não foi possível alterar: ${e.message}`); }
+  };
+  const td = { padding: "7px 9px", borderBottom: `1px solid ${CINZA_BORDA}`, fontSize: 13 };
+  return (
+    <Card icon={Wallet} titulo="Contas de recebimento">
+      <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 10px" }}>
+        Onde a FN recebe dos clientes. A conta PJ do Mercado Pago é conferida sozinha (Financeiro › Conciliação Mercado Pago); as outras,
+        pelo comprovante do Pix anexado na baixa do cliente. O dinheiro de cliente em qualquer conta é faturamento da FN: entra no limite do
+        MEI e na planilha do contador.
+      </p>
+      {!rec.carregado ? <p style={{ fontSize: 13, color: "#65758b", margin: 0 }}><Loader2 size={13} className="spin" /> Carregando…</p> : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>{rec.contas.map((c) => (
+              <tr key={c.id}>
+                <td style={td}><strong>{c.nome}</strong></td>
+                <td style={{ ...td, color: "#65758b" }}>{c.conferencia === "api" ? "conferida pelo Mercado Pago (automática)" : "conferida pelo comprovante do Pix"}</td>
+                <td style={{ ...td, color: c.ativa ? "#1B7F4B" : "#8593a8" }}>{c.ativa ? "ativa" : "desativada"}</td>
+                <td style={{ ...td, textAlign: "right" }}>
+                  {c.id !== CONTA_MP_PJ && <button className="btn-mini" onClick={() => alternar(c)}>{c.ativa ? "Desativar" : "Reativar"}</button>}
+                </td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginTop: 12 }}>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <label style={{ ...lab, display: "block", marginBottom: 4 }}>Nova conta</label>
+          <input style={{ ...inp, width: "100%" }} value={nome} maxLength={60} placeholder="Ex.: Mercado Pago secundária"
+            onChange={(e) => setNome(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") adicionar(); }} />
+        </div>
+        <button className="btn-solid" style={{ width: "auto" }} onClick={adicionar} disabled={salvando}>
+          {salvando ? <Loader2 size={14} className="spin" /> : <Plus size={14} />} Cadastrar conta
+        </button>
+      </div>
+    </Card>
+  );
+}
+
+function AbaFinanceiroDespesas({ sub, fin, clientes = [], docs = [], precos = [], usuarios = [], usuarioAtual, telaEstreita, notify, token, updCliente, recarregarClientes }) {
   const comum = { fin, clientes, usuarios, usuarioAtual, telaEstreita, notify };
   /* Folha: vistoriadores, salário fixo e extras. O comprovante se anexa na despesa do
      pagamento, por isso a folha recebe o "fin" inteiro. */
   if (sub === "fin-folha") return <AbaFolhaPagamento token={token} apiFetch={apiFetch} notify={notify} fin={fin} usuarios={usuarios} />;
   if (sub === "fin-conferencia") return <AbaConferenciaPagamentos clientes={clientes} docs={docs} precos={precos} updCliente={updCliente} notify={notify} />;
+  if (sub === "fin-conciliacao") return <AbaMercadoPago token={token} fin={fin} clientes={clientes} docs={docs} precos={precos} notify={notify} recarregarClientes={recarregarClientes} />;
   if (sub === "fin-notas") return <AbaFinNotas {...comum} />;
   if (sub === "fin-deslocamentos") return <AbaFinDeslocamentos {...comum} docs={docs} precos={precos} />;
   if (sub === "fin-relatorios") return <AbaFinRelatorios fin={fin} clientes={clientes} docs={docs} precos={precos} notify={notify} />;
   if (sub === "fin-indicadores") return <AbaFinIndicadores fin={fin} clientes={clientes} docs={docs} precos={precos} token={token} />;
+  /* Créditos de IA (src/ia-creditos.jsx): gasto estimado da OpenAI e do Claude e o limite de
+     gravação de cada técnico na patologia por voz. */
+  if (sub === "fin-ia") return <AbaCreditosIA apiFetch={apiFetch} token={token} notify={notify} />;
   if (sub === "fin-config") return (
     <div style={{ display: "grid", gap: 16 }}>
       <AbaFinConfig fin={fin} clientes={clientes} docs={docs} precos={precos} />
       <CardValoresCustos token={token} apiFetch={apiFetch} notify={notify} />
+      <CardContasRecebimento notify={notify} />
     </div>
   );
   return <AbaFinDespesas {...comum} />;
@@ -14721,7 +15777,7 @@ function AbaGerenciaReformas({ usuarioAtual, perfil, token }) {
    ficavam somados num total só: histórico importado × operação de hoje, vistoria × ART/TRT, e
    por empreendimento/construtora. O recorte de período (mês, trimestre, ano) vale para os três.
    ============================================================ */
-function AbaGerenciaIndicadores({ clientes = [], docs = [], precos = [], carregando }) {
+function AbaGerenciaIndicadores({ clientes = [], docs = [], precos = [], carregando, token, aoAbrirFnHome }) {
   const [periodo, setPeriodo] = useState(PERIODO_TUDO);
   const [origem, setOrigem] = useState("tudo"); // "tudo" | "historico" | "atual"
   const [buscaObra, setBuscaObra] = useState("");
@@ -14883,6 +15939,11 @@ function AbaGerenciaIndicadores({ clientes = [], docs = [], precos = [], carrega
           {blocoServico({ titulo: "Documentação ART/TRT", Icon: FileText, cor: "#6E36BE", resumo: resumoDoc, resumoAntes: resumoDocAntes, rotuloConcluido: "Documentações prontas" })}
         </div>
       </Card>
+
+      {/* O FN Home no mesmo recorte. A origem (base antiga/operação atual) não se aplica: é venda
+          de parceiro, não atendimento. */}
+      <CardFnHomeNosIndicadores token={token} apiFetch={apiFetch} {...datasDoPeriodo(periodo)}
+        rotulo={rotuloPeriodo(periodo)} aoAbrir={aoAbrirFnHome} />
 
       <Card icon={Building2} titulo={`Por empreendimento e construtora — ${rotuloPeriodo(periodo)}`}>
         <input style={{ ...inp, marginBottom: 12 }} placeholder="Filtrar por empreendimento ou construtora…"
@@ -15773,7 +16834,7 @@ function AbaGerenciaImportacao({ clientes = [], precos = [], empreendimentosRef 
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, decidirComissaoItem, importarClientesHistorico, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas }) {
+function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, decidirComissaoItem, importarClientesHistorico, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], carregarEmpreendimentosRef, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas, aoAbrirFnHome }) {
   if (sub === "painel") {
     return <AbaGerenciaPainelEstrategico clientes={clientes} docs={docs} usuarios={usuarios} precos={precos}
       avaliacoes={avaliacoes} prospeccao={prospeccao} prospeccaoParceiros={prospeccaoParceiros}
@@ -15783,7 +16844,7 @@ function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, de
       patologiasIndisponivel={painelPatologiasIndisponivel} recarregarPatologias={carregarPainelPatologias} />;
   }
   if (sub === "indicadores") {
-    return <AbaGerenciaIndicadores clientes={clientes} docs={docs} precos={precos} carregando={carregando} />;
+    return <AbaGerenciaIndicadores clientes={clientes} docs={docs} precos={precos} carregando={carregando} token={token} aoAbrirFnHome={aoAbrirFnHome} />;
   }
   if (sub === "importacao") {
     return <AbaGerenciaImportacao clientes={clientes} precos={precos} empreendimentosRef={empreendimentosRef}
@@ -15804,6 +16865,39 @@ function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, de
     return <CardBancoPatologias patologias={patologiasBanco} carregando={patologiasBancoCarregando}
       onCriar={criarPatologia} onAtualizar={atualizarPatologia} onExcluir={excluirPatologia}
       onImportar={importarPatologiasEstaticas} notify={notify} />;
+  }
+  if (sub === "empreendimentos") {
+    return <AbaEmpreendimentosCadastro token={token} apiFetch={apiFetch} notify={notify} aoMudar={carregarEmpreendimentosRef} />;
+  }
+  if (sub === "clube-parceiros") {
+    return (
+      <div style={{ display: "grid", gap: 16 }}>
+        <AvisoCasaProntaNoClube apiFetch={apiFetch} />
+        <AbaGerenciaParceiros parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro}
+          criarParceiroManual={criarParceiroManual} podeExcluir excluirParceiro={excluirParceiro}
+          salvarItemCatalogo={salvarItemCatalogo} excluirItemCatalogo={excluirItemCatalogo}
+          vales={vales} valesCarregando={valesCarregando} vendas={vendas} vendasCarregando={vendasCarregando} atualizarVenda={atualizarVenda}
+          notify={notify} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem}
+          prospeccaoParceiros={prospeccaoParceiros} prospeccaoParceirosCarregando={prospeccaoParceirosCarregando}
+          atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
+          importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao} meuConvite={meuConvite} />
+      </div>
+    );
+  }
+  if (sub === "clube-visibilidade") {
+    /* A prévia é a mesma seção do portal do cliente (FN Clube, sem as abas): a Gerência vê o que
+       vai aparecer antes de ligar. */
+    return (
+      <AbaVisibilidadeClube apiFetch={apiFetch} token={token} notify={notify}>
+        <SecaoParceirosVitrine notify={notify} tipoInicial="servico" semAbas />
+      </AbaVisibilidadeClube>
+    );
+  }
+  if (sub === "fn-home-ml") {
+    return <AbaProdutosMercadoLivre token={token} apiFetch={apiFetch} notify={notify} redimensionar={redimensionar} />;
+  }
+  if (sub === "fn-home-financeiro") {
+    return <AbaFinanceiroFnHome token={token} apiFetch={apiFetch} notify={notify} />;
   }
   if (sub === "prospeccao") {
     return <CardProspeccao prospeccao={prospeccao} carregando={prospeccaoCarregando} atualizar={atualizarProspeccao}
@@ -16232,10 +17326,16 @@ function PaginaAvaliarPublica({ id, tipo, servico }) {
   // está fresca, em vez de deixar essa venda pra outro contato, em outro dia.
   useEffect(() => {
     if (!enviado) return;
-    const t = setTimeout(() => {
-      window.location.href = `${window.location.origin}${window.location.pathname}?pagina=fn-clube`;
-    }, 2500);
-    return () => clearTimeout(t);
+    let vivo = true;
+    let t;
+    /* Com o FN Clube oculto pela Gerência, o convite vai para a loja FN Home, aberta a todos. */
+    clubeVisivelParaClientes(apiFetch).then((clube) => {
+      if (!vivo) return;
+      t = setTimeout(() => {
+        window.location.href = `${window.location.origin}${window.location.pathname}?pagina=${clube ? "fn-clube" : "fn-home"}`;
+      }, 2500);
+    });
+    return () => { vivo = false; clearTimeout(t); };
   }, [enviado]);
 
   return (
@@ -16544,7 +17644,7 @@ function CartaoAtendimentoCliente({ doc, cpf, notify, emailConhecido }) {
 
 const OUTROS = "__outros__";
 
-function AbaCliente({ notify, onLogin, onIrParaLogin }) {
+function AbaCliente({ notify, onLogin }) {
   const [form, setForm] = useState(novoCadastroCliente());
   const [enviando, setEnviando] = useState(false);
 
@@ -16570,7 +17670,7 @@ function AbaCliente({ notify, onLogin, onIrParaLogin }) {
       } catch { /* dropdown vira "Outros" direto se a lista não carregar */ }
     })();
   }, []);
-  const construtorasDisponiveis = [...new Set(refEmpreendimentos.map((e) => e.construtora))].sort();
+  const construtorasDisponiveis = [...new Set(refEmpreendimentos.map((e) => e.construtora).filter(Boolean))].sort();
   const empreendimentosDisponiveis = [...new Set(
     refEmpreendimentos.filter((e) => e.construtora === construtoraSel).map((e) => e.empreendimento)
   )].sort();
@@ -16612,6 +17712,8 @@ function AbaCliente({ notify, onLogin, onIrParaLogin }) {
     if (!form.senha.trim() || form.senha.length < 6) { notify("Crie uma senha de no mínimo 6 caracteres para acessar seu portal"); return; }
     if (!form.email.trim()) { notify("Informe um e-mail para criar a senha do portal"); return; }
     if (!form.aceiteTermos) { notify("Marque o aceite da política de privacidade para continuar"); return; }
+    if (form.dataDesejada && form.dataDesejada < paraChaveISO(new Date())) { notify("A data desejada precisa ser de hoje em diante — confira o ano"); return; }
+    if (form.dataDesejada && !confirmarDataDistante(form.dataDesejada)) return;
     const construtoraFinal = construtoraSel === OUTROS ? construtoraOutros.trim() : construtoraSel;
     const empreendimentoFinal = empreendimentoSel === OUTROS ? empreendimentoOutros.trim() : empreendimentoSel;
     const precisaCadastroEmpreendimento = construtoraSel === OUTROS || empreendimentoSel === OUTROS;
@@ -16630,7 +17732,7 @@ function AbaCliente({ notify, onLogin, onIrParaLogin }) {
       setConstrutoraSel(""); setEmpreendimentoSel(""); setConstrutoraOutros(""); setEmpreendimentoOutros("");
       // Já criou senha no cadastro: entra direto no portal, sem precisar logar de novo.
       if (r.token && onLogin) {
-        onLogin({ token: r.token, usuario: r.usuario });
+        onLogin({ token: r.token, usuario: r.usuario }, { recemCadastrado: true });
       } else {
         notify("Cadastro realizado ✓");
       }
@@ -16651,6 +17753,10 @@ function AbaCliente({ notify, onLogin, onIrParaLogin }) {
                 ? "Sua solicitação de ART/TRT de reforma já foi para a nossa equipe de Documentação. Entre com seu e-mail e senha para acompanhar — quando ficar pronta, você baixa os documentos por lá."
                 : "Recebemos seus dados. Nossa equipe entra em contato para confirmar o atendimento. Entre com seu e-mail e senha para acompanhar."}
             </div>
+            {/* Só aparece quando o cadastro não abriu o portal sozinho (lá a loja já vem aberta). */}
+            <a href="?pagina=fn-home" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 13.5, fontWeight: 700, color: AZUL_MARINHO }}>
+              <ShoppingBag size={15} /> Enquanto isso, conheça a loja FN Home →
+            </a>
             <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: "#fff", marginTop: 10, padding: "6px 12px" }} onClick={() => setCadastroRealizado(null)}>
               Fazer outro cadastro
             </button>
@@ -16791,7 +17897,13 @@ function AbaCliente({ notify, onLogin, onIrParaLogin }) {
           <Field label="Bloco / Apto" value={form.blocoTorre} onChange={(v) => setFMaiusc("blocoTorre", v)} />
           {form.servico === SERVICO_OPCOES[0] && (
             <>
-              <Field label="Data desejada" type="date" value={form.dataDesejada} onChange={(v) => setF("dataDesejada", v)} />
+              <div style={cell(false)}>
+                <label style={lab}>Data desejada</label>
+                <input style={inp} type="date" min={paraChaveISO(new Date())} value={form.dataDesejada} onChange={(e) => setF("dataDesejada", e.target.value)} />
+                {avisoDataDesejada(form.dataDesejada) && (
+                  <span style={{ fontSize: 11.5, color: "#C62828", fontWeight: 600 }}>{avisoDataDesejada(form.dataDesejada)}</span>
+                )}
+              </div>
               <div style={cell(false)}>
                 <label style={lab}>Horário desejado</label>
                 <select style={inp} value={form.horarioDesejado} onChange={(e) => setF("horarioDesejado", e.target.value)}>
@@ -16823,7 +17935,9 @@ function AbaCliente({ notify, onLogin, onIrParaLogin }) {
       </Card>
 
       <SecaoFeedbackVitrine notify={notify} />
-      <SecaoParceirosVitrine notify={notify} onIrParaLogin={onIrParaLogin} somenteLogos />
+      {/* O card "Benefícios Exclusivos FN" (logos dos parceiros) que ficava aqui saiu a pedido da
+          Gerência (nov/2026): sozinho, com só o logo do FN Home, não dizia nada. A loja já tem a
+          sua chamada no topo da página (DestaqueLojaFnHome). */}
     </div>
   );
 }
@@ -16842,8 +17956,9 @@ const PARCEIRO_TIPO_LABEL = { servico: "Parceiro", produto: "Afiliado" };
    (afiliados que vendem produto) são as duas áreas de benefícios dentro dela — mesmo
    cadastro de sempre (campo "tipo"), só a apresentação ao cliente muda por área. */
 const FN_AREA_INFO = {
-  servico: { titulo: "FN Clube", descricao: "Serviços selecionados para seu imóvel, com benefícios exclusivos para clientes FN." },
-  produto: { titulo: "FN Home", descricao: "Produtos e vantagens para transformar seu imóvel em lar, com condições exclusivas FN." },
+  servico: { titulo: "FN Clube", descricao: "Restaurantes, farmácias, academias, terapias e prestadores homologados pela FN para cuidar do seu imóvel, com desconto exclusivo para clientes FN." },
+  /* "Aberta a todos" é de propósito: quem ainda não é cliente achava que a loja era fechada. */
+  produto: { titulo: "Loja FN Home", descricao: "Produtos escolhidos pela equipe técnica da FN para equipar o seu imóvel. Aberta a todos: não precisa ser cliente nem ter cadastro." },
 };
 
 const PARCEIRO_STATUS_OPCOES = ["em_analise", "aprovado", "suspenso", "encerrado"];
@@ -16895,6 +18010,8 @@ function mapParceiroDaApi(p) {
     instagram: p.instagram || "", site: p.site || "", logo: p.logo || "", email: p.email || "",
     comissao: safeParseArray(p.comissao),
     beneficio: p.beneficio || "", descricaoBeneficio: p.descricao_beneficio || p.descricaoBeneficio || "",
+    /* Ramo no FN Clube (restaurantes, farmácias…) — chaves e rótulos em clube-fn.jsx. */
+    ramo: p.ramo || "",
     avaliacao: p.avaliacao || "",
     comissoesPendentes: Number(p.comissoes_pendentes || 0),
     /* Quem convidou este parceiro — é o que liga o cadastro ao vendedor, do aviso da
@@ -16967,7 +18084,7 @@ function resumoDaProposta(comissao = []) {
 const novoCadastroParceiro = () => ({
   email: "", senha: "", tipo: "servico", empresa: "", responsavel: "", cnpj: "",
   cidade: "", uf: "", whatsapp: "", instagram: "", site: "", logo: "",
-  comissao: [novaComissaoLinha()], beneficio: "", descricaoBeneficio: "",
+  comissao: [novaComissaoLinha()], beneficio: "", descricaoBeneficio: "", ramo: "",
 });
 
 /* ---- Modal interno: Vendas/Gerência cadastra um parceiro em nome dele (ex.: negociou por
@@ -16990,6 +18107,7 @@ function ModalCriarParceiroManual({ onFechar, criarParceiroManual, notify }) {
     if (!form.empresa.trim() || !form.responsavel.trim()) { setErro("Informe a empresa e o responsável."); return; }
     if (!form.cidade.trim() || !form.uf.trim()) { setErro("Informe cidade e UF."); return; }
     if (!form.whatsapp.trim()) { setErro("Informe um WhatsApp para contato."); return; }
+    if (form.tipo === "servico" && !form.ramo) { setErro("Escolha o ramo do parceiro no FN Clube."); return; }
     const comissaoValida = form.comissao.filter((l) => l.name.trim() && l.p !== "");
     if (comissaoValida.length === 0) { setErro("Adicione ao menos uma categoria de comissão com percentual."); return; }
 
@@ -17020,6 +18138,9 @@ function ModalCriarParceiroManual({ onFechar, criarParceiroManual, notify }) {
               {PARCEIRO_TIPO_OPCOES.map((o) => <option key={o.valor} value={o.valor}>{o.label}</option>)}
             </select>
           </div>
+          {form.tipo === "servico" && (
+            <SeletorRamo valor={form.ramo} aoMudar={(v) => setF("ramo", v)} estiloCelula={cell()} estiloRotulo={lab} estiloCampo={inp} />
+          )}
           <Field label="CNPJ/CPF" value={form.cnpj} onChange={(v) => setF("cnpj", v)} />
           <Field label="Empresa" value={form.empresa} onChange={(v) => setF("empresa", v)} full />
           <Field label="Responsável" value={form.responsavel} onChange={(v) => setF("responsavel", v)} />
@@ -17448,6 +18569,47 @@ function PaginaPrivacidade() {
    Mesma vitrine de sempre (SecaoParceirosVitrine, tipo "servico"/"produto"), só que como
    página própria, dentro da marca FN Serviços — é o que o resto do site linka quando fala
    em "VER BENEFÍCIOS" ou "VER PRODUTOS". Funciona sem login, igual ao portfólio do parceiro. */
+/* Faixa de abertura da loja, com a mesma cara da seção FN Home do site institucional: fundo azul,
+   título grande e a proposta em três pontos. O primeiro ponto é o que mais importa — quem ainda
+   não é cliente achava que a loja era fechada. "compacta" é a versão do portal do cliente. */
+const PROPOSTA_LOJA = [
+  ["Aberta a todos", "Não precisa ser cliente nem ter cadastro."],
+  ["Escolhido por técnicos", "O que a equipe vê fazer falta em apartamento novo."],
+  ["Compra no Mercado Livre", "Pagamento, entrega e garantia por lá, sem custo a mais."],
+];
+function FaixaLojaFnHome({ compacta = false }) {
+  return (
+    <section style={{
+      position: "relative", overflow: "hidden", color: "#fff", borderRadius: 20,
+      padding: compacta ? "22px 20px" : "clamp(24px, 4.5vw, 44px)",
+      background: "radial-gradient(520px 280px at 100% 0%, rgba(44,117,181,.45), transparent 70%), linear-gradient(160deg, #12335B, #0B2140)",
+    }}>
+      <div style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 11.5, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "#C8A44D" }}>
+        <span style={{ width: 20, height: 2, borderRadius: 2, background: "#C8A44D" }} /> FN Home · a loja da FN
+      </div>
+      <h2 style={{ margin: "10px 0 0", fontSize: compacta ? 22 : "clamp(24px, 3.4vw, 36px)", lineHeight: 1.15, fontWeight: 800, letterSpacing: "-.02em", maxWidth: 640 }}>
+        Chegou a chave. Agora é equipar o imóvel.
+      </h2>
+      {!compacta && (
+        <p style={{ margin: "12px 0 0", fontSize: 15.5, lineHeight: 1.6, color: "rgba(255,255,255,.8)", maxWidth: 640 }}>
+          O que costuma faltar depois da entrega — iluminação, elétrica, banheiro, cozinha e organização —,
+          escolhido por quem vistoria apartamento novo todo dia.
+        </p>
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 10, marginTop: compacta ? 14 : 24 }}>
+        {PROPOSTA_LOJA.map(([titulo, texto]) => (
+          <div key={titulo} style={{ display: "flex", gap: 10, alignItems: "flex-start", background: "rgba(255,255,255,.07)", border: "1px solid rgba(255,255,255,.12)", borderRadius: 12, padding: compacta ? "10px 12px" : "14px 16px" }}>
+            <Check size={17} color="#C8A44D" style={{ flexShrink: 0, marginTop: 2 }} />
+            <div style={{ fontSize: 13, lineHeight: 1.45, color: "rgba(255,255,255,.75)" }}>
+              <strong style={{ display: "block", color: "#fff", fontSize: 14 }}>{titulo}</strong>{texto}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function PaginaBeneficiosFn({ tipo }) {
   const info = FN_AREA_INFO[tipo] || FN_AREA_INFO.servico;
   const [toast, setToast] = useState("");
@@ -17458,10 +18620,23 @@ function PaginaBeneficiosFn({ tipo }) {
   const sessaoAtual = carregarSessaoSalva();
   const clienteLogado = sessaoAtual?.usuario?.role === "cliente" ? sessaoAtual.usuario : null;
   const tokenCliente = clienteLogado ? sessaoAtual.token : undefined;
+  /* A loja ocupa a largura do site institucional (1160): com 780 os cartões ficavam pequenos, e
+     a Gerência pediu a loja "grande, bonita" como lá (out/2026). O FN Clube ganhou cartões com o
+     desconto e a faixa própria (nov/2026) e passou de 780 para 1040. */
+  const ehLoja = tipo === "produto";
+  const largura = ehLoja ? 1160 : 1040;
+  const [qtdProdutos, setQtdProdutos] = useState(null);
+  /* Com o FN Clube oculto pela Gerência, a página dele mostra só o "em breve" — quem chega por um
+     link antigo ou pelo site não vê parceiro nenhum — e o link "FN Clube" sai da barra. */
+  const clubeVisivel = useClubeVisivel(apiFetch);
   return (
     <div style={{ minHeight: "100vh", background: CINZA_CLARO, fontFamily: "'Inter', system-ui, sans-serif" }}>
+      {/* Página aberta direto pelo link, fora do AppInterno/PainelCliente que injetam os estilos:
+          sem isto, os botões (FN Clube/FN Home, carrinho, "Comprar") saíam com a cara padrão do
+          navegador — igual faz a PaginaRetornoCobranca. */}
+      <style>{estilos}</style>
       <header style={{ background: AZUL_MARINHO, color: "#fff" }}>
-        <div style={{ maxWidth: 780, margin: "0 auto", padding: "16px 18px", display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ maxWidth: largura, margin: "0 auto", padding: "16px 18px", display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ width: "clamp(36px, 9vw, 44px)", height: "clamp(36px, 9vw, 44px)", borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
             <img src={LOGO_URL} alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
           </div>
@@ -17471,15 +18646,41 @@ function PaginaBeneficiosFn({ tipo }) {
           </div>
           <a href={home} className="btn-ghost" style={{ textDecoration: "none" }}>← Início</a>
         </div>
-        <div style={{ maxWidth: 780, margin: "0 auto", padding: "0 18px 14px", display: "flex", gap: 20, fontSize: 13, fontWeight: 700 }}>
+        <div style={{ maxWidth: largura, margin: "0 auto", padding: "0 18px 14px", display: "flex", gap: 20, fontSize: 13, fontWeight: 700 }}>
           <a href={`${home}#solicitar-servico`} style={{ color: "#fff", opacity: 0.85, textDecoration: "none" }}>Serviços FN</a>
-          <a href="?pagina=fn-clube" style={{ color: "#fff", opacity: tipo === "servico" ? 1 : 0.85, textDecoration: "none" }}>FN Clube</a>
+          {clubeVisivel && <a href="?pagina=fn-clube" style={{ color: "#fff", opacity: tipo === "servico" ? 1 : 0.85, textDecoration: "none" }}>FN Clube</a>}
           <a href="?pagina=fn-home" style={{ color: "#fff", opacity: tipo === "produto" ? 1 : 0.85, textDecoration: "none" }}>FN Home</a>
         </div>
       </header>
-      <main style={{ maxWidth: 780, margin: "0 auto", padding: "22px 18px 80px" }}>
-        <SecaoParceirosVitrine notify={notify} tipoInicial={tipo} clienteLogado={clienteLogado} token={tokenCliente}
-          onIrParaLogin={() => { window.location.href = `${window.location.origin}${window.location.pathname}`; }} />
+      <main style={{ maxWidth: largura, margin: "0 auto", padding: "22px 18px 80px" }}>
+        {ehLoja ? (
+          <div style={{ display: "grid", gap: 20 }}>
+            <FaixaLojaFnHome />
+            <section style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 18, padding: "clamp(16px, 3vw, 28px)", minWidth: 0 }}>
+              {qtdProdutos === 0 && <p style={{ color: "#8593a8", fontSize: 14, margin: 0 }}>Nenhum produto disponível no momento.</p>}
+              <SecaoOfertasMercadoLivre apiFetch={apiFetch} aoCarregar={setQtdProdutos} separar={false} />
+            </section>
+          </div>
+        ) : clubeVisivel ? (
+          <div style={{ display: "grid", gap: 20 }}>
+            <FaixaClubeFn />
+            <SecaoParceirosVitrine notify={notify} tipoInicial={tipo} clienteLogado={clienteLogado} token={tokenCliente}
+              onIrParaLogin={() => { window.location.href = `${window.location.origin}${window.location.pathname}`; }} />
+          </div>
+        ) : (
+          <section style={{ background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 18, padding: "clamp(16px, 3vw, 28px)", display: "grid", gap: 14 }}>
+            {clubeVisivel === null ? (
+              <p style={{ color: "#8593a8", fontSize: 14, margin: 0 }}>Carregando…</p>
+            ) : (
+              <>
+                <AvisoFnClubeEmBreve />
+                <a href="?pagina=fn-home" className="btn-solid" style={{ textDecoration: "none", justifySelf: "start" }}>
+                  <ShoppingBag size={14} /> Enquanto isso, conheça a Loja FN Home
+                </a>
+              </>
+            )}
+          </section>
+        )}
       </main>
       {toast && (
         <div className="no-print" style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: AZUL_MARINHO, color: "#fff", padding: "10px 18px", borderRadius: 10, fontSize: 13.5, boxShadow: "0 6px 20px rgba(0,0,0,.2)" }}>
@@ -17531,6 +18732,7 @@ function TelaCadastroParceiro({ convite, onVoltar, onIrParaLogin }) {
     if (!form.empresa.trim() || !form.responsavel.trim()) { setErro("Informe a empresa e o responsável."); return; }
     if (!form.cidade.trim() || !form.uf.trim()) { setErro("Informe cidade e UF."); return; }
     if (!form.whatsapp.trim()) { setErro("Informe um WhatsApp para contato."); return; }
+    if (form.tipo === "servico" && !form.ramo) { setErro("Escolha o ramo da sua empresa (restaurante, farmácia, academia…)."); return; }
 
     setEnviando(true);
     try {
@@ -17646,6 +18848,10 @@ function TelaCadastroParceiro({ convite, onVoltar, onIrParaLogin }) {
                 {PARCEIRO_TIPO_OPCOES.map((o) => <option key={o.valor} value={o.valor}>{o.label}</option>)}
               </select>
             </div>
+            {form.tipo === "servico" && (
+              <SeletorRamo valor={form.ramo} aoMudar={(v) => setF("ramo", v)} rotulo="Ramo da empresa"
+                estiloCelula={cell()} estiloRotulo={lab} estiloCampo={inp} />
+            )}
             <Field label="CNPJ/CPF" value={form.cnpj} onChange={(v) => setF("cnpj", v)} />
             <Field label="Empresa" value={form.empresa} onChange={(v) => setF("empresa", v)} full />
             <Field label="Responsável" value={form.responsavel} onChange={(v) => setF("responsavel", v)} />
@@ -17752,6 +18958,7 @@ function CardPerfilParceiro({ parceiro, token, onSalvo }) {
         ? parceiro.comissao.map((c) => ({ name: c.name || "", d: c.d ?? "", p: c.p ?? "" }))
         : [novaComissaoLinha()],
       beneficio: parceiro.beneficio || "", descricaoBeneficio: parceiro.descricaoBeneficio || "",
+      ramo: parceiro.ramo || "",
     });
     setErro("");
     setEditando(true);
@@ -17797,6 +19004,10 @@ function CardPerfilParceiro({ parceiro, token, onSalvo }) {
           <Field label="UF" value={form.uf} onChange={(v) => setF("uf", v.toUpperCase().slice(0, 2))} />
           <Field label="Instagram" value={form.instagram} onChange={(v) => setF("instagram", v)} />
           <Field label="Site" value={form.site} onChange={(v) => setF("site", v)} />
+          {parceiro.tipo !== "produto" && (
+            <SeletorRamo valor={form.ramo} aoMudar={(v) => setF("ramo", v)} rotulo="Ramo da empresa"
+              estiloCelula={cell()} estiloRotulo={lab} estiloCampo={inp} />
+          )}
         </Grid>
         <div style={{ ...cell(true), marginTop: 12 }}>
           <label style={lab}>Logo da empresa</label>
@@ -18287,6 +19498,7 @@ function ModalPedirRevistoria({ atendimento, onFechar, onEnviar }) {
     setErro("");
     if (!data || !horario) { setErro("Escolha a data e o horário desejados."); return; }
     if (data < hojeISO) { setErro("A data precisa ser de hoje em diante."); return; }
+    if (!confirmarDataDistante(data)) return;
     if (!motivo.trim()) { setErro("Conte o que precisa ser revisto."); return; }
     setEnviando(true);
     const ok = await onEnviar({ dataDesejada: data, horarioDesejado: horario, observacoes: motivo.trim() });
@@ -18479,8 +19691,196 @@ function PaginaRetornoCobranca({ id }) {
   );
 }
 
-function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
+/* ---- "Vai reformar?": a Documentação ART/TRT no portal do cliente ----
+   Era o card "Precisa de mais um serviço?", e o cliente não entendia que a ART/TRT oferecida ali
+   é a da REFORMA do imóvel dele. Virou propaganda da documentação da reforma (pedido da Gerência,
+   nov/2026). A lista do que o cliente recebe é a mesma que o portal promete quando a documentação
+   fica pronta (STATUS_ATENDIMENTO_INFO): a documentação assinada e a placa de identificação de
+   obra — não prometa aqui o que a equipe não entrega. A frase da norma fica no que a NBR 16.280
+   pede: a reforma comunicada ao síndico antes de começar, com o responsável técnico. */
+const ENTREGAS_DOCUMENTACAO_REFORMA = [
+  "Documentação assinada pelo responsável técnico (ART/TRT)",
+  "Placa de identificação de obra",
+  "Os dois arquivos ficam aqui no portal para você baixar",
+];
+function CardDocumentacaoReforma({ imovel, onSolicitar, solicitando }) {
+  return (
+    <section style={{ borderRadius: 14, overflow: "hidden", border: `1px solid ${CINZA_BORDA}`, background: "#fff", minWidth: 0 }}>
+      <div style={{ color: "#fff", padding: "18px 20px", background: "radial-gradient(420px 220px at 100% 0%, rgba(44,117,181,.45), transparent 70%), linear-gradient(160deg, #12335B, #0B2140)" }}>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 11.5, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: "#C8A44D" }}>
+          <HardHat size={14} /> Vai reformar?
+        </div>
+        <h3 style={{ margin: "8px 0 0", fontSize: 19, lineHeight: 1.25, fontWeight: 800, letterSpacing: "-.01em" }}>
+          Veja a documentação necessária para a sua reforma
+        </h3>
+        <p style={{ margin: "8px 0 0", fontSize: 13.5, lineHeight: 1.55, color: "rgba(255,255,255,.8)" }}>
+          Em condomínio, a NBR 16.280 pede que a reforma seja comunicada ao síndico antes de começar,
+          com a ART/TRT do responsável técnico pela obra.
+        </p>
+      </div>
+      <div style={{ padding: "16px 20px 18px" }}>
+        <div style={{ fontWeight: 700, fontSize: 14.5, color: AZUL_MARINHO }}>Documentação ART/TRT da reforma — a FN faz para você</div>
+        <p style={{ fontSize: 13.5, color: "#65758b", margin: "4px 0 12px", lineHeight: 1.5 }}>
+          É a documentação da reforma do seu imóvel
+          {imovel ? <> — <strong style={{ color: "#4a5a70" }}>{imovel}</strong></> : null}. Sem cadastro
+          novo: usamos os mesmos dados que você já enviou.
+        </p>
+        <div style={{ display: "grid", gap: 6, marginBottom: 14 }}>
+          {ENTREGAS_DOCUMENTACAO_REFORMA.map((t) => (
+            <div key={t} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13.5, color: "#334" }}>
+              <Check size={16} color="#2E7D32" style={{ flexShrink: 0, marginTop: 2 }} /> {t}
+            </div>
+          ))}
+        </div>
+        <button className="btn-solid" onClick={onSolicitar} disabled={solicitando}>
+          {solicitando ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} Solicitar a documentação da reforma
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/* ---- FN Reforma no portal do cliente (pedido da Gerência, nov/2026) ----
+   A FN ainda não atende reforma, mas o cliente já deixa o pedido. Ainda não existe rota no backend
+   para isso: o formulário monta a mensagem e abre o WhatsApp do atendimento (o mesmo número do
+   rodapé da página de entrada), já com o nome e o imóvel do cadastro. Nada fica gravado no
+   sistema — o pedido chega pelo WhatsApp. Quando a FN Reforma abrir, troque o WhatsApp por um POST
+   na API e dê à Gerência a lista dos pedidos.
+   As categorias são as do FN Casa Pronta (repositório fn-reformas, lib/casa-pronta.ts), na mesma
+   ordem: o pedido já chega com o nome que os fornecedores usam. */
+const WHATSAPP_ATENDIMENTO_FN = "5581983061305";
+const CATEGORIAS_REFORMA = ["Box e vidros", "Marmoraria", "Marcenaria", "Pintura", "Elétrica e iluminação", "Hidráulica", "Gesso e forro", "Pisos e revestimentos", "Climatização", "Cortinas e persianas", "Redes e telas", "Limpeza pós-obra", "Gás", "Outros"];
+const PRAZOS_REFORMA = ["O quanto antes", "Nos próximos 3 meses", "Ainda estou planejando"];
+
+function ChipEscolha({ ativo, onClick, children }) {
+  return (
+    <button type="button" onClick={onClick} aria-pressed={ativo}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 4, padding: "6px 11px", borderRadius: 20,
+        fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+        border: `1px solid ${ativo ? AZUL_MEDIO : CINZA_BORDA}`, background: ativo ? AZUL_MEDIO : "#fff", color: ativo ? "#fff" : AZUL_MARINHO,
+      }}>
+      {ativo && <Check size={12} />}{children}
+    </button>
+  );
+}
+
+function SecaoFnReforma({ nome, imoveis = [], aoVerDocumentacao }) {
+  const [categorias, setCategorias] = useState([]);
+  const [prazo, setPrazo] = useState("");
+  const [detalhes, setDetalhes] = useState("");
+  const [imovel, setImovel] = useState("");
+  const [erro, setErro] = useState("");
+  const [enviado, setEnviado] = useState(false);
+  // Os atendimentos chegam depois da primeira pintura da tela: sem escolha, vale o primeiro imóvel.
+  const imovelEscolhido = imovel || imoveis[0] || "";
+  const pronto = categorias.length > 0 || detalhes.trim().length >= 5;
+
+  const alternar = (c) => { setErro(""); setCategorias((atual) => (atual.includes(c) ? atual.filter((x) => x !== c) : [...atual, c])); };
+  const linhas = ["Olá, FN! Quero deixar meu pedido para a *FN Reforma*.", ""];
+  if (nome) linhas.push(`*Nome:* ${nome}`);
+  if (imovelEscolhido) linhas.push(`*Imóvel:* ${imovelEscolhido}`);
+  if (categorias.length) linhas.push(`*O que preciso:* ${categorias.join(", ")}`);
+  if (prazo) linhas.push(`*Para quando:* ${prazo}`);
+  if (detalhes.trim()) linhas.push(`*Detalhes:* ${detalhes.trim()}`);
+  linhas.push("", "_Pedido feito pela Área do Cliente._");
+  /* Link de verdade (e não window.open no clique): o iPhone abre o WhatsApp direto, e nenhum
+     bloqueador de pop-up segura um link que a própria pessoa tocou. */
+  const link = `https://wa.me/${WHATSAPP_ATENDIMENTO_FN}?text=${encodeURIComponent(linhas.join("\n"))}`;
+  const recomecar = () => { setCategorias([]); setPrazo(""); setDetalhes(""); setErro(""); setEnviado(false); };
+
+  return (
+    <Card icon={PaintRoller} titulo={<>FN Reforma<SeloEmBreve /></>}>
+      <p style={{ fontSize: 13.5, color: "#4a5a70", lineHeight: 1.55, margin: "0 0 14px" }}>
+        No momento a FN Reforma ainda não está funcionando, mas em breve também vamos atender a reforma
+        do seu imóvel. <strong>Já pode deixar o seu pedido aqui</strong>: assim que começarmos, a nossa
+        equipe fala com você.
+      </p>
+
+      {enviado ? (
+        <div style={{ background: "#E6F4EA", border: "1px solid #A5D6B0", borderRadius: 10, padding: "12px 14px", fontSize: 13.5, color: "#33683c", lineHeight: 1.5 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#2E7D32", fontWeight: 700, fontSize: 14.5, marginBottom: 4 }}>
+            <Check size={16} /> Seu pedido está pronto no WhatsApp
+          </div>
+          É só tocar em enviar por lá. Assim que a FN Reforma começar a atender, a nossa equipe entra em contato.
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 10, alignItems: "center" }}>
+            <a href={link} target="_blank" rel="noopener noreferrer" style={{ color: "#2E7D32", fontWeight: 700 }}>O WhatsApp não abriu? Toque aqui</a>
+            <button type="button" className="btn-ghost" style={{ color: AZUL_MARINHO, background: "#fff", padding: "6px 12px" }} onClick={recomecar}>
+              Fazer outro pedido
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gap: 14 }}>
+          <div>
+            <div style={lab}>O que você quer fazer no imóvel?</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 7 }}>
+              {CATEGORIAS_REFORMA.map((c) => (
+                <ChipEscolha key={c} ativo={categorias.includes(c)} onClick={() => alternar(c)}>{c}</ChipEscolha>
+              ))}
+            </div>
+          </div>
+          <div style={cell(true)}>
+            <label style={lab} htmlFor="fn-reforma-detalhes">Conte um pouco do que precisa</label>
+            <textarea id="fn-reforma-detalhes" style={{ ...inp, minHeight: 80, resize: "vertical" }} value={detalhes}
+              placeholder="Ex.: box do banheiro da suíte, bancada da cozinha e rede de proteção nas janelas."
+              onChange={(e) => { setErro(""); setDetalhes(e.target.value); }} />
+          </div>
+          <div>
+            <div style={lab}>Para quando?</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 7 }}>
+              {PRAZOS_REFORMA.map((p) => (
+                <ChipEscolha key={p} ativo={prazo === p} onClick={() => setPrazo(prazo === p ? "" : p)}>{p}</ChipEscolha>
+              ))}
+            </div>
+          </div>
+          {imoveis.length > 1 && (
+            <div style={cell(true)}>
+              <label style={lab} htmlFor="fn-reforma-imovel">Em qual imóvel?</label>
+              <select id="fn-reforma-imovel" style={inp} value={imovelEscolhido} onChange={(e) => setImovel(e.target.value)}>
+                {imoveis.map((i) => <option key={i} value={i}>{i}</option>)}
+              </select>
+            </div>
+          )}
+          {erro && (
+            <div style={{ background: "#FCEAEA", color: "#C62828", padding: "8px 10px", borderRadius: 8, fontSize: 12.5 }}>
+              <AlertTriangle size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} /> {erro}
+            </div>
+          )}
+          <div>
+            <a className="btn-solid" href={link} target="_blank" rel="noopener noreferrer"
+              style={{ textDecoration: "none", justifyContent: "center", padding: "11px 14px" }}
+              onClick={(e) => {
+                if (!pronto) { e.preventDefault(); setErro("Marque o que você quer fazer ou conte um pouco do que precisa."); return; }
+                setEnviado(true);
+              }}>
+              <Send size={15} /> Enviar pedido pelo WhatsApp
+            </a>
+            <p style={{ fontSize: 11.5, color: "#8593a8", margin: "6px 0 0" }}>
+              Vai para o WhatsApp da FN, (81) 98306-1305, já com o seu nome e o imóvel do cadastro.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {aoVerDocumentacao && (
+        <p style={{ fontSize: 12.5, color: "#65758b", margin: "14px 0 0", paddingTop: 12, borderTop: `1px solid ${CINZA_BORDA}`, lineHeight: 1.5 }}>
+          Vai reformar antes disso? A <strong>documentação ART/TRT da reforma</strong> a FN já faz.{" "}
+          <button type="button" onClick={aoVerDocumentacao}
+            style={{ background: "none", border: "none", padding: 0, color: AZUL_MEDIO, fontWeight: 700, cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>
+            Ver a documentação →
+          </button>
+        </p>
+      )}
+    </Card>
+  );
+}
+
+function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado = false }) {
   const [carregando, setCarregando] = useState(true);
+  /* Seção e botão do FN Clube só com o Clube ligado pela Gerência (Gerência → FN Clube → Ativar ou
+     ocultar). Enquanto pergunta, nenhum dos dois aparece. */
+  const clubeVisivel = useClubeVisivel(apiFetch);
   const [erro, setErro] = useState("");
   const [cliente, setCliente] = useState(null);
   const [resultados, setResultados] = useState([]);
@@ -18606,12 +20006,66 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
     setSolicitandoDoc(false);
   };
 
+  /* Loja FN Home: só a loja, sem as abas FN Clube / FN Home (semAbas) — antes ela abria na aba FN
+     Home e a do FN Clube ficava ao lado, vazia; hoje o FN Clube tem seção própria, logo depois da
+     loja. Para quem acabou de se cadastrar a loja sobe para o topo, logo abaixo da confirmação — o
+     "Meu atendimento" ainda está vazio nessa hora. Para os demais fica no fim, e o botão do
+     cabeçalho leva até ela. */
+  /* Mais larga que o resto do portal (720): os cartões de produto pedem espaço, como no site.
+     justifySelf: "center" não centraliza o que é maior que a coluna (vazava só para a direita);
+     a margem negativa de metade da sobra, sim. O % da margem é a largura da coluna. */
+  const larguraLoja = "min(1100px, 100vw - 36px)";
+  const naLarguraDaLoja = { width: larguraLoja, marginLeft: `calc((100% - ${larguraLoja}) / 2)`, justifySelf: "start" };
+  const loja = (
+    <div id="loja-fn-home" style={{ scrollMarginTop: 90, ...naLarguraDaLoja, display: "grid", gap: 12 }}>
+      <FaixaLojaFnHome compacta />
+      <SecaoParceirosVitrine notify={notify} clienteLogado={cliente} token={session.token} tipoInicial="produto" semDescricao semAbas />
+    </div>
+  );
+  /* Rola até a seção descontando o cabeçalho fixo, que no celular tem duas linhas: com um
+     scrollMarginTop fixo o título da seção ficava escondido atrás dele. */
+  const cabecalhoRef = useRef(null);
+  const irPara = (id) => {
+    const alvo = document.getElementById(id);
+    if (!alvo) return;
+    const folga = (cabecalhoRef.current?.offsetHeight || 0) + 12;
+    window.scrollTo({ top: alvo.getBoundingClientRect().top + window.scrollY - folga, behavior: "smooth" });
+  };
+  /* Imóveis dos atendimentos, sem repetir — vão no pedido da FN Reforma e no card da documentação. */
+  const imoveis = [...new Set(resultados.filter((d) => d.empreendimento)
+    .map((d) => `${d.empreendimento}${d.blocoTorre ? ` · ${d.blocoTorre}` : ""}`))];
+  const mostraDocumentacao = !carregando && resultados.length > 0 && !jaTemDocumentacao;
+  /* FN Clube e FN Reforma logo depois da loja (pedido da Gerência, nov/2026): as áreas da FN para o
+     imóvel ficam juntas, e cada uma tem o seu botão no cabeçalho. As duas ainda vão estrear: o FN
+     Clube mostra o aviso enquanto não houver parceiro homologado (AvisoFnClubeEmBreve) e a FN
+     Reforma já recebe pedido pelo WhatsApp (SecaoFnReforma). Lado a lado, na largura da loja, o
+     FN Clube ficava um card alto e vazio ao lado do formulário — por isso vão um embaixo do outro. */
+  const outrasAreas = (
+    <>
+      {clubeVisivel && (
+        <div id="fn-clube" style={{ display: "grid", minWidth: 0 }}>
+          <SecaoParceirosVitrine notify={notify} clienteLogado={cliente} token={session.token} tipoInicial="servico" semAbas />
+        </div>
+      )}
+      <div id="fn-reforma" style={{ display: "grid", minWidth: 0 }}>
+        <SecaoFnReforma nome={session.usuario.nome} imoveis={imoveis}
+          aoVerDocumentacao={mostraDocumentacao ? () => irPara("documentacao-reforma") : null} />
+      </div>
+    </>
+  );
+  const primeiroNome = String(session.usuario.nome || "").trim().split(/\s+/)[0];
+  // O cadastro fica no fim da página pública; sem isto o portal abria rolado lá para baixo.
+  useEffect(() => { if (recemCadastrado) window.scrollTo(0, 0); }, []);
+
   return (
     <div style={{ fontFamily: "'Inter', system-ui, sans-serif", color: "#1a2330", background: CINZA_CLARO, minHeight: "100vh" }}>
       <style>{estilos}</style>
 
-      <header className="no-print" style={{ background: AZUL_MARINHO, color: "#fff", position: "sticky", top: 0, zIndex: 20 }}>
-        <div style={{ maxWidth: 720, margin: "0 auto", padding: "12px 18px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+      {/* 1100 de largura (a da loja), e não 720 como o resto do portal: com Loja FN Home, FN Clube e
+          FN Reforma lado a lado, em 720 o nome e os botões desciam para uma segunda linha. No
+          celular os botões ficam só no ícone e dividem a linha com o nome (cabecalho-cliente). */}
+      <header ref={cabecalhoRef} className="no-print" style={{ background: AZUL_MARINHO, color: "#fff", position: "sticky", top: 0, zIndex: 20 }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto", padding: "12px 18px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{ width: "clamp(36px, 9vw, 44px)", height: "clamp(36px, 9vw, 44px)", borderRadius: 9, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
               <img src={LOGO_URL} alt="FN Edificações" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
@@ -18622,11 +20076,23 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
             </div>
           </div>
           <div style={{ flex: 1 }} />
-          <div className="cabecalho-usuario" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}>
+          <div className="cabecalho-usuario cabecalho-cliente" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, marginLeft: "auto" }}>
             <div style={{ textAlign: "right", lineHeight: 1.2, minWidth: 0 }}>
               <div style={{ fontWeight: 700 }}>{session.usuario.nome}</div>
               <div style={{ opacity: 0.7 }}>{cliente?.cpfMascarado || ""}</div>
             </div>
+            {/* As áreas da FN para o imóvel, uma ao lado da outra; cada botão rola até a sua seção. */}
+            <button className="btn-ghost" onClick={() => irPara("loja-fn-home")} title="Loja FN Home" aria-label="Loja FN Home">
+              <ShoppingBag size={14} /> <span className="rotulo-cabecalho">Loja FN Home</span>
+            </button>
+            {clubeVisivel && (
+              <button className="btn-ghost" onClick={() => irPara("fn-clube")} title="FN Clube" aria-label="FN Clube">
+                <Handshake size={14} /> <span className="rotulo-cabecalho">FN Clube</span>
+              </button>
+            )}
+            <button className="btn-ghost" onClick={() => irPara("fn-reforma")} title="FN Reforma (em breve)" aria-label="FN Reforma">
+              <PaintRoller size={14} /> <span className="rotulo-cabecalho">FN Reforma</span>
+            </button>
             <button className="btn-ghost" onClick={onLogout} title="Sair" aria-label="Sair"><X size={14} /> <span className="rotulo-cabecalho">Sair</span></button>
           </div>
         </div>
@@ -18636,6 +20102,20 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
         {erro && (
           <div style={{ background: "#FCEAEA", color: "#C62828", padding: "12px 14px", borderRadius: 10, fontSize: 13.5 }}>{erro}</div>
         )}
+
+        {recemCadastrado && (
+          <div style={{ background: "#E6F4EA", border: "1px solid #A5D6B0", borderRadius: 12, padding: "14px 16px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#2E7D32", fontWeight: 700, fontSize: 15, marginBottom: 4 }}>
+              <Check size={17} /> Cadastro realizado{primeiroNome ? `, ${primeiroNome}` : ""}!
+            </div>
+            <div style={{ fontSize: 13.5, color: "#33683c" }}>
+              Nossa equipe já recebeu seus dados e entra em contato para confirmar o atendimento — você acompanha
+              tudo aqui, em "Meu atendimento". Enquanto isso, conheça a <strong>loja FN Home</strong>: produtos que a
+              FN escolheu para equipar o seu imóvel novo.
+            </div>
+          </div>
+        )}
+        {recemCadastrado && loja}
 
         <Card icon={ClipboardCheck} titulo="Meu atendimento">
           {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
@@ -18812,20 +20292,17 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada }) {
           </Card>
         )}
 
-        {!carregando && resultados.length > 0 && !jaTemDocumentacao && (
-          <Card icon={FileText} titulo="Precisa de mais um serviço?">
-            <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-              Vai reformar o imóvel? Peça a ART/TRT de reforma sem preencher o cadastro de novo —
-              usamos os mesmos dados que você já enviou. A ART da vistoria de entrega de chaves, quando a
-              construtora exige, já vem com a vistoria: não precisa pedir aqui.
-            </p>
-            <button className="btn-solid" onClick={solicitarDocumentacao} disabled={solicitandoDoc}>
-              {solicitandoDoc ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} Solicitar ART/TRT de reforma
-            </button>
-          </Card>
+        {/* O imóvel só aparece com um imóvel só: com mais de um, quem escolhe de qual cadastro
+            saem os dados é o servidor (nova-solicitacao), e a tela poderia nomear o errado. */}
+        {mostraDocumentacao && (
+          <div id="documentacao-reforma" style={{ display: "grid", minWidth: 0 }}>
+            <CardDocumentacaoReforma imovel={imoveis.length === 1 ? imoveis[0] : ""}
+              onSolicitar={solicitarDocumentacao} solicitando={solicitandoDoc} />
+          </div>
         )}
 
-        <SecaoParceirosVitrine notify={notify} clienteLogado={cliente} token={session.token} />
+        {!recemCadastrado && loja}
+        {outrasAreas}
 
         <CardPrivacidadeCliente token={session.token} notify={notify} />
       </main>
@@ -19057,6 +20534,7 @@ function ModalPerfilParceiroAdmin({ parceiro, onFechar, atualizarParceiro, notif
     logo: parceiro.logo || "",
     beneficio: parceiro.beneficio || "",
     descricao_beneficio: parceiro.descricaoBeneficio ?? parceiro.descricao_beneficio ?? "",
+    ramo: parceiro.ramo || "",
   });
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
@@ -19117,6 +20595,9 @@ function ModalPerfilParceiroAdmin({ parceiro, onFechar, atualizarParceiro, notif
           <Field label="UF" value={form.uf} onChange={(v) => set("uf", v.toUpperCase().slice(0, 2))} />
           <Field label="Instagram" value={form.instagram} onChange={(v) => set("instagram", v)} />
           <Field label="Site" value={form.site} onChange={(v) => set("site", v)} />
+          {parceiro.tipo !== "produto" && (
+            <SeletorRamo valor={form.ramo} aoMudar={(v) => set("ramo", v)} estiloCelula={cell()} estiloRotulo={lab} estiloCampo={inp} />
+          )}
         </Grid>
 
         <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${CINZA_BORDA}` }}>
@@ -19258,7 +20739,13 @@ function CardParceiros({ parceiros, carregando, atualizarParceiro, podeExcluir =
                       </div>
                     )}
                   </td>
-                  <td style={{ padding: "8px 10px" }}>{PARCEIRO_TIPO_LABEL[p.tipo] || p.tipo}</td>
+                  <td style={{ padding: "8px 10px" }}>
+                    {PARCEIRO_TIPO_LABEL[p.tipo] || p.tipo}
+                    {/* Parceiro de serviço sem ramo só aparece em "Todos" no FN Clube. */}
+                    {p.tipo !== "produto" && (p.ramo
+                      ? <div style={{ fontSize: 12, color: "#65758b" }}>{rotuloDoRamo(p.ramo)}</div>
+                      : <div style={{ fontSize: 11.5, fontWeight: 700, color: "#B26A00" }}>sem ramo no Clube</div>)}
+                  </td>
                   <td style={{ padding: "8px 10px", fontSize: 12 }}>
                     {p.comissao.length > 0 ? resumoDaProposta(p.comissao) : "—"}
                   </td>
@@ -19715,13 +21202,54 @@ function CardProdutoVitrine({ p, onClick }) {
   );
 }
 
-function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, somenteLogos = false, tipoInicial = "servico" }) {
+/* Selo das áreas que ainda vão estrear (FN Clube, FN Reforma), ao lado do título do card. */
+function SeloEmBreve() {
+  return (
+    <span style={{ background: "#FFF4E0", color: "#B26A00", padding: "2px 8px", borderRadius: 20, fontSize: 10.5, fontWeight: 800, letterSpacing: ".04em", textTransform: "uppercase", whiteSpace: "nowrap", marginLeft: 8, verticalAlign: "2px" }}>
+      Em breve
+    </span>
+  );
+}
+
+/* FN Clube sem parceiro de serviço homologado (pedido da Gerência, nov/2026): no lugar de
+   "nenhum parceiro disponível", o aviso de que a área está em andamento e vai estrear. Quem
+   decide é a vitrine — o primeiro parceiro aprovado toma o lugar deste aviso, sem mexer aqui. */
+function AvisoFnClubeEmBreve() {
+  return (
+    <div style={{ display: "flex", gap: 12, alignItems: "flex-start", background: "#FFF8E8", border: "1px solid #F3DDAE", borderRadius: 12, padding: "12px 14px" }}>
+      <div style={{ width: 34, height: 34, borderRadius: 9, background: "#FFEBC2", display: "grid", placeItems: "center", flexShrink: 0 }}>
+        <Rocket size={17} color="#B26A00" />
+      </div>
+      <div style={{ fontSize: 13.5, lineHeight: 1.5, color: "#5d4a22" }}>
+        <strong style={{ display: "block", color: "#8A5300", fontSize: 14, marginBottom: 2 }}>Em andamento · estreia em breve</strong>
+        Os primeiros parceiros estão em homologação e o FN Clube vai estrear em breve. Estamos
+        trabalhando para reunir tudo o que o seu imóvel precisa em um só lugar.
+      </div>
+    </div>
+  );
+}
+
+/* semDescricao: no portal do cliente a faixa da loja já explica a área logo acima.
+   semAbas: mostra só a área de tipoInicial, sem os botões FN Clube / FN Home. É o jeito do portal
+   do cliente (nov/2026): a loja e o FN Clube têm cada um a sua seção e o seu botão no cabeçalho, e
+   a aba FN Clube dentro da loja virava uma segunda porta para o mesmo lugar. */
+function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, tipoInicial = "servico", semDescricao = false, semAbas = false }) {
   const [parceiros, setParceiros] = useState([]);
-  const [carregando, setCarregando] = useState(false);
+  /* Começa carregando: começando em false, o FN Clube mostrava o aviso de "em breve" por um
+     instante antes de a lista de parceiros chegar. */
+  const [carregando, setCarregando] = useState(true);
   const [abaTipo, setAbaTipo] = useState(tipoInicial);
   const [selecionado, setSelecionado] = useState(null);
   const [carrinhoAberto, setCarrinhoAberto] = useState(false);
+  const [qtdOfertasMl, setQtdOfertasMl] = useState(0);
+  /* Parceiros do Casa Pronta que a VitrineClubeFn achou (null enquanto busca): com eles o Clube não
+     está "em breve", mesmo sem parceiro próprio ainda. */
+  const [qtdCasaPronta, setQtdCasaPronta] = useState(null);
   const carrinho = useCarrinho();
+  const mostraOfertasMl = abaTipo === "produto";
+  /* FN Clube organizado por ramo, com o desconto em destaque e o Casa Pronta junto (nov/2026) —
+     ver clube-fn.jsx. */
+  const ehClube = abaTipo === "servico";
 
   useEffect(() => {
     (async () => {
@@ -19734,45 +21262,74 @@ function SecaoParceirosVitrine({ notify, clienteLogado, token, onIrParaLogin, so
     })();
   }, []);
 
-  // Na página pública é só a vitrine de logos, sem separar por tipo — quem quer o detalhe
-  // (e resgatar) entra no portal do cliente, onde a área continua disponível.
-  const filtrados = somenteLogos ? parceiros : parceiros.filter((p) => p.tipo === abaTipo);
+  /* Na aba FN Home não entram cartões de parceiro: a loja é a grade de produtos lá embaixo. O
+     cartão "FN Home · Catálogo de móveis e decoração" ficava sozinho em cima dela, sem nada
+     dentro, e saiu a pedido da Gerência (out/2026) — parceiro que vende produto mora no FN
+     Projetos → Casa Pronta. */
+  const filtrados = abaTipo === "produto" ? [] : parceiros.filter((p) => p.tipo === abaTipo);
   const info = FN_AREA_INFO[abaTipo] || FN_AREA_INFO.servico;
+  const clubeEmBreve = abaTipo === "servico" && !carregando && filtrados.length === 0 && qtdCasaPronta === 0;
+  /* O carrinho é dos parceiros do FN Clube: na aba deles aparece sempre que houver parceiro (no
+     "em breve", só se já tiver item); na loja, só se já tiver item. Com semAbas a loja nunca mostra
+     o carrinho: no portal ele fica na seção do FN Clube, e duas cópias do carrinho na mesma página
+     (cada seção tem o seu useCarrinho) se desencontrariam. */
+  const mostraCarrinho = abaTipo === "produto"
+    ? !semAbas && carrinho.quantidadeTotal > 0
+    : !clubeEmBreve || carrinho.quantidadeTotal > 0;
+  const mostraAbas = !semAbas;
+  const iconeCard = abaTipo === "produto" ? ShoppingBag : Handshake;
 
   return (
-    <Card icon={Building2} titulo={somenteLogos ? "Benefícios Exclusivos FN" : info.titulo}>
-      {!somenteLogos && (
-        <>
-          <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>{info.descricao}</p>
-          <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-            <button onClick={() => setAbaTipo("servico")}
-              className={abaTipo === "servico" ? "btn-solid" : "btn-ghost"}
-              style={abaTipo === "servico" ? {} : { color: AZUL_MARINHO, background: CINZA_CLARO }}>
-              FN Clube
-            </button>
-            <button onClick={() => setAbaTipo("produto")}
-              className={abaTipo === "produto" ? "btn-solid" : "btn-ghost"}
-              style={abaTipo === "produto" ? {} : { color: AZUL_MARINHO, background: CINZA_CLARO }}>
-              FN Home
-            </button>
-            <div style={{ flex: 1 }} />
-            <BotaoCarrinho quantidade={carrinho.quantidadeTotal} onClick={() => setCarrinhoAberto(true)} />
-          </div>
-        </>
+    <Card icon={iconeCard} titulo={<>{info.titulo}{clubeEmBreve && <SeloEmBreve />}</>}>
+      {!semDescricao && <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>{info.descricao}</p>}
+      {(mostraAbas || mostraCarrinho) && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+          {mostraAbas && (
+            <>
+              <button onClick={() => setAbaTipo("servico")}
+                className={abaTipo === "servico" ? "btn-solid" : "btn-ghost"}
+                style={abaTipo === "servico" ? {} : { color: AZUL_MARINHO, background: CINZA_CLARO }}>
+                FN Clube
+              </button>
+              <button onClick={() => setAbaTipo("produto")}
+                className={abaTipo === "produto" ? "btn-solid" : "btn-ghost"}
+                style={abaTipo === "produto" ? {} : { color: AZUL_MARINHO, background: CINZA_CLARO }}>
+                FN Home
+              </button>
+            </>
+          )}
+          <div style={{ flex: 1 }} />
+          {mostraCarrinho && (
+            <BotaoCarrinho quantidade={carrinho.quantidadeTotal} onClick={() => setCarrinhoAberto(true)}
+              style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} />
+          )}
+        </div>
       )}
 
-      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
-      {!carregando && filtrados.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum parceiro disponível no momento.</p>}
+      {carregando && !mostraOfertasMl && !ehClube && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
+      {clubeEmBreve && <AvisoFnClubeEmBreve />}
+      {!carregando && !ehClube && !clubeEmBreve && filtrados.length === 0 && !(mostraOfertasMl && qtdOfertasMl > 0) && (
+        <p style={{ color: "#8593a8", fontSize: 14 }}>
+          {mostraOfertasMl ? "Nenhum produto disponível no momento." : "Nenhum parceiro disponível no momento."}
+        </p>
+      )}
 
-      {filtrados.length > 0 && (
+      {ehClube && <VitrineClubeFn apiFetch={apiFetch} parceiros={filtrados} carregando={carregando} aoEscolher={setSelecionado}
+        aoCarregarCasaPronta={setQtdCasaPronta} />}
+
+      {filtrados.length > 0 && !ehClube && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 12 }}>
           {filtrados.map((p) => (
-            !somenteLogos && abaTipo === "produto"
+            abaTipo === "produto"
               ? <CardProdutoVitrine key={p.id} p={p} onClick={() => setSelecionado(p)} />
               : <LogoParceiro key={p.id} p={p} onClick={() => setSelecionado(p)} />
           ))}
         </div>
       )}
+
+      {/* Produtos que a própria FN indica com o link de afiliado dela — fora do carrinho: a
+          compra é no Mercado Livre. Ver src/fn-home-mercadolivre.jsx. */}
+      {mostraOfertasMl && <SecaoOfertasMercadoLivre apiFetch={apiFetch} aoCarregar={setQtdOfertasMl} separar={filtrados.length > 0} />}
 
       {selecionado && (
         <ModalBeneficioParceiro parceiro={selecionado} onClose={() => setSelecionado(null)} notify={notify}
@@ -19932,6 +21489,11 @@ const estilos = `
     .rotulo-cabecalho { display: none; }
     .cabecalho-usuario { flex-wrap: wrap; justify-content: flex-end; max-width: 100%; }
     .cabecalho-usuario .btn-ghost { padding: 9px 10px; min-width: 40px; min-height: 40px; }
+    /* Portal do cliente: nome e os quatro botões (loja, FN Clube, FN Reforma, sair) numa linha só,
+       embaixo do logo. O nome quebra em duas linhas antes de o "Sair" descer para uma terceira. */
+    .cabecalho-cliente { flex-wrap: nowrap; width: 100%; }
+    .cabecalho-cliente > div:first-child { flex: 1 1 auto; }
+    .cabecalho-cliente .btn-ghost { flex-shrink: 0; justify-content: center; }
     .modal-acoes, .modal-acoes > div { flex-direction: column-reverse; width: 100%; }
     .modal-acoes button { width: 100%; min-height: 44px; }
     th { white-space: nowrap; }
