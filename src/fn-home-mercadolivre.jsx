@@ -19,6 +19,7 @@
 
    Arquivo à parte como a Rede Nacional: o App.jsx só o encaixa e entrega o apiFetch. */
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import ImportarPlanilhaMercadoLivre from "./fn-home-importar-planilha.jsx";
 import { ShoppingBag, ExternalLink, Plus, Pencil, Trash2, RefreshCcw, Loader2, X, Search, Upload, CalendarCheck, Eye, EyeOff, MousePointerClick, Sparkles, Bookmark, Check, Tag } from "lucide-react";
 
 const AZUL_MEDIO = "#2C75B5";
@@ -967,7 +968,12 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
           )}
           <Campo label="Link de afiliado *" largo
             dica={avisoLink ? null : "O link que o portal gera: https://meli.la/… ou https://mercadolivre.com/sec/…"}>
-            <input style={inp} type="url" placeholder="https://meli.la/..." value={form.link} onChange={(e) => mudar("link", e.target.value)} />
+            <input style={inp} type="url" placeholder="https://meli.la/..." value={form.link} onChange={(e) => {
+              const novo = e.target.value;
+              // Produto oculto à espera do meli.la (a importação deixa assim): chegou o link, volta a aparecer.
+              const ligar = form.id && !form.ativo && !pareceLinkDeAfiliado(form.link.trim()) && ehLinkCurto(novo);
+              setForm((f) => ({ ...f, link: novo, ...(ligar ? { ativo: true } : {}) }));
+            }} />
             {avisoLink && (
               <span style={{ fontSize: 12, color: AMBAR, background: "#FFF4E0", borderRadius: 6, padding: "6px 8px", lineHeight: 1.4 }}>
                 Este parece ser o endereço da página do produto, não o link de afiliado. Assim o produto abre normalmente, mas a FN
@@ -1055,6 +1061,7 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
           <span style={{ fontSize: 12.5, color: "#8593a8" }}>{naVitrine} no FN Home · {cliques} {cliques === 1 ? "clique" : "cliques"} no total</span>
           <a href="?pagina=fn-home" target="_blank" rel="noreferrer" style={{ ...btnLeve, textDecoration: "none" }}><Eye size={14} /> Ver o FN Home</a>
           <button style={btnLeve} onClick={carregar} disabled={carregando}><RefreshCcw size={14} /> Atualizar</button>
+          <ImportarPlanilhaMercadoLivre token={token} apiFetch={apiFetch} notify={notify} cadastrados={lista} aoTerminar={() => carregar(true)} />
         </div>
         <p style={{ fontSize: 12.5, color: "#8593a8", margin: "0 0 12px", lineHeight: 1.5 }}>
           Cliques contados no botão "Comprar no Mercado Livre". Vendas e comissão só aparecem no painel de afiliados do Mercado Livre.
@@ -1098,6 +1105,8 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: "#1a2330", lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", overflowWrap: "anywhere" }} title={p.titulo}>{p.titulo}</div>
                   <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 4, fontSize: 12, color: "#65758b" }}>
                     {p.ativo ? <Etiqueta cor={VERDE}>No FN Home</Etiqueta> : <Etiqueta cor="#65758b">Fora do FN Home</Etiqueta>}
+                    {/* Os que a importação pôs ocultos com a página no lugar do meli.la (e qualquer outro assim). */}
+                    {!pareceLinkDeAfiliado(p.link) && <Etiqueta cor={AMBAR}>Falta link de afiliado</Etiqueta>}
                     {p.categoria && <Etiqueta>{p.categoria}</Etiqueta>}
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }} title="Cliques no botão Comprar"><MousePointerClick size={12} /> {p.cliques || 0}</span>
                   </div>
@@ -1128,7 +1137,10 @@ export default function AbaProdutosMercadoLivre({ token, apiFetch, notify, redim
                         </button>
                       )}
                       <button title={p.ativo ? "Tirar do FN Home" : "Voltar ao FN Home"} style={{ ...btnLeve, padding: "6px 9px" }}
-                        onClick={() => acao(p, { ativo: !p.ativo }, p.ativo ? "Saiu do FN Home ✓" : "Voltou ao FN Home ✓")}>
+                        onClick={() => {
+                          if (!p.ativo && !pareceLinkDeAfiliado(p.link) && !window.confirm(`"${p.titulo}" ainda não tem link de afiliado: no FN Home ele abre o produto, mas a FN não ganha comissão. Pôr no FN Home assim mesmo?`)) return;
+                          acao(p, { ativo: !p.ativo }, p.ativo ? "Saiu do FN Home ✓" : "Voltou ao FN Home ✓");
+                        }}>
                         {p.ativo ? <EyeOff size={14} /> : <Eye size={14} />}
                       </button>
                       <button title="Excluir" style={{ ...btnLeve, padding: "6px 9px", color: VERMELHO }} onClick={() => excluir(p)}><Trash2 size={14} /></button>

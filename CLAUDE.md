@@ -104,6 +104,7 @@ src/patologia-voz.jsx       patologia por voz: gravar, acompanhar e revisar o it
 src/voz-fila-offline.js     patologia por voz: gravações guardadas no celular até o servidor receber
 src/ia-creditos.jsx         Financeiro › Créditos de IA: gasto estimado da IA e limite de gravação por técnico
 src/fn-home-mercadolivre.jsx FN Home: produtos do Mercado Livre (cadastro da Gerência e vitrine)
+src/fn-home-importar-planilha.jsx FN Home: importar planilha (.xlsx/.csv) de produtos do Mercado Livre
 src/fn-home-financeiro.jsx  FN Home: vendas, comissão da FN, repasses, mais vendidos e cliques
 src/clube-fn.jsx            FN Clube: ramos, vitrine com desconto, Casa Pronta e o aviso da Gerência
 src/laudo-whatsapp.jsx      laudo aprovado pelo WhatsApp do cliente (link wa.me com a mensagem pronta)
@@ -397,6 +398,15 @@ comissão só aparece no painel de afiliados de lá. Backend: `src/afiliados-mer
   - O link de afiliado continua à mão (o Mercado Livre não tem API para afiliado). Avisa, sem travar,
     quando o link não parece o do portal (`/sec/`, `/social/`, `meli.la`) — link da página do produto
     abre o mesmo anúncio e não paga comissão.
+  - **Importar planilha** (`src/fn-home-importar-planilha.jsx`, botão em "Produtos cadastrados"; nov/2026,
+    300 itens natalinos): .xlsx (lido no navegador, sem biblioteca — zip + `DecompressionStream`, primeira aba
+    com cabeçalho de nome e link) ou .csv. **Só entra quem tem link de afiliado** (pedido da Gerência: "só o
+    que vai me dar retorno por venda"): linha só com a página do produto ou com link de busca não é
+    cadastrada nem oculta — fica listada com o link para gerar o meli.la, e entra quando a planilha voltar
+    com a coluna preenchida. Produto já cadastrado sem afiliado que chega com meli.la recebe o link e vai ao ar
+    (casa pelo link ou pelo nome). Foto e preço do catálogo (/p/) vêm do Preencher; no 429 (60 por 10 min)
+    espera e continua. Só usa as rotas que já existiam. Na lista, produto sem link de afiliado tem o selo
+    "Falta link de afiliado", e pô-lo no FN Home pede confirmação.
   - Foto por endereço https ou arquivo (reduzido a 600 px). Preço conferido há mais de 14 dias fica em
     amarelo; "Conferi hoje" renova a data sem mudar o valor.
 - **Vitrine** (`SecaoOfertasMercadoLivre`): dentro de `SecaoParceirosVitrine` na aba FN Home — vale para
