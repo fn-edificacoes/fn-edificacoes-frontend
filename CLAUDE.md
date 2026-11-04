@@ -400,13 +400,13 @@ comissão só aparece no painel de afiliados de lá. Backend: `src/afiliados-mer
     abre o mesmo anúncio e não paga comissão.
   - **Importar planilha** (`src/fn-home-importar-planilha.jsx`, botão em "Produtos cadastrados"; nov/2026,
     300 itens natalinos): .xlsx (lido no navegador, sem biblioteca — zip + `DecompressionStream`, primeira aba
-    com cabeçalho de nome e link) ou .csv. Com meli.la entra no FN Home; só com a página do produto entra
-    **oculto**, com a página no lugar do link e o selo "Falta link de afiliado" na lista; link de busca
-    (`lista.mercadolivre…`) não entra. Reimportar com a coluna de afiliado preenchida troca o link e põe no
-    ar (casa pelo link ou pelo nome, por isso o nome gravado é o da planilha). Foto e preço do catálogo (/p/)
-    vêm do Preencher; no 429 (60 por 10 min) espera e continua. Só usa as rotas que já existiam.
-    Pôr no FN Home um produto sem link de afiliado pede confirmação; colar o meli.la ao editar um oculto
-    marca "Aparece no FN Home".
+    com cabeçalho de nome e link) ou .csv. **Só entra quem tem link de afiliado** (pedido da Gerência: "só o
+    que vai me dar retorno por venda"): linha só com a página do produto ou com link de busca não é
+    cadastrada nem oculta — fica listada com o link para gerar o meli.la, e entra quando a planilha voltar
+    com a coluna preenchida. Produto já cadastrado sem afiliado que chega com meli.la recebe o link e vai ao ar
+    (casa pelo link ou pelo nome). Foto e preço do catálogo (/p/) vêm do Preencher; no 429 (60 por 10 min)
+    espera e continua. Só usa as rotas que já existiam. Na lista, produto sem link de afiliado tem o selo
+    "Falta link de afiliado", e pô-lo no FN Home pede confirmação.
   - Foto por endereço https ou arquivo (reduzido a 600 px). Preço conferido há mais de 14 dias fica em
     amarelo; "Conferi hoje" renova a data sem mudar o valor.
 - **Vitrine** (`SecaoOfertasMercadoLivre`): dentro de `SecaoParceirosVitrine` na aba FN Home — vale para

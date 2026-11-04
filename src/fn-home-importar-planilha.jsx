@@ -5,15 +5,12 @@
    topo de AbaProdutosMercadoLivre e usa só as rotas que o cadastro manual já usa
    (POST/PATCH /api/afiliados/mercadolivre e /preencher) — o backend não ganhou nada.
 
-   O que decide o destino de cada linha é o link de afiliado, porque é ele que paga a comissão:
-     - com link de afiliado (meli.la, /sec/, /social/): entra no FN Home;
-     - só com a página do produto: entra OCULTO, com a página no lugar do link. Na vitrine ele
-       abriria o produto normalmente e a FN não ganharia nada — o erro que não se vê depois;
-     - com link de busca (lista.mercadolivre…): não entra. Busca não é produto: alguém precisa
-       escolher o anúncio.
-   Reimportar a mesma planilha, agora com a coluna de afiliado preenchida, troca o link dos que
-   entraram ocultos e os põe no FN Home. O casamento é pelo link gravado ou pelo nome (sem acento
-   nem caixa) — por isso o nome gravado é o da planilha, não o que o Mercado Livre devolve.
+   Só entra quem tem link de afiliado (meli.la, /sec/, /social/) — é ele que paga a comissão, e a
+   Gerência pediu (nov/2026) "só o que vai me dar retorno por venda". Linha sem ele (só a página do
+   produto, ou link de busca) não é cadastrada nem oculta: fica listada, com o link para abrir e
+   gerar o meli.la, e entra quando a planilha for importada de novo com a coluna preenchida.
+   Produto já cadastrado sem link de afiliado (à mão) que chega com meli.la na planilha recebe o
+   link e vai ao FN Home. O casamento é pelo link gravado ou pelo nome (sem acento nem caixa).
 
    Foto e preço: os da planilha, se houver; senão o Preencher, que só os dá para produto de
    catálogo (/p/). O servidor limita o Preencher a 60 por 10 minutos — no 429 a importação espera
@@ -211,7 +208,7 @@ function acharTabela(abas) {
 }
 
 /* Cada linha vira { situacao, ... }:
-   novo-ativo | novo-oculto | ativar (já cadastrado oculto, agora com afiliado) | ja-existe | busca | invalido */
+   novo-ativo | ativar (já cadastrado sem afiliado, agora com ele) | ja-existe | sem-afiliado | invalido */
 function planejar(tabela, cadastrados, origemCategoria) {
   const { mapa, linhas } = tabela;
   const pegar = (l, campo) => (mapa[campo] != null ? String(l[mapa[campo]] ?? "").trim() : "");
@@ -244,7 +241,7 @@ function planejar(tabela, cadastrados, origemCategoria) {
     const pagina = doMercadoLivre(u) && !ehLinkDeAfiliado(paginaTxt) ? u.toString() : "";
     item.pagina = pagina;
     item.catalogo = Boolean(pagina) && ehCatalogo(u);
-    const busca = Boolean(pagina) && (ehBusca(u) || normalizar(pegar(l, "tipo")) === "busca");
+    item.busca = Boolean(pagina) && (ehBusca(u) || normalizar(pegar(l, "tipo")) === "busca");
 
     const existente = (item.afiliado && porLink.get(item.afiliado)) || (pagina && porLink.get(pagina)) || porNome.get(chave);
     if (existente) {
@@ -252,17 +249,14 @@ function planejar(tabela, cadastrados, origemCategoria) {
       return { ...item, situacao: "ja-existe", existente };
     }
     if (item.afiliado) return { ...item, situacao: "novo-ativo" };
-    if (busca) return { ...item, situacao: "busca" };
-    if (!pagina) return { ...item, situacao: "invalido", motivo: "Sem link do Mercado Livre." };
-    return { ...item, situacao: "novo-oculto" };
+    return { ...item, situacao: "sem-afiliado" };
   });
 }
 
 const ROTULO = {
-  "novo-ativo": { texto: "Entram no FN Home", cor: VERDE, dica: "Têm link de afiliado." },
-  "ativar": { texto: "Já cadastrados ocultos — recebem o link de afiliado e entram no FN Home", cor: VERDE },
-  "novo-oculto": { texto: "Entram ocultos, esperando o link de afiliado", cor: AMBAR, dica: "Sem o meli.la a venda não paga comissão." },
-  "busca": { texto: "Não entram: link de busca, não de produto", cor: VERMELHO, dica: "Abra a busca, escolha o anúncio e cadastre." },
+  "novo-ativo": { texto: "Entram no FN Home", cor: VERDE, dica: "Têm link de afiliado: pagam comissão." },
+  "ativar": { texto: "Já cadastrados sem link de afiliado — recebem o link e entram no FN Home", cor: VERDE },
+  "sem-afiliado": { texto: "Não entram: sem link de afiliado", cor: VERMELHO, dica: "Não pagariam comissão. Gere o meli.la no portal de afiliados e importe de novo." },
   "ja-existe": { texto: "Já cadastrados (ficam como estão)", cor: "#65758b" },
   "invalido": { texto: "Com problema", cor: VERMELHO },
 };
@@ -280,7 +274,7 @@ export default function ImportarPlanilhaMercadoLivre({ token, apiFetch, notify, 
 
   const plano = arquivo ? planejar(arquivo.tabela, cadastrados || [], origemCategoria) : [];
   const grupos = plano.reduce((g, it) => ({ ...g, [it.situacao]: [...(g[it.situacao] || []), it] }), {});
-  const aGravar = plano.filter((it) => ["novo-ativo", "novo-oculto", "ativar"].includes(it.situacao));
+  const aGravar = plano.filter((it) => ["novo-ativo", "ativar"].includes(it.situacao));
   const afiliadosRuins = plano.filter((it) => it.afiliadoInvalido).length;
 
   const fechar = () => { setAberto(false); setArquivo(null); setResultado(null); setProgresso(null); setVerGrupo(null); };
@@ -322,7 +316,7 @@ export default function ImportarPlanilhaMercadoLivre({ token, apiFetch, notify, 
   const importar = async () => {
     parar.current = false;
     const erros = [];
-    let criados = 0, ativados = 0, ocultos = 0;
+    let criados = 0, ativados = 0;
     setProgresso({ feito: 0, total: aGravar.length, espera: 0, erros });
     for (let i = 0; i < aGravar.length; i++) {
       if (parar.current) break;
@@ -332,7 +326,7 @@ export default function ImportarPlanilhaMercadoLivre({ token, apiFetch, notify, 
           await apiFetch(`/api/afiliados/mercadolivre/${encodeURIComponent(it.existente.id)}`, { method: "PATCH", token, body: { link: it.afiliado, ativo: true } });
           ativados++;
         } else {
-          const corpo = { titulo: it.titulo, categoria: it.categoria, link: it.afiliado || it.pagina, ativo: it.situacao === "novo-ativo" };
+          const corpo = { titulo: it.titulo, categoria: it.categoria, link: it.afiliado, ativo: true };
           if (it.preco != null) corpo.preco = it.preco;
           if (it.foto) corpo.foto = it.foto;
           if (it.catalogo && (!it.foto || it.preco == null)) {
@@ -348,12 +342,11 @@ export default function ImportarPlanilhaMercadoLivre({ token, apiFetch, notify, 
           }
           await apiFetch("/api/afiliados/mercadolivre", { method: "POST", token, body: corpo });
           criados++;
-          if (!corpo.ativo) ocultos++;
         }
       } catch (e) { erros.push({ titulo: it.titulo, motivo: e.message }); }
       setProgresso({ feito: i + 1, total: aGravar.length, espera: 0, erros });
     }
-    setResultado({ criados, ativados, ocultos, erros, parou: parar.current });
+    setResultado({ criados, ativados, erros, parou: parar.current });
     setProgresso(null);
     setArquivo(null);
     notify(`Importação ${parar.current ? "interrompida" : "concluída"}: ${criados} cadastrados, ${ativados} postos no FN Home ✓`);
@@ -385,9 +378,9 @@ export default function ImportarPlanilhaMercadoLivre({ token, apiFetch, notify, 
               <li key={it.n} style={{ overflowWrap: "anywhere" }}>
                 {it.titulo || <em>(sem nome)</em>}
                 {it.motivo && <span style={{ color: VERMELHO }}> — {it.motivo}</span>}
-                {chave === "busca" && it.pagina && (
+                {chave === "sem-afiliado" && it.pagina && (
                   <a href={it.pagina} target="_blank" rel="noreferrer" style={{ marginLeft: 6, color: AZUL_MEDIO }}>
-                    <Search size={11} style={{ verticalAlign: "-1px" }} /> abrir a busca
+                    {it.busca ? <><Search size={11} style={{ verticalAlign: "-1px" }} /> abrir a busca</> : <><ExternalLink size={11} style={{ verticalAlign: "-1px" }} /> abrir o produto</>}
                   </a>
                 )}
               </li>
@@ -408,8 +401,8 @@ export default function ImportarPlanilhaMercadoLivre({ token, apiFetch, notify, 
       <p style={{ margin: 0, fontSize: 12.5, color: "#4a5a70", lineHeight: 1.5 }}>
         Planilha em .xlsx ou .csv com uma linha por produto e, no cabeçalho, o <strong>nome do produto</strong>, o <strong>link do
         anúncio</strong> e a coluna <strong>link de afiliado (meli.la)</strong>; categoria, preço e imagem são opcionais.
-        Só entra no FN Home quem tem o link de afiliado — é ele que paga a comissão. Quem tem só a página do produto entra
-        oculto: gere os meli.la no portal de afiliados, preencha a coluna e importe a mesma planilha de novo para pô-los no ar.
+        <strong>Só entra quem tem o link de afiliado</strong> — é ele que paga a comissão. Linha sem ele não é cadastrada:
+        gere os meli.la no portal de afiliados, preencha a coluna e importe a mesma planilha de novo.
       </p>
 
       {!arquivo && !progresso && (
@@ -441,7 +434,14 @@ export default function ImportarPlanilhaMercadoLivre({ token, apiFetch, notify, 
             </div>
           )}
           <div style={{ display: "grid", gap: 6 }}>
-            {["novo-ativo", "ativar", "novo-oculto", "busca", "ja-existe", "invalido"].map((k) => <Grupo key={k} chave={k} />)}
+            {aGravar.length === 0 && (
+              <div style={{ fontSize: 12.5, color: VERMELHO, background: "#FDECEC", borderRadius: 6, padding: "6px 8px", lineHeight: 1.45 }}>
+                Nenhuma linha desta planilha tem link de afiliado, então nada vai ser cadastrado. Gere os links no{" "}
+                <a href="https://afiliados.mercadolivre.com.br" target="_blank" rel="noreferrer" style={{ color: AZUL_MEDIO }}>portal de afiliados</a>,
+                cole na coluna "Link de afiliado" e envie a planilha de novo.
+              </div>
+            )}
+            {["novo-ativo", "ativar", "sem-afiliado", "ja-existe", "invalido"].map((k) => <Grupo key={k} chave={k} />)}
           </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
             <button type="button" style={btnLeve} onClick={() => setArquivo(null)}>Outra planilha</button>
@@ -471,21 +471,13 @@ export default function ImportarPlanilhaMercadoLivre({ token, apiFetch, notify, 
         <div style={{ fontSize: 13, lineHeight: 1.55, background: "#fff", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, padding: "8px 10px" }}>
           <div style={{ color: VERDE, fontWeight: 600 }}>
             {resultado.parou ? "Importação interrompida. " : "Importação concluída. "}
-            {resultado.criados} {resultado.criados === 1 ? "produto cadastrado" : "produtos cadastrados"}
-            {resultado.ocultos > 0 ? ` (${resultado.ocultos} ocultos, esperando o link de afiliado)` : ""}
+            {resultado.criados} {resultado.criados === 1 ? "produto cadastrado" : "produtos cadastrados"} no FN Home
             {resultado.ativados > 0 ? ` · ${resultado.ativados} postos no FN Home` : ""}.
           </div>
           {resultado.erros.length > 0 && (
             <ul style={{ margin: "6px 0 0", paddingLeft: 18, color: VERMELHO, fontSize: 12.5 }}>
               {resultado.erros.map((e, i) => <li key={i}>{e.titulo}: {e.motivo}</li>)}
             </ul>
-          )}
-          {resultado.ocultos > 0 && (
-            <div style={{ color: "#4a5a70", fontSize: 12.5, marginTop: 4 }}>
-              Na lista abaixo eles aparecem com <strong>"Falta link de afiliado"</strong>. Gere os links no{" "}
-              <a href="https://afiliados.mercadolivre.com.br" target="_blank" rel="noreferrer" style={{ color: AZUL_MEDIO }}>portal de afiliados <ExternalLink size={11} /></a>,
-              cole na coluna da planilha e importe de novo — ou edite um por um aqui.
-            </div>
           )}
         </div>
       )}
