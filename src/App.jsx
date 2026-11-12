@@ -2624,6 +2624,16 @@ function AppInterno({ session, onLogout }) {
     try { await apiFetch(`/api/clientes/${id}/senha`, { method: "PATCH", token, body: { senha } }); return true; }
     catch (e) { notify(`Não foi possível resetar a senha: ${e.message}`); return false; }
   };
+  /* Outro imóvel do mesmo cliente (mesmo CPF e login), incluído pelo Atendimento ou pela
+     Gerência a partir de um cadastro existente — ver ModalOutroImovel. */
+  const criarOutroImovel = async (origemId, corpo, mostrarErro) => {
+    try {
+      await apiFetch(`/api/clientes/${origemId}/outro-imovel`, { method: "POST", token, body: corpo });
+      notify("Imóvel incluído ✓ Já aparece no portal do cliente.");
+      await carregarClientes();
+      return true;
+    } catch (e) { mostrarErro(e.message); return false; }
+  };
 
   /* ---- Documentação ART/TRT: os dois arquivos finais de cada cliente (ficam no Drive) ---- */
   const [documentosArt, setDocumentosArt] = useState([]);
@@ -3979,7 +3989,7 @@ function AppInterno({ session, onLogout }) {
         )}
         {abaTop === "clientes" && (
           <AbaClientesComercial clientes={clientesAtivos} carregando={clientesCarregando} atualizarCliente={updCliente} excluirCliente={delCliente}
-            resetarSenhaCliente={resetarSenhaCliente} notify={notify} docs={docs} perfil={perfil} />
+            resetarSenhaCliente={resetarSenhaCliente} criarOutroImovel={criarOutroImovel} notify={notify} docs={docs} perfil={perfil} />
         )}
         {abaTop === "qualidade" && (
           <AbaQualidade sub={abaQualidade} setSub={setAbaQualidade} token={token} avaliacoes={avaliacoes} carregando={avaliacoesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
@@ -4021,7 +4031,7 @@ function AppInterno({ session, onLogout }) {
             atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
             importarEmpresasProspeccao={importarEmpresasProspeccao} removerEmpresaProspeccao={removerEmpresaProspeccao}
             meuConvite={meuConvite}
-            docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} clientes={clientes} updCliente={updCliente} resetarSenhaCliente={resetarSenhaCliente} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
+            docs={docs} addDoc={addDoc} updDoc={updDoc} delDoc={delDoc} clientes={clientes} updCliente={updCliente} resetarSenhaCliente={resetarSenhaCliente} criarOutroImovel={criarOutroImovel} carregando={docsCarregando} assinatura={assinatura} salvarAssinatura={salvarAssinatura} removerAssinatura={removerAssinatura} notify={notify}
             usuarios={usuarios} usuariosCarregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario} excluirUsuario={excluirUsuario} salvarPerfilTecnico={salvarPerfilTecnico} usuarioAtualId={session.usuario.id}
             avaliacoes={avaliacoes} avaliacoesCarregando={avaliacoesCarregando}
             parceiros={parceiros} parceirosCarregando={parceirosCarregando} atualizarParceiro={atualizarParceiro} criarParceiroManual={criarParceiroManual}
@@ -4712,13 +4722,15 @@ function ModalResetarSenhaCliente({ cliente, resetarSenhaCliente, notify, onFech
   );
 }
 
-function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirCliente, resetarSenhaCliente, notify, docs = [], perfil }) {
+function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirCliente, resetarSenhaCliente, criarOutroImovel, notify, docs = [], perfil }) {
   const [busca, setBusca] = useState("");
   const [editando, setEditando] = useState(null); // cópia do cliente em edição
   const [visualizacao, setVisualizacao] = useState("kanban"); // "kanban" | "tabela"
   const [cpfsRevelados, setCpfsRevelados] = useState({}); // { [clienteId]: true } — revelação é por sessão, não persiste
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(null); // cliente a excluir definitivamente
   const [resetandoSenha, setResetandoSenha] = useState(null); // cliente cuja senha do portal está sendo resetada
+  const [outroImovelDe, setOutroImovelDe] = useState(null); // cadastro de origem do novo imóvel
+  const podeIncluirImovel = !!criarOutroImovel && (perfil === "gerencia" || perfil === "atendimento");
   /* Atendimento vê o CPF sem precisar clicar em "revelar": é ele quem monta a documentação
      (ART/TRT), que pede o CPF do cliente, e ficar clicando pra revelar a cada linha só
      atrasava o trabalho. */
@@ -4930,6 +4942,12 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
                     <Lock size={15} /> Resetar senha do portal
                   </button>
                 )}
+                {podeIncluirImovel && (
+                  <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }}
+                    onClick={() => { setOutroImovelDe(originalEdicao.current); setEditando(null); }}>
+                    <Building2 size={15} /> Incluir outro imóvel
+                  </button>
+                )}
               </div>
               <div>
                 <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setEditando(null)}>Cancelar</button>
@@ -4948,6 +4966,11 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
       {resetandoSenha && (
         <ModalResetarSenhaCliente cliente={resetandoSenha} resetarSenhaCliente={resetarSenhaCliente}
           notify={notify} onFechar={() => setResetandoSenha(null)} />
+      )}
+
+      {outroImovelDe && (
+        <ModalOutroImovel pessoa={outroImovelDe} daEquipe onFechar={() => setOutroImovelDe(null)}
+          onEnviar={(corpo, mostrarErro) => criarOutroImovel(outroImovelDe.id, corpo, mostrarErro)} />
       )}
     </div>
   );
@@ -10532,7 +10555,7 @@ function CardProspeccao({ prospeccao = [], carregando, atualizar, publicarNoDriv
    documentação, cupons, pedidos — e edita o cadastro no mesmo lugar.
    De propósito NÃO é um "entrar como o cliente": nada é feito em nome dele, e cada alteração
    continua saindo pelo PATCH normal, gravada como ação da Gerência. */
-function AbaPerfilCliente({ clientes = [], token, notify, atualizarCliente, resetarSenhaCliente }) {
+function AbaPerfilCliente({ clientes = [], token, notify, atualizarCliente, resetarSenhaCliente, criarOutroImovel }) {
   const [busca, setBusca] = useState("");
   const [abertoId, setAbertoId] = useState(null);
   const [perfil, setPerfil] = useState(null);
@@ -10540,6 +10563,7 @@ function AbaPerfilCliente({ clientes = [], token, notify, atualizarCliente, rese
   const [form, setForm] = useState(null);
   const [salvando, setSalvando] = useState(false);
   const [resetandoSenha, setResetandoSenha] = useState(false);
+  const [incluindoImovel, setIncluindoImovel] = useState(false);
 
   const carregar = async (id) => {
     setCarregando(true);
@@ -10730,6 +10754,12 @@ function AbaPerfilCliente({ clientes = [], token, notify, atualizarCliente, rese
               ))}
               {perfil.atendimentos.length === 0 && <p style={{ color: "#8593a8", fontSize: 13.5, margin: 0 }}>Nenhum atendimento.</p>}
             </div>
+            {criarOutroImovel && (
+              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, marginTop: 12 }}
+                onClick={() => setIncluindoImovel(true)}>
+                <Building2 size={15} /> Incluir outro imóvel deste cliente
+              </button>
+            )}
           </Card>
 
           <Card icon={Edit3} titulo="Editar cadastro">
@@ -10795,6 +10825,15 @@ function AbaPerfilCliente({ clientes = [], token, notify, atualizarCliente, rese
       {resetandoSenha && form && (
         <ModalResetarSenhaCliente cliente={form} resetarSenhaCliente={resetarSenhaCliente}
           notify={notify} onFechar={() => { setResetandoSenha(false); carregar(form.id); }} />
+      )}
+
+      {incluindoImovel && form && (
+        <ModalOutroImovel pessoa={form} daEquipe onFechar={() => setIncluindoImovel(false)}
+          onEnviar={async (corpo, mostrarErro) => {
+            const ok = await criarOutroImovel(form.id, corpo, mostrarErro);
+            if (ok) await carregar(form.id);
+            return ok;
+          }} />
       )}
     </div>
   );
@@ -17063,7 +17102,7 @@ function AbaGerenciaImportacao({ clientes = [], precos = [], empreendimentosRef 
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, decidirComissaoItem, importarClientesHistorico, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], carregarEmpreendimentosRef, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas, aoAbrirFnHome }) {
+function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, decidirComissaoItem, importarClientesHistorico, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, criarOutroImovel, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], carregarEmpreendimentosRef, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas, aoAbrirFnHome }) {
   if (sub === "painel") {
     return <AbaGerenciaPainelEstrategico clientes={clientes} docs={docs} usuarios={usuarios} precos={precos}
       avaliacoes={avaliacoes} prospeccao={prospeccao} prospeccaoParceiros={prospeccaoParceiros}
@@ -17088,7 +17127,7 @@ function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, de
   }
   if (sub === "perfil-cliente") {
     return <AbaPerfilCliente clientes={clientes} token={token} notify={notify}
-      atualizarCliente={updCliente} resetarSenhaCliente={resetarSenhaCliente} />;
+      atualizarCliente={updCliente} resetarSenhaCliente={resetarSenhaCliente} criarOutroImovel={criarOutroImovel} />;
   }
   if (sub === "patologias") {
     return <CardBancoPatologias patologias={patologiasBanco} carregando={patologiasBancoCarregando}
@@ -17872,6 +17911,172 @@ function CartaoAtendimentoCliente({ doc, cpf, notify, emailConhecido }) {
 }
 
 const OUTROS = "__outros__";
+
+/* Outro imóvel do mesmo cliente: mesmo CPF e mesmo login, empreendimento e endereço novos.
+   Serve ao portal (o próprio cliente) e à equipe (Atendimento → Clientes e Gerência → Perfil
+   do cliente). Os dados pessoais não aparecem para editar: o servidor copia do cadastro de
+   origem (POST /api/clientes/outro-imovel e /api/clientes/:id/outro-imovel). Os campos do
+   imóvel são os do "Cadastre-se" (AbaCliente), com a mesma lista de empreendimentos. */
+function ModalOutroImovel({ pessoa, daEquipe = false, onFechar, onEnviar }) {
+  const [form, setForm] = useState({
+    servico: SERVICO_OPCOES[0], endereco: "", cep: "", blocoTorre: "",
+    dataDesejada: "", horarioDesejado: "", areaPrivativa: "", observacoes: "",
+  });
+  const [refEmpreendimentos, setRefEmpreendimentos] = useState([]);
+  const [refTipologias, setRefTipologias] = useState([]);
+  const [construtoraSel, setConstrutoraSel] = useState("");
+  const [empreendimentoSel, setEmpreendimentoSel] = useState("");
+  const [construtoraOutros, setConstrutoraOutros] = useState("");
+  const [empreendimentoOutros, setEmpreendimentoOutros] = useState("");
+  const [tipologiaSel, setTipologiaSel] = useState("");
+  const [buscandoCep, setBuscandoCep] = useState(false);
+  const [enviando, setEnviando] = useState(false);
+  const [erro, setErro] = useState("");
+  useEffect(() => {
+    apiFetch("/api/empreendimentos-ref").then((r) => setRefEmpreendimentos(r.empreendimentos || [])).catch(() => {});
+    apiFetch("/api/tipologias-ref").then((t) => setRefTipologias(t.tipologias || [])).catch(() => {});
+  }, []);
+  const construtorasDisponiveis = [...new Set(refEmpreendimentos.map((e) => e.construtora).filter(Boolean))].sort();
+  const empreendimentosDisponiveis = [...new Set(
+    refEmpreendimentos.filter((e) => e.construtora === construtoraSel).map((e) => e.empreendimento)
+  )].sort();
+  const tipologiasDoEmpreendimento = refTipologias.filter((t) => t.empreendimento === empreendimentoSel);
+  const setF = (campo, v) => setForm((f) => ({ ...f, [campo]: v }));
+  const escolherEmpreendimento = (nome) => {
+    setEmpreendimentoSel(nome);
+    setTipologiaSel("");
+    const ref = refEmpreendimentos.find((e) => e.empreendimento === nome);
+    setForm((f) => ({
+      ...f, areaPrivativa: "",
+      endereco: ref?.endereco ? String(ref.endereco).toUpperCase() : f.endereco,
+      cep: ref?.cep ? String(ref.cep).replace(/\D/g, "").slice(0, 8) : f.cep,
+    }));
+  };
+  const escolherTipologia = (nome) => {
+    setTipologiaSel(nome);
+    const t = tipologiasDoEmpreendimento.find((x) => x.tipologia === nome);
+    if (t) setForm((f) => ({ ...f, areaPrivativa: t.areaPrivativa || f.areaPrivativa }));
+  };
+  const ehVistoria = form.servico !== SERVICO_DOCUMENTACAO;
+
+  const enviar = async () => {
+    setErro("");
+    const construtora = (construtoraSel === OUTROS ? construtoraOutros : construtoraSel).trim().toUpperCase();
+    const empreendimento = (empreendimentoSel === OUTROS ? empreendimentoOutros : empreendimentoSel).trim().toUpperCase();
+    if (!empreendimento && !form.endereco.trim()) { setErro("Informe o empreendimento ou o endereço do novo imóvel."); return; }
+    if (form.dataDesejada && form.dataDesejada < paraChaveISO(new Date())) { setErro("A data desejada precisa ser de hoje em diante — confira o ano."); return; }
+    if (form.dataDesejada && !confirmarDataDistante(form.dataDesejada)) return;
+    setEnviando(true);
+    const ok = await onEnviar({
+      ...form, construtora, empreendimento,
+      precisaCadastroEmpreendimento: construtoraSel === OUTROS || empreendimentoSel === OUTROS,
+    }, setErro);
+    setEnviando(false);
+    if (ok) onFechar();
+  };
+
+  return (
+    <div className="no-print" style={overlay} onClick={onFechar}>
+      <div style={{ ...modal, maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <strong style={{ color: AZUL_MARINHO, fontSize: 16 }}>Cadastrar outro imóvel</strong>
+          <button className="icon-btn" onClick={onFechar} aria-label="Fechar"><X size={16} /></button>
+        </div>
+        <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 14px" }}>
+          {daEquipe
+            ? <>Novo atendimento para <strong>{pessoa?.nome}</strong>{pessoa?.cpf ? ` (CPF ${mascararCpf(pessoa.cpf)})` : ""}, com os mesmos dados pessoais e o mesmo acesso ao portal. Preencha só o que é do novo imóvel.</>
+            : <>Comprou outro imóvel ou vai reformar outro endereço? Use o mesmo CPF e o mesmo acesso: preencha só os dados do novo imóvel. Ele aparece aqui em "Meu atendimento", separado do primeiro.</>}
+        </p>
+        <Grid>
+          <div style={cell(true)}>
+            <label style={lab}>Qual serviço para este imóvel?</label>
+            <EscolhaDeServico valor={form.servico} onChange={(v) => setF("servico", v)} />
+          </div>
+          <div style={cell(false)}>
+            <label style={lab}>Construtora</label>
+            <select style={inp} value={construtoraSel} onChange={(e) => { setConstrutoraSel(e.target.value); setEmpreendimentoSel(""); }}>
+              <option value="">selecionar…</option>
+              {construtorasDisponiveis.map((c) => <option key={c} value={c}>{c}</option>)}
+              <option value={OUTROS}>Outros (não está na lista)</option>
+            </select>
+            {construtoraSel === OUTROS && (
+              <input style={{ ...inp, marginTop: 6 }} placeholder="Digite o nome da construtora" value={construtoraOutros} onChange={(e) => setConstrutoraOutros(e.target.value)} />
+            )}
+          </div>
+          <div style={cell(false)}>
+            <label style={lab}>Empreendimento</label>
+            <select style={inp} value={empreendimentoSel} onChange={(e) => escolherEmpreendimento(e.target.value)} disabled={!construtoraSel}>
+              <option value="">{construtoraSel ? "selecionar…" : "escolha a construtora primeiro"}</option>
+              {empreendimentosDisponiveis.map((e) => <option key={e} value={e}>{e}</option>)}
+              <option value={OUTROS}>Outros (não está na lista)</option>
+            </select>
+            {empreendimentoSel === OUTROS && (
+              <input style={{ ...inp, marginTop: 6 }} placeholder="Digite o nome do empreendimento" value={empreendimentoOutros} onChange={(e) => setEmpreendimentoOutros(e.target.value)} />
+            )}
+          </div>
+          {ehVistoria && tipologiasDoEmpreendimento.length > 0 && (
+            <div style={cell(false)}>
+              <label style={lab}>Tipologia do imóvel</label>
+              <select style={inp} value={tipologiaSel} onChange={(e) => escolherTipologia(e.target.value)}>
+                <option value="">selecionar…</option>
+                {[...new Set(tipologiasDoEmpreendimento.map((t) => t.tipologia).filter(Boolean))].map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <Field label="Endereço completo" value={form.endereco} onChange={(v) => setF("endereco", v.toUpperCase())} full />
+          <div style={cell(false)}>
+            <label style={lab}>CEP</label>
+            <input style={inp} value={form.cep} inputMode="numeric" placeholder="Só números"
+              onChange={async (e) => {
+                const cep = e.target.value.replace(/\D/g, "").slice(0, 8);
+                setF("cep", cep);
+                if (cep.length === 8) {
+                  setBuscandoCep(true);
+                  const achado = await buscarEnderecoPorCep(cep);
+                  setBuscandoCep(false);
+                  if (achado) setF("endereco", achado.endereco.toUpperCase());
+                }
+              }} />
+            <span style={{ fontSize: 11.5, color: "#8593a8" }}>
+              {buscandoCep ? "Buscando endereço…" : "Preenche o endereço automaticamente."}
+            </span>
+          </div>
+          <Field label="Bloco / Apto" value={form.blocoTorre} onChange={(v) => setF("blocoTorre", v.toUpperCase())} />
+          {ehVistoria && (
+            <>
+              <div style={cell(false)}>
+                <label style={lab}>Data desejada</label>
+                <input style={inp} type="date" min={paraChaveISO(new Date())} value={form.dataDesejada} onChange={(e) => setF("dataDesejada", e.target.value)} />
+                {avisoDataDesejada(form.dataDesejada) && (
+                  <span style={{ fontSize: 11.5, color: "#C62828", fontWeight: 600 }}>{avisoDataDesejada(form.dataDesejada)}</span>
+                )}
+              </div>
+              <div style={cell(false)}>
+                <label style={lab}>Horário desejado</label>
+                <select style={inp} value={form.horarioDesejado} onChange={(e) => setF("horarioDesejado", e.target.value)}>
+                  <option value="">selecionar…</option>
+                  {HORARIOS_COMERCIAIS.map((h) => <option key={h} value={h}>{h}</option>)}
+                </select>
+              </div>
+              <Field label="Área privativa (opcional)" value={form.areaPrivativa}
+                onChange={(v) => setF("areaPrivativa", v)} placeholder="Ex.: 58,40 m²" />
+            </>
+          )}
+        </Grid>
+        <Area label="Observações (opcional)" value={form.observacoes} onChange={(v) => setF("observacoes", v.toUpperCase())} rows={2} />
+        {erro && <div style={{ background: "#FCEAEA", color: "#C62828", padding: "8px 10px", borderRadius: 8, fontSize: 13, marginTop: 10 }}>{erro}</div>}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+          <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={onFechar}>Cancelar</button>
+          <button className="btn-solid" onClick={enviar} disabled={enviando}>
+            {enviando ? <Loader2 size={15} className="spin" /> : <Plus size={15} />} Cadastrar imóvel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function AbaCliente({ notify, onLogin }) {
   const [form, setForm] = useState(novoCadastroCliente());
@@ -20221,6 +20426,17 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado 
     } catch (e) { notify(`Não foi possível pedir a revistoria: ${e.message}`); return false; }
   };
 
+  /* Outro imóvel com o mesmo CPF e o mesmo login (ver ModalOutroImovel). */
+  const [cadastrandoImovel, setCadastrandoImovel] = useState(false);
+  const cadastrarOutroImovel = async (corpo, mostrarErro) => {
+    try {
+      await apiFetch("/api/clientes/outro-imovel", { method: "POST", token: session.token, body: corpo });
+      notify("Imóvel cadastrado ✓ Nossa equipe entra em contato para confirmar o atendimento.");
+      await carregar();
+      return true;
+    } catch (e) { mostrarErro(e.message); return false; }
+  };
+
   /* Cross-sell: quem já é cliente (fez vistoria, por ex.) pede Documentação ART/TRT sem
      preencher o cadastro de novo — os dados vêm do cadastro já existente. */
   const [solicitandoDoc, setSolicitandoDoc] = useState(false);
@@ -20405,6 +20621,16 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado 
               })}
             </div>
           )}
+          {!carregando && cliente && (
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${CINZA_BORDA}`, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12.5, color: "#65758b", flex: 1, minWidth: 200 }}>
+                Tem outro imóvel? Cadastre com o mesmo CPF e acompanhe os dois por aqui.
+              </span>
+              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setCadastrandoImovel(true)}>
+                <Building2 size={14} /> Cadastrar outro imóvel
+              </button>
+            </div>
+          )}
         </Card>
 
         {!leadsCarregando && leads.length > 0 && (
@@ -20545,6 +20771,10 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado 
       {pedindoRevistoria && (
         <ModalPedirRevistoria atendimento={pedindoRevistoria}
           onFechar={() => setPedindoRevistoria(null)} onEnviar={pedirRevistoria} />
+      )}
+
+      {cadastrandoImovel && (
+        <ModalOutroImovel pessoa={cliente} onFechar={() => setCadastrandoImovel(false)} onEnviar={cadastrarOutroImovel} />
       )}
 
       {session.usuario.senhaProvisoria && (
