@@ -225,6 +225,9 @@ function mapClienteDaApi(c) {
        atendimento de origem; revistoriaSeq é a ordem (1ª, 2ª…). */
     revistoriaDe: c.revistoria_de || null,
     revistoriaSeq: Number(c.revistoria_seq) || 0,
+    /* Outro imóvel do mesmo cliente (ModalOutroImovel): o cadastro de onde vieram os dados
+       pessoais. O imóvel é outro — nunca herda laudo daquele cadastro. */
+    outroImovelDe: c.outro_imovel_de || null,
   };
 }
 /* O laudo (registro em "docs") de um cadastro. O vínculo é o cliente_id: casar por CPF
@@ -232,12 +235,13 @@ function mapClienteDaApi(c) {
    as duas têm o mesmo CPF, e o `find` devolvia sempre a primeira, deixando a revistoria
    nascer com cara de "já vistoriada".
    Registros antigos, gravados antes de existir o cliente_id, continuam casando pelo CPF;
-   revistoria nunca usa esse atalho, senão adotaria o laudo da vistoria anterior. */
+   revistoria nunca usa esse atalho, senão adotaria o laudo da vistoria anterior — nem o outro
+   imóvel do mesmo cliente, que adotaria o laudo do imóvel antigo. */
 function docDoCliente(cliente, docs = []) {
   if (!cliente) return null;
   const porCadastro = docs.find((d) => d.clienteId && d.clienteId === cliente.id);
   if (porCadastro) return porCadastro;
-  if (cliente.revistoriaDe) return null;
+  if (cliente.revistoriaDe || cliente.outroImovelDe) return null;
   const cpfLimpo = (cliente.cpf || "").replace(/\D/g, "");
   if (!cpfLimpo) return null;
   return docs.find((d) => !d.clienteId && (d.cpf || "").replace(/\D/g, "") === cpfLimpo) || null;
@@ -255,7 +259,7 @@ function clienteDoDoc(doc, clientes = []) {
   if (porCadastro) return porCadastro;
   const cpfLimpo = (doc.cpf || "").replace(/\D/g, "");
   if (!cpfLimpo) return null;
-  return clientes.find((c) => !c.revistoriaDe && (c.cpf || "").replace(/\D/g, "") === cpfLimpo) || null;
+  return clientes.find((c) => !c.revistoriaDe && !c.outroImovelDe && (c.cpf || "").replace(/\D/g, "") === cpfLimpo) || null;
 }
 /* Etapa atual de um cliente no fluxo completo (cadastro → análise → vistoria → laudo → feedback).
    Antes de existir um "docs" pra esse CPF, quem manda é cliente.status (Em análise/Agendamento
@@ -2563,6 +2567,18 @@ function AppInterno({ session, onLogout }) {
       return false;
     }
   };
+  /* Outro imóvel de quem já é cliente (ModalOutroImovel, em Perfil do cliente e Editar cliente):
+     o servidor copia os dados pessoais do cadastro origemId. Devolve a resposta ou { erro } — o
+     modal mostra o motivo ali mesmo. POST: não é repetido em caso de falha. */
+  const criarOutroImovel = async (origemId, corpo) => {
+    try {
+      const r = await apiFetch(`/api/clientes/${origemId}/outro-imovel`, { method: "POST", token, body: corpo });
+      await carregarClientes();
+      // Vistoria já feita por quem está logado: aparece na agenda dele sem esperar os 20 s.
+      if (r?.vistoriadorId && String(r.vistoriadorId) === String(session.usuario.id)) carregarAgendaVistoriador({ silencioso: true });
+      return r || {};
+    } catch (e) { return { erro: e.message }; }
+  };
   /* ---- Carga da base antiga de clientes (Gerência → Importar base) ----
      Rota própria, e não o POST /api/clientes do portal: o cadastro público dispara o fluxo
      inteiro — análise do Atendimento, e-mail de boas-vindas, entrada na fila de agendamento —,
@@ -3979,7 +3995,8 @@ function AppInterno({ session, onLogout }) {
         )}
         {abaTop === "clientes" && (
           <AbaClientesComercial clientes={clientesAtivos} carregando={clientesCarregando} atualizarCliente={updCliente} excluirCliente={delCliente}
-            resetarSenhaCliente={resetarSenhaCliente} notify={notify} docs={docs} perfil={perfil} />
+            resetarSenhaCliente={resetarSenhaCliente} notify={notify} docs={docs} perfil={perfil}
+            criarOutroImovel={criarOutroImovel} usuarios={usuarios} usuarioAtualId={session.usuario.id} />
         )}
         {abaTop === "qualidade" && (
           <AbaQualidade sub={abaQualidade} setSub={setAbaQualidade} token={token} avaliacoes={avaliacoes} carregando={avaliacoesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
@@ -4015,7 +4032,7 @@ function AppInterno({ session, onLogout }) {
         )}
         {abaTop === "gerencia" && !String(abaGerencia).startsWith("fin-") && (
           <AbaGerencia sub={abaGerencia} fin={fin} usuarioAtual={session.usuario} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem}
-            aoAbrirFnHome={() => setAbaGerencia("fn-home-financeiro")}
+            aoAbrirFnHome={() => setAbaGerencia("fn-home-financeiro")} criarOutroImovel={criarOutroImovel}
             importarClientesHistorico={importarClientesHistorico}
             prospeccaoParceiros={prospeccaoParceiros} prospeccaoParceirosCarregando={prospeccaoParceirosCarregando}
             atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
@@ -4239,9 +4256,11 @@ function NotificacoesClientes({ clientes, preencherComCliente, usuarioAtualId, s
                   data inválida — corrigir no cadastro
                 </div>
               )}
+              {/* "Em vistoria" que ninguém abriu ainda é a vistoria que já foi feita — o outro imóvel
+                  que a equipe cadastrou com "A vistoria já foi feita" (ModalOutroImovel): falta o laudo. */}
               <button className="btn-solid" style={{ width: "auto", padding: "8px 14px" }}
                 onClick={() => preencherComCliente(c, { irParaItens: true })}>
-                <Check size={14} /> Iniciar vistoria
+                <Check size={14} /> {c.status === "Em vistoria" ? "Criar laudo" : "Iniciar vistoria"}
               </button>
             </div>
           ))}
@@ -4526,7 +4545,9 @@ function CalendarioVistoriador({ agenda = [], carregando, clientes = [], preench
                           const cli = clientes.find((c) => c.id === a.id);
                           if (cli) preencherComCliente(cli, { irParaItens: true });
                         }}>
-                        <Check size={14} /> {a.status === "Em vistoria" ? "Continuar" : "Iniciar"} {a.revistoria_seq > 0 ? "revistoria" : "vistoria"}
+                        <Check size={14} /> {a.status === "Em vistoria" && !a.atendido
+                          ? "Criar laudo" /* vistoria já feita, ninguém abriu ainda (ver NotificacoesClientes) */
+                          : `${a.status === "Em vistoria" ? "Continuar" : "Iniciar"} ${a.revistoria_seq > 0 ? "revistoria" : "vistoria"}`}
                       </button>
                     )}
                   </div>
@@ -4712,9 +4733,10 @@ function ModalResetarSenhaCliente({ cliente, resetarSenhaCliente, notify, onFech
   );
 }
 
-function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirCliente, resetarSenhaCliente, notify, docs = [], perfil }) {
+function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirCliente, resetarSenhaCliente, notify, docs = [], perfil, criarOutroImovel, usuarios = [], usuarioAtualId }) {
   const [busca, setBusca] = useState("");
   const [editando, setEditando] = useState(null); // cópia do cliente em edição
+  const [outroImovelDe, setOutroImovelDe] = useState(null); // cadastro de onde saem os dados pessoais (ModalOutroImovel)
   const [visualizacao, setVisualizacao] = useState("kanban"); // "kanban" | "tabela"
   const [cpfsRevelados, setCpfsRevelados] = useState({}); // { [clienteId]: true } — revelação é por sessão, não persiste
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(null); // cliente a excluir definitivamente
@@ -4930,6 +4952,13 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
                     <Lock size={15} /> Resetar senha do portal
                   </button>
                 )}
+                {/* Abre por cima desta janela: o que foi mexido aqui e ainda não foi salvo continua
+                    aqui quando a outra fechar. Os dados pessoais saem do cadastro como estava ao abrir. */}
+                {criarOutroImovel && (
+                  <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setOutroImovelDe(originalEdicao.current)}>
+                    <Building2 size={15} /> Outro imóvel
+                  </button>
+                )}
               </div>
               <div>
                 <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setEditando(null)}>Cancelar</button>
@@ -4948,6 +4977,13 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
       {resetandoSenha && (
         <ModalResetarSenhaCliente cliente={resetandoSenha} resetarSenhaCliente={resetarSenhaCliente}
           notify={notify} onFechar={() => setResetandoSenha(null)} />
+      )}
+
+      {outroImovelDe && (
+        <ModalOutroImovel cliente={outroImovelDe} equipe
+          vistoriadores={usuarios.filter((u) => fazVistoria(u) && u.ativo !== false)} usuarioAtualId={usuarioAtualId}
+          onFechar={() => setOutroImovelDe(null)}
+          onEnviar={(corpo) => criarOutroImovel(outroImovelDe.id, corpo)} />
       )}
     </div>
   );
@@ -10532,7 +10568,7 @@ function CardProspeccao({ prospeccao = [], carregando, atualizar, publicarNoDriv
    documentação, cupons, pedidos — e edita o cadastro no mesmo lugar.
    De propósito NÃO é um "entrar como o cliente": nada é feito em nome dele, e cada alteração
    continua saindo pelo PATCH normal, gravada como ação da Gerência. */
-function AbaPerfilCliente({ clientes = [], token, notify, atualizarCliente, resetarSenhaCliente }) {
+function AbaPerfilCliente({ clientes = [], token, notify, atualizarCliente, resetarSenhaCliente, criarOutroImovel, usuarios = [], usuarioAtualId }) {
   const [busca, setBusca] = useState("");
   const [abertoId, setAbertoId] = useState(null);
   const [perfil, setPerfil] = useState(null);
@@ -10540,6 +10576,7 @@ function AbaPerfilCliente({ clientes = [], token, notify, atualizarCliente, rese
   const [form, setForm] = useState(null);
   const [salvando, setSalvando] = useState(false);
   const [resetandoSenha, setResetandoSenha] = useState(false);
+  const [cadastrandoOutroImovel, setCadastrandoOutroImovel] = useState(false);
 
   const carregar = async (id) => {
     setCarregando(true);
@@ -10730,6 +10767,14 @@ function AbaPerfilCliente({ clientes = [], token, notify, atualizarCliente, rese
               ))}
               {perfil.atendimentos.length === 0 && <p style={{ color: "#8593a8", fontSize: 13.5, margin: 0 }}>Nenhum atendimento.</p>}
             </div>
+            {/* Outro imóvel da mesma pessoa: aproveita os dados pessoais deste cadastro e vira um
+                atendimento novo, com o laudo dele (ModalOutroImovel). */}
+            {criarOutroImovel && (
+              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO, marginTop: 12 }}
+                onClick={() => setCadastrandoOutroImovel(true)}>
+                <Building2 size={15} /> Cadastrar outro imóvel deste cliente
+              </button>
+            )}
           </Card>
 
           <Card icon={Edit3} titulo="Editar cadastro">
@@ -10795,6 +10840,16 @@ function AbaPerfilCliente({ clientes = [], token, notify, atualizarCliente, rese
       {resetandoSenha && form && (
         <ModalResetarSenhaCliente cliente={form} resetarSenhaCliente={resetarSenhaCliente}
           notify={notify} onFechar={() => { setResetandoSenha(false); carregar(form.id); }} />
+      )}
+
+      {/* Os dados pessoais saem do cadastro como veio do servidor (perfil.cliente), não do
+          formulário de edição, que pode ter mudança ainda não salva. */}
+      {cadastrandoOutroImovel && perfil && (
+        <ModalOutroImovel cliente={mapClienteDaApi(perfil.cliente)} equipe
+          vistoriadores={usuarios.filter((u) => fazVistoria(u) && u.ativo !== false)} usuarioAtualId={usuarioAtualId}
+          onFechar={() => setCadastrandoOutroImovel(false)}
+          onEnviar={(corpo) => criarOutroImovel(perfil.cliente.id, corpo)}
+          onCriado={() => carregar(perfil.cliente.id)} />
       )}
     </div>
   );
@@ -17063,7 +17118,7 @@ function AbaGerenciaImportacao({ clientes = [], precos = [], empreendimentosRef 
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, decidirComissaoItem, importarClientesHistorico, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], carregarEmpreendimentosRef, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas, aoAbrirFnHome }) {
+function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, decidirComissaoItem, importarClientesHistorico, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], carregarEmpreendimentosRef, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas, aoAbrirFnHome, criarOutroImovel }) {
   if (sub === "painel") {
     return <AbaGerenciaPainelEstrategico clientes={clientes} docs={docs} usuarios={usuarios} precos={precos}
       avaliacoes={avaliacoes} prospeccao={prospeccao} prospeccaoParceiros={prospeccaoParceiros}
@@ -17088,7 +17143,8 @@ function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, de
   }
   if (sub === "perfil-cliente") {
     return <AbaPerfilCliente clientes={clientes} token={token} notify={notify}
-      atualizarCliente={updCliente} resetarSenhaCliente={resetarSenhaCliente} />;
+      atualizarCliente={updCliente} resetarSenhaCliente={resetarSenhaCliente}
+      criarOutroImovel={criarOutroImovel} usuarios={usuarios} usuarioAtualId={usuarioAtualId} />;
   }
   if (sub === "patologias") {
     return <CardBancoPatologias patologias={patologiasBanco} carregando={patologiasBancoCarregando}
@@ -19786,6 +19842,274 @@ function ModalPedirRevistoria({ atendimento, onFechar, onEnviar }) {
   );
 }
 
+/* ================= Outro imóvel do mesmo cliente =================
+   Pedido da Gerência (nov/2026): quem já fez vistoria com a FN tem outro imóvel para vistoriar.
+   Os dados pessoais (nome, CPF, telefone, e-mail, login do portal) vêm do cadastro que ele já
+   tem — quem decide isso é o servidor (src/outro-imovel.js); aqui eles só aparecem, para quem
+   preenche conferir de quem é. O que se preenche é o imóvel novo. Vira um cadastro novo, com o
+   laudo dele, que segue o caminho de sempre: análise do Atendimento, agendamento, técnico, laudo.
+   Usado no portal do cliente e pela equipe (Perfil do cliente e Editar cliente). A equipe tem o
+   atalho "A vistoria já foi feita": o cadastro nasce escalado para quem fez e em "Em vistoria", e
+   o laudo fica aberto para essa pessoa em Laudos → "Solicitações de clientes pendentes" → "Criar
+   laudo" — o laudo sai no nome de quem o cria e envia.
+   Construtora e empreendimento vêm da mesma lista do "Cadastre-se" (AbaCliente), com o mesmo
+   "Outros" para o que não está nela.
+   onEnviar devolve a resposta do servidor ou { erro }: o motivo da recusa (imóvel já cadastrado,
+   técnico que a FN Nacional não deixa receber…) aparece aqui mesmo, e não num aviso que some. */
+function ModalOutroImovel({ cliente, equipe = false, vistoriadores = [], usuarioAtualId, onFechar, onEnviar, onCriado }) {
+  const hojeISO = paraChaveISO(new Date());
+  const [refEmpreendimentos, setRefEmpreendimentos] = useState([]);
+  const [refTipologias, setRefTipologias] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await apiFetch("/api/empreendimentos-ref");
+        setRefEmpreendimentos(r.empreendimentos || []);
+        try {
+          const t = await apiFetch("/api/tipologias-ref");
+          setRefTipologias(t.tipologias || []);
+        } catch { /* sem tipologias, a área continua manual */ }
+      } catch { /* sem a lista, sobra o "Outros" */ }
+    })();
+  }, []);
+  const [construtoraSel, setConstrutoraSel] = useState("");
+  const [empreendimentoSel, setEmpreendimentoSel] = useState("");
+  const [construtoraOutros, setConstrutoraOutros] = useState("");
+  const [empreendimentoOutros, setEmpreendimentoOutros] = useState("");
+  const [tipologiaSel, setTipologiaSel] = useState("");
+  const [form, setForm] = useState({ endereco: "", cep: "", blocoTorre: "", areaPrivativa: "", dataDesejada: "", horarioDesejado: "", observacoes: "" });
+  const [jaFeita, setJaFeita] = useState(false);
+  const [tecnicoId, setTecnicoId] = useState("");
+  const [buscandoCep, setBuscandoCep] = useState(false);
+  const [erro, setErro] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [criado, setCriado] = useState(null); // resposta do servidor depois de gravar
+
+  const setF = (campo, v) => setForm((f) => ({ ...f, [campo]: v }));
+  const construtoras = [...new Set(refEmpreendimentos.map((e) => e.construtora).filter(Boolean))].sort();
+  const empreendimentos = [...new Set(refEmpreendimentos.filter((e) => e.construtora === construtoraSel).map((e) => e.empreendimento))].sort();
+  const tipologias = refTipologias.filter((t) => t.empreendimento === empreendimentoSel);
+  /* Igual ao "Cadastre-se": escolher o empreendimento traz endereço e CEP quando a lista tem, e a
+     tipologia traz a área. Tudo continua editável. */
+  const escolherEmpreendimento = (nome) => {
+    setEmpreendimentoSel(nome);
+    setTipologiaSel("");
+    const ref = refEmpreendimentos.find((e) => e.empreendimento === nome);
+    setForm((f) => ({
+      ...f,
+      areaPrivativa: "",
+      endereco: ref?.endereco ? String(ref.endereco).toUpperCase() : f.endereco,
+      cep: ref?.cep ? String(ref.cep).replace(/\D/g, "").slice(0, 8) : f.cep,
+    }));
+  };
+  const escolherTipologia = (nome) => {
+    setTipologiaSel(nome);
+    const t = tipologias.find((x) => x.tipologia === nome);
+    if (t) setForm((f) => ({ ...f, areaPrivativa: t.areaPrivativa || f.areaPrivativa }));
+  };
+  const tecnicos = [...vistoriadores].sort((a, b) => String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR"));
+
+  const enviar = async () => {
+    setErro("");
+    const construtora = (construtoraSel === OUTROS ? construtoraOutros : construtoraSel).trim().toUpperCase();
+    const empreendimento = (empreendimentoSel === OUTROS ? empreendimentoOutros : empreendimentoSel).trim().toUpperCase();
+    if (!empreendimento && !form.endereco.trim()) { setErro("Escolha o empreendimento ou escreva o endereço do outro imóvel."); return; }
+    const vistoriaFeita = equipe && jaFeita;
+    if (vistoriaFeita) {
+      if (!tecnicoId) { setErro("Escolha quem fez a vistoria — o laudo sai no nome dessa pessoa."); return; }
+      if (!form.dataDesejada) { setErro("Informe a data em que a vistoria foi feita."); return; }
+      if (form.dataDesejada > hojeISO) { setErro("A vistoria já feita não pode ter data depois de hoje — confira o ano."); return; }
+    } else if (form.dataDesejada) {
+      if (form.dataDesejada < hojeISO) { setErro("A data desejada precisa ser de hoje em diante — confira o ano."); return; }
+      if (!confirmarDataDistante(form.dataDesejada)) return;
+    }
+    setEnviando(true);
+    const r = await onEnviar({
+      construtora, empreendimento,
+      endereco: form.endereco.trim(), cep: form.cep, blocoTorre: form.blocoTorre.trim(),
+      areaPrivativa: form.areaPrivativa.trim(), observacoes: form.observacoes.trim(),
+      dataDesejada: form.dataDesejada, horarioDesejado: form.horarioDesejado,
+      precisaCadastroEmpreendimento: construtoraSel === OUTROS || empreendimentoSel === OUTROS,
+      ...(vistoriaFeita ? { vistoriaRealizada: true, vistoriadorId: tecnicoId } : {}),
+    });
+    setEnviando(false);
+    if (!r || r.erro) { setErro(r?.erro || "Não foi possível cadastrar o imóvel. Tente de novo."); return; }
+    setCriado({ ...r, empreendimento: empreendimento || form.endereco.trim(), blocoTorre: form.blocoTorre.trim() });
+    onCriado?.(r);
+  };
+
+  const imovelCriado = criado ? `${criado.empreendimento}${criado.blocoTorre ? ` · ${criado.blocoTorre}` : ""}` : "";
+  const paraMim = criado?.vistoriadorId && String(criado.vistoriadorId) === String(usuarioAtualId);
+
+  return (
+    <div className="no-print" style={overlay} onClick={onFechar}>
+      <div style={{ ...modal, maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <strong>Cadastrar outro imóvel</strong>
+          <button className="icon-btn" onClick={onFechar}><X size={16} /></button>
+        </div>
+
+        {criado ? (
+          <>
+            <div style={{ background: "#E6F4EA", border: "1px solid #A5D6B0", borderRadius: 10, padding: "12px 14px", marginTop: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#2E7D32", fontWeight: 700, fontSize: 14.5, marginBottom: 4 }}>
+                <Check size={16} /> {criado.vistoriadorId ? "Imóvel cadastrado e laudo aberto" : "Imóvel cadastrado"}
+              </div>
+              <div style={{ fontSize: 13.5, color: "#33683c" }}>
+                <strong>{imovelCriado}</strong> — {cliente?.nome}.{" "}
+                {criado.vistoriadorId
+                  ? (paraMim
+                    ? "O laudo está aberto para você: em Laudos, \"Solicitações de clientes pendentes\", toque em \"Criar laudo\"."
+                    : `O laudo está aberto para ${criado.vistoriadorNome}: quando entrar, ele encontra em Laudos, "Solicitações de clientes pendentes", com o botão "Criar laudo". O laudo sai no nome dele.`)
+                  : equipe
+                    ? "Está no Agendamento, em Análise, para aprovar a data e escalar o técnico."
+                    : "Nossa equipe entra em contato para confirmar a data da vistoria. Você acompanha aqui, em \"Meu atendimento\"."}
+              </div>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+              <button className="btn-solid" onClick={onFechar}><Check size={15} /> Fechar</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 12px" }}>
+              {equipe
+                ? "Os dados pessoais vêm deste cadastro; o imóvel é novo. Vira um atendimento separado, com o laudo dele."
+                : "Seus dados pessoais já estão aqui — preencha só o imóvel. Nossa equipe confirma a data da vistoria com você."}
+            </p>
+            {/* Só para conferir de quem é: os dados que valem são os do cadastro, no servidor. */}
+            <div style={{ background: CINZA_CLARO, borderRadius: 10, padding: "10px 12px", marginBottom: 14 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#65758b", marginBottom: 2 }}>DADOS PESSOAIS (JÁ CADASTRADOS)</div>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>{cliente?.nome || "—"}</div>
+              <div style={{ fontSize: 12.5, color: "#65758b", overflowWrap: "anywhere" }}>
+                {[cliente?.cpfMascarado || mascararCpf(cliente?.cpf), cliente?.telefone, cliente?.email].filter(Boolean).join(" · ")}
+              </div>
+            </div>
+
+            <Grid>
+              <div style={cell(false)}>
+                <label style={lab}>Construtora</label>
+                <select style={inp} value={construtoraSel} onChange={(e) => { setConstrutoraSel(e.target.value); setEmpreendimentoSel(""); setTipologiaSel(""); }}>
+                  <option value="">selecionar…</option>
+                  {construtoras.map((c) => <option key={c} value={c}>{c}</option>)}
+                  <option value={OUTROS}>Outros (não está na lista)</option>
+                </select>
+                {construtoraSel === OUTROS && (
+                  <input style={{ ...inp, marginTop: 6 }} placeholder="Nome da construtora" value={construtoraOutros} onChange={(e) => setConstrutoraOutros(e.target.value)} />
+                )}
+              </div>
+              <div style={cell(false)}>
+                <label style={lab}>Empreendimento</label>
+                <select style={inp} value={empreendimentoSel} onChange={(e) => escolherEmpreendimento(e.target.value)} disabled={!construtoraSel}>
+                  <option value="">{construtoraSel ? "selecionar…" : "escolha a construtora primeiro"}</option>
+                  {empreendimentos.map((e) => <option key={e} value={e}>{e}</option>)}
+                  <option value={OUTROS}>Outros (não está na lista)</option>
+                </select>
+                {empreendimentoSel === OUTROS && (
+                  <input style={{ ...inp, marginTop: 6 }} placeholder="Nome do empreendimento" value={empreendimentoOutros} onChange={(e) => setEmpreendimentoOutros(e.target.value)} />
+                )}
+              </div>
+              {tipologias.length > 0 && (
+                <div style={cell(false)}>
+                  <label style={lab}>Tipologia do imóvel</label>
+                  <select style={inp} value={tipologiaSel} onChange={(e) => escolherTipologia(e.target.value)}>
+                    <option value="">selecionar…</option>
+                    {[...new Set(tipologias.map((t) => t.tipologia).filter(Boolean))].map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                  <span style={{ fontSize: 11.5, color: "#8593a8" }}>Preenche a área privativa.</span>
+                </div>
+              )}
+              <Field label="Endereço completo" value={form.endereco} onChange={(v) => setF("endereco", v.toUpperCase())} full />
+              <div style={cell(false)}>
+                <label style={lab}>CEP</label>
+                <input style={inp} value={form.cep} inputMode="numeric" placeholder="Só números"
+                  onChange={async (e) => {
+                    const cep = e.target.value.replace(/\D/g, "").slice(0, 8);
+                    setF("cep", cep);
+                    if (cep.length === 8) {
+                      setBuscandoCep(true);
+                      const achado = await buscarEnderecoPorCep(cep);
+                      setBuscandoCep(false);
+                      if (achado) setF("endereco", achado.endereco.toUpperCase());
+                    }
+                  }} />
+                <span style={{ fontSize: 11.5, color: "#8593a8" }}>{buscandoCep ? "Buscando endereço…" : "Preenche o endereço automaticamente."}</span>
+              </div>
+              <Field label="Bloco / Apto" value={form.blocoTorre} onChange={(v) => setF("blocoTorre", v.toUpperCase())} />
+              <Field label="Área privativa (opcional)" value={form.areaPrivativa} onChange={(v) => setF("areaPrivativa", v)} placeholder="Ex.: 58,40 m²" />
+
+              {equipe && (
+                <label style={{ ...cell(true), flexDirection: "row", alignItems: "flex-start", gap: 9, background: jaFeita ? "#EAF2FB" : CINZA_CLARO, border: `1px solid ${jaFeita ? AZUL_MEDIO : CINZA_BORDA}`, borderRadius: 10, padding: "10px 12px", cursor: "pointer" }}>
+                  <input type="checkbox" checked={jaFeita} onChange={(e) => setJaFeita(e.target.checked)} style={{ marginTop: 2, width: 16, height: 16, flexShrink: 0 }} />
+                  <span style={{ fontSize: 13, color: "#334" }}>
+                    <strong>A vistoria deste imóvel já foi feita</strong> — pula a análise e o agendamento e já abre o laudo para quem fez a vistoria.
+                  </span>
+                </label>
+              )}
+
+              {equipe && jaFeita ? (
+                <>
+                  <div style={cell(true)}>
+                    <label style={lab}>Quem fez a vistoria (o laudo sai no nome dele)</label>
+                    <select style={inp} value={tecnicoId} onChange={(e) => setTecnicoId(e.target.value)}>
+                      <option value="">selecionar…</option>
+                      {tecnicos.map((u) => <option key={u.id} value={u.id}>{rotuloTecnico(u)}</option>)}
+                    </select>
+                  </div>
+                  <div style={cell(false)}>
+                    <label style={lab}>Data da vistoria</label>
+                    <input style={inp} type="date" max={hojeISO} value={form.dataDesejada} onChange={(e) => setF("dataDesejada", e.target.value)} />
+                  </div>
+                  <div style={cell(false)}>
+                    <label style={lab}>Horário (opcional)</label>
+                    <select style={inp} value={form.horarioDesejado} onChange={(e) => setF("horarioDesejado", e.target.value)}>
+                      <option value="">selecionar…</option>
+                      {HORARIOS_COMERCIAIS.map((h) => <option key={h} value={h}>{h}</option>)}
+                    </select>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={cell(false)}>
+                    <label style={lab}>Data desejada</label>
+                    <input style={inp} type="date" min={hojeISO} value={form.dataDesejada} onChange={(e) => setF("dataDesejada", e.target.value)} />
+                    {avisoDataDesejada(form.dataDesejada) && (
+                      <span style={{ fontSize: 11.5, color: "#C62828", fontWeight: 600 }}>{avisoDataDesejada(form.dataDesejada)}</span>
+                    )}
+                  </div>
+                  <div style={cell(false)}>
+                    <label style={lab}>Horário desejado</label>
+                    <select style={inp} value={form.horarioDesejado} onChange={(e) => setF("horarioDesejado", e.target.value)}>
+                      <option value="">selecionar…</option>
+                      {HORARIOS_COMERCIAIS.map((h) => <option key={h} value={h}>{h}</option>)}
+                    </select>
+                  </div>
+                </>
+              )}
+            </Grid>
+            <Area label="Observações (opcional)" value={form.observacoes} onChange={(v) => setF("observacoes", v.toUpperCase())} rows={2}
+              placeholder="EX.: CHAVES COM O PORTEIRO, MELHOR HORÁRIO PARA CONTATO..." />
+
+            {erro && (
+              <div style={{ background: "#FCEAEA", color: "#C62828", padding: "8px 10px", borderRadius: 8, fontSize: 12.5, marginTop: 12 }}>
+                <AlertTriangle size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} /> {erro}
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18, flexWrap: "wrap" }}>
+              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={onFechar}>Cancelar</button>
+              <button className="btn-solid" onClick={enviar} disabled={enviando}>
+                {enviando ? <Loader2 size={15} className="spin" /> : <Building2 size={15} />}
+                {equipe && jaFeita ? "Cadastrar e abrir o laudo" : "Cadastrar imóvel"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* Fluxograma visual do atendimento no portal do cliente — mesma ideia de LinhaDoTempo (uso
    interno da equipe, sobre ETAPAS_VISTORIA), mas com o vocabulário mais simples que o cliente
    já recebe em STATUS_ATENDIMENTO_INFO. Documentação ART/TRT tem fluxo próprio de 2 passos
@@ -20221,6 +20545,17 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado 
     } catch (e) { notify(`Não foi possível pedir a revistoria: ${e.message}`); return false; }
   };
 
+  /* Outro imóvel para vistoriar (ModalOutroImovel): os dados pessoais vêm do cadastro dele, no
+     servidor; ele preenche só o imóvel. Devolve a resposta ou { erro } — o modal mostra o motivo. */
+  const [cadastrandoOutroImovel, setCadastrandoOutroImovel] = useState(false);
+  const cadastrarOutroImovel = async (corpo) => {
+    try {
+      const r = await apiFetch("/api/clientes/outro-imovel", { method: "POST", token: session.token, body: corpo });
+      carregar();
+      return r || {};
+    } catch (e) { return { erro: e.message }; }
+  };
+
   /* Cross-sell: quem já é cliente (fez vistoria, por ex.) pede Documentação ART/TRT sem
      preencher o cadastro de novo — os dados vêm do cadastro já existente. */
   const [solicitandoDoc, setSolicitandoDoc] = useState(false);
@@ -20405,6 +20740,18 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado 
               })}
             </div>
           )}
+          {/* Outro imóvel: o mesmo cliente, outro endereço. A revistoria (acima) é o retorno ao
+              mesmo imóvel; aqui é um imóvel diferente, com vistoria e laudo próprios. */}
+          {!carregando && resultados.length > 0 && cliente && (
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${CINZA_BORDA}`, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ flex: 1, minWidth: 200, fontSize: 13, color: "#65758b" }}>
+                Tem outro imóvel para vistoriar? Seus dados pessoais já vão preenchidos — falta só o endereço.
+              </span>
+              <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setCadastrandoOutroImovel(true)}>
+                <Building2 size={14} /> Cadastrar outro imóvel
+              </button>
+            </div>
+          )}
         </Card>
 
         {!leadsCarregando && leads.length > 0 && (
@@ -20545,6 +20892,11 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado 
       {pedindoRevistoria && (
         <ModalPedirRevistoria atendimento={pedindoRevistoria}
           onFechar={() => setPedindoRevistoria(null)} onEnviar={pedirRevistoria} />
+      )}
+
+      {cadastrandoOutroImovel && cliente && (
+        <ModalOutroImovel cliente={cliente}
+          onFechar={() => setCadastrandoOutroImovel(false)} onEnviar={cadastrarOutroImovel} />
       )}
 
       {session.usuario.senhaProvisoria && (
