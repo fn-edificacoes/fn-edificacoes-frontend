@@ -220,6 +220,23 @@ cliente e em pastas separadas no Drive.
   CPF: vistoria e revistoria compartilham o CPF, e o `find` devolvia sempre a primeira,
   fazendo a revistoria nascer com cara de "já vistoriada".
 
+## Outro imóvel do mesmo cliente
+
+Pedido da Gerência (nov/2026): quem já é cliente tem outro imóvel para vistoriar. `ModalOutroImovel`
+aproveita os dados pessoais do cadastro (quem copia é o servidor, `src/outro-imovel.js` no backend)
+e pede só o imóvel — construtora/empreendimento pela mesma lista do "Cadastre-se", com "Outros".
+Vira um cadastro novo (`outroImovelDe` no `mapClienteDaApi`), com o laudo dele.
+
+- Portal do cliente: "Cadastrar outro imóvel", no fim de "Meu atendimento" — entra em Análise.
+- Equipe: Gerência → Perfil do cliente ("Cadastrar outro imóvel deste cliente") e Clientes →
+  Editar cliente ("Outro imóvel", que abre por cima sem perder a edição). Lá existe **"A vistoria
+  deste imóvel já foi feita"**: escolhe quem fez e a data, e o cadastro nasce "Em vistoria" escalado
+  para essa pessoa. O laudo sai no nome de quem o cria e envia — por isso o técnico é quem fez.
+- Para o técnico, "Em vistoria" que ninguém abriu ainda é vistoria feita esperando laudo: o botão
+  vira **"Criar laudo"** em Solicitações de clientes pendentes e em Minha agenda.
+- `docDoCliente` e `clienteDoDoc` nunca casam o outro imóvel pelo CPF (o doc antigo é do outro
+  imóvel) — a mesma exceção da revistoria.
+
 ## Perfil do cliente (Gerência)
 
 Sub-aba **Gerência → Perfil do cliente** (`AbaPerfilCliente`): busca por nome, CPF, e-mail ou
