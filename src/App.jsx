@@ -4592,6 +4592,149 @@ function KanbanClientes({ clientes, docs, onAbrir }) {
 }
 
 
+/* Clientes por empreendimento (aba Clientes): pedido do Atendimento para bater o olho e ver,
+   em cada empreendimento, quantas pessoas estão cadastradas e quem são — separadas em
+   pré-cadastro, agendados e realizados. As etapas são as mesmas do Kanban
+   (etapaClienteCompleta), só agrupadas em três: "Solicitação de vistoria" é o pré-cadastro;
+   "Vistoria agendada" e "Em vistoria" são agendados; "Vistoriado" é realizado. Cancelados
+   contam só em "Todos". O agrupamento usa normalizarChaveEmpreendimento, a mesma chave dos
+   relatórios, para "Residencial X" e "x" não virarem dois empreendimentos.
+   As listas têm altura fixa com rolagem própria, para a tela não crescer sem fim. */
+const GRUPOS_EMPREENDIMENTO = [
+  { id: "todos", rotulo: "Todos" },
+  { id: "pre", rotulo: "Pré-cadastro", etapas: ["Solicitação de vistoria"] },
+  { id: "agendado", rotulo: "Agendados", etapas: ["Vistoria agendada", "Em vistoria"] },
+  { id: "realizado", rotulo: "Realizados", etapas: ["Vistoriado"] },
+];
+const COR_GRUPO_EMPREENDIMENTO = {
+  todos: { cor: AZUL_MARINHO, bg: "#EEF1F5" },
+  pre: { cor: "#65758b", bg: "#EEF1F5" },
+  agendado: { cor: "#B26A00", bg: "#FFF4E0" },
+  realizado: { cor: "#2E7D32", bg: "#E6F4EA" },
+};
+function grupoDaEtapa(etapa) {
+  const g = GRUPOS_EMPREENDIMENTO.find((x) => x.etapas?.includes(etapa));
+  return g ? g.id : null;
+}
+function ClientesPorEmpreendimento({ clientes, docs, onAbrir }) {
+  const [busca, setBusca] = useState("");
+  const [selecionado, setSelecionado] = useState(null); // chave normalizada
+  const [aba, setAba] = useState("todos");
+
+  const empreendimentos = useMemo(() => {
+    const mapa = {};
+    clientes.forEach((c) => {
+      const chave = normalizarChaveEmpreendimento(c.empreendimento) || "__sem__";
+      const e = (mapa[chave] = mapa[chave] || { chave, nomes: {}, clientes: [], cont: { todos: 0, pre: 0, agendado: 0, realizado: 0 } });
+      const original = (c.empreendimento || "").trim();
+      if (original) e.nomes[original] = (e.nomes[original] || 0) + 1;
+      const grupo = grupoDaEtapa(etapaClienteCompleta(c, docs));
+      e.clientes.push({ c, grupo });
+      e.cont.todos += 1;
+      if (grupo) e.cont[grupo] += 1;
+    });
+    return Object.values(mapa)
+      .map((e) => {
+        // Mostra a grafia mais usada do nome.
+        const nome = Object.entries(e.nomes).sort((a, b) => b[1] - a[1])[0]?.[0] || "Sem empreendimento";
+        e.clientes.sort((a, b) => (a.c.nome || "").localeCompare(b.c.nome || "", "pt-BR"));
+        return { ...e, nome };
+      })
+      .sort((a, b) => b.cont.todos - a.cont.todos || a.nome.localeCompare(b.nome, "pt-BR"));
+  }, [clientes, docs]);
+
+  const visiveis = empreendimentos.filter((e) => !busca || e.nome.toLowerCase().includes(busca.toLowerCase()));
+  const atual = empreendimentos.find((e) => e.chave === selecionado) || visiveis[0] || null;
+  const lista = atual ? atual.clientes.filter((x) => aba === "todos" || x.grupo === aba) : [];
+
+  const Contador = ({ grupo, n }) => {
+    const s = COR_GRUPO_EMPREENDIMENTO[grupo];
+    return <span title={GRUPOS_EMPREENDIMENTO.find((g) => g.id === grupo).rotulo}
+      style={{ background: s.bg, color: s.cor, borderRadius: 20, padding: "2px 8px", fontSize: 11.5, fontWeight: 700, minWidth: 22, textAlign: "center" }}>{n}</span>;
+  };
+
+  return (
+    <Card icon={IconeEmpreendimento} titulo={`Clientes por empreendimento (${empreendimentos.length})`}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12, color: "#65758b", marginBottom: 12, alignItems: "center" }}>
+        Em cada empreendimento:
+        {GRUPOS_EMPREENDIMENTO.map((g) => (
+          <span key={g.id} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <span style={{ width: 10, height: 10, borderRadius: 10, background: COR_GRUPO_EMPREENDIMENTO[g.id].cor }} />{g.rotulo}
+          </span>
+        ))}
+      </div>
+      {empreendimentos.length === 0 ? (
+        <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum cliente cadastrado.</p>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 }}>
+          {/* Lista de empreendimentos */}
+          <div style={{ minWidth: 0 }}>
+            <input style={{ ...inp, width: "100%", marginBottom: 8 }} placeholder="Buscar empreendimento…" value={busca} onChange={(e) => setBusca(e.target.value)} />
+            <div style={{ display: "grid", gap: 6, maxHeight: 380, overflowY: "auto", paddingRight: 4 }}>
+              {visiveis.length === 0 && <span style={{ fontSize: 13, color: "#8593a8" }}>Nenhum empreendimento encontrado.</span>}
+              {visiveis.map((e) => {
+                const ativo = atual?.chave === e.chave;
+                return (
+                  <button key={e.chave} onClick={() => setSelecionado(e.chave)}
+                    style={{ textAlign: "left", cursor: "pointer", borderRadius: 10, padding: "9px 10px", background: ativo ? "#EAF2FB" : "#fff",
+                      border: `1px solid ${ativo ? AZUL_MEDIO : CINZA_BORDA}` }}>
+                    <div style={{ fontWeight: 700, fontSize: 13.5, color: AZUL_MARINHO, marginBottom: 5 }}>{e.nome}</div>
+                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                      {GRUPOS_EMPREENDIMENTO.map((g) => <Contador key={g.id} grupo={g.id} n={e.cont[g.id]} />)}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Pessoas do empreendimento escolhido, em abas */}
+          {atual && (
+            <div style={{ minWidth: 0, border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: 12 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: AZUL_MARINHO, marginBottom: 10 }}>
+                {atual.nome} <span style={{ fontWeight: 400, fontSize: 13, color: "#65758b" }}>· {atual.cont.todos} {atual.cont.todos === 1 ? "pessoa" : "pessoas"}</span>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+                {GRUPOS_EMPREENDIMENTO.map((g) => {
+                  const ativo = aba === g.id;
+                  const s = COR_GRUPO_EMPREENDIMENTO[g.id];
+                  return (
+                    <button key={g.id} onClick={() => setAba(g.id)}
+                      style={{ border: `1px solid ${ativo ? s.cor : CINZA_BORDA}`, background: ativo ? s.bg : "#fff", color: ativo ? s.cor : "#4a5a70",
+                        borderRadius: 20, padding: "6px 12px", fontSize: 12.5, fontWeight: ativo ? 700 : 500, cursor: "pointer" }}>
+                      {g.rotulo} ({atual.cont[g.id]})
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ maxHeight: 320, overflowY: "auto", display: "grid", gap: 4, paddingRight: 4 }}>
+                {lista.length === 0 && <span style={{ fontSize: 13, color: "#8593a8", padding: "6px 2px" }}>Ninguém nesta aba.</span>}
+                {lista.map(({ c, grupo }, i) => (
+                  <button key={c.id} onClick={() => onAbrir(c)} title="Abrir cadastro"
+                    style={{ display: "flex", alignItems: "center", gap: 8, textAlign: "left", cursor: "pointer", background: i % 2 ? "#fff" : CINZA_CLARO,
+                      border: "none", borderRadius: 8, padding: "7px 9px" }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 8, flexShrink: 0, background: grupo ? COR_GRUPO_EMPREENDIMENTO[grupo].cor : "#C62828" }} />
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>{c.nome || "(sem nome)"}</span>
+                      {c.blocoTorre && <span style={{ fontSize: 12, color: "#8593a8" }}> · {c.blocoTorre}</span>}
+                    </span>
+                    {grupo === "agendado" && c.dataDesejada && (
+                      <span style={{ fontSize: 11.5, color: "#8593a8", whiteSpace: "nowrap" }}>
+                        {c.dataDesejada.split("-").reverse().join("/")}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""}
+                      </span>
+                    )}
+                    {!grupo && <Selo valor={etapaClienteCompleta(c, docs)} />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 /* Caminho manual de "esqueci minha senha": o cliente liga no WhatsApp, a Gerência define uma
    senha nova aqui e passa por telefone/WhatsApp. Funciona também pra quem nunca teve senha
    (cria a conta na hora, sem precisar do fluxo de e-mail). */
@@ -4832,6 +4975,8 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
           ))}
         </div>
       )}
+
+      {!carregando && <ClientesPorEmpreendimento clientes={daVistoria} docs={docs} onAbrir={abrirEdicao} />}
 
       <Card icon={Users} titulo={`Clientes cadastrados (${daVistoria.length})`}>
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 12px" }}>
