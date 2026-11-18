@@ -2519,20 +2519,32 @@ function AppInterno({ session, onLogout }) {
      guarda, quem entrava por Vendas era recebido por um "você não tem permissão" que não
      dizia respeito a nada do que ele veio fazer. */
   const podeVerClientes = ["gerencia", "vistoriador", "documentacao", "atendimento"].includes(perfil);
-  const carregarClientes = async () => {
+  /* silencioso: a releitura automática não mexe em clientesCarregando. Várias telas trocam o
+     conteúdo por "Carregando…" enquanto ele está ligado; com a releitura a cada 20s, a lista
+     sumia e voltava, a página subia sozinha e quem estava lendo um cadastro, um empreendimento
+     ou uma aba lá embaixo era jogado para cima (queixa do Atendimento, nov/2026). Falha na
+     releitura também não avisa: a lista que está na tela continua valendo, e um aviso a cada
+     20s com a internet oscilando só atrapalharia. */
+  /* O "Carregando…" só aparece na primeira carga. As releituras depois de salvar, agendar ou
+     excluir (muitas telas chamam carregarClientes) trocam a lista por baixo, sem apagá-la —
+     pelo mesmo motivo. */
+  const clientesJaCarregados = useRef(false);
+  const carregarClientes = async ({ silencioso = false } = {}) => {
     if (!podeVerClientes) return;
-    setClientesCarregando(true);
+    const mostrarCarregando = !clientesJaCarregados.current;
+    if (mostrarCarregando) setClientesCarregando(true);
     try {
       const r = await apiFetch("/api/clientes", { token });
       setClientes((r.clientes || []).map(mapClienteDaApi));
-    } catch (e) { notify(`Não foi possível carregar clientes: ${e.message}`); }
-    setClientesCarregando(false);
+      clientesJaCarregados.current = true;
+    } catch (e) { if (!silencioso) notify(`Não foi possível carregar clientes: ${e.message}`); }
+    if (mostrarCarregando) setClientesCarregando(false);
   };
   useEffect(() => { carregarClientes(); }, []);
   // Novo cadastro (feito na tela pública) precisa aparecer no bloco de aprovação do
-  // Agendamento sem precisar recarregar a página — busca de novo a cada 20s.
+  // Agendamento sem precisar recarregar a página — busca de novo a cada 20s, em silêncio.
   useEffect(() => {
-    const t = setInterval(carregarClientes, 20000);
+    const t = setInterval(() => carregarClientes({ silencioso: true }), 20000);
     return () => clearInterval(t);
   }, []);
   /* Devolve se a gravação foi aceita pelo servidor. A falha continua avisada aqui (é o mesmo
