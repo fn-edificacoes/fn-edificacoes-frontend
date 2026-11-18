@@ -14,7 +14,10 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   FileSignature, FileText, Download, Eye, Plus, Search, RefreshCcw, X, Check, AlertTriangle, ShieldCheck, Loader2,
   ExternalLink, Upload, Eraser, History, Paperclip, Ban, Repeat, Send, Lock, Mail, Save, PenLine, Info, Settings, ScrollText,
+  CalendarClock, MessageCircle,
 } from "lucide-react";
+import { numeroWhatsapp } from "./laudo-whatsapp.jsx";
+import { AREA_CLIENTE_URL } from "./links-publicos.js";
 
 const AZUL_MEDIO = "#2C75B5";
 const AZUL_MARINHO = "#12335B";
@@ -63,7 +66,10 @@ const ROTULO_EVENTO = {
   falha_assinatura: "Tentativa de assinatura não concluída", govbr_recebido: "PDF assinado pelo GOV.BR recebido",
   triagem_automatica: "Triagem automática: assinatura digital encontrada", validacao_aprovada: "Assinatura GOV.BR validada e aprovada",
   validacao_rejeitada: "Documento do GOV.BR recusado", cancelado: "Contrato cancelado", substituido: "Contrato substituído",
+  whatsapp_aberto: "WhatsApp aberto com o pedido de assinatura",
 };
+/* Contrato que o cliente já pode assinar (liberado e ainda não assinado): é para ele que vai o WhatsApp. */
+const ESPERANDO_CLIENTE = ["aguardando_assinatura", "em_assinatura_fn", "aguardando_govbr", "rejeitado"];
 const ROTULO_ARQUIVO = {
   original: "PDF original (o que vai para assinatura)", assinado_fn: "PDF assinado na plataforma FN",
   assinatura_png: "Imagem da assinatura desenhada", evidencias: "Evidências da assinatura (JSON)",
@@ -83,6 +89,67 @@ const data = (v) => (v ? new Date(v).toLocaleDateString("pt-BR") : "—");
 const tamanho = (b) => (b >= 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round((b || 0) / 1024))} KB`);
 const hashCurto = (h) => (h ? `${h.slice(0, 10)}…${h.slice(-6)}` : "—");
 const brl = (v) => (v === null || v === undefined || v === "" ? "" : Number(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }));
+
+/* ---------------- WhatsApp do pedido de assinatura ---------------- */
+/* "2026-12-01" -> "01/12/2026". A data do agendamento é texto AAAA-MM-DD (clientes.data_desejada). */
+const dataDoAgendamento = (iso) => (/^\d{4}-\d{2}-\d{2}$/.test(String(iso || "")) ? String(iso).split("-").reverse().join("/") : "");
+/* Dias até a vistoria (0 = hoje, negativo = já passou), pelo calendário de quem está na tela. */
+function diasAteVistoria(iso) {
+  const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const hoje = new Date();
+  const zero = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate()).getTime();
+  return Math.round((new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime() - zero) / 86400000);
+}
+function primeiroNome(nome) {
+  const p = String(nome || "").trim().split(/\s+/)[0] || "";
+  return p ? p.charAt(0).toUpperCase() + p.slice(1).toLowerCase() : "";
+}
+/* O texto pronto. Leva a Área do Cliente (o contrato não abre sem login) e diz, com todas as
+   letras, que a vistoria só acontece depois da assinatura — a regra da FN. Sem e-mail nem CPF na
+   mensagem: o cliente entra com o e-mail do cadastro, que ele já sabe. */
+export function mensagemWhatsappContrato({ nome, numero, servico, dataVistoria, horaVistoria, temAcessoAoPortal = true, motivoRecusa = "" }) {
+  const pn = primeiroNome(nome);
+  const data = dataDoAgendamento(dataVistoria);
+  const quando = data ? ` para *${data}${horaVistoria ? ` às ${horaVistoria}` : ""}*` : "";
+  return [
+    pn ? `Olá, ${pn}! 👋` : "Olá! 👋",
+    "",
+    `Aqui é da *FN Edificações*. Sua ${String(servico || "vistoria").toLowerCase()} está agendada${quando}.`,
+    `Para confirmarmos o atendimento, falta só a *assinatura do contrato*${numero ? ` nº ${numero}` : ""} ✍️`,
+    ...(motivoRecusa ? ["", `⚠️ O PDF enviado pelo GOV.BR não pôde ser validado: ${motivoRecusa}`] : []),
+    "",
+    "📱 É rápido e dá para fazer pelo celular:",
+    `1. Acesse ${AREA_CLIENTE_URL}`,
+    temAcessoAoPortal
+      ? "2. Entre com o e-mail e a senha do seu cadastro"
+      : "2. Toque em *Primeiro acesso? Crie sua senha* e use o e-mail do seu cadastro",
+    "3. Em *Meus contratos*, toque em *Assinar contrato* — aqui na FN ou pelo GOV.BR, como preferir",
+    "",
+    "⚠️ A vistoria só é realizada depois da assinatura do contrato.",
+    "",
+    "Qualquer dúvida, é só responder esta mensagem.",
+    "*Equipe FN Edificações*",
+  ].join("\n");
+}
+/* Link click-to-chat (wa.me), como o do laudo: abre o WhatsApp de quem clicou com a conversa e o
+   texto prontos — quem envia é a pessoa. O clique só avisa o servidor (histórico), sem esperar. */
+function BotaoWhatsappContrato({ contratoId, telefone, mensagem, apiFetch, token, rotulo = "WhatsApp" }) {
+  const numero = numeroWhatsapp(telefone);
+  if (!numero) {
+    return <span title="Cadastro sem telefone com DDD" style={{ ...btnLeve, ...desligado(true), color: AMBAR }}><MessageCircle size={15} /> Sem WhatsApp no cadastro</span>;
+  }
+  const avisar = () => {
+    if (!contratoId) return;
+    apiFetch(`/api/contratos/${contratoId}/whatsapp-aberto`, { method: "POST", token }).catch(() => { /* registro não impede o envio */ });
+  };
+  return (
+    <a href={`https://wa.me/${numero}?text=${encodeURIComponent(mensagem)}`} target="_blank" rel="noopener noreferrer" onClick={avisar}
+      style={{ ...btn, background: "#1B7F4B", textDecoration: "none" }}>
+      <MessageCircle size={15} /> {rotulo}
+    </a>
+  );
+}
 
 /* ---------------- arquivos protegidos pelo login ---------------- */
 /* O apiFetch lê JSON; PDF vem em binário, com o mesmo token. */
@@ -794,6 +861,9 @@ function AssinaturaGovbr({ contrato, token, apiFetch, onBaixar, onBaixarAssinado
 export default function AbaContratos({ token, apiFetch, apiUrl, notify, perfil }) {
   const ehGerencia = perfil === "gerencia";
   const [sub, setSub] = useState("contratos");
+  /* Mudou um contrato em qualquer das duas listas (agendados e contratos): as duas se atualizam. */
+  const [versao, setVersao] = useState(0);
+  const mudou = () => setVersao((v) => v + 1);
   const abas = [["contratos", "Contratos", FileSignature], ...(ehGerencia ? [["modelos", "Modelos", ScrollText], ["contratada", "Dados da FN", Settings]] : [])];
   return (
     <div className="fnc-raiz" style={{ display: "grid", gap: 16, minWidth: 0 }}>
@@ -807,14 +877,121 @@ export default function AbaContratos({ token, apiFetch, apiUrl, notify, perfil }
           ))}
         </div>
       )}
-      {sub === "contratos" && <ListaDeContratos token={token} apiFetch={apiFetch} apiUrl={apiUrl} notify={notify} perfil={perfil} />}
+      {sub === "contratos" && (
+        <>
+          <AgendadosParaContrato token={token} apiFetch={apiFetch} apiUrl={apiUrl} notify={notify} perfil={perfil} versao={versao} onMudou={mudou} />
+          <ListaDeContratos token={token} apiFetch={apiFetch} apiUrl={apiUrl} notify={notify} perfil={perfil} versao={versao} onMudouGeral={mudou} />
+        </>
+      )}
       {sub === "modelos" && ehGerencia && <ModelosDeContrato token={token} apiFetch={apiFetch} apiUrl={apiUrl} notify={notify} />}
       {sub === "contratada" && ehGerencia && <DadosDaContratada token={token} apiFetch={apiFetch} notify={notify} />}
     </div>
   );
 }
 
-function ListaDeContratos({ token, apiFetch, apiUrl, notify, perfil }) {
+/* Agendados sem contrato assinado: o cadastro entra aqui sozinho assim que o agendamento é aprovado
+   e sai quando o contrato é assinado — o Atendimento não precisa procurar ninguém. A vistoria mais
+   próxima vem primeiro, com o aviso de quanto falta. */
+function AgendadosParaContrato({ token, apiFetch, apiUrl, notify, perfil, versao, onMudou }) {
+  const [lista, setLista] = useState(null);
+  const [aberto, setAberto] = useState(null);
+  const [gerando, setGerando] = useState(null);
+  const carregar = async () => {
+    try { setLista((await apiFetch("/api/contratos/agendados", { token })).agendados || []); }
+    catch (e) { notify(`Não foi possível carregar os agendados: ${e.message}`); setLista((l) => l || []); }
+  };
+  useEffect(() => { carregar(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [versao]);
+
+  const gerar = async (a) => {
+    setGerando(a.clienteId);
+    try {
+      const r = await apiFetch("/api/contratos", { method: "POST", token, body: { clienteId: a.clienteId } });
+      notify(`Contrato ${r.contrato.numero} gerado — confira os dados e libere para assinatura.`);
+      setAberto(r.contrato.id);
+      onMudou();
+    } catch (e) { notify(e.message); }
+    setGerando(null);
+  };
+  const prazo = (a) => {
+    const d = diasAteVistoria(a.dataVistoria);
+    if (d === null) return null;
+    if (d < 0) return { texto: "vistoria com data passada", cor: VERMELHO, fundo: "#FDECEC" };
+    if (d === 0) return { texto: "vistoria hoje", cor: VERMELHO, fundo: "#FDECEC" };
+    if (d === 1) return { texto: "vistoria amanhã", cor: AMBAR, fundo: "#FFF4E0" };
+    if (d <= 3) return { texto: `vistoria em ${d} dias`, cor: AMBAR, fundo: "#FFF4E0" };
+    return { texto: `vistoria em ${d} dias`, cor: "#5a6a80", fundo: "#EEF1F5" };
+  };
+
+  return (
+    <Caixa icon={CalendarClock} titulo={`Agendados aguardando contrato${lista ? ` (${lista.length})` : ""}`}
+      acoes={<button style={btnLeve} onClick={carregar}><RefreshCcw size={15} /> Atualizar</button>}>
+      <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 12px", lineHeight: 1.5 }}>
+        Todo cliente com agendamento aprovado aparece aqui até assinar o contrato — a vistoria só é realizada depois da assinatura.
+        Gere o contrato, libere e mande o link pelo WhatsApp.
+      </p>
+      {lista === null && <Girando />}
+      {lista && lista.length === 0 && <div style={{ fontSize: 13.5, color: "#8593a8" }}>Nenhum cliente agendado esperando contrato. ✓</div>}
+      {lista && lista.length > 0 && (
+        <div style={{ display: "grid", gap: 8 }}>
+          {lista.map((a) => {
+            const p = prazo(a);
+            const c = a.contrato;
+            const esperandoCliente = c && ESPERANDO_CLIENTE.includes(c.status);
+            return (
+              <div key={a.clienteId} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: 12, display: "grid", gap: 8 }}>
+                <div className="fnc-linha" style={{ justifyContent: "space-between", gap: 8 }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontWeight: 700, color: AZUL_MARINHO, fontSize: 14.5 }}>{a.nome}</div>
+                    <div style={{ fontSize: 12.5, color: "#4a5a70" }}>
+                      {[a.servico, a.empreendimento, a.unidade].filter(Boolean).join(" · ")}
+                    </div>
+                    <div style={{ fontSize: 12.5, color: "#4a5a70" }}>
+                      {a.dataVistoria ? `Vistoria ${dataDoAgendamento(a.dataVistoria)}${a.horaVistoria ? ` às ${a.horaVistoria}` : ""}` : "Vistoria sem data marcada"}
+                      {a.tecnico ? ` · técnico ${a.tecnico}` : ""} · {a.statusCadastro}
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", gap: 4, justifyItems: "end" }}>
+                    {p && <span style={{ background: p.fundo, color: p.cor, borderRadius: 20, padding: "3px 10px", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>{p.texto}</span>}
+                    {c ? <Selo status={c.status} rotulo={`${c.numero} · ${c.rotuloStatus}`} />
+                      : <span style={{ background: "#EEF1F5", color: "#5a6a80", borderRadius: 20, padding: "3px 10px", fontSize: 12, fontWeight: 700 }}>Sem contrato</span>}
+                  </div>
+                </div>
+                {!a.temAcessoAoPortal && (
+                  <div style={{ fontSize: 12, color: AMBAR }}>Cliente ainda sem senha no portal — a mensagem do WhatsApp já explica o "Primeiro acesso".</div>
+                )}
+                <div className="fnc-acoes">
+                  {!c && (
+                    <button style={{ ...btn, ...desligado(gerando === a.clienteId) }} disabled={gerando === a.clienteId} onClick={() => gerar(a)}>
+                      {gerando === a.clienteId ? <Loader2 size={15} className="fnc-spin" /> : <FileSignature size={15} />} Gerar contrato
+                    </button>
+                  )}
+                  {c && (
+                    <button style={c.status === "rascunho" ? btn : btnLeve} onClick={() => setAberto(c.id)}>
+                      {c.status === "rascunho" ? <><Send size={15} /> Conferir e liberar</> : <><Eye size={15} /> Abrir contrato</>}
+                    </button>
+                  )}
+                  {esperandoCliente && (
+                    <BotaoWhatsappContrato contratoId={c.id} telefone={a.telefone} apiFetch={apiFetch} token={token} rotulo="Enviar pelo WhatsApp"
+                      mensagem={mensagemWhatsappContrato({ nome: a.nome, numero: c.numero, servico: a.servico, dataVistoria: a.dataVistoria, horaVistoria: a.horaVistoria, temAcessoAoPortal: a.temAcessoAoPortal })} />
+                  )}
+                  {!esperandoCliente && (
+                    <span style={{ fontSize: 12, color: "#8593a8", alignSelf: "center" }}>O WhatsApp com o link aparece depois de liberar o contrato.</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {aberto && (
+        <FichaContrato id={aberto} token={token} apiFetch={apiFetch} apiUrl={apiUrl} notify={notify} perfil={perfil}
+          onFechar={() => setAberto(null)} onMudou={onMudou} onAbrir={(id) => setAberto(id)} />
+      )}
+    </Caixa>
+  );
+}
+
+function ListaDeContratos({ token, apiFetch, apiUrl, notify, perfil, versao = 0, onMudouGeral = () => {} }) {
   const [filtro, setFiltro] = useState("");
   const [busca, setBusca] = useState("");
   const [buscaAplicada, setBuscaAplicada] = useState("");
@@ -834,7 +1011,7 @@ function ListaDeContratos({ token, apiFetch, apiUrl, notify, perfil }) {
     } catch (e) { notify(`Não foi possível carregar os contratos: ${e.message}`); setDados((d) => d || { contratos: [], contagem: {} }); }
     setCarregando(false);
   };
-  useEffect(() => { carregar(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filtro, buscaAplicada]);
+  useEffect(() => { carregar(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filtro, buscaAplicada, versao]);
   useEffect(() => { const t = setTimeout(() => setBuscaAplicada(busca.trim()), 350); return () => clearTimeout(t); }, [busca]);
 
   const contagem = dados?.contagem || {};
@@ -891,11 +1068,11 @@ function ListaDeContratos({ token, apiFetch, apiUrl, notify, perfil }) {
       )}
       {novo && (
         <NovoContrato token={token} apiFetch={apiFetch} notify={notify} onFechar={() => setNovo(false)}
-          onCriado={(id) => { setNovo(false); setAberto(id); carregar(); }} />
+          onCriado={(id) => { setNovo(false); setAberto(id); onMudouGeral(); }} />
       )}
       {aberto && (
         <FichaContrato id={aberto} token={token} apiFetch={apiFetch} apiUrl={apiUrl} notify={notify} perfil={perfil}
-          onFechar={() => setAberto(null)} onMudou={carregar} onAbrir={(id) => setAberto(id)} />
+          onFechar={() => setAberto(null)} onMudou={onMudouGeral} onAbrir={(id) => setAberto(id)} />
       )}
     </Caixa>
   );
@@ -1112,7 +1289,7 @@ function FichaContrato({ id, token, apiFetch, apiUrl, notify, perfil, onFechar, 
           <div style={{ fontSize: 13, color: "#4a5a70" }}>{c.cliente.empreendimento || "sem empreendimento"}{c.cliente.unidade ? ` · ${c.cliente.unidade}` : ""}</div>
           {c.cliente.temAcessoAoPortal
             ? <div style={{ fontSize: 12.5, color: VERDE, marginTop: 4 }}>✓ Cliente com acesso ao portal — vê e assina o contrato na Área do Cliente.</div>
-            : <Aviso tipo="alerta" style={{ marginTop: 8 }}>Este cliente ainda não tem acesso ao portal. Para ver e assinar, ele cria a senha em "Primeiro acesso" com o e-mail {c.cliente.email || "do cadastro"} (ou a equipe envia o link pela ficha do cliente).</Aviso>}
+            : <Aviso tipo="alerta" style={{ marginTop: 8 }}>Este cliente ainda não criou a senha do portal. Para ver e assinar, ele toca em "Primeiro acesso? Crie sua senha" com o e-mail {c.cliente.email || "do cadastro"} — a mensagem do WhatsApp já explica esse passo.</Aviso>}
         </div>
 
         <div className="fnc-acoes">
@@ -1122,6 +1299,13 @@ function FichaContrato({ id, token, apiFetch, apiUrl, notify, perfil, onFechar, 
           {a.liberar && <button style={btn} onClick={() => setConfirmando("liberar")}><Send size={15} /> Liberar para assinatura</button>}
           {a.substituir && <button style={btnLeve} onClick={() => setConfirmando("substituir")}><Repeat size={15} /> Substituir</button>}
           {a.cancelar && <button style={btnPerigo} onClick={() => setConfirmando("cancelar")}><Ban size={15} /> Cancelar</button>}
+          {ESPERANDO_CLIENTE.includes(c.status) && (
+            <BotaoWhatsappContrato contratoId={c.id} telefone={c.cliente.telefone} apiFetch={apiFetch} token={token} rotulo="Enviar pelo WhatsApp"
+              mensagem={mensagemWhatsappContrato({
+                nome: c.cliente.nome, numero: c.numero, servico: c.servico, dataVistoria: c.cliente.dataVistoria, horaVistoria: c.cliente.horaVistoria,
+                temAcessoAoPortal: c.cliente.temAcessoAoPortal, motivoRecusa: c.status === "rejeitado" ? c.motivo : "",
+              })} />
+          )}
           {c.pastaDrive && <a href={c.pastaDrive} target="_blank" rel="noopener noreferrer" style={{ ...btnLeve, textDecoration: "none" }}><ExternalLink size={15} /> Pasta no Drive</a>}
         </div>
 
