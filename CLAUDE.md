@@ -111,6 +111,7 @@ src/laudo-whatsapp.jsx      laudo aprovado pelo WhatsApp do cliente (link wa.me)
 src/links-publicos.js       endereços que vão para o cliente: Área do Cliente e FN_HOME_URL
 src/contratos.jsx           Contratos: aba da equipe, seção da ficha do cliente e "Meus contratos" no portal
 src/documentacao-construtora.jsx Meus documentos (técnico), anexo da ART, Minha ART (portal) e Gerência › Construtoras
+src/colaboradores.jsx       Gerência › Equipe › Colaboradores: ficha por pessoa (painel, folha, documentos, perfil) e cadastro de colaborador novo — só lê/grava em rotas que já existem (/api/users, /api/folha, credenciais)
 ```
 
 Para achar algo no `App.jsx`, procure pela definição da componente

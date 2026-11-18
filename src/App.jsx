@@ -15,6 +15,7 @@ import { BotaoWhatsappLaudo, AbaEnvioLaudo } from "./laudo-whatsapp.jsx";
 import { AbaArtsVistoria, AbaFolhaPagamento, AbaDespesasFixas, CardValoresCustos, useCustosOperacionais, useFolhaEmAberto } from "./controle-financeiro.jsx";
 import AbaContratos, { MeusContratos, SecaoContratosCliente } from "./contratos.jsx";
 import AbaConstrutoras, { MeusDocumentosTecnico, AvisoDocumentosTecnico, MinhasArts, AvisoAnexoArtMultipla } from "./documentacao-construtora.jsx";
+import AbaColaboradores from "./colaboradores.jsx";
 import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
   Building2, User, ClipboardList, ChevronDown, ChevronRight, ChevronLeft, Check,
@@ -2654,6 +2655,12 @@ const GERENCIA_MENU_LATERAL = [
   { titulo: "FN Nacional", itens: [
     { aba: "nacional", label: "Rede Nacional", Icon: Landmark },
   ] },
+  /* Cada pessoa da equipe num lugar só: painel, folha, documentos e perfil, e o cadastro de
+     colaborador novo de qualquer área (src/colaboradores.jsx). "Usuários", em Sistema, continua
+     sendo a lista crua de acessos. */
+  { titulo: "Equipe", itens: [
+    { aba: "gerencia", sub: "colaboradores", label: "Colaboradores", Icon: Users },
+  ] },
   { titulo: "Visão geral & Indicadores", itens: [
     { aba: "gerencia", sub: "visao-geral", label: "Visão geral", Icon: LayoutGrid },
     { aba: "gerencia", sub: "indicadores", label: "Indicadores", Icon: PieChart },
@@ -2774,7 +2781,7 @@ function AppInterno({ session, onLogout }) {
   const [novaDespesaAberta, setNovaDespesaAberta] = useState(false);
   const fin = useFinanceiro({
     token, perfil, notify,
-    ativo: novaDespesaAberta || abaTop === "despesas" || (abaTop === "gerencia" && (abaGerencia === "financeiro" || String(abaGerencia).startsWith("fin-"))),
+    ativo: novaDespesaAberta || abaTop === "despesas" || (abaTop === "gerencia" && (abaGerencia === "financeiro" || abaGerencia === "colaboradores" || String(abaGerencia).startsWith("fin-"))),
   });
 
   /* ---- Documentação/Gerência: carregar e persistir via API real ----
@@ -3638,9 +3645,10 @@ function AppInterno({ session, onLogout }) {
   useEffect(() => { carregarUsuarios(); }, []);
 
   const criarUsuario = async (dadosUsuario) => {
-    await apiFetch("/api/users", { method: "POST", token, body: dadosUsuario });
+    const r = await apiFetch("/api/users", { method: "POST", token, body: dadosUsuario });
     notify("Usuário criado ✓");
     carregarUsuarios();
+    return r; // { id, ... } — Colaboradores abre a ficha da pessoa recém-criada
   };
   const atualizarUsuario = async (id, patch) => {
     await apiFetch(`/api/users/${id}`, { method: "PATCH", token, body: patch });
@@ -4337,6 +4345,7 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "gerencia" && !String(abaGerencia).startsWith("fin-") && (
           <AbaGerencia sub={abaGerencia} fin={fin} usuarioAtual={session.usuario} token={token} perfil={perfil} decidirComissaoItem={decidirComissaoItem}
             aoAbrirFnHome={() => setAbaGerencia("fn-home-financeiro")}
+            aoAbrirFolha={() => setAbaGerencia("fin-folha")}
             importarClientesHistorico={importarClientesHistorico}
             prospeccaoParceiros={prospeccaoParceiros} prospeccaoParceirosCarregando={prospeccaoParceirosCarregando}
             atualizarProspeccaoParceiro={atualizarProspeccaoParceiro} adicionarEmpresaProspeccao={adicionarEmpresaProspeccao}
@@ -17581,7 +17590,7 @@ function AbaGerenciaImportacao({ clientes = [], precos = [], empreendimentosRef 
   );
 }
 
-function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, decidirComissaoItem, importarClientesHistorico, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], carregarEmpreendimentosRef, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas, aoAbrirFnHome }) {
+function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, decidirComissaoItem, importarClientesHistorico, docs, addDoc, updDoc, delDoc, clientes = [], updCliente, resetarSenhaCliente, prospeccaoParceiros = [], prospeccaoParceirosCarregando, atualizarProspeccaoParceiro, adicionarEmpresaProspeccao, importarEmpresasProspeccao, removerEmpresaProspeccao, meuConvite, padronizarEmpreendimento, excluirCliente, adicionarEmpreendimento, removerEmpreendimento, prospeccao, prospeccaoCarregando, atualizarProspeccao, publicarProspeccaoDrive, carregando, assinatura, salvarAssinatura, removerAssinatura, notify, usuarios, usuariosCarregando, criarUsuario, atualizarUsuario, excluirUsuario, salvarPerfilTecnico, usuarioAtualId, avaliacoes, avaliacoesCarregando, parceiros, parceirosCarregando, atualizarParceiro, criarParceiroManual, excluirParceiro, salvarItemCatalogo, excluirItemCatalogo, vales, valesCarregando, vendas, vendasCarregando, atualizarVenda, precos, precosCarregando, salvarPreco, empreendimentosRef = [], carregarEmpreendimentosRef, laudosPendentes, laudosPendentesCarregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, painel, painelCarregando, carregarPainel, painelPatologias, painelPatologiasCarregando, painelPatologiasIndisponivel, carregarPainelPatologias, acessos, acessosCarregando, patologiasBanco, patologiasBancoCarregando, criarPatologia, atualizarPatologia, excluirPatologia, importarPatologiasEstaticas, aoAbrirFnHome, aoAbrirFolha }) {
   if (sub === "painel") {
     return <AbaGerenciaPainelEstrategico clientes={clientes} docs={docs} usuarios={usuarios} precos={precos}
       avaliacoes={avaliacoes} prospeccao={prospeccao} prospeccaoParceiros={prospeccaoParceiros}
@@ -17615,6 +17624,12 @@ function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, de
   }
   if (sub === "construtoras") {
     return <AbaConstrutoras token={token} apiFetch={apiFetch} notify={notify} perfil={perfil} />;
+  }
+  if (sub === "colaboradores") {
+    return <AbaColaboradores token={token} apiFetch={apiFetch} notify={notify}
+      usuarios={usuarios} carregando={usuariosCarregando} criarUsuario={criarUsuario} atualizarUsuario={atualizarUsuario}
+      salvarPerfilTecnico={salvarPerfilTecnico} usuarioAtualId={usuarioAtualId}
+      clientes={clientes} docs={docs} fin={fin} aoAbrirFolha={aoAbrirFolha} />;
   }
   if (sub === "empreendimentos") {
     return <AbaEmpreendimentosCadastro token={token} apiFetch={apiFetch} notify={notify} aoMudar={carregarEmpreendimentosRef} />;
