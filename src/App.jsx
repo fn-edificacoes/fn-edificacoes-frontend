@@ -227,6 +227,9 @@ function mapClienteDaApi(c) {
        atendimento de origem; revistoriaSeq é a ordem (1ª, 2ª…). */
     revistoriaDe: c.revistoria_de || null,
     revistoriaSeq: Number(c.revistoria_seq) || 0,
+    /* Quando o cadastro chegou. Faltava aqui, e o cartão da fila mostrava sempre "Cadastrado em —";
+       agora também diz há quantos dias o cliente espera agendamento (tempoNaFila). */
+    criadoEm: c.criado_em || null,
   };
 }
 /* O laudo (registro em "docs") de um cadastro. O vínculo é o cliente_id: casar por CPF
@@ -545,19 +548,27 @@ const TIPO_ART_OPCOES = ["Individual", "Coletiva"];
 
 /* ---------- Status do CLIENTE (status_cliente) — sempre automático, nunca editado manualmente ----------
    O cliente NUNCA vê status internos de gerência/documentação (STATUS_INTERNO_OPCOES abaixo).
-   Antes de existir um "docs", quem manda é clientes.status: "Em análise" (cadastro acabou de
-   chegar, aguardando o Atendimento aprovar) -> "Agendado" (Atendimento aprovou o agendamento).
-   Depois que a vistoria é finalizada, o docs.status_cliente assume: "Agendado" -> "Laudo em análise"
-   quando o vistoriador finaliza a vistoria (POST /api/vistoria/finalizar) -> "Laudo enviado por
-   e-mail" quando a gerência aprova (POST /api/docs/:id/aprovar, que já gera o PDF e envia o e-mail). */
-const STATUS_ATENDIMENTO_OPCOES = ["Em análise", "Agendado", "Vistoria realizada", "Laudo enviado por e-mail"];
+   Antes de existir um "docs", quem manda é clientes.status, traduzido pelo backend
+   (statusPublicoDaVistoria, em status-cliente.js): "Aguardando agendamento" enquanto o cadastro está
+   na fila de espera do Agendamento (com a data que o cliente pediu, se pediu) -> "Agendado" quando o
+   Atendimento escolhe técnico, data e horário ("Vistoria agendada"). Até nov/2026 era "Em análise",
+   e quem era aprovado sem técnico já lia "Agendado" sem ter dia marcado. Depois que a vistoria é
+   finalizada, o docs.status_cliente assume: "Agendado" -> "Laudo em análise" quando o vistoriador
+   finaliza a vistoria (POST /api/vistoria/finalizar) -> "Laudo enviado por e-mail" quando a
+   gerência aprova (POST /api/docs/:id/aprovar, que já gera o PDF e envia o e-mail). */
+const STATUS_AGUARDANDO_AGENDAMENTO = "Aguardando agendamento";
+const STATUS_ATENDIMENTO_OPCOES = [STATUS_AGUARDANDO_AGENDAMENTO, "Agendado", "Vistoria realizada", "Laudo enviado por e-mail"];
 /* Documentação ART/TRT tem fluxo próprio (sem vistoria): ver STATUS_DOC_* no backend. */
 const STATUS_DOC_PROCESSANDO = "Elaborando";
 const STATUS_DOC_CONCLUIDA = "Documentação pronta";
 const TIPOS_DOCUMENTO_ART = ["Documentação assinada", "Placa de identificação de obra"];
 const STATUS_ATENDIMENTO_INFO = {
-  "Em análise": "Recebemos seu cadastro e ele está em análise pelo nosso setor de Atendimento. Em breve confirmaremos seu agendamento.",
-  "Agendado": "Recebemos sua solicitação e sua vistoria está agendada. Em breve nossa equipe entrará em contato.",
+  [STATUS_AGUARDANDO_AGENDAMENTO]: "Seu cadastro foi realizado e está na nossa fila de agendamento. O Atendimento vai escolher o técnico e confirmar a data com você — assim que isso acontecer, o status muda para \"Agendado\".",
+  // Rótulo antigo, enviado pelo servidor até nov/2026: mesmo texto, para não sumir durante a publicação.
+  "Em análise": "Seu cadastro foi realizado e está na nossa fila de agendamento. O Atendimento vai escolher o técnico e confirmar a data com você — assim que isso acontecer, o status muda para \"Agendado\".",
+  "Agendado": "Sua vistoria está agendada. Em breve nossa equipe entrará em contato.",
+  "Cancelamento solicitado": "Recebemos o pedido de cancelamento deste atendimento e ele está sendo concluído pela nossa equipe.",
+  "Cancelado": "Este atendimento foi cancelado. Se precisar de uma nova vistoria, fale com a FN pelo WhatsApp.",
   "Vistoria realizada": "Sua vistoria foi realizada com sucesso. Estamos finalizando seu laudo e avisaremos assim que ele for enviado.",
   "Laudo enviado por e-mail": "Seu laudo foi aprovado e enviado para o e-mail cadastrado. Verifique sua caixa de entrada (e o spam).",
   [STATUS_DOC_PROCESSANDO]: "Recebemos seu cadastro e sua documentação ART/TRT está sendo elaborada pela nossa equipe técnica.",
@@ -1589,12 +1600,14 @@ function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], ava
 
   /* --- Fila do Agendamento --- Atendimento e Gerência agem. */
   if (["atendimento", "gerencia"].includes(perfil)) {
+    /* Todo cadastro novo (com ou sem data) e o aprovado antigo sem técnico estão na Fila de
+       espera, que é onde se agenda (ver naFilaDeEspera). */
     const aguardando = clientes.filter((c) => c.status === "Em análise" && !ehServicoDocumentacao(c));
     if (aguardando.length) {
       itens.push({
         id: "aprovacao", urgente: true,
-        texto: `${aguardando.length} cliente(s) aguardando aprovação`,
-        onde: { aba: "qualidade", sub: "analise" },
+        texto: `${aguardando.length} cliente(s) novo(s) na fila de espera para agendar`,
+        onde: { aba: "qualidade", sub: "fila" },
       });
     }
     /* Revistoria pesa diferente de cadastro novo: é cliente já atendido que voltou porque
@@ -1604,15 +1617,15 @@ function calcularNotificacoes({ perfil, clientes = [], laudosPendentes = [], ava
       itens.push({
         id: "revistorias", urgente: true,
         texto: `${revistorias.length} pedido(s) de revistoria para analisar`,
-        onde: { aba: "qualidade", sub: "analise" },
+        onde: { aba: "qualidade", sub: "fila" },
       });
     }
     const aprovados = clientes.filter((c) => c.status === "Agendamento aprovado");
     if (aprovados.length) {
       itens.push({
         id: "sem-tecnico",
-        texto: `${aprovados.length} vistoria(s) sem técnico atribuído`,
-        onde: { aba: "qualidade", sub: "vistoria" },
+        texto: `${aprovados.length} vistoria(s) aprovada(s) sem técnico — agende na fila de espera`,
+        onde: { aba: "qualidade", sub: "fila" },
       });
     }
     const emVistoria = clientes.filter((c) => c.status === "Em vistoria");
@@ -2730,7 +2743,7 @@ function AppInterno({ session, onLogout }) {
   // preenchidos); os demais caem direto na vistoria.
   const [aba, setAba] = useState("itens");
   const [abaGerencia, setAbaGerencia] = useState("visao-geral"); // "visao-geral" | "financeiro" | "prospeccao"
-  const [abaQualidade, setAbaQualidade] = useState("analise"); // "analise" | "vistoria" | "feedback"
+  const [abaQualidade, setAbaQualidade] = useState("fila"); // "fila" | "analise" (calendário) | "vistoria" | "cobranca" | "feedback" | "acompanhamento"
   const [agendarAgoraId, setAgendarAgoraId] = useState(null); // id do cliente recém-aprovado, pra abrir direto o card dele em "Vistoria"
   // Sugere o nome de quem está logado como responsável técnico — evita repetir o bug
   // antigo de sair com o nome de outra pessoa fixo. Qualificação e registro (CFT) o
@@ -2838,7 +2851,7 @@ function AppInterno({ session, onLogout }) {
     if (mostrarCarregando) setClientesCarregando(false);
   };
   useEffect(() => { carregarClientes(); }, []);
-  // Novo cadastro (feito na tela pública) precisa aparecer no bloco de aprovação do
+  // Novo cadastro (feito na tela pública) precisa aparecer na Fila de espera do
   // Agendamento sem precisar recarregar a página — busca de novo a cada 20s, em silêncio.
   useEffect(() => {
     const t = setInterval(() => carregarClientes({ silencioso: true }), 20000);
@@ -2869,7 +2882,7 @@ function AppInterno({ session, onLogout }) {
     try {
       const r = await apiFetch(`/api/clientes/${cliente.id}/converter-para-vistoria`, { method: "POST", token });
       await carregarClientes();
-      notify(`${cliente.nome} agora é Vistoria de entrega de chaves ✓ — está no Agendamento, em Análise.${r.avisos?.length ? ` ${r.avisos.join(" ")}` : ""}`);
+      notify(`${cliente.nome} agora é Vistoria de entrega de chaves ✓ — está no Agendamento, na Fila de espera.${r.avisos?.length ? ` ${r.avisos.join(" ")}` : ""}`);
       return true;
     } catch (e) {
       notify(`Não foi possível mudar para vistoria: ${e.message}`);
@@ -3490,6 +3503,9 @@ function AppInterno({ session, onLogout }) {
      continua vendo o histórico completo (ela recebe `clientes` inteiro), porque é ela
      quem decide cancelamento e precisa poder conferir depois. */
   const clientesAtivos = clientes.filter((c) => c.status !== "Cancelado");
+  /* Quantos esperam agendamento: aparece no menu "Agendamento" e na sub-aba Fila de espera, para
+     o cliente novo não passar despercebido (pedido da Gerência, nov/2026). */
+  const totalNaFila = clientesAtivos.filter(naFilaDeEspera).length;
 
   /* ---- Laudos que o técnico já realizou, com o retorno do cliente ---- */
   const [meusLaudos, setMeusLaudos] = useState([]);
@@ -4082,6 +4098,7 @@ function AppInterno({ session, onLogout }) {
                         color: ativo ? "#fff" : "rgba(255,255,255,.75)",
                       }}>
                       <item.Icon size={15} style={{ flexShrink: 0 }} /> {item.label}
+                      {item.aba === "qualidade" && <BolhaContagem n={totalNaFila} titulo="cliente(s) na fila de espera" />}
                     </button>
                   );
                 })}
@@ -4183,6 +4200,7 @@ function AppInterno({ session, onLogout }) {
                 return (
                   <button key={k} onClick={() => setAbaTop(k)} className="tab" style={{ borderBottomColor: ativa ? "#fff" : "transparent", color: ativa ? "#fff" : "rgba(255,255,255,.55)", whiteSpace: "nowrap", flexShrink: 0 }}>
                     <Icon size={15} /> {label}
+                    {k === "qualidade" && <BolhaContagem n={totalNaFila} titulo="cliente(s) na fila de espera" />}
                   </button>
                 );
               })}
@@ -4229,12 +4247,15 @@ function AppInterno({ session, onLogout }) {
           </nav>
         )}
 
-        {/* Sub-navegação (somente dentro do módulo Qualidade) */}
+        {/* Sub-navegação (somente dentro do módulo Qualidade). A Fila de espera vem primeiro e é a
+            sub-aba que abre: é onde todo cadastro novo chega e é agendado (nov/2026). A antiga
+            "Análise" ficou só com o calendário, e a chave "analise" continua a mesma. */}
         {abaTop === "qualidade" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, background: "rgba(0,0,0,.12)", overflowX: "auto" }}>
-            {[["analise", "Análise", ClipboardCheck], ["fila", "Fila de espera", Clock], ["vistoria", "Vistoria", CalendarDays], ["cobranca", "Cobrança", DollarSign], ["feedback", "Feedback", Star], ["acompanhamento", "Acompanhamento", ClipboardList]].map(([k, label, Icon]) => (
+            {[["fila", "Fila de espera", Clock], ["analise", "Calendário", CalendarDays], ["vistoria", "Vistoria", ClipboardCheck], ["cobranca", "Cobrança", DollarSign], ["feedback", "Feedback", Star], ["acompanhamento", "Acompanhamento", ClipboardList]].map(([k, label, Icon]) => (
               <button key={k} onClick={() => setAbaQualidade(k)} className="tab" style={{ borderBottomColor: abaQualidade === k ? AZUL_MEDIO : "transparent", color: abaQualidade === k ? "#fff" : "rgba(255,255,255,.6)", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>
                 <Icon size={15} /> {label}
+                {k === "fila" && <BolhaContagem n={totalNaFila} titulo="cliente(s) na fila de espera" />}
               </button>
             ))}
           </nav>
@@ -5592,17 +5613,13 @@ function CardIndicadoresQualidade({ clientes = [], docs = [], avaliacoes = [], f
   );
 }
 
-function AbaQualidade({ sub = "analise", setSub, token, clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, agendarAgoraId, setAgendarAgoraId, podeAgir = false, ehGerencia = false, precos = [] }) {
-  const [diaParaAbrir, setDiaParaAbrir] = useState(null); // data (ISO) que o calendário da Análise deve abrir já selecionada
+function AbaQualidade({ sub = "fila", setSub, token, clientes, clientesCarregando, updCliente, usuarios, notify, preencherComCliente, avaliacoes, carregando, docs, docsCarregando, aprovarAvaliacao, solicitarExclusaoAvaliacao, manterAvaliacao, excluirAvaliacao, agendarAgoraId, setAgendarAgoraId, podeAgir = false, ehGerencia = false, precos = [] }) {
+  const [diaParaAbrir, setDiaParaAbrir] = useState(null); // data (ISO) que o calendário deve abrir já selecionada
   // Etapa escolhida nos indicadores — filtra a lista da sub-aba aberta. Fica aqui (e não em
   // cada sub-aba) pra que o filtro continue valendo ao trocar de sub-aba.
   const [filtroEtapa, setFiltroEtapa] = useState(null);
-  const irParaAgendamento = (clienteId) => {
-    setAgendarAgoraId(clienteId);
-    setSub("vistoria");
-  };
-  // Confirmou a vistoria na sub-aba Vistoria -> volta pra Análise já com o calendário
-  // no mês certo e o painel do dia aberto, sem precisar navegar manualmente.
+  // Confirmou a vistoria na sub-aba Vistoria -> volta pro Calendário já no mês certo e com o
+  // painel do dia aberto, sem precisar navegar manualmente.
   const aoConfirmarVistoria = (dataISO) => {
     setDiaParaAbrir(dataISO);
     setSub("analise");
@@ -5618,7 +5635,7 @@ function AbaQualidade({ sub = "analise", setSub, token, clientes, clientesCarreg
         docs={docs} avaliacoes={avaliacoes} filtroEtapa={filtroEtapa} />}
       {sub === "feedback" && <AbaQualidadeFeedback avaliacoes={avaliacoes} carregando={carregando} clientes={clientes} clientesCarregando={clientesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
         solicitarExclusaoAvaliacao={solicitarExclusaoAvaliacao} manterAvaliacao={manterAvaliacao} excluirAvaliacao={excluirAvaliacao} podeAgir={podeAgir} ehGerencia={ehGerencia} filtroEtapa={filtroEtapa} />}
-      {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} onAgendarAgora={irParaAgendamento} diaParaAbrir={diaParaAbrir} aoAbrirDia={() => setDiaParaAbrir(null)} filtroEtapa={filtroEtapa} aoTrocarEtapa={setFiltroEtapa} />}
+      {sub === "analise" && <AbaQualidadeAnalise clientes={clientes} docs={docs} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} onAbrirFila={() => setSub("fila")} diaParaAbrir={diaParaAbrir} aoAbrirDia={() => setDiaParaAbrir(null)} filtroEtapa={filtroEtapa} aoTrocarEtapa={setFiltroEtapa} />}
       {sub === "fila" && <AbaQualidadeFila clientes={clientes} carregando={clientesCarregando} updCliente={updCliente} usuarios={usuarios} notify={notify} podeAgir={podeAgir} />}
     </div>
   );
@@ -6486,33 +6503,83 @@ function vistoriaNoMesmoHorario(clientes = [], { clienteId, vistoriadorId, data,
   ) || null;
 }
 
-/* ================= Bloco de aprovação de clientes (item 2 do Agendamento) =================
-   Fica acima do calendário. Só cliente "aprovado" pode ser agendado (status "Agendamento
-   aprovado"); "Recusar" reaproveita o status "Cancelado" já existente no fluxo — não existe
-   (nem no backend) um status "Recusado" à parte. */
-function CardClientePendente({ c, todos, podeAgir, onAprovar, onRecusar, vistoriadores = [] }) {
-  const conflitos = conflitosDeHorario(c, todos);
-  /* Aprovar e escalar o técnico no mesmo passo. Antes eram dois momentos: o cadastro virava
-     "Agendamento aprovado" aqui e alguém precisava abrir a sub-aba Vistoria depois para dizer
-     quem atende — nesse meio a vistoria aparecia no calendário do dia mas não estava na agenda
-     de técnico nenhum, e o formulário de agendar nem listava quem ainda não tinha passado por
-     aqui. Na revistoria o técnico da visita anterior já vem escolhido. */
-  const [vistoriadorId, setVistoriadorId] = useState(c.vistoriadorId || "");
-  const [aprovando, setAprovando] = useState(false);
-  const semDataOuHora = !c.dataDesejada || !c.horarioDesejado;
-
-  const aprovar = async (comTecnico) => {
-    setAprovando(true);
-    await onAprovar(c, comTecnico ? vistoriadorId : "");
-    setAprovando(false);
-  };
+/* ================= Fila de espera: o cartão de cada cadastro que espera agendamento =================
+   Todo cadastro novo de vistoria chega aqui, com ou sem data (pedido da Gerência, nov/2026). Antes,
+   quem vinha com data e horário ia para a sub-aba Análise e quem vinha sem ia para a Fila de
+   espera, onde o "Aprovar e agendar" ficava travado: a única saída era "Aprovar sem definir o
+   técnico", e o portal passava a mostrar "Agendado" ao cliente sem dia nem técnico. Agora o
+   Atendimento escolhe técnico, data e horário no próprio cartão (já vêm os que o cliente pediu) e
+   agenda num clique — só então o cliente lê "Agendado". O servidor recusa agendar sem os três
+   (faltaParaAgendar, em status-cliente.js). "Recusar" reaproveita o status "Cancelado" — não
+   existe um status "Recusado" à parte. */
+const STATUS_FILA_ESPERA = ["Em análise", "Agendamento aprovado"];
+function naFilaDeEspera(c) {
+  return STATUS_FILA_ESPERA.includes(c.status) && !ehServicoDocumentacao(c);
+}
+/* "chegou hoje", "chegou ontem", "esperando há 5 dias" — quem espera há mais tempo precisa saltar
+   aos olhos, e quem acabou de chegar também. */
+function tempoNaFila(criadoEm, hoje = new Date()) {
+  const quando = criadoEm ? new Date(criadoEm) : null;
+  if (!quando || Number.isNaN(quando.getTime())) return null;
+  const dias = Math.round((new Date(paraChaveISO(hoje)) - new Date(paraChaveISO(quando))) / 86400000);
+  if (dias <= 0) return { texto: "chegou hoje", novo: true, atrasado: false };
+  if (dias === 1) return { texto: "chegou ontem", novo: true, atrasado: false };
+  return { texto: `esperando há ${dias} dias`, novo: false, atrasado: dias >= 3 };
+}
+/* Contador ao lado do nome do menu e da sub-aba: quantos esperam agendamento. */
+function BolhaContagem({ n, titulo = "" }) {
+  if (!n) return null;
   return (
-    <div style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, minWidth: 250, maxWidth: 270, flexShrink: 0, display: "flex", flexDirection: "column", gap: 5 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+    <span title={`${n} ${titulo}`.trim()} style={{ background: "#F59E0B", color: "#1f1300", borderRadius: 20, padding: "0 7px", marginLeft: 4, fontSize: 11, fontWeight: 800, lineHeight: "18px", minWidth: 18, display: "inline-block", textAlign: "center" }}>
+      {n}
+    </span>
+  );
+}
+
+function CardFilaEspera({ c, todos, podeAgir, onAgendar, onRecusar, vistoriadores = [] }) {
+  // Na revistoria o técnico da visita anterior já vem escolhido; data e horário vêm do pedido.
+  const [vistoriadorId, setVistoriadorId] = useState(c.vistoriadorId || "");
+  const [data, setData] = useState(c.dataDesejada || "");
+  const [horario, setHorario] = useState(c.horarioDesejado || "");
+  const [salvando, setSalvando] = useState(false);
+  const hojeISO = paraChaveISO(new Date());
+  const dataPassada = !!data && data < hojeISO;
+  const choque = vistoriaNoMesmoHorario(todos, { clienteId: c.id, vistoriadorId, data, horario });
+  // Outras vistorias já na agenda a menos de 1h, com qualquer técnico — só para saber.
+  const proximas = conflitosDeHorario({ ...c, dataDesejada: data, horarioDesejado: horario }, todos)
+    .filter((o) => o.status === "Vistoria agendada" || o.status === "Em vistoria");
+  const avisoData = data ? avisoDataDesejada(data) : "";
+  const tempo = tempoNaFila(c.criadoEm);
+  const pediu = c.dataDesejada
+    ? `Pediu ${c.dataDesejada.split("-").reverse().join("/")}${c.horarioDesejado ? ` às ${c.horarioDesejado}` : ""}`
+    : "Não escolheu data — combinar com o cliente";
+  const nomeTecnico = vistoriadores.find((v) => String(v.id) === String(vistoriadorId))?.nome || "O técnico";
+  const falta = [!vistoriadorId && "o técnico", !data && "a data", !horario && "o horário"].filter(Boolean);
+  const listaFalta = falta.length > 1 ? `${falta.slice(0, -1).join(", ")} e ${falta[falta.length - 1]}` : falta[0];
+  const motivoTravado = falta.length ? `Escolha ${listaFalta}`
+    : dataPassada ? "Essa data já passou — escolha outra"
+      : choque ? `${nomeTecnico} já tem vistoria nesse horário (${choque.nome})` : "";
+
+  const agendar = async () => {
+    if (motivoTravado || salvando) return;
+    setSalvando(true);
+    await onAgendar(c, { vistoriadorId, data, horario });
+    setSalvando(false);
+  };
+  const selo = (texto, cor, fundo) => (
+    <span style={{ background: fundo, color: cor, padding: "2px 8px", borderRadius: 20, fontSize: 10.5, fontWeight: 800, whiteSpace: "nowrap" }}>{texto}</span>
+  );
+  const horarios = horario && !HORARIOS_COMERCIAIS.includes(horario) ? [horario, ...HORARIOS_COMERCIAIS] : HORARIOS_COMERCIAIS;
+
+  return (
+    <div style={{ border: `1px solid ${tempo?.novo ? "#F0C48A" : CINZA_BORDA}`, background: tempo?.novo ? "#FFFBF4" : "#fff", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 5 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
         <strong style={{ fontSize: 14 }}>{c.nome}</strong>
         {ehRevistoria(c) && <SeloRevistoria seq={c.revistoriaSeq} />}
+        {tempo?.novo && selo("NOVO", "#B26A00", "#FFF4E0")}
+        {c.status === "Agendamento aprovado" && selo("Aprovado · falta agendar", AZUL_MEDIO, "#EAF2FB")}
       </div>
-      <div style={{ fontSize: 12, color: "#65758b" }}>{mascararCpf(c.cpf)}</div>
+      <div style={{ fontSize: 12, color: "#65758b" }}>{mascararCpf(c.cpf)}{c.telefone ? ` · ${c.telefone}` : ""}</div>
       {c.empreendimento && (
         <div style={{ fontSize: 12, fontWeight: 700, color: AZUL_MARINHO }}>
           {c.empreendimento}{c.blocoTorre ? ` · ${c.blocoTorre}` : ""}
@@ -6521,99 +6588,65 @@ function CardClientePendente({ c, todos, podeAgir, onAprovar, onRecusar, vistori
       <div style={{ fontSize: 12, color: "#65758b" }}>{c.endereco || "Endereço não informado"}</div>
       <div style={{ fontSize: 12, color: AZUL_MARINHO, fontWeight: 700 }}>{c.servico}</div>
       {/* No pedido de revistoria, o motivo é o que a pessoa do Atendimento precisa ler antes
-          de aprovar: é ele que diz se o caso é retorno mesmo ou outra coisa. */}
+          de agendar: é ele que diz se o caso é retorno mesmo ou outra coisa. */}
       {ehRevistoria(c) && c.observacoes && (
         <div style={{ background: "#F1EAFB", color: "#33224a", padding: "6px 8px", borderRadius: 8, fontSize: 11.5, whiteSpace: "pre-wrap" }}>
           {c.observacoes}
         </div>
       )}
-      <div style={{ fontSize: 12, color: "#4a5a70" }}>
-        {c.dataDesejada ? c.dataDesejada.split("-").reverse().join("/") : "sem data"}{c.horarioDesejado ? ` · ${c.horarioDesejado}` : ""}
+      <div style={{ fontSize: 12, fontWeight: 700, color: c.dataDesejada ? "#4a5a70" : "#B26A00" }}>{pediu}</div>
+      <div style={{ fontSize: 11, color: tempo?.atrasado ? "#C62828" : "#8593a8", fontWeight: tempo?.atrasado ? 700 : 400 }}>
+        Cadastrado em {c.criadoEm ? new Date(c.criadoEm).toLocaleDateString("pt-BR") : "—"}{tempo ? ` · ${tempo.texto}` : ""}
       </div>
-      <div style={{ fontSize: 11, color: "#8593a8" }}>
-        Cadastrado em {c.criadoEm ? new Date(c.criadoEm).toLocaleDateString("pt-BR") : "—"}
-      </div>
-      {conflitos.length > 0 && (
-        <div style={{ background: "#FFF4E0", color: "#B26A00", padding: "6px 8px", borderRadius: 8, fontSize: 11.5 }}>
-          <AlertTriangle size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />
-          Cruza com {conflitos.length} outro(s) no mesmo horário: {conflitos.map((x) => x.nome).join(", ")}
-        </div>
-      )}
       {podeAgir ? (
         <>
-          <div style={cell(true)}>
-            <label style={lab}>Técnico que vai atender</label>
-            <select style={{ ...inp, padding: "7px 9px", fontSize: 12.5 }} value={vistoriadorId}
-              onChange={(e) => setVistoriadorId(e.target.value)}>
-              <option value="">selecionar…</option>
-              {vistoriadores.map((v) => <option key={v.id} value={v.id}>{rotuloTecnico(v)}</option>)}
-            </select>
+          <div style={{ display: "grid", gap: 6, marginTop: 4, paddingTop: 8, borderTop: `1px dashed ${CINZA_BORDA}` }}>
+            <div style={cell(true)}>
+              <label style={lab}>Técnico que vai atender</label>
+              <select style={{ ...inp, padding: "7px 9px", fontSize: 12.5 }} value={vistoriadorId} onChange={(e) => setVistoriadorId(e.target.value)}>
+                <option value="">selecionar…</option>
+                {vistoriadores.map((v) => <option key={v.id} value={v.id}>{rotuloTecnico(v)}</option>)}
+              </select>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+              <div style={cell(false)}>
+                <label style={lab}>Data</label>
+                <input type="date" min={hojeISO} style={{ ...inp, padding: "6px 7px", fontSize: 12.5 }} value={data} onChange={(e) => setData(e.target.value)} />
+              </div>
+              <div style={cell(false)}>
+                <label style={lab}>Horário</label>
+                <select style={{ ...inp, padding: "7px 9px", fontSize: 12.5 }} value={horario} onChange={(e) => setHorario(e.target.value)}>
+                  <option value="">selecionar…</option>
+                  {horarios.map((h) => <option key={h} value={h}>{h}{HORARIOS_COMERCIAIS.includes(h) ? "" : " (fora do horário comercial)"}</option>)}
+                </select>
+              </div>
+            </div>
           </div>
+          {avisoData && <span style={{ fontSize: 11.5, color: "#C62828", fontWeight: 600 }}>{avisoData}</span>}
+          {proximas.length > 0 && (
+            <div style={{ background: "#FFF4E0", color: "#B26A00", padding: "6px 8px", borderRadius: 8, fontSize: 11.5 }}>
+              <AlertTriangle size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />
+              Perto desse horário já há vistoria agendada: {proximas.map((x) => x.nome).join(", ")}
+            </div>
+          )}
+          {motivoTravado && (vistoriadorId || data || horario) && (
+            <span style={{ fontSize: 11.5, color: dataPassada || choque ? "#C62828" : "#8593a8" }}>{motivoTravado}.</span>
+          )}
           <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
             <button className="btn-solid" style={{ flex: 1, padding: "7px 10px", fontSize: 12.5 }}
-              disabled={aprovando || !vistoriadorId || semDataOuHora}
-              title={semDataOuHora ? "Este cadastro não tem data/horário definidos" : (!vistoriadorId ? "Escolha quem vai atender" : "")}
-              onClick={() => aprovar(true)}>
-              {aprovando ? <Loader2 size={13} className="spin" /> : <Check size={13} />} Aprovar e agendar
+              disabled={!!motivoTravado || salvando} title={motivoTravado || "Agenda a vistoria: o cliente passa a ver \"Agendado\""} onClick={agendar}>
+              {salvando ? <Loader2 size={13} className="spin" /> : <CalendarDays size={13} />} Agendar
             </button>
             <button className="btn-ghost" style={{ flex: 1, color: "#C62828", background: "#FCEAEA", padding: "7px 10px", fontSize: 12.5 }}
-              disabled={aprovando} onClick={() => onRecusar(c)}>
+              disabled={salvando} onClick={() => onRecusar(c)}>
               <X size={13} /> Recusar
             </button>
           </div>
-          {/* Saída para quando ainda não se sabe quem atende: aprova e a vistoria fica na fila
-              de "aguardando técnico", como era antes. */}
-          <button className="btn-ghost" style={{ color: "#65758b", padding: "2px 4px", fontSize: 11.5, justifyContent: "flex-start" }}
-            disabled={aprovando} onClick={() => aprovar(false)}>
-            Aprovar sem definir o técnico agora
-          </button>
-          {semDataOuHora && (
-            <span style={{ fontSize: 11.5, color: "#B26A00" }}>
-              Sem data ou horário no cadastro — defina em Clientes antes de agendar.
-            </span>
-          )}
         </>
       ) : (
-        <span style={{ fontSize: 11.5, color: "#8593a8", marginTop: 4 }}>Somente leitura — o Atendimento decide isso.</span>
+        <span style={{ fontSize: 11.5, color: "#8593a8", marginTop: 4 }}>Somente leitura — o Atendimento agenda.</span>
       )}
     </div>
-  );
-}
-
-function BlocoAprovacaoClientes({ clientes = [], carregando, podeAgir, onAprovar, onRecusar, clienteAprovado, onAgendarAgora, onFecharAviso, vistoriadores = [] }) {
-  // Quem não tem data/horário definidos vai para a Fila de espera (AbaQualidadeFila) —
-  // aqui só fica quem já veio com data e horário, pronto pra aprovação direta.
-  const pendentes = clientes.filter((c) => c.status === "Em análise" && !ehServicoDocumentacao(c) && c.dataDesejada && c.horarioDesejado);
-
-  if (!carregando && pendentes.length === 0 && !clienteAprovado) {
-    return (
-      <div style={{ fontSize: 12.5, color: "#8593a8", padding: "4px 2px" }}>
-        Nenhum cliente aguardando aprovação.
-      </div>
-    );
-  }
-
-  return (
-    <Card icon={ClipboardList} titulo={pendentes.length > 0 ? `${pendentes.length} aguardando aprovação` : "Aprovação de clientes"}>
-      {clienteAprovado && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", background: "#E6F4EA", color: "#2E7D32", borderRadius: 8, padding: "8px 12px", fontSize: 13, marginBottom: 12 }}>
-          <span><Check size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} /> Cliente aprovado: {clienteAprovado.nome}</span>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn-solid" style={{ width: "auto", padding: "6px 12px", fontSize: 12.5 }} onClick={() => onAgendarAgora(clienteAprovado.id)}>Agendar agora</button>
-            <button className="icon-btn" onClick={onFecharAviso}><X size={14} /></button>
-          </div>
-        </div>
-      )}
-      {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
-      {!carregando && pendentes.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum cliente aguardando aprovação.</p>}
-      {pendentes.length > 0 && (
-        <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
-          {pendentes.map((c) => (
-            <CardClientePendente key={c.id} c={c} todos={clientes} podeAgir={podeAgir} onAprovar={onAprovar} onRecusar={onRecusar} vistoriadores={vistoriadores} />
-          ))}
-        </div>
-      )}
-    </Card>
   );
 }
 
@@ -7182,46 +7215,37 @@ function FormAgendarVistoria({ diaInicial, vistoriadores = [], clientesParaAgend
   );
 }
 
-/* Aprovar/recusar cadastro em análise — compartilhado entre a sub-aba Análise (com
-   calendário) e a Fila de espera (kanban por empreendimento), que decidem sobre o mesmo
-   status "Em análise" e usavam a mesma lógica antes de ela virar duplicada nas duas telas. */
-function useAprovacaoAnalise(clientes, vistoriadores, updCliente, notify) {
-  const [clienteAprovado, setClienteAprovado] = useState(null);
-
-  const aprovar = async (c, vistoriadorId = "") => {
-    try {
-      if (!vistoriadorId) {
-        const ok = await updCliente(c.id, { status: "Agendamento aprovado" });
-        if (!ok) return;
-        setClienteAprovado(c);
-        notify("Agendamento aprovado ✓ — falta escalar o técnico");
-        return;
-      }
-      const conflito = vistoriaNoMesmoHorario(clientes, {
-        clienteId: c.id, vistoriadorId, data: c.dataDesejada, horario: c.horarioDesejado,
-      });
-      const nomeTecnico = vistoriadores.find((v) => String(v.id) === String(vistoriadorId))?.nome || "O técnico";
-      if (conflito) {
-        notify(`${nomeTecnico} já tem vistoria às ${c.horarioDesejado} nesse dia (${conflito.nome}). Escolha outro.`);
-        return;
-      }
-      const ok = await updCliente(c.id, { status: "Vistoria agendada", vistoriadorId });
-      if (!ok) return;
-      setClienteAprovado(null);
-      notify(`${ehRevistoria(c) ? "Revistoria" : "Vistoria"} agendada com ${nomeTecnico} ✓ — já entrou na agenda`);
-    } catch (e) { notify(`Erro: ${e.message}`); }
+/* Agendar ou recusar quem está na Fila de espera. Agendar grava técnico, data, horário e "Vistoria
+   agendada" de uma vez — é o que o cliente passa a ler como "Agendado" no portal. Não existe mais
+   "aprovar sem técnico": quem ainda não tem técnico simplesmente continua na fila. */
+function useAgendamentoFila(clientes, vistoriadores, updCliente, notify) {
+  const agendar = async (c, { vistoriadorId, data, horario }) => {
+    if (!vistoriadorId || !data || !horario) { notify("Escolha o técnico, a data e o horário para agendar."); return false; }
+    if (!confirmarDataDistante(data)) return false;
+    const nomeTecnico = vistoriadores.find((v) => String(v.id) === String(vistoriadorId))?.nome || "O técnico";
+    const conflito = vistoriaNoMesmoHorario(clientes, { clienteId: c.id, vistoriadorId, data, horario });
+    if (conflito) {
+      notify(`${nomeTecnico} já tem vistoria às ${horario} nesse dia (${conflito.nome}). Escolha outro técnico ou horário.`);
+      return false;
+    }
+    const ok = await updCliente(c.id, { vistoriadorId, dataDesejada: data, horarioDesejado: horario, status: "Vistoria agendada" });
+    if (!ok) return false;
+    notify(`${ehRevistoria(c) ? "Revistoria" : "Vistoria"} de ${c.nome} agendada com ${nomeTecnico} em ${data.split("-").reverse().join("/")} às ${horario} ✓ — o cliente já vê "Agendado" no portal. Próximo passo: o contrato, em Contratos.`);
+    return true;
   };
 
+  // updCliente não lança: devolve false e já avisa o motivo.
   const recusar = async (c) => {
-    try { await updCliente(c.id, { status: "Cancelado" }); notify("Cadastro recusado"); }
-    catch (e) { notify(`Erro: ${e.message}`); }
+    if (await updCliente(c.id, { status: "Cancelado" })) notify("Cadastro recusado");
   };
 
-  return { aprovar, recusar, clienteAprovado, setClienteAprovado };
+  return { agendar, recusar };
 }
 
-/* ================= Agendamento · Análise: aprovação de clientes + calendário operacional ================= */
-function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, ehGerencia = false, onAgendarAgora, diaParaAbrir, aoAbrirDia, filtroEtapa = null, aoTrocarEtapa }) {
+/* ================= Agendamento · Calendário (chave "analise"): calendário operacional =================
+   Era "Análise", com a aprovação dos cadastros que chegavam com data. Desde nov/2026 todo cadastro
+   novo vai para a Fila de espera, e aqui ficam o calendário e o aviso de quantos esperam. */
+function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente, usuarios = [], notify, podeAgir = false, ehGerencia = false, onAbrirFila, diaParaAbrir, aoAbrirDia, filtroEtapa = null, aoTrocarEtapa }) {
   const [mesRef, setMesRef] = useState(() => { const h = new Date(); return new Date(h.getFullYear(), h.getMonth(), 1); });
   const [diaSelecionado, setDiaSelecionado] = useState(null);
   const [filtroTecnicos, setFiltroTecnicos] = useState(() => new Set());
@@ -7232,8 +7256,7 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
      ainda em análise. Os dois podem ser agendados pelo formulário: confirmar já aprova, que é
      o que se espera de quem está olhando o dia e decidindo quem atende. Antes só os aprovados
      entravam na lista, e o formulário abria vazio bem no dia em que havia cadastro esperando. */
-  const aguardandoAgenda = clientes.filter((c) =>
-    ["Em análise", "Agendamento aprovado"].includes(c.status) && !ehServicoDocumentacao(c));
+  const aguardandoAgenda = clientes.filter(naFilaDeEspera);
   // O painel do dia respeita o mesmo filtro de etapa aplicado ao calendário.
   const doDiaSelecionado = diaSelecionado
     ? clientes.filter((c) => c.dataDesejada === diaSelecionado && (!filtroEtapa || etapaVistoriaCliente(c, docs) === filtroEtapa))
@@ -7253,17 +7276,12 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
     }
   }, [diaParaAbrir]);
 
-  const { aprovar, recusar, clienteAprovado, setClienteAprovado } = useAprovacaoAnalise(clientes, vistoriadores, updCliente, notify);
   const toggleFiltroTecnico = (id) => {
     setFiltroTecnicos((atual) => {
       const novo = new Set(atual);
       if (novo.has(id)) novo.delete(id); else novo.add(id);
       return novo;
     });
-  };
-  const aoClicarAgendarAgora = (clienteId) => {
-    setClienteAprovado(null);
-    onAgendarAgora?.(clienteId);
   };
   const confirmarAgendamento = async (dados) => {
     try {
@@ -7277,9 +7295,21 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <BlocoAprovacaoClientes clientes={clientes} carregando={carregando} podeAgir={podeAgir}
-        onAprovar={aprovar} onRecusar={recusar} vistoriadores={vistoriadores}
-        clienteAprovado={clienteAprovado} onAgendarAgora={aoClicarAgendarAgora} onFecharAviso={() => setClienteAprovado(null)} />
+      {/* A aprovação que ficava aqui foi para a Fila de espera, junto com quem chega sem data:
+          um lugar só para todo cadastro novo (nov/2026). Daqui fica só o aviso de quantos esperam. */}
+      {!carregando && aguardandoAgenda.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", background: "#FFF4E0", border: "1px solid #F0C48A", color: "#7a4a00", borderRadius: 10, padding: "10px 14px", fontSize: 13.5 }}>
+          <span>
+            <Clock size={15} style={{ verticalAlign: "-3px", marginRight: 6 }} />
+            <strong>{aguardandoAgenda.length} cliente(s)</strong> na fila de espera, aguardando técnico e data.
+          </span>
+          {onAbrirFila && (
+            <button className="btn-solid" style={{ width: "auto", padding: "6px 12px", fontSize: 12.5 }} onClick={onAbrirFila}>
+              Abrir a fila de espera
+            </button>
+          )}
+        </div>
+      )}
 
       <Card icon={CalendarDays} titulo="Calendário de vistorias">
         <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
@@ -7318,11 +7348,11 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
   );
 }
 
-/* ================= Agendamento · Fila de espera: quem ainda não tem data/horário =================
-   Antes ficava tudo misturado na aprovação (item 2 acima), numa fileira só, sem separar quem
-   já pode ser agendado de quem ainda precisa de data. Aqui fica só quem falta marcar data e
-   horário, em colunas por empreendimento — mais fácil ver o volume por obra/cliente. */
-function ColunaFilaEmpreendimento({ nome, clientes, podeAgir, onAprovar, onRecusar, vistoriadores, todos }) {
+/* ================= Agendamento · Fila de espera: todo cadastro que espera agendamento =================
+   Desde nov/2026 é o lugar único do cadastro novo de vistoria, com ou sem data (ver CardFilaEspera).
+   Colunas por empreendimento — mais fácil ver o volume por obra. Dentro de cada coluna, a data
+   pedida mais próxima primeiro; sem data, quem chegou antes. */
+function ColunaFilaEmpreendimento({ nome, clientes, podeAgir, onAgendar, onRecusar, vistoriadores, todos }) {
   return (
     <div style={{ minWidth: 290, maxWidth: 290, flexShrink: 0, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 4px", borderBottom: `2px solid ${AZUL_MEDIO}` }}>
@@ -7334,33 +7364,37 @@ function ColunaFilaEmpreendimento({ nome, clientes, podeAgir, onAprovar, onRecus
           {clientes.length}
         </span>
       </div>
-      {/* Mostra só os 5 primeiros de cada vez — com todos abertos a coluna ficava do
-          tamanho da fila inteira e a página esticava junto. Quem quiser ver mais rola
-          por dentro da própria coluna. */}
-      <div className="scroll-y-fila" style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 5 * ALTURA_CARD_FILA, overflowY: "auto", paddingRight: 4 }}>
+      {/* Mostra só os primeiros de cada vez — com todos abertos a coluna ficava do tamanho da
+          fila inteira e a página esticava junto. Quem quiser ver mais rola por dentro da coluna. */}
+      <div className="scroll-y-fila" style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 3 * ALTURA_CARD_FILA, overflowY: "auto", paddingRight: 4 }}>
         {clientes.map((c) => (
-          <CardClientePendente key={c.id} c={c} todos={todos} podeAgir={podeAgir} onAprovar={onAprovar} onRecusar={onRecusar} vistoriadores={vistoriadores} />
+          <CardFilaEspera key={c.id} c={c} todos={todos} podeAgir={podeAgir} onAgendar={onAgendar} onRecusar={onRecusar} vistoriadores={vistoriadores} />
         ))}
       </div>
     </div>
   );
 }
 
-// Altura aproximada de um CardClientePendente (com botões de aprovar/recusar) — usada só
-// para calcular quantos cabem nos "5 primeiros" visíveis de cada coluna da fila.
-const ALTURA_CARD_FILA = 300;
+// Altura aproximada de um CardFilaEspera (com técnico, data, horário e botões) — usada só para
+// calcular quantos cabem visíveis em cada coluna da fila.
+const ALTURA_CARD_FILA = 430;
+
+/* Data pedida mais próxima primeiro; sem data, quem chegou antes. */
+function ordemDaFila(a, b) {
+  if (a.dataDesejada && b.dataDesejada && a.dataDesejada !== b.dataDesejada) return a.dataDesejada.localeCompare(b.dataDesejada);
+  if (a.dataDesejada && !b.dataDesejada) return -1;
+  if (!a.dataDesejada && b.dataDesejada) return 1;
+  return String(a.criadoEm || "").localeCompare(String(b.criadoEm || ""));
+}
 
 function AbaQualidadeFila({ clientes = [], carregando, updCliente, usuarios = [], notify, podeAgir = false }) {
   const [busca, setBusca] = useState("");
   const vistoriadores = usuarios.filter((u) => fazVistoria(u) && u.ativo);
-  const { aprovar, recusar } = useAprovacaoAnalise(clientes, vistoriadores, updCliente, notify);
+  const { agendar, recusar } = useAgendamentoFila(clientes, vistoriadores, updCliente, notify);
 
-  // Mesmo recorte da aprovação (item 2), mas só quem ainda não tem data/horário — quem já
-  // tem os dois fica na sub-aba Análise, pronto pra aprovação direta.
   const termo = busca.trim().toLowerCase();
   const fila = clientes.filter((c) =>
-    c.status === "Em análise" && !ehServicoDocumentacao(c) && (!c.dataDesejada || !c.horarioDesejado) &&
-    (!termo || `${c.nome} ${c.empreendimento}`.toLowerCase().includes(termo)));
+    naFilaDeEspera(c) && (!termo || `${c.nome} ${c.empreendimento}`.toLowerCase().includes(termo)));
 
   const porEmpreendimento = useMemo(() => {
     const grupos = new Map();
@@ -7369,38 +7403,47 @@ function AbaQualidadeFila({ clientes = [], carregando, updCliente, usuarios = []
       if (!grupos.has(chave)) grupos.set(chave, []);
       grupos.get(chave).push(c);
     });
+    grupos.forEach((lista) => lista.sort(ordemDaFila));
     return [...grupos.entries()].sort((a, b) => b[1].length - a[1].length);
   }, [fila]);
 
+  const comData = fila.filter((c) => c.dataDesejada).length;
+  const recentes = fila.filter((c) => tempoNaFila(c.criadoEm)?.novo).length;
+  const numero = (valor, rotulo, cor = AZUL_MARINHO) => (
+    <div>
+      <div style={{ fontSize: 22, fontWeight: 800, color: cor }}>{valor}</div>
+      <div style={{ fontSize: 12, color: "#65758b" }}>{rotulo}</div>
+    </div>
+  );
+
   return (
     <Card icon={Clock} titulo={fila.length > 0 ? `${fila.length} na fila de espera` : "Fila de espera"}>
-      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-        Cadastros em análise sem data e horário definidos, separados por empreendimento. Quem já tem os dois aparece na sub-aba Análise.
+      <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px", lineHeight: 1.5 }}>
+        Todo cadastro novo de vistoria chega aqui, com ou sem data. Escolha o técnico, a data e o horário (já vêm os
+        que o cliente pediu) e clique em <strong>Agendar</strong>: o cliente passa a ver <strong>Agendado</strong> no
+        portal. O contrato já pode ser elaborado em <strong>Contratos</strong> desde a chegada do cliente.
       </p>
 
       <input style={{ ...inp, marginBottom: 14 }} placeholder="Buscar por cliente ou empreendimento…" value={busca} onChange={(e) => setBusca(e.target.value)} />
 
       {!carregando && fila.length > 0 && (
         <div style={{ display: "flex", gap: 20, marginBottom: 16, flexWrap: "wrap" }}>
-          <div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: AZUL_MARINHO }}>{fila.length}</div>
-            <div style={{ fontSize: 12, color: "#65758b" }}>cliente(s) na fila</div>
-          </div>
-          <div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: AZUL_MARINHO }}>{porEmpreendimento.length}</div>
-            <div style={{ fontSize: 12, color: "#65758b" }}>empreendimento(s)</div>
-          </div>
+          {numero(fila.length, "na fila de espera")}
+          {numero(recentes, "chegaram hoje ou ontem", recentes ? "#B26A00" : AZUL_MARINHO)}
+          {numero(comData, "com data pedida")}
+          {numero(fila.length - comData, "sem data — combinar")}
+          {numero(porEmpreendimento.length, "empreendimento(s)")}
         </div>
       )}
 
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
-      {!carregando && fila.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum cadastro sem data/horário na fila.</p>}
+      {!carregando && fila.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum cliente esperando agendamento. ✓</p>}
 
       {fila.length > 0 && (
         <div className="scroll-x-fila" style={{ display: "flex", gap: 16, overflowX: "auto", paddingBottom: 10 }}>
           {porEmpreendimento.map(([nome, lista]) => (
             <ColunaFilaEmpreendimento key={nome} nome={nome} clientes={lista} todos={clientes}
-              podeAgir={podeAgir} onAprovar={aprovar} onRecusar={recusar} vistoriadores={vistoriadores} />
+              podeAgir={podeAgir} onAgendar={agendar} onRecusar={recusar} vistoriadores={vistoriadores} />
           ))}
         </div>
       )}
@@ -18567,7 +18610,7 @@ function AbaCliente({ notify, onLogin }) {
             <div style={{ fontSize: 13.5, color: "#33683c" }}>
               {cadastroRealizado === SERVICO_DOCUMENTACAO
                 ? "Sua solicitação de ART/TRT de reforma já foi para a nossa equipe de Documentação. Entre com seu e-mail e senha para acompanhar — quando ficar pronta, você baixa os documentos por lá."
-                : "Recebemos seus dados. Nossa equipe entra em contato para confirmar o atendimento. Entre com seu e-mail e senha para acompanhar."}
+                : "Recebemos seus dados e seu cadastro está aguardando agendamento: nossa equipe escolhe o técnico e confirma a data com você. Entre com seu e-mail e senha para acompanhar o status."}
             </div>
             {/* Só aparece quando o cadastro não abriu o portal sozinho (lá a loja já vem aberta). */}
             <a href="?pagina=fn-home" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 13.5, fontWeight: 700, color: AZUL_MARINHO }}>
@@ -18802,6 +18845,8 @@ STATUS_COR["Proposta recebida"] = { cor: "#2C75B5", bg: "#EAF2FB" };
 STATUS_COR["Proposta aceita"] = { cor: "#2E7D32", bg: "#E6F4EA" };
 // "Encerrado" já tem cor definida mais abaixo, junto de PARCEIRO_STATUS_LABEL.
 STATUS_COR["Em análise"] = { cor: "#2C75B5", bg: "#EAF2FB" };
+/* O que o cliente lê enquanto o cadastro está na fila de espera do Agendamento (ver statusPublicoDaVistoria no backend). */
+STATUS_COR["Aguardando agendamento"] = { cor: "#B26A00", bg: "#FFF4E0" };
 STATUS_COR["Aprovado"] = { cor: "#2E7D32", bg: "#E6F4EA" };
 STATUS_COR["Suspenso"] = { cor: "#B26A00", bg: "#FFF4E0" };
 STATUS_COR["Encerrado"] = { cor: "#65758b", bg: "#EEF1F5" };
@@ -20600,9 +20645,13 @@ function ModalVistoriaOutroImovel({ cliente, onFechar, onEnviar }) {
    já recebe em STATUS_ATENDIMENTO_INFO. Documentação ART/TRT tem fluxo próprio de 2 passos
    (Elaborando/Documentação pronta) e não entra aqui — o texto explicativo já dá conta disso;
    status fora da lista (ex.: "Cancelado") também não mostra a linha, só o texto de sempre. */
-const ETAPAS_ATENDIMENTO_CLIENTE = ["Em análise", "Agendado", "Vistoria realizada", "Laudo enviado por e-mail"];
+/* A primeira etapa se chama "Cadastro realizado" e acende já na chegada: é o que o cliente precisa
+   ler logo depois de se cadastrar (pedido da Gerência, nov/2026). O status dele nesse ponto é
+   "Aguardando agendamento" ("Em análise" até nov/2026), que conta como a primeira etapa. */
+const ETAPAS_ATENDIMENTO_CLIENTE = ["Cadastro realizado", "Agendado", "Vistoria realizada", "Laudo enviado por e-mail"];
+const ehAguardandoAgendamento = (status) => status === STATUS_AGUARDANDO_AGENDAMENTO || status === "Em análise";
 function FluxogramaAtendimentoCliente({ status }) {
-  const indiceAtual = ETAPAS_ATENDIMENTO_CLIENTE.indexOf(status);
+  const indiceAtual = ehAguardandoAgendamento(status) ? 0 : ETAPAS_ATENDIMENTO_CLIENTE.indexOf(status);
   if (indiceAtual < 0) return null;
   const etapas = ETAPAS_ATENDIMENTO_CLIENTE.map((label, i) => ({ label, cor: AZUL_MEDIO, ativa: i <= indiceAtual }));
   return (
@@ -20613,6 +20662,43 @@ function FluxogramaAtendimentoCliente({ status }) {
           {i < etapas.length - 1 && <div style={{ height: 2, background: "#D8DEE7", flex: 0.6, marginTop: 6 }} />}
         </React.Fragment>
       ))}
+    </div>
+  );
+}
+
+/* Onde o atendimento está, em destaque no cartão (pedido da Gerência, nov/2026: o cliente se
+   cadastrava e só lia "Em análise", sem saber se o cadastro tinha entrado nem o que vinha depois).
+   Na fila de espera: cadastro realizado e a data que ele pediu — ou que a equipe vai combinar, se
+   ele não escolheu. Agendado: dia, hora e técnico. Devolve null quando não há o que destacar, e
+   aí o cartão mostra o texto de sempre (STATUS_ATENDIMENTO_INFO). */
+const temDestaqueSituacao = (d) => ehAguardandoAgendamento(d.status) || (d.status === "Agendado" && !!d.dataVistoria);
+function DestaqueSituacaoCliente({ d }) {
+  if (!temDestaqueSituacao(d)) return null;
+  const dataBr = (iso) => String(iso || "").split("-").reverse().join("/");
+  const caixa = (fundo, borda) => ({ background: fundo, border: `1px solid ${borda}`, borderRadius: 10, padding: "10px 12px", marginBottom: 10, display: "flex", gap: 10, alignItems: "flex-start" });
+  if (ehAguardandoAgendamento(d.status)) {
+    const pediu = d.dataSolicitada ? `${dataBr(d.dataSolicitada)}${d.horarioSolicitado ? ` às ${d.horarioSolicitado}` : ""}` : "";
+    return (
+      <div style={caixa("#FFF4E0", "#F0C48A")}>
+        <Clock size={18} color="#B26A00" style={{ flexShrink: 0, marginTop: 1 }} />
+        <div style={{ fontSize: 13.5, color: "#5c3d00", lineHeight: 1.45 }}>
+          <div style={{ fontWeight: 800, color: "#B26A00", marginBottom: 2 }}>Cadastro realizado ✓ — aguardando agendamento</div>
+          {pediu
+            ? <>Você pediu a vistoria para <strong>{pediu}</strong>. O Atendimento vai escolher o técnico e confirmar essa data com você.</>
+            : <>Você ainda não escolheu uma data. O Atendimento vai entrar em contato para combinar o melhor dia e horário.</>}
+          {" "}Quando a vistoria for agendada, o status muda para <strong>Agendado</strong>.
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={caixa("#EAF2FB", "#B9D3EE")}>
+      <CalendarDays size={18} color={AZUL_MEDIO} style={{ flexShrink: 0, marginTop: 1 }} />
+      <div style={{ fontSize: 13.5, color: "#1f3550", lineHeight: 1.45 }}>
+        <div style={{ fontWeight: 800, color: AZUL_MARINHO, marginBottom: 2 }}>Vistoria agendada</div>
+        <strong>{dataBr(d.dataVistoria)}{d.horaVistoria ? ` às ${d.horaVistoria}` : ""}</strong>
+        {d.vistoriador ? <> com o técnico <strong>{d.vistoriador}</strong></> : null}.
+      </div>
     </div>
   );
 }
@@ -21161,8 +21247,9 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado 
               <Check size={17} /> Cadastro realizado{primeiroNome ? `, ${primeiroNome}` : ""}!
             </div>
             <div style={{ fontSize: 13.5, color: "#33683c" }}>
-              Nossa equipe já recebeu seus dados e entra em contato para confirmar o atendimento — você acompanha
-              tudo aqui, em "Meu atendimento". Enquanto isso, conheça a <strong>loja FN Home</strong>: produtos que a
+              Seu cadastro já está na nossa fila de agendamento: o Atendimento escolhe o técnico e confirma a data
+              com você. Acompanhe tudo aqui, em "Meu atendimento" — o status muda para <strong>Agendado</strong> assim
+              que a vistoria for marcada. Enquanto isso, conheça a <strong>loja FN Home</strong>: produtos que a
               FN escolheu para equipar o seu imóvel novo.
             </div>
           </div>
@@ -21198,8 +21285,9 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado 
                         {d.empreendimento}{d.blocoTorre ? ` · ${d.blocoTorre}` : ""}
                       </div>
                     )}
+                    {!ehServicoDocumentacao(d) && <DestaqueSituacaoCliente d={d} />}
                     {!ehServicoDocumentacao(d) && <FluxogramaAtendimentoCliente status={d.status} />}
-                    {statusInfo && (
+                    {statusInfo && !temDestaqueSituacao(d) && (
                       <div style={{ fontSize: 13.5, color: "#334", background: CINZA_CLARO, borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
                         {statusInfo}
                       </div>
