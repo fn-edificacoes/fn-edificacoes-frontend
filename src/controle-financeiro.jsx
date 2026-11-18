@@ -16,6 +16,7 @@ import {
   Repeat, Paperclip, RotateCcw, Edit3, Power,
 } from "lucide-react";
 import { CATEGORIAS, CATEGORIAS_DESPESA, FORMAS_PAGAMENTO } from "./financeiro-regras.js";
+import { AnexoArtVistoria, lerArquivoComoDataUrl } from "./documentacao-construtora.jsx";
 
 const AZUL_MEDIO = "#2C75B5";
 const AZUL_MARINHO = "#12335B";
@@ -224,6 +225,9 @@ function GrupoEmpreendimento({ g, config, perfil, token, apiFetch, notify, clien
   const [marcados, setMarcados] = useState({});
   const [emitindo, setEmitindo] = useState(null); // null | "coletiva" | "individual"
   const [form, setForm] = useState({ numero: "", emitidaEm: hoje(), observacoes: "" });
+  /* PDF da ART já na emissão: é ele que aparece no portal de cada pessoa da ART e vai junto
+     para a construtora. Várias individuais de uma vez: cada uma tem o seu PDF, anexado na linha. */
+  const [arquivoArt, setArquivoArt] = useState(null);
   const [enviando, setEnviando] = useState(false);
   const selecionados = g.semArt.filter((p) => marcados[p.c.id]);
   const alternarTodos = () => {
@@ -241,6 +245,12 @@ function GrupoEmpreendimento({ g, config, perfil, token, apiFetch, notify, clien
     if (!selecionados.length) return;
     if (!individual && selecionados.length > config.artCapacidade) { notify(`Uma ART cobre no máximo ${config.artCapacidade} pessoas.`); return; }
     setEnviando(true);
+    /* Lê o arquivo antes de emitir: arquivo inválido não deve virar ART emitida sem PDF. */
+    let dataUrlArt = null;
+    if (arquivoArt) {
+      try { dataUrlArt = await lerArquivoComoDataUrl(arquivoArt); }
+      catch (e) { notify(e.message); setEnviando(false); return; }
+    }
     try {
       const r = await apiFetch("/api/arts-vistoria", { method: "POST", token, body: {
         tipo: individual ? "individual" : "coletiva",
@@ -254,7 +264,14 @@ function GrupoEmpreendimento({ g, config, perfil, token, apiFetch, notify, clien
         trocarArt(r.art);
         notify(`ART emitida com ${r.art.pessoas.length} pessoa(s) ✓ — ${brl(r.art.valor)} lançado nas despesas`);
       }
-      setMarcados({}); setEmitindo(null); setForm({ numero: "", emitidaEm: hoje(), observacoes: "" });
+      const criadas = individual ? r.arts : [r.art];
+      if (dataUrlArt && criadas.length === 1) {
+        try {
+          await apiFetch(`/api/arts-vistoria/${criadas[0].id}/arquivo`, { method: "PUT", token, body: { arquivo: dataUrlArt } });
+          await recarregar();
+        } catch (e) { notify(`ART emitida, mas o PDF não subiu (${e.message}). Anexe pelo botão "Anexar PDF" na linha da ART.`); }
+      }
+      setMarcados({}); setEmitindo(null); setForm({ numero: "", emitidaEm: hoje(), observacoes: "" }); setArquivoArt(null);
     } catch (e) { notify(`Não foi possível emitir a ART: ${e.message}`); }
     setEnviando(false);
   };
@@ -304,6 +321,7 @@ function GrupoEmpreendimento({ g, config, perfil, token, apiFetch, notify, clien
                 <tbody>
                   {g.arts.map((a) => (
                     <LinhaArt key={a.id} art={a} perfil={perfil} clientePorId={clientePorId} tirar={tirar} excluir={excluirArt}
+                      anexo={<AnexoArtVistoria art={a} token={token} apiFetch={apiFetch} notify={notify} aoMudar={recarregar} />}
                       salvar={async (dados) => {
                         try { const r = await apiFetch(`/api/arts-vistoria/${a.id}`, { method: "PATCH", token, body: dados }); trocarArt(r.art); notify("ART atualizada ✓"); return true; }
                         catch (e) { notify(`Não foi possível salvar: ${e.message}`); return false; }
@@ -386,6 +404,18 @@ function GrupoEmpreendimento({ g, config, perfil, token, apiFetch, notify, clien
                     <div style={{ display: "grid", gap: 4, flex: 1, minWidth: 180 }}><label style={lab}>Observação</label>
                       <input style={inp} value={form.observacoes} onChange={(e) => setForm({ ...form, observacoes: e.target.value })} /></div>
                   </div>
+                  {(!individual || selecionados.length === 1) ? (
+                    <div style={{ display: "grid", gap: 4 }}>
+                      <label style={lab}>PDF da ART (pode anexar depois)</label>
+                      <input type="file" accept="application/pdf,image/jpeg,image/png" style={{ fontSize: 12.5 }}
+                        onChange={(e) => setArquivoArt(e.target.files?.[0] || null)} />
+                      <span style={{ fontSize: 12, color: "#65758b" }}>
+                        Aparece no portal de {individual ? "quem é desta ART" : "cada pessoa desta ART"} e vai junto na documentação enviada à construtora.
+                      </span>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: "#65758b" }}>Depois de emitir, anexe o PDF de cada ART individual pelo botão "Anexar PDF" na linha dela.</div>
+                  )}
                   <div style={{ fontSize: 12.5, color: "#4a5a70" }}>
                     Válida de {dataBr(form.emitidaEm)} até {dataBr(somarDias(form.emitidaEm, config.artValidadeDias))}.
                   </div>
@@ -417,7 +447,7 @@ function somarDias(iso, dias) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function LinhaArt({ art, perfil, clientePorId, tirar, excluir, salvar }) {
+function LinhaArt({ art, perfil, clientePorId, tirar, excluir, salvar, anexo = null }) {
   const [vendo, setVendo] = useState(false);
   const [editando, setEditando] = useState(false);
   const [form, setForm] = useState({ numero: art.numero, emitidaEm: art.emitidaEm });
@@ -431,6 +461,8 @@ function LinhaArt({ art, perfil, clientePorId, tirar, excluir, salvar }) {
         <td style={{ ...td, fontWeight: 700 }}>
           {editando ? <input style={{ ...inp, width: 130 }} value={form.numero} onChange={(e) => setForm({ ...form, numero: e.target.value })} />
             : (art.numero || <span style={{ color: AMBAR }}>sem número</span>)}
+          {/* O PDF da ART vai junto para a construtora com o contrato e os documentos do técnico. */}
+          {!editando && anexo}
           {individual && <div style={{ marginTop: 3 }}><Pilula cor="#6E36BE" fundo="#F1EAFB">Individual</Pilula></div>}
         </td>
         <td style={{ ...td, whiteSpace: "nowrap" }}>
