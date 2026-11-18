@@ -605,6 +605,15 @@ cadastro e o cliente assina sem custo — na própria FN ou pelo GOV.BR.
   PDF enviado, "Abrir validador do ITI", três conferências e aprovar/recusar), arquivos e histórico. A
   Gerência tem ainda **Modelos** (`EditorDeModelo`: versão nova a cada salvar, botões que inserem os
   `{{campos}}`, prévia em PDF) e **Dados da FN** (inclui a imagem da assinatura do representante).
+- **Agendados aguardando contrato** (`AgendadosParaContrato`, no topo da aba Contratos; pedido da
+  Gerência: o cliente só faz o serviço depois de assinar): todo cliente com agendamento aprovado aparece
+  sozinho, sem o Atendimento buscar, com a data da vistoria e quanto falta ("vistoria amanhã"), a
+  situação do contrato e os botões **Gerar contrato** / **Conferir e liberar** / **Abrir contrato**. Com o
+  contrato liberado, **Enviar pelo WhatsApp** (`BotaoWhatsappContrato`, link `wa.me` com
+  `mensagemWhatsappContrato`: data da vistoria, número do contrato, passo a passo na Área do Cliente —
+  ou o "Primeiro acesso", para quem ainda não tem senha — e que a vistoria só acontece depois da
+  assinatura). O mesmo botão está na ficha do contrato. O número sai do `numeroWhatsapp` do laudo.
+  As duas listas da aba se atualizam juntas (`versao` em `AbaContratos`).
 - **Ficha do cliente:** `SecaoContratosCliente` no modal "Editar cliente" da aba Clientes (Atendimento e
   Gerência) e no Perfil do cliente da Gerência — contratos do CPF e "Gerar contrato" para aquele cadastro.
 - **Portal** (`MeusContratos`, logo depois de "Meu atendimento" no `PainelCliente`; não aparece sem
