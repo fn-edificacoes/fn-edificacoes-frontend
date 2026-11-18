@@ -14,6 +14,7 @@ import AbaCreditosIA from "./ia-creditos.jsx";
 import { BotaoWhatsappLaudo, AbaEnvioLaudo } from "./laudo-whatsapp.jsx";
 import { AbaArtsVistoria, AbaFolhaPagamento, AbaDespesasFixas, CardValoresCustos, useCustosOperacionais, useFolhaEmAberto } from "./controle-financeiro.jsx";
 import AbaContratos, { MeusContratos, SecaoContratosCliente } from "./contratos.jsx";
+import AbaConstrutoras, { MeusDocumentosTecnico, AvisoDocumentosTecnico, MinhasArts, AvisoAnexoArtMultipla } from "./documentacao-construtora.jsx";
 import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
   Building2, User, ClipboardList, ChevronDown, ChevronRight, ChevronLeft, Check,
@@ -593,7 +594,9 @@ const STATUS_INTERNO_OPCOES = ["Agendado", "Em vistoria", "Laudo em elaboração
 /* "loja" é a Loja FN Home para o técnico mostrar ao cliente na vistoria (nov/2026): só leitura,
    com o link para mandar pelo WhatsApp — nada de cadastro de produto. */
 const MODULOS_POR_PERFIL = {
-  vistoriador: ["laudos", "loja", "despesas"],
+  /* "meus-documentos" (nov/2026): carteira do conselho e acervo técnico, que vão sozinhos para a
+     construtora antes da vistoria — ver src/documentacao-construtora.jsx. */
+  vistoriador: ["laudos", "meus-documentos", "loja", "despesas"],
   documentacao: ["documentacao", "arts", "despesas"],
   /* "contratos" (nov/2026): o Atendimento gera, confere e libera o contrato e valida o PDF que volta
      do GOV.BR — ver src/contratos.jsx. */
@@ -750,11 +753,15 @@ const novoCadastroCliente = () => ({
      legal do tratamento depois — que é exatamente o que a LGPD cobra de quem coleta CPF,
      telefone, endereço e fotos do interior da casa das pessoas. */
   aceiteTermos: false,
+  /* Anexo da ART/TRT múltipla: aceite separado, porque é um compartilhamento específico. */
+  aceiteAnexoArt: false,
   criadoEm: new Date().toISOString(),
 });
 
 /* A versão precisa ser a mesma do backend: é ela que diz a que texto a pessoa disse sim. */
-const VERSAO_POLITICA_PRIVACIDADE = "2026-08";
+const VERSAO_POLITICA_PRIVACIDADE = "2026-11";
+/* Anexo da ART/TRT múltipla (nov/2026), com aceite próprio no cadastro — igual no backend. */
+const VERSAO_ANEXO_ART_MULTIPLA = "2026-11";
 
 async function redimensionar(dataUrl, max = 1024) {
   /* Foto que já está no Drive chega como URL, não como base64 (ver laudo-fotos.js no
@@ -2625,6 +2632,9 @@ const GERENCIA_MENU_LATERAL = [
     { aba: "gerencia", sub: "prospeccao", label: "Prospecção", Icon: TrendingUp },
     /* A lista de construtora/empreendimento que o cliente vê no "Cadastre-se". */
     { aba: "gerencia", sub: "empreendimentos", label: "Empreendimentos", Icon: IconeEmpreendimento },
+    /* E-mail de cada construtora, a documentação que vai para ela antes da vistoria e os
+       documentos dos técnicos (src/documentacao-construtora.jsx). */
+    { aba: "gerencia", sub: "construtoras", label: "Construtoras e documentos", Icon: Building2 },
   ] },
   /* Os parceiros do FN Home são cuidados no FN Projetos (Casa Pronta › Fornecedores); aqui fica
      o que é da própria FN: os produtos do Mercado Livre com o link de afiliado dela, e o financeiro
@@ -4144,7 +4154,7 @@ function AppInterno({ session, onLogout }) {
             aqui: é sub-aba de Documentação (abaTop "arts" acende a aba Documentação). */}
         {perfil !== "gerencia" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, borderTop: "1px solid rgba(255,255,255,.12)", overflowX: "auto" }}>
-            {[["laudos", "Laudos", FileText], ["clientes", "Clientes", Users], ["contratos", "Contratos", FileSignature], ["envio-laudo", "Envio de laudo", Send], ["qualidade", "Agendamento", Star], ["documentacao", "Documentação", ClipboardCheck], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Fornecedores", Wrench], ["loja", "Loja FN Home", ShoppingBag], ["despesas", "Despesas", Receipt], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog], ["nacional", "Rede Nacional", Landmark], ["mapa", "Mapa de atuação", IconeMapa]]
+            {[["laudos", "Laudos", FileText], ["clientes", "Clientes", Users], ["contratos", "Contratos", FileSignature], ["envio-laudo", "Envio de laudo", Send], ["qualidade", "Agendamento", Star], ["documentacao", "Documentação", ClipboardCheck], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Fornecedores", Wrench], ["meus-documentos", "Meus documentos", User], ["loja", "Loja FN Home", ShoppingBag], ["despesas", "Despesas", Receipt], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog], ["nacional", "Rede Nacional", Landmark], ["mapa", "Mapa de atuação", IconeMapa]]
               .filter(([k]) => modulosPermitidos.includes(k))
               .map(([k, label, Icon]) => {
                 const ativa = abaTop === k || (k === "documentacao" && abaTop === "arts");
@@ -4157,6 +4167,11 @@ function AppInterno({ session, onLogout }) {
           </nav>
         )}
 
+        {/* Técnico sem carteira/acervo, ou com mais de 6 meses desde o último envio: a construtora
+            exige esses documentos antes da vistoria, então o aviso fica à vista em toda tela. */}
+        {perfil === "vistoriador" && abaTop !== "meus-documentos" && (
+          <AvisoDocumentosTecnico token={token} apiFetch={apiFetch} aoAbrir={() => setAbaTop("meus-documentos")} />
+        )}
         {/* Sub-navegação do módulo Documentação: TRTs de reforma (os cadastros de Documentação
             ART/TRT, com os dois anexos) e ARTs de vistoria (ART múltipla por empreendimento).
             Ficam juntas porque quem organiza uma organiza a outra. */}
@@ -4311,6 +4326,7 @@ function AppInterno({ session, onLogout }) {
           <AbaMinhasDespesas fin={fin} clientes={clientesAtivos} usuarioAtual={session.usuario} telaEstreita={telaEstreita} notify={notify} />
         )}
         {abaTop === "loja" && <AbaLojaParaCliente apiFetch={apiFetch} notify={notify} />}
+        {abaTop === "meus-documentos" && <MeusDocumentosTecnico token={token} apiFetch={apiFetch} notify={notify} />}
         {abaTop === "contratos" && <AbaContratos token={token} apiFetch={apiFetch} apiUrl={API_URL} notify={notify} perfil={perfil} />}
         {abaTop === "envio-laudo" && <AbaEnvioLaudo apiFetch={apiFetch} token={token} notify={notify} />}
         {abaTop === "gerencia" && String(abaGerencia).startsWith("fin-") && (
@@ -17597,6 +17613,9 @@ function AbaGerencia({ sub = "visao-geral", fin, token, perfil, usuarioAtual, de
       onCriar={criarPatologia} onAtualizar={atualizarPatologia} onExcluir={excluirPatologia}
       onImportar={importarPatologiasEstaticas} notify={notify} />;
   }
+  if (sub === "construtoras") {
+    return <AbaConstrutoras token={token} apiFetch={apiFetch} notify={notify} perfil={perfil} />;
+  }
   if (sub === "empreendimentos") {
     return <AbaEmpreendimentosCadastro token={token} apiFetch={apiFetch} notify={notify} aoMudar={carregarEmpreendimentosRef} />;
   }
@@ -18443,6 +18462,7 @@ function AbaCliente({ notify, onLogin }) {
     if (!form.senha.trim() || form.senha.length < 6) { notify("Crie uma senha de no mínimo 6 caracteres para acessar seu portal"); return; }
     if (!form.email.trim()) { notify("Informe um e-mail para criar a senha do portal"); return; }
     if (!form.aceiteTermos) { notify("Marque o aceite da política de privacidade para continuar"); return; }
+    if (!form.aceiteAnexoArt) { notify("Marque o aceite do anexo da ART/TRT múltipla para continuar"); return; }
     if (form.dataDesejada && form.dataDesejada < paraChaveISO(new Date())) { notify("A data desejada precisa ser de hoje em diante — confira o ano"); return; }
     if (form.dataDesejada && !confirmarDataDistante(form.dataDesejada)) return;
     const construtoraFinal = construtoraSel === OUTROS ? construtoraOutros.trim() : construtoraSel;
@@ -18456,6 +18476,7 @@ function AbaCliente({ notify, onLogin }) {
           ...form, instagram: normalizarInstagram(form.instagram),
           construtora: construtoraFinal.toUpperCase(), empreendimento: empreendimentoFinal.toUpperCase(),
           precisaCadastroEmpreendimento, aceiteVersao: VERSAO_POLITICA_PRIVACIDADE,
+          aceiteAnexoArtVersao: VERSAO_ANEXO_ART_MULTIPLA,
         },
       });
       setCadastroRealizado(form.servico);
@@ -18657,6 +18678,16 @@ function AbaCliente({ notify, onLogin }) {
             Autorizo a FN Edificações a usar meus dados para prestar o serviço contratado e falar comigo sobre ele.
             Li a <a href="?pagina=privacidade" target="_blank" rel="noopener noreferrer" style={{ color: AZUL_MEDIO }}>política de privacidade</a>,
             que explica o que é guardado, por quanto tempo e como pedir a exclusão.
+          </span>
+        </label>
+
+        <label style={{ display: "flex", gap: 9, alignItems: "flex-start", marginTop: 10, fontSize: 13, color: "#4a5a70", cursor: "pointer" }}>
+          <input type="checkbox" checked={form.aceiteAnexoArt} onChange={(e) => setF("aceiteAnexoArt", e.target.checked)}
+            style={{ marginTop: 2, width: 16, height: 16, flexShrink: 0 }} />
+          <span>
+            Li e concordo com o <a href="?pagina=privacidade#anexo-art-multipla" target="_blank" rel="noopener noreferrer" style={{ color: AZUL_MEDIO }}>anexo da ART/TRT múltipla</a>:
+            se a minha vistoria entrar numa ART/TRT coletiva, meu nome, CPF e unidade aparecem no mesmo documento das
+            outras pessoas incluídas nele, e cada uma recebe esse documento. A FN não responde pelo uso que elas façam desses dados.
           </span>
         </label>
 
@@ -19194,6 +19225,11 @@ function PaginaPortfolioParceiro({ parceiroId }) {
    Ao mudar este texto, mude junto VERSAO_POLITICA_PRIVACIDADE aqui e no backend — é a
    versão que fica gravada no cadastro de quem aceitou. */
 function PaginaPrivacidade() {
+  /* O link do cadastro aponta direto para o anexo (#anexo-art-multipla). A página é montada pelo
+     React depois que o navegador já procurou a âncora, então a rolagem é feita aqui. */
+  useEffect(() => {
+    if (window.location.hash) document.getElementById(window.location.hash.slice(1))?.scrollIntoView();
+  }, []);
   const secao = { margin: "26px 0 0" };
   const h2 = { color: AZUL_MARINHO, fontSize: 17, margin: "0 0 8px" };
   const texto = { fontSize: 14, lineHeight: 1.65, color: "#4a5a70", margin: "0 0 10px" };
@@ -19247,6 +19283,44 @@ function PaginaPrivacidade() {
               contato vão para aquele parceiro — só o dele, só naquele pedido, e só porque é o que
               faz o orçamento chegar até você.
             </p>
+            <p style={texto}>
+              Na vistoria com ART/TRT múltipla, seus dados aparecem no mesmo documento das demais
+              pessoas incluídas nele — veja o anexo abaixo.
+            </p>
+          </div>
+
+          {/* Anexo pedido pela Gerência (nov/2026). Tem aceite próprio no cadastro
+              (aceite_anexo_art_*, com VERSAO_ANEXO_ART_MULTIPLA aqui e no backend): mudou o
+              texto, muda a versão. */}
+          <div id="anexo-art-multipla" style={{ ...secao, border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: "16px 18px", background: "#FAFBFD" }}>
+            <h2 style={h2}>Anexo — ART/TRT múltipla de vistoria</h2>
+            <p style={texto}>
+              Para baratear a vistoria, a FN pode registrar a ART (ou TRT) de várias pessoas do mesmo
+              empreendimento num documento só, a chamada ART/TRT múltipla ou coletiva. É o conselho
+              profissional que define o formato desse documento, não a FN.
+            </p>
+            <p style={texto}>
+              Ao concordar com este anexo, você está ciente e autoriza que, se a sua vistoria entrar numa
+              ART/TRT múltipla:
+            </p>
+            <ul style={{ ...texto, paddingLeft: 20 }}>
+              <li>o seu nome, CPF e a identificação do seu imóvel (empreendimento, bloco e unidade) constem
+                no mesmo documento que os das demais pessoas incluídas nele;</li>
+              <li>cada pessoa da mesma ART/TRT receba o documento inteiro — no portal do cliente e na
+                documentação enviada à construtora antes da vistoria;</li>
+              <li>a FN compartilhe nesse documento somente os dados que o registro exige, e nenhum outro.</li>
+            </ul>
+            <p style={texto}>
+              Os dados de terceiros que você vier a ver nesse documento servem só para comprovar a
+              responsabilidade técnica da vistoria. Você se compromete a não usá-los para outra finalidade, e
+              a FN não responde pelo uso que as demais pessoas incluídas na mesma ART/TRT façam dos dados
+              que constam nela.
+            </p>
+            <p style={texto}>
+              Se preferir não ter seus dados num documento compartilhado, avise a FN antes da vistoria: a ART
+              pode ser individual, com o custo dela.
+            </p>
+            <p style={{ ...texto, fontSize: 12.5, color: "#8593a8" }}>Anexo versão {VERSAO_ANEXO_ART_MULTIPLA}</p>
           </div>
 
           <div style={secao}>
@@ -20848,6 +20922,10 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado 
         )}
         {recemCadastrado && loja}
 
+        {/* Quem virou cliente antes do anexo da ART/TRT múltipla (ou foi cadastrado por telefone)
+            concorda aqui. Some sozinho depois do aceite (src/documentacao-construtora.jsx). */}
+        <AvisoAnexoArtMultipla token={session.token} apiFetch={apiFetch} notify={notify} />
+
         <Card icon={ClipboardCheck} titulo="Meu atendimento">
           {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
           {!carregando && resultados.length === 0 && (
@@ -20912,6 +20990,10 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado 
         {/* Meus contratos (nov/2026): ler, baixar e assinar — aqui na FN ou pelo GOV.BR. Só aparece
             para quem tem contrato liberado (src/contratos.jsx). */}
         <MeusContratos token={session.token} apiFetch={apiFetch} apiUrl={API_URL} notify={notify} usuario={session.usuario} />
+
+        {/* Minha ART (nov/2026): a coletiva em que a pessoa está ou a individual dela, sempre à mão.
+            Só aparece com o PDF anexado pelo Atendimento (src/documentacao-construtora.jsx). */}
+        <MinhasArts token={session.token} apiFetch={apiFetch} notify={notify} />
 
         {!leadsCarregando && leads.length > 0 && (
           <Card icon={FileText} titulo="Meus orçamentos">

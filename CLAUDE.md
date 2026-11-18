@@ -110,6 +110,7 @@ src/clube-fn.jsx            FN Clube: ramos, vitrine com desconto, Casa Pronta e
 src/laudo-whatsapp.jsx      laudo aprovado pelo WhatsApp do cliente (link wa.me) e a aba "Envio de laudo" do Atendimento
 src/links-publicos.js       endereços que vão para o cliente: Área do Cliente e FN_HOME_URL
 src/contratos.jsx           Contratos: aba da equipe, seção da ficha do cliente e "Meus contratos" no portal
+src/documentacao-construtora.jsx Meus documentos (técnico), anexo da ART, Minha ART (portal) e Gerência › Construtoras
 ```
 
 Para achar algo no `App.jsx`, procure pela definição da componente
@@ -718,6 +719,19 @@ para quem mexe aqui:
   `/api/laudos/:docId/conteudo` quando alguém abre uma linha. Com o conteúdo na lista, uma
   abertura de tela baixava 62 MB — foi o que consumiu a banda mensal da hospedagem e
   suspendeu o serviço.
+
+## Documentação para a construtora
+
+`src/documentacao-construtora.jsx` (nov/2026). O servidor junta contrato assinado + ART + carteira + acervo num
+PDF e envia à construtora dias antes da vistoria (ver o CLAUDE.md do backend). Aqui:
+
+- **Meus documentos** (módulo `meus-documentos` do vistoriador): carteira (CFT/CAU/CREA + nº) e acervo, uma vez;
+  aviso de atualizar a cada 6 meses. `AvisoDocumentosTecnico` mostra a faixa no topo quando falta ou venceu.
+- **ART de vistoria**: o formulário de emissão aceita o PDF; na linha da ART, "Anexar PDF" / "Ver ART"
+  (`AnexoArtVistoria`). Várias individuais de uma vez: cada PDF se anexa na linha.
+- **Portal do cliente**: `MinhasArts`, logo abaixo de Meus contratos — só aparece com PDF anexado.
+- **Gerência › Construtoras e documentos**: vistorias com o que falta e a situação do envio (prévia do PDF,
+  "Enviar agora"/"Reenviar"), e-mails e antecedência de cada construtora, e documentos de cada técnico.
 
 ## Convenções
 
