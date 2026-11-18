@@ -11,7 +11,7 @@ import AbaFinanceiroFnHome, { CardFnHomeNosIndicadores } from "./fn-home-finance
 import AbaMapaAtuacao from "./mapa-atuacao.jsx";
 import { usePatologiaVoz, PainelPatologiaVoz, AvisoPendentesVoz } from "./patologia-voz.jsx";
 import AbaCreditosIA from "./ia-creditos.jsx";
-import { BotaoWhatsappLaudo } from "./laudo-whatsapp.jsx";
+import { BotaoWhatsappLaudo, AbaEnvioLaudo } from "./laudo-whatsapp.jsx";
 import { AbaArtsVistoria, AbaFolhaPagamento, AbaDespesasFixas, CardValoresCustos, useCustosOperacionais, useFolhaEmAberto } from "./controle-financeiro.jsx";
 import AbaContratos, { MeusContratos, SecaoContratosCliente } from "./contratos.jsx";
 import {
@@ -597,7 +597,7 @@ const MODULOS_POR_PERFIL = {
   documentacao: ["documentacao", "arts", "despesas"],
   /* "contratos" (nov/2026): o Atendimento gera, confere e libera o contrato e valida o PDF que volta
      do GOV.BR — ver src/contratos.jsx. */
-  atendimento: ["clientes", "contratos", "qualidade", "documentacao", "arts", "faq", "marketing", "vendas", "despesas"],
+  atendimento: ["clientes", "contratos", "envio-laudo", "qualidade", "documentacao", "arts", "faq", "marketing", "vendas", "despesas"],
   vendas: ["vendas", "despesas"],
   gerencia: ["laudos", "documentacao", "arts", "gerencia", "usuarios", "clientes", "contratos", "qualidade", "faq", "marketing", "nacional", "mapa"],
   /* FN Nacional por regional: só a Rede Nacional, filtrada pelo servidor às regionais dele. */
@@ -4144,7 +4144,7 @@ function AppInterno({ session, onLogout }) {
             aqui: é sub-aba de Documentação (abaTop "arts" acende a aba Documentação). */}
         {perfil !== "gerencia" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, borderTop: "1px solid rgba(255,255,255,.12)", overflowX: "auto" }}>
-            {[["laudos", "Laudos", FileText], ["clientes", "Clientes", Users], ["contratos", "Contratos", FileSignature], ["qualidade", "Agendamento", Star], ["documentacao", "Documentação", ClipboardCheck], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Fornecedores", Wrench], ["loja", "Loja FN Home", ShoppingBag], ["despesas", "Despesas", Receipt], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog], ["nacional", "Rede Nacional", Landmark], ["mapa", "Mapa de atuação", IconeMapa]]
+            {[["laudos", "Laudos", FileText], ["clientes", "Clientes", Users], ["contratos", "Contratos", FileSignature], ["envio-laudo", "Envio de laudo", Send], ["qualidade", "Agendamento", Star], ["documentacao", "Documentação", ClipboardCheck], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Fornecedores", Wrench], ["loja", "Loja FN Home", ShoppingBag], ["despesas", "Despesas", Receipt], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog], ["nacional", "Rede Nacional", Landmark], ["mapa", "Mapa de atuação", IconeMapa]]
               .filter(([k]) => modulosPermitidos.includes(k))
               .map(([k, label, Icon]) => {
                 const ativa = abaTop === k || (k === "documentacao" && abaTop === "arts");
@@ -4312,6 +4312,7 @@ function AppInterno({ session, onLogout }) {
         )}
         {abaTop === "loja" && <AbaLojaParaCliente apiFetch={apiFetch} notify={notify} />}
         {abaTop === "contratos" && <AbaContratos token={token} apiFetch={apiFetch} apiUrl={API_URL} notify={notify} perfil={perfil} />}
+        {abaTop === "envio-laudo" && <AbaEnvioLaudo apiFetch={apiFetch} token={token} notify={notify} />}
         {abaTop === "gerencia" && String(abaGerencia).startsWith("fin-") && (
           <AbaFinanceiroDespesas sub={abaGerencia} fin={fin} clientes={clientes} docs={docs} precos={precos} usuarios={usuarios}
             usuarioAtual={session.usuario} telaEstreita={telaEstreita} notify={notify} token={token} updCliente={updCliente}
@@ -9842,7 +9843,7 @@ function EditorLaudoGerencia({ laudo, onSalvar, onCancelar, salvando, patologias
 function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, devolverLaudo, editarLaudo, reenviarDrive, marcarEmAnalise, assinatura, notify, patologiasBanco = [], clientes = [], docs = [], token }) {
   const [previewId, setPreviewId] = useState(null);
   const [aprovandoId, setAprovandoId] = useState(null);
-  /* O último laudo aprovado aqui, para oferecer o WhatsApp logo em seguida. A linha some da
+  /* O último laudo aprovado aqui, para confirmar a aprovação e o e-mail. A linha some da
      fila na aprovação, então guarda uma cópia dela. */
   const [aprovadoAgora, setAprovadoAgora] = useState(null);
   /* Devolver exige motivo: é ele que o técnico vê no topo do formulário ao reabrir o laudo. */
@@ -9896,15 +9897,13 @@ function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, d
   return (
     <Card icon={Mail} titulo={`Laudos aguardando aprovação (${laudosPendentes.length})`}>
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px" }}>
-        Ao aprovar, o sistema gera o PDF final e envia automaticamente por e-mail para o endereço já cadastrado do cliente — sem precisar digitar nada.
+        Ao aprovar, o sistema gera o PDF final e envia automaticamente por e-mail para o endereço já cadastrado do cliente — sem precisar digitar nada. O envio pelo WhatsApp fica com o Atendimento, na aba "Envio de laudo".
       </p>
 
+      {/* Desde nov/2026 o WhatsApp não sai daqui: o laudo aprovado vai para a aba "Envio de laudo"
+          do Atendimento (AbaEnvioLaudo, em src/laudo-whatsapp.jsx). O aviso só confirma a aprovação. */}
       {aprovadoAgora && (() => {
         const { laudo, emailEnviado, emailErro } = aprovadoAgora;
-        const doc = docs.find((d) => d.id === laudo.doc_id);
-        const cpfLimpo = String(laudo.cpf || "").replace(/\D/g, "");
-        const cliente = clienteDoDoc(doc, clientes)
-          || (cpfLimpo ? clientes.find((c) => !c.revistoriaDe && (c.cpf || "").replace(/\D/g, "") === cpfLimpo) : null);
         return (
           <div style={{ border: `1px solid ${emailEnviado ? "#a5d6a7" : "#f0c987"}`, background: emailEnviado ? "#EEF7EE" : "#FFF4E0", borderRadius: 10, padding: 12, marginBottom: 14, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <div style={{ flex: 1, minWidth: 200, fontSize: 13.5 }}>
@@ -9914,8 +9913,10 @@ function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, d
               <div style={{ fontSize: 12.5, color: "#65758b" }}>
                 {laudo.cliente}{!emailEnviado && emailErro ? ` · ${emailErro}` : ""}
               </div>
+              <div style={{ fontSize: 12.5, color: "#4a5a70", marginTop: 2 }}>
+                📲 Já está na fila do Atendimento para envio pelo WhatsApp.
+              </div>
             </div>
-            <BotaoWhatsappLaudo laudo={laudo} cliente={cliente} emailEnviado={emailEnviado} apiFetch={apiFetch} token={token} />
             <button className="icon-btn" title="Fechar aviso" onClick={() => setAprovadoAgora(null)}><X size={16} /></button>
           </div>
         );

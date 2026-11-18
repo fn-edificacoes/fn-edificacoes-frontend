@@ -107,7 +107,7 @@ src/fn-home-mercadolivre.jsx FN Home: produtos do Mercado Livre (cadastro da Ger
 src/fn-home-importar-planilha.jsx FN Home: importar planilha (.xlsx/.csv) de produtos do Mercado Livre
 src/fn-home-financeiro.jsx  FN Home: vendas, comissão da FN, repasses, mais vendidos e cliques
 src/clube-fn.jsx            FN Clube: ramos, vitrine com desconto, Casa Pronta e o aviso da Gerência
-src/laudo-whatsapp.jsx      laudo aprovado pelo WhatsApp do cliente (link wa.me com a mensagem pronta)
+src/laudo-whatsapp.jsx      laudo aprovado pelo WhatsApp do cliente (link wa.me) e a aba "Envio de laudo" do Atendimento
 src/links-publicos.js       endereços que vão para o cliente: Área do Cliente e FN_HOME_URL
 src/contratos.jsx           Contratos: aba da equipe, seção da ficha do cliente e "Meus contratos" no portal
 ```
@@ -126,7 +126,7 @@ O papel vem do backend no login, nunca é escolhido na tela. `App()` despacha po
 - `cliente` → `PainelCliente`
 - os demais → `AppInterno`, filtrado por `MODULOS_POR_PERFIL`:
   `vistoriador` (laudos, loja FN Home, despesas), `documentacao`, `atendimento` (clientes, agendamento, documentação,
-  parceiros), `qualidade` (agendamento, só leitura), `vendas` (parceiros), `gerencia` (tudo).
+  envio de laudo pelo WhatsApp, parceiros), `qualidade` (agendamento, só leitura), `vendas` (parceiros), `gerencia` (tudo).
 
 **Aba Documentação (Atendimento e Documentação):** duas sub-abas — **TRTs de reforma**
 (`AbaDocumentacao`, os cadastros de "Documentação ART/TRT" com os dois anexos, pagamento e o
@@ -195,15 +195,21 @@ os preços de tabela usados na conta. Tudo num `GET /api/financeiro/ia-creditos`
 
 ## Laudo pelo WhatsApp
 
-Depois de aprovar (`CardLaudosPendentes`), a fila mostra "✅ Laudo aprovado e enviado por e-mail" (ou
-o aviso de que o e-mail não saiu — o servidor aprova mesmo assim) com **"📲 Enviar também pelo
-WhatsApp"**; em Laudos realizados, a Gerência tem **"Reenviar WhatsApp"** nos entregues. É um `<a>`
-para `wa.me` (`src/laudo-whatsapp.jsx`): nada de API da Meta, e nada de `window.open` depois de
-`await`, que o navegador barra. O número sai do `telefone` do cadastro dono do laudo (`clienteDoDoc`).
-O link do laudo é a Área do Cliente (`src/links-publicos.js`): o e-mail só leva o PDF anexo e o Drive
-é privado. O cliente entra lá com o **e-mail**, não com o CPF. O clique avisa
-`POST /api/laudos/:docId/whatsapp-aberto`, que grava em `laudo_auditoria` — "aberto", porque quem envia
-é a pessoa.
+**Quem envia é o Atendimento** (nov/2026). A Gerência só aprova (`CardLaudosPendentes`): o aviso
+diz "✅ Laudo aprovado e enviado por e-mail" (ou que o e-mail não saiu — o servidor aprova mesmo
+assim) e que o laudo já está na fila do Atendimento. O Atendimento tem a aba **Envio de laudo**
+(módulo `envio-laudo`, `AbaEnvioLaudo` em `src/laudo-whatsapp.jsx`): os laudos aprovados, primeiro
+os que ainda não tiveram o WhatsApp aberto, com "📲 Enviar pelo WhatsApp" / "Reenviar". A lista vem
+de `GET /api/laudos/envio-whatsapp`, já com o telefone do cadastro dono do laudo — o Atendimento não
+recebe os registros de vistoria em `/api/docs`, então o casamento laudo ↔ cadastro é feito no
+servidor. Em Laudos realizados a Gerência continua com **"Reenviar WhatsApp"** nos entregues.
+
+O botão é um `<a>` para `wa.me` (`BotaoWhatsappLaudo`): nada de API da Meta, e nada de
+`window.open` depois de `await`, que o navegador barra. O link do laudo é a Área do Cliente
+(`src/links-publicos.js`): o e-mail só leva o PDF anexo e o Drive é privado. O cliente entra lá com
+o **e-mail**, não com o CPF. O clique avisa `POST /api/laudos/:docId/whatsapp-aberto` (Gerência e
+Atendimento, só laudo aprovado), que grava em `laudo_auditoria` — "aberto", porque quem envia é a
+pessoa; é desse registro que a aba tira o "já aberto".
 
 ## Revistoria
 
