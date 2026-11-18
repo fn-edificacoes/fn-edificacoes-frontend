@@ -894,10 +894,15 @@ export default function AbaContratos({ token, apiFetch, apiUrl, notify, perfil }
    próxima vem primeiro, com o aviso de quanto falta. */
 function AgendadosParaContrato({ token, apiFetch, apiUrl, notify, perfil, versao, onMudou }) {
   const [lista, setLista] = useState(null);
+  const [aPartirDe, setAPartirDe] = useState("");
   const [aberto, setAberto] = useState(null);
   const [gerando, setGerando] = useState(null);
   const carregar = async () => {
-    try { setLista((await apiFetch("/api/contratos/agendados", { token })).agendados || []); }
+    try {
+      const r = await apiFetch("/api/contratos/agendados", { token });
+      setLista(r.agendados || []);
+      setAPartirDe(r.aPartirDe || "");
+    }
     catch (e) { notify(`Não foi possível carregar os agendados: ${e.message}`); setLista((l) => l || []); }
   };
   useEffect(() => { carregar(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [versao]);
@@ -926,7 +931,8 @@ function AgendadosParaContrato({ token, apiFetch, apiUrl, notify, perfil, versao
     <Caixa icon={CalendarClock} titulo={`Agendados aguardando contrato${lista ? ` (${lista.length})` : ""}`}
       acoes={<button style={btnLeve} onClick={carregar}><RefreshCcw size={15} /> Atualizar</button>}>
       <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 12px", lineHeight: 1.5 }}>
-        Todo cliente com agendamento aprovado aparece aqui até assinar o contrato — a vistoria só é realizada depois da assinatura.
+        Todo cliente com agendamento aprovado {aPartirDe ? <>e cadastrado a partir de <strong>{dataDoAgendamento(aPartirDe)}</strong> </> : ""}aparece
+        aqui até assinar o contrato — a vistoria só é realizada depois da assinatura. Clientes mais antigos não precisam de contrato.
         Gere o contrato, libere e mande o link pelo WhatsApp.
       </p>
       {lista === null && <Girando />}

@@ -606,7 +606,8 @@ cadastro e o cliente assina sem custo — na própria FN ou pelo GOV.BR.
   Gerência tem ainda **Modelos** (`EditorDeModelo`: versão nova a cada salvar, botões que inserem os
   `{{campos}}`, prévia em PDF) e **Dados da FN** (inclui a imagem da assinatura do representante).
 - **Agendados aguardando contrato** (`AgendadosParaContrato`, no topo da aba Contratos; pedido da
-  Gerência: o cliente só faz o serviço depois de assinar): todo cliente com agendamento aprovado aparece
+  Gerência: o cliente só faz o serviço depois de assinar): todo cliente com agendamento aprovado e
+  cadastrado a partir de 17/11/2026 (data no `aPartirDe` do servidor; cliente antigo não tem contrato) aparece
   sozinho, sem o Atendimento buscar, com a data da vistoria e quanto falta ("vistoria amanhã"), a
   situação do contrato e os botões **Gerar contrato** / **Conferir e liberar** / **Abrir contrato**. Com o
   contrato liberado, **Enviar pelo WhatsApp** (`BotaoWhatsappContrato`, link `wa.me` com
