@@ -212,6 +212,34 @@ o **e-mail**, não com o CPF. O clique avisa `POST /api/laudos/:docId/whatsapp-a
 Atendimento, só laudo aprovado), que grava em `laudo_auditoria` — "aberto", porque quem envia é a
 pessoa; é desse registro que a aba tira o "já aberto".
 
+## Fila de espera e o status que o cliente vê
+
+Pedido da Gerência (18/11/2026): o cadastro novo ia para lugares diferentes conforme tivesse data, e
+o cliente lia status errado. **Todo cadastro novo de vistoria (com ou sem data) vai para Agendamento ›
+Fila de espera** (`AbaQualidadeFila`, a primeira sub-aba e a que abre), junto com o "Agendamento
+aprovado" antigo sem técnico (`naFilaDeEspera`). Antes, quem vinha com data ia para a sub-aba Análise e
+quem vinha sem ficava na fila com o "Aprovar e agendar" travado — a única saída era "Aprovar sem definir
+o técnico", e o cliente passava a ler "Agendado" sem dia nem técnico.
+
+- **Cartão** (`CardFilaEspera`): técnico, data e horário no próprio cartão (data e horário já vêm com o
+  que o cliente pediu) e **Agendar**, que grava os três + "Vistoria agendada" de uma vez
+  (`useAgendamentoFila`). Trava com o que falta, data passada ou o técnico já ocupado no horário
+  (`vistoriaNoMesmoHorario`); avisa vistoria agendada a menos de 1h com qualquer técnico. Selo **NOVO**
+  (chegou hoje/ontem) e "esperando há N dias" em vermelho a partir de 3 (`tempoNaFila`, que precisa de
+  `criadoEm` em `mapClienteDaApi`). Não existe mais "aprovar sem técnico": quem não tem técnico fica na fila.
+- **Destaque:** contador laranja (`BolhaContagem`) em "Agendamento" (barra de cima e menu lateral da
+  Gerência) e na sub-aba; o sino leva à fila. A antiga "Análise" virou **Calendário** (chave `"analise"`,
+  só o calendário e um aviso com o atalho para a fila).
+- **O servidor recusa** sair da fila para "Vistoria agendada" sem técnico, data e horário
+  (`faltaParaAgendar`, `src/status-cliente.js` no backend) — vale para o formulário do calendário também.
+- **Portal** (`PainelCliente` → "Meu atendimento"): o servidor manda `"Aguardando agendamento"` (era
+  "Em análise"; o front aceita os dois) com `dataSolicitada`/`horarioSolicitado`, e só `"Agendado"` com a
+  vistoria na agenda (com `dataVistoria`, `horaVistoria`, `vistoriador`). `DestaqueSituacaoCliente` mostra
+  "Cadastro realizado ✓ — aguardando agendamento" com a data pedida (ou "vamos combinar a data") e, depois,
+  "Vistoria agendada: dia, hora, técnico". A linha do tempo começa em **Cadastro realizado**. Cancelado
+  aparece como "Cancelado" (antes saía "Agendado").
+- Contrato: o cliente novo já aparece em Contratos desde a chegada (ver "Clientes aguardando contrato").
+
 ## Revistoria
 
 Retorno ao mesmo imóvel, pedido pelo cliente no próprio portal depois que o laudo é
@@ -612,15 +640,20 @@ cadastro e o cliente assina sem custo — na própria FN ou pelo GOV.BR.
   PDF enviado, "Abrir validador do ITI", três conferências e aprovar/recusar), arquivos e histórico. A
   Gerência tem ainda **Modelos** (`EditorDeModelo`: versão nova a cada salvar, botões que inserem os
   `{{campos}}`, prévia em PDF) e **Dados da FN** (inclui a imagem da assinatura do representante).
-- **Agendados aguardando contrato** (`AgendadosParaContrato`, no topo da aba Contratos; pedido da
-  Gerência: o cliente só faz o serviço depois de assinar): todo cliente com agendamento aprovado e
-  cadastrado a partir de 17/11/2026 (data no `aPartirDe` do servidor; cliente antigo não tem contrato) aparece
-  sozinho, sem o Atendimento buscar, com a data da vistoria e quanto falta ("vistoria amanhã"), a
-  situação do contrato e os botões **Gerar contrato** / **Conferir e liberar** / **Abrir contrato**. Com o
+- **Clientes aguardando contrato** (`AgendadosParaContrato`, no topo da aba Contratos; pedido da
+  Gerência: o cliente só faz o serviço depois de assinar): todo cliente cadastrado a partir de 17/11/2026
+  (data no `aPartirDe` do servidor; cliente antigo não tem contrato) aparece sozinho **assim que chega**
+  (desde 18/11/2026 — antes só depois de aprovado), sem o Atendimento buscar, e sai quando assina. Dois
+  grupos: **Agendados**, com a data da vistoria e quanto falta ("vistoria amanhã"), e **Clientes novos —
+  aguardando agendamento** (`aguardandoAgendamento` do servidor: ainda na Fila de espera), com a data que
+  o cliente *pediu* ("a confirmar no Agendamento") e sem prazo, e o botão **Elaborar contrato**. Nos dois,
+  a situação do contrato e **Gerar contrato** / **Conferir e liberar** / **Abrir contrato**. Com o
   contrato liberado, **Enviar pelo WhatsApp** (`BotaoWhatsappContrato`, link `wa.me` com
   `mensagemWhatsappContrato`: data da vistoria, número do contrato, passo a passo na Área do Cliente —
   ou o "Primeiro acesso", para quem ainda não tem senha — e que a vistoria só acontece depois da
-  assinatura). O mesmo botão está na ficha do contrato. O número sai do `numeroWhatsapp` do laudo.
+  assinatura). Para quem ainda aguarda agendamento a mensagem não diz "agendada" ("recebemos o seu
+  pedido… o contrato já está pronto"); a ficha do contrato sabe disso por `cliente.aguardandoAgendamento`.
+  O mesmo botão está na ficha do contrato. O número sai do `numeroWhatsapp` do laudo.
   As duas listas da aba se atualizam juntas (`versao` em `AbaContratos`).
 - **Ficha do cliente:** `SecaoContratosCliente` no modal "Editar cliente" da aba Clientes (Atendimento e
   Gerência) e no Perfil do cliente da Gerência — contratos do CPF e "Gerar contrato" para aquele cadastro.

@@ -108,15 +108,23 @@ function primeiroNome(nome) {
 /* O texto pronto. Leva a Área do Cliente (o contrato não abre sem login) e diz, com todas as
    letras, que a vistoria só acontece depois da assinatura — a regra da FN. Sem e-mail nem CPF na
    mensagem: o cliente entra com o e-mail do cadastro, que ele já sabe. */
-export function mensagemWhatsappContrato({ nome, numero, servico, dataVistoria, horaVistoria, temAcessoAoPortal = true, motivoRecusa = "" }) {
+/* aguardandoAgendamento: o cliente novo já entra em Contratos e pode receber o contrato antes de
+   ter técnico e data (pedido da Gerência, 18/11/2026). Aí a mensagem não pode dizer "agendada" —
+   a data do cadastro é só a que ele pediu. */
+export function mensagemWhatsappContrato({ nome, numero, servico, dataVistoria, horaVistoria, temAcessoAoPortal = true, motivoRecusa = "", aguardandoAgendamento = false }) {
   const pn = primeiroNome(nome);
   const data = dataDoAgendamento(dataVistoria);
   const quando = data ? ` para *${data}${horaVistoria ? ` às ${horaVistoria}` : ""}*` : "";
+  const servicoTexto = String(servico || "vistoria").toLowerCase();
+  const nomeContrato = `*${aguardandoAgendamento ? "contrato" : "assinatura do contrato"}*${numero ? ` nº ${numero}` : ""}`;
   return [
     pn ? `Olá, ${pn}! 👋` : "Olá! 👋",
     "",
-    `Aqui é da *FN Edificações*. Sua ${String(servico || "vistoria").toLowerCase()} está agendada${quando}.`,
-    `Para confirmarmos o atendimento, falta só a *assinatura do contrato*${numero ? ` nº ${numero}` : ""} ✍️`,
+    ...(aguardandoAgendamento
+      ? [`Aqui é da *FN Edificações*. Recebemos o seu pedido de ${servicoTexto} e já estamos organizando o agendamento.`,
+        `Enquanto isso, o ${nomeContrato} já está pronto para você assinar ✍️`]
+      : [`Aqui é da *FN Edificações*. Sua ${servicoTexto} está agendada${quando}.`,
+        `Para confirmarmos o atendimento, falta só a ${nomeContrato} ✍️`]),
     ...(motivoRecusa ? ["", `⚠️ O PDF enviado pelo GOV.BR não pôde ser validado: ${motivoRecusa}`] : []),
     "",
     "📱 É rápido e dá para fazer pelo celular:",
@@ -889,9 +897,10 @@ export default function AbaContratos({ token, apiFetch, apiUrl, notify, perfil }
   );
 }
 
-/* Agendados sem contrato assinado: o cadastro entra aqui sozinho assim que o agendamento é aprovado
-   e sai quando o contrato é assinado — o Atendimento não precisa procurar ninguém. A vistoria mais
-   próxima vem primeiro, com o aviso de quanto falta. */
+/* Clientes sem contrato assinado: o cadastro entra aqui sozinho assim que chega (o cliente novo,
+   ainda na fila de espera do Agendamento, já pode ter o contrato elaborado — pedido da Gerência,
+   18/11/2026) e sai quando o contrato é assinado — o Atendimento não precisa procurar ninguém.
+   Primeiro os agendados, da vistoria mais próxima, com o aviso de quanto falta; depois os novos. */
 function AgendadosParaContrato({ token, apiFetch, apiUrl, notify, perfil, versao, onMudou }) {
   const [lista, setLista] = useState(null);
   const [aPartirDe, setAPartirDe] = useState("");
@@ -927,66 +936,87 @@ function AgendadosParaContrato({ token, apiFetch, apiUrl, notify, perfil, versao
     return { texto: `vistoria em ${d} dias`, cor: "#5a6a80", fundo: "#EEF1F5" };
   };
 
+  /* Um cartão por cliente. O cliente novo (ainda na fila de espera do Agendamento) não tem
+     vistoria marcada: a data dele é só a que pediu, então não vira prazo nem "vistoria em N dias". */
+  const cartao = (a) => {
+    const novo = !!a.aguardandoAgendamento;
+    const p = novo ? null : prazo(a);
+    const c = a.contrato;
+    const esperandoCliente = c && ESPERANDO_CLIENTE.includes(c.status);
+    const quando = `${dataDoAgendamento(a.dataVistoria)}${a.horaVistoria ? ` às ${a.horaVistoria}` : ""}`;
+    return (
+      <div key={a.clienteId} style={{ border: `1px solid ${novo ? "#F0C48A" : CINZA_BORDA}`, background: novo ? "#FFFBF4" : "#fff", borderRadius: 12, padding: 12, display: "grid", gap: 8 }}>
+        <div className="fnc-linha" style={{ justifyContent: "space-between", gap: 8 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontWeight: 700, color: AZUL_MARINHO, fontSize: 14.5 }}>{a.nome}</div>
+            <div style={{ fontSize: 12.5, color: "#4a5a70" }}>
+              {[a.servico, a.empreendimento, a.unidade].filter(Boolean).join(" · ")}
+            </div>
+            <div style={{ fontSize: 12.5, color: "#4a5a70" }}>
+              {novo
+                ? (a.dataVistoria ? `Pediu ${quando} — a confirmar no Agendamento` : "Ainda sem data — o Agendamento combina com o cliente")
+                : <>{a.dataVistoria ? `Vistoria ${quando}` : "Vistoria sem data marcada"}{a.tecnico ? ` · técnico ${a.tecnico}` : ""} · {a.statusCadastro}</>}
+            </div>
+          </div>
+          <div style={{ display: "grid", gap: 4, justifyItems: "end" }}>
+            {novo && <span style={{ background: "#FFF4E0", color: AMBAR, borderRadius: 20, padding: "3px 10px", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>Cliente novo · aguardando agendamento</span>}
+            {p && <span style={{ background: p.fundo, color: p.cor, borderRadius: 20, padding: "3px 10px", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>{p.texto}</span>}
+            {c ? <Selo status={c.status} rotulo={`${c.numero} · ${c.rotuloStatus}`} />
+              : <span style={{ background: "#EEF1F5", color: "#5a6a80", borderRadius: 20, padding: "3px 10px", fontSize: 12, fontWeight: 700 }}>Sem contrato</span>}
+          </div>
+        </div>
+        {!a.temAcessoAoPortal && (
+          <div style={{ fontSize: 12, color: AMBAR }}>Cliente ainda sem senha no portal — a mensagem do WhatsApp já explica o "Primeiro acesso".</div>
+        )}
+        <div className="fnc-acoes">
+          {!c && (
+            <button style={{ ...btn, ...desligado(gerando === a.clienteId) }} disabled={gerando === a.clienteId} onClick={() => gerar(a)}>
+              {gerando === a.clienteId ? <Loader2 size={15} className="fnc-spin" /> : <FileSignature size={15} />} {novo ? "Elaborar contrato" : "Gerar contrato"}
+            </button>
+          )}
+          {c && (
+            <button style={c.status === "rascunho" ? btn : btnLeve} onClick={() => setAberto(c.id)}>
+              {c.status === "rascunho" ? <><Send size={15} /> Conferir e liberar</> : <><Eye size={15} /> Abrir contrato</>}
+            </button>
+          )}
+          {esperandoCliente && (
+            <BotaoWhatsappContrato contratoId={c.id} telefone={a.telefone} apiFetch={apiFetch} token={token} rotulo="Enviar pelo WhatsApp"
+              mensagem={mensagemWhatsappContrato({ nome: a.nome, numero: c.numero, servico: a.servico, dataVistoria: a.dataVistoria, horaVistoria: a.horaVistoria, temAcessoAoPortal: a.temAcessoAoPortal, aguardandoAgendamento: novo })} />
+          )}
+          {!esperandoCliente && (
+            <span style={{ fontSize: 12, color: "#8593a8", alignSelf: "center" }}>O WhatsApp com o link aparece depois de liberar o contrato.</span>
+          )}
+        </div>
+      </div>
+    );
+  };
+  const agendados = (lista || []).filter((a) => !a.aguardandoAgendamento);
+  const novos = (lista || []).filter((a) => a.aguardandoAgendamento);
+  const subtitulo = (texto, n) => (
+    <div style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: 0.3, color: "#5a6a80", textTransform: "uppercase", margin: "4px 0 2px" }}>{texto} ({n})</div>
+  );
+
   return (
-    <Caixa icon={CalendarClock} titulo={`Agendados aguardando contrato${lista ? ` (${lista.length})` : ""}`}
+    <Caixa icon={CalendarClock} titulo={`Clientes aguardando contrato${lista ? ` (${lista.length})` : ""}`}
       acoes={<button style={btnLeve} onClick={carregar}><RefreshCcw size={15} /> Atualizar</button>}>
       <p style={{ fontSize: 13, color: "#65758b", margin: "0 0 12px", lineHeight: 1.5 }}>
-        Todo cliente com agendamento aprovado {aPartirDe ? <>e cadastrado a partir de <strong>{dataDoAgendamento(aPartirDe)}</strong> </> : ""}aparece
-        aqui até assinar o contrato — a vistoria só é realizada depois da assinatura. Clientes mais antigos não precisam de contrato.
+        Todo cliente cadastrado {aPartirDe ? <>a partir de <strong>{dataDoAgendamento(aPartirDe)}</strong> </> : ""}aparece aqui
+        assim que chega — o cliente novo já pode ter o contrato elaborado enquanto espera o agendamento — e sai quando
+        assina. A vistoria só é realizada depois da assinatura. Clientes mais antigos não precisam de contrato.
         Gere o contrato, libere e mande o link pelo WhatsApp.
       </p>
       {lista === null && <Girando />}
-      {lista && lista.length === 0 && <div style={{ fontSize: 13.5, color: "#8593a8" }}>Nenhum cliente agendado esperando contrato. ✓</div>}
-      {lista && lista.length > 0 && (
+      {lista && lista.length === 0 && <div style={{ fontSize: 13.5, color: "#8593a8" }}>Nenhum cliente esperando contrato. ✓</div>}
+      {agendados.length > 0 && (
         <div style={{ display: "grid", gap: 8 }}>
-          {lista.map((a) => {
-            const p = prazo(a);
-            const c = a.contrato;
-            const esperandoCliente = c && ESPERANDO_CLIENTE.includes(c.status);
-            return (
-              <div key={a.clienteId} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 12, padding: 12, display: "grid", gap: 8 }}>
-                <div className="fnc-linha" style={{ justifyContent: "space-between", gap: 8 }}>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontWeight: 700, color: AZUL_MARINHO, fontSize: 14.5 }}>{a.nome}</div>
-                    <div style={{ fontSize: 12.5, color: "#4a5a70" }}>
-                      {[a.servico, a.empreendimento, a.unidade].filter(Boolean).join(" · ")}
-                    </div>
-                    <div style={{ fontSize: 12.5, color: "#4a5a70" }}>
-                      {a.dataVistoria ? `Vistoria ${dataDoAgendamento(a.dataVistoria)}${a.horaVistoria ? ` às ${a.horaVistoria}` : ""}` : "Vistoria sem data marcada"}
-                      {a.tecnico ? ` · técnico ${a.tecnico}` : ""} · {a.statusCadastro}
-                    </div>
-                  </div>
-                  <div style={{ display: "grid", gap: 4, justifyItems: "end" }}>
-                    {p && <span style={{ background: p.fundo, color: p.cor, borderRadius: 20, padding: "3px 10px", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>{p.texto}</span>}
-                    {c ? <Selo status={c.status} rotulo={`${c.numero} · ${c.rotuloStatus}`} />
-                      : <span style={{ background: "#EEF1F5", color: "#5a6a80", borderRadius: 20, padding: "3px 10px", fontSize: 12, fontWeight: 700 }}>Sem contrato</span>}
-                  </div>
-                </div>
-                {!a.temAcessoAoPortal && (
-                  <div style={{ fontSize: 12, color: AMBAR }}>Cliente ainda sem senha no portal — a mensagem do WhatsApp já explica o "Primeiro acesso".</div>
-                )}
-                <div className="fnc-acoes">
-                  {!c && (
-                    <button style={{ ...btn, ...desligado(gerando === a.clienteId) }} disabled={gerando === a.clienteId} onClick={() => gerar(a)}>
-                      {gerando === a.clienteId ? <Loader2 size={15} className="fnc-spin" /> : <FileSignature size={15} />} Gerar contrato
-                    </button>
-                  )}
-                  {c && (
-                    <button style={c.status === "rascunho" ? btn : btnLeve} onClick={() => setAberto(c.id)}>
-                      {c.status === "rascunho" ? <><Send size={15} /> Conferir e liberar</> : <><Eye size={15} /> Abrir contrato</>}
-                    </button>
-                  )}
-                  {esperandoCliente && (
-                    <BotaoWhatsappContrato contratoId={c.id} telefone={a.telefone} apiFetch={apiFetch} token={token} rotulo="Enviar pelo WhatsApp"
-                      mensagem={mensagemWhatsappContrato({ nome: a.nome, numero: c.numero, servico: a.servico, dataVistoria: a.dataVistoria, horaVistoria: a.horaVistoria, temAcessoAoPortal: a.temAcessoAoPortal })} />
-                  )}
-                  {!esperandoCliente && (
-                    <span style={{ fontSize: 12, color: "#8593a8", alignSelf: "center" }}>O WhatsApp com o link aparece depois de liberar o contrato.</span>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+          {novos.length > 0 && subtitulo("Agendados", agendados.length)}
+          {agendados.map(cartao)}
+        </div>
+      )}
+      {novos.length > 0 && (
+        <div style={{ display: "grid", gap: 8, marginTop: agendados.length ? 14 : 0 }}>
+          {subtitulo("Clientes novos — aguardando agendamento", novos.length)}
+          {novos.map(cartao)}
         </div>
       )}
       {aberto && (
@@ -1310,6 +1340,7 @@ function FichaContrato({ id, token, apiFetch, apiUrl, notify, perfil, onFechar, 
               mensagem={mensagemWhatsappContrato({
                 nome: c.cliente.nome, numero: c.numero, servico: c.servico, dataVistoria: c.cliente.dataVistoria, horaVistoria: c.cliente.horaVistoria,
                 temAcessoAoPortal: c.cliente.temAcessoAoPortal, motivoRecusa: c.status === "rejeitado" ? c.motivo : "",
+                aguardandoAgendamento: !!c.cliente.aguardandoAgendamento,
               })} />
           )}
           {c.pastaDrive && <a href={c.pastaDrive} target="_blank" rel="noopener noreferrer" style={{ ...btnLeve, textDecoration: "none" }}><ExternalLink size={15} /> Pasta no Drive</a>}
