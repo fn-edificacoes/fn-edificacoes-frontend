@@ -13,6 +13,7 @@ import { usePatologiaVoz, PainelPatologiaVoz, AvisoPendentesVoz } from "./patolo
 import AbaCreditosIA from "./ia-creditos.jsx";
 import { BotaoWhatsappLaudo } from "./laudo-whatsapp.jsx";
 import { AbaArtsVistoria, AbaFolhaPagamento, AbaDespesasFixas, CardValoresCustos, useCustosOperacionais, useFolhaEmAberto } from "./controle-financeiro.jsx";
+import AbaContratos, { MeusContratos, SecaoContratosCliente } from "./contratos.jsx";
 import {
   FileText, Plus, Trash2, Camera, X, Printer, Save, FolderOpen,
   Building2, User, ClipboardList, ChevronDown, ChevronRight, ChevronLeft, Check,
@@ -21,7 +22,7 @@ import {
   TrendingUp, Percent, Send, CalendarDays, Eye, Mail, EyeOff, UserCheck, UserX, Search, Lock, Bell,
   ExternalLink, Undo2, Handshake, ShoppingCart, Minus, Images, UserCog, History, Download, Upload, PieChart, HelpCircle, Megaphone, Clock,
   Wrench, Paperclip, Menu, Receipt, Car, FileBarChart, Gauge, Settings, Landmark, Wallet, Archive, FileSpreadsheet, FileCheck, Repeat,
-  Link2, Scale, Map as IconeMapa, PaintRoller, Rocket, HardHat
+  Link2, Scale, Map as IconeMapa, PaintRoller, Rocket, HardHat, FileSignature
 } from "lucide-react";
 
 /* ============================================================
@@ -592,9 +593,11 @@ const STATUS_INTERNO_OPCOES = ["Agendado", "Em vistoria", "Laudo em elaboração
 const MODULOS_POR_PERFIL = {
   vistoriador: ["laudos", "loja", "despesas"],
   documentacao: ["documentacao", "arts", "despesas"],
-  atendimento: ["clientes", "qualidade", "documentacao", "arts", "faq", "marketing", "vendas", "despesas"],
+  /* "contratos" (nov/2026): o Atendimento gera, confere e libera o contrato e valida o PDF que volta
+     do GOV.BR — ver src/contratos.jsx. */
+  atendimento: ["clientes", "contratos", "qualidade", "documentacao", "arts", "faq", "marketing", "vendas", "despesas"],
   vendas: ["vendas", "despesas"],
-  gerencia: ["laudos", "documentacao", "arts", "gerencia", "usuarios", "clientes", "qualidade", "faq", "marketing", "nacional", "mapa"],
+  gerencia: ["laudos", "documentacao", "arts", "gerencia", "usuarios", "clientes", "contratos", "qualidade", "faq", "marketing", "nacional", "mapa"],
   /* FN Nacional por regional: só a Rede Nacional, filtrada pelo servidor às regionais dele. */
   gestor_regional: ["nacional", "despesas"],
 };
@@ -2327,6 +2330,7 @@ const GERENCIA_MENU_LATERAL = [
   ] },
   { titulo: "Atendimento", itens: [
     { aba: "clientes", label: "Clientes", Icon: Users },
+    { aba: "contratos", label: "Contratos", Icon: FileSignature },
     { aba: "qualidade", label: "Agendamento", Icon: Star },
     { aba: "faq", label: "FAQ", Icon: HelpCircle },
     { aba: "marketing", label: "Marketing", Icon: Megaphone },
@@ -3841,7 +3845,7 @@ function AppInterno({ session, onLogout }) {
             aqui: é sub-aba de Documentação (abaTop "arts" acende a aba Documentação). */}
         {perfil !== "gerencia" && (
           <nav style={{ maxWidth: 1080, margin: "0 auto", padding: "0 18px", display: "flex", gap: 4, borderTop: "1px solid rgba(255,255,255,.12)", overflowX: "auto" }}>
-            {[["laudos", "Laudos", FileText], ["clientes", "Clientes", Users], ["qualidade", "Agendamento", Star], ["documentacao", "Documentação", ClipboardCheck], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Fornecedores", Wrench], ["loja", "Loja FN Home", ShoppingBag], ["despesas", "Despesas", Receipt], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog], ["nacional", "Rede Nacional", Landmark], ["mapa", "Mapa de atuação", IconeMapa]]
+            {[["laudos", "Laudos", FileText], ["clientes", "Clientes", Users], ["contratos", "Contratos", FileSignature], ["qualidade", "Agendamento", Star], ["documentacao", "Documentação", ClipboardCheck], ["faq", "FAQ", HelpCircle], ["marketing", "Marketing", Megaphone], ["vendas", "Fornecedores", Wrench], ["loja", "Loja FN Home", ShoppingBag], ["despesas", "Despesas", Receipt], ["gerencia", "Gerência", BarChart3], ["usuarios", "Usuários", UserCog], ["nacional", "Rede Nacional", Landmark], ["mapa", "Mapa de atuação", IconeMapa]]
               .filter(([k]) => modulosPermitidos.includes(k))
               .map(([k, label, Icon]) => {
                 const ativa = abaTop === k || (k === "documentacao" && abaTop === "arts");
@@ -3979,7 +3983,7 @@ function AppInterno({ session, onLogout }) {
         )}
         {abaTop === "clientes" && (
           <AbaClientesComercial clientes={clientesAtivos} carregando={clientesCarregando} atualizarCliente={updCliente} excluirCliente={delCliente}
-            resetarSenhaCliente={resetarSenhaCliente} notify={notify} docs={docs} perfil={perfil} />
+            resetarSenhaCliente={resetarSenhaCliente} notify={notify} docs={docs} perfil={perfil} token={token} />
         )}
         {abaTop === "qualidade" && (
           <AbaQualidade sub={abaQualidade} setSub={setAbaQualidade} token={token} avaliacoes={avaliacoes} carregando={avaliacoesCarregando} docs={docs} docsCarregando={docsCarregando} aprovarAvaliacao={aprovarAvaliacao}
@@ -4008,6 +4012,7 @@ function AppInterno({ session, onLogout }) {
           <AbaMinhasDespesas fin={fin} clientes={clientesAtivos} usuarioAtual={session.usuario} telaEstreita={telaEstreita} notify={notify} />
         )}
         {abaTop === "loja" && <AbaLojaParaCliente apiFetch={apiFetch} notify={notify} />}
+        {abaTop === "contratos" && <AbaContratos token={token} apiFetch={apiFetch} apiUrl={API_URL} notify={notify} perfil={perfil} />}
         {abaTop === "gerencia" && String(abaGerencia).startsWith("fin-") && (
           <AbaFinanceiroDespesas sub={abaGerencia} fin={fin} clientes={clientes} docs={docs} precos={precos} usuarios={usuarios}
             usuarioAtual={session.usuario} telaEstreita={telaEstreita} notify={notify} token={token} updCliente={updCliente}
@@ -4855,7 +4860,7 @@ function ModalResetarSenhaCliente({ cliente, resetarSenhaCliente, notify, onFech
   );
 }
 
-function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirCliente, resetarSenhaCliente, notify, docs = [], perfil }) {
+function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirCliente, resetarSenhaCliente, notify, docs = [], perfil, token }) {
   const [busca, setBusca] = useState("");
   const [editando, setEditando] = useState(null); // cópia do cliente em edição
   const [visualizacao, setVisualizacao] = useState("kanban"); // "kanban" | "tabela"
@@ -5063,6 +5068,14 @@ function AbaClientesComercial({ clientes, carregando, atualizarCliente, excluirC
               <button className="icon-btn" onClick={() => setEditando(null)}><X size={16} /></button>
             </div>
             <CamposCadastroCliente dados={editando} onChange={setEditando} />
+            {/* A seção "Contratos" da ficha: gerar, abrir e acompanhar os contratos deste cliente
+                (src/contratos.jsx). Só Atendimento e Gerência — é quem o servidor deixa. */}
+            {token && (perfil === "atendimento" || perfil === "gerencia") && (
+              <div style={{ marginTop: 14 }}>
+                <SecaoContratosCliente token={token} apiFetch={apiFetch} apiUrl={API_URL} notify={notify} perfil={perfil}
+                  cadastroId={editando.id} cpf={originalEdicao.current?.cpf || editando.cpf} />
+              </div>
+            )}
             <div className="modal-acoes">
               <div>
                 {podeExcluir && (
@@ -10876,6 +10889,11 @@ function AbaPerfilCliente({ clientes = [], token, notify, atualizarCliente, rese
               {perfil.atendimentos.length === 0 && <p style={{ color: "#8593a8", fontSize: 13.5, margin: 0 }}>Nenhum atendimento.</p>}
             </div>
           </Card>
+
+          {/* Contratos do cliente (todos os cadastros do mesmo CPF) e "Gerar contrato" para o
+              atendimento aberto — ver src/contratos.jsx. */}
+          <SecaoContratosCliente token={token} apiFetch={apiFetch} apiUrl={API_URL} notify={notify} perfil="gerencia"
+            cadastroId={form.id} cpf={perfil.cliente?.cpf || form.cpf} />
 
           <Card icon={Edit3} titulo="Editar cadastro">
             <p style={{ fontSize: 12.5, color: "#65758b", margin: "0 0 12px" }}>
@@ -20551,6 +20569,10 @@ function PainelCliente({ session, onLogout, onSessaoAtualizada, recemCadastrado 
             </div>
           )}
         </Card>
+
+        {/* Meus contratos (nov/2026): ler, baixar e assinar — aqui na FN ou pelo GOV.BR. Só aparece
+            para quem tem contrato liberado (src/contratos.jsx). */}
+        <MeusContratos token={session.token} apiFetch={apiFetch} apiUrl={API_URL} notify={notify} usuario={session.usuario} />
 
         {!leadsCarregando && leads.length > 0 && (
           <Card icon={FileText} titulo="Meus orçamentos">

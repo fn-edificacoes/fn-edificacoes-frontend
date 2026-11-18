@@ -109,6 +109,7 @@ src/fn-home-financeiro.jsx  FN Home: vendas, comissão da FN, repasses, mais ven
 src/clube-fn.jsx            FN Clube: ramos, vitrine com desconto, Casa Pronta e o aviso da Gerência
 src/laudo-whatsapp.jsx      laudo aprovado pelo WhatsApp do cliente (link wa.me com a mensagem pronta)
 src/links-publicos.js       endereços que vão para o cliente: Área do Cliente e FN_HOME_URL
+src/contratos.jsx           Contratos: aba da equipe, seção da ficha do cliente e "Meus contratos" no portal
 ```
 
 Para achar algo no `App.jsx`, procure pela definição da componente
@@ -588,6 +589,36 @@ de `minWidth: 0` — sem isso a tabela larga esticava a coluna do grid e a tela 
 A comissão do FN Home **não entra** na receita do Financeiro (ficha, MEI, contador).
 - `PaginaBeneficiosFn` passou a injetar `estilos` (antes os botões da página pública saíam sem estilo),
   e `BotaoCarrinho` aceita `style` — na vitrine branca o ícone branco do `btn-ghost` sumia.
+
+## Contratos e assinatura eletrônica
+
+`src/contratos.jsx`, arquivo próprio (recebe `apiFetch` e `apiUrl` por prop). Backend em `src/contratos.js`
+(regras e decisões no `CLAUDE.md` de lá). Pedido da Gerência (nov/2026): o Atendimento gera o contrato do
+cadastro e o cliente assina sem custo — na própria FN ou pelo GOV.BR.
+
+- **Equipe** (módulo `contratos`, Gerência e Atendimento; menu lateral da Gerência em Atendimento ›
+  Contratos): `AbaContratos` — lista com filtro por situação (o aviso "N documentos do GOV.BR esperando
+  validação" leva ao filtro), **Novo contrato** (`NovoContrato`: busca o cadastro, que é o serviço
+  contratado, e escolhe o modelo) e a **ficha** (`FichaContrato`): conferir os campos no rascunho
+  (obrigatórios em vermelho), visualizar a prévia, **Liberar** (confirmação: depois não muda),
+  **Substituir**/**Cancelar** com motivo, validar o GOV.BR (`ValidacaoGovbr`: triagem automática, baixar o
+  PDF enviado, "Abrir validador do ITI", três conferências e aprovar/recusar), arquivos e histórico. A
+  Gerência tem ainda **Modelos** (`EditorDeModelo`: versão nova a cada salvar, botões que inserem os
+  `{{campos}}`, prévia em PDF) e **Dados da FN** (inclui a imagem da assinatura do representante).
+- **Ficha do cliente:** `SecaoContratosCliente` no modal "Editar cliente" da aba Clientes (Atendimento e
+  Gerência) e no Perfil do cliente da Gerência — contratos do CPF e "Gerar contrato" para aquele cadastro.
+- **Portal** (`MeusContratos`, logo depois de "Meu atendimento" no `PainelCliente`; não aparece sem
+  contrato liberado): aviso de contrato pendente, situação, Visualizar (o mesmo texto do PDF, em blocos),
+  Baixar e **Assinar contrato** → OPÇÃO 1 "Assinar aqui na FN" ou OPÇÃO 2 "Assinar com GOV.BR".
+  - FN (`AssinaturaNaFn`): ler até o fim (IntersectionObserver no fim do texto libera o resto), desenhar
+    (`CampoAssinatura`: canvas com Pointer Events, `touch-action: none`, traços normalizados que se
+    redesenham ao girar a tela; "Limpar assinatura"), aceite, código por e-mail e "Confirmar e assinar
+    contrato". O botão diz o que falta enquanto está travado.
+  - GOV.BR (`AssinaturaGovbr`): as instruções na íntegra, "Baixar meu contrato", "Acessar GOV.BR"
+    (`assinador.iti.br`) e "Enviar contrato assinado" (PDF até 7 MB, em base64 como os demais uploads).
+- PDFs vêm em binário com o token (`buscarBinario`); "Visualizar" abre a aba **antes** do download (senão
+  o navegador trata como pop-up). Estilos do módulo em `ESTILOS` (classes `fnc-*`; no celular os modais
+  ocupam a tela inteira).
 
 ## Rede Nacional (FN Nacional)
 
