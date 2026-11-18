@@ -529,7 +529,9 @@ const STATUS_ITEM_OPCOES = [
 ];
 
 const novoItem = () => ({ id: idCounter++, local: "", tipo: "", patologia: "", categoria: "", norma: "",
-  titulo: "", status: "pendente", severidade: "Média", descricao: "", recomendacao: "", fotos: [] });
+  titulo: "", status: "pendente", severidade: "Média", descricao: "", recomendacao: "", fotos: [],
+  /* Ocorrências individuais do item (peças, pontos): nasce 1 e o técnico ajusta. */
+  quantidadeOcorrencias: 1 });
 
 /* ---------- Documentação / Gerência (registro de vistorias e TRT) ---------- */
 
@@ -873,25 +875,40 @@ function montarLaudoModelo(dados = {}, itens = []) {
        função no backend (laudo-modelo.js) sempre teve. */
     fotoCliente: dados.fotoCliente || "",
     responsavel: { nome: rt.nome || "", qualificacao: rt.qualificacao || "", registro: rt.registro || "" },
-    itens: itens.map((item, i) => ({
-      n: String(i + 1).padStart(2, "0"),
-      ambiente: item.local || "",
-      categoria: item.categoria || "",
-      severidade: SEVERIDADE_PARA_MODELO[item.severidade] || "media",
-      status: item.status || "pendente",
-      // Sem título preenchido, cai no nome da patologia — o modelo exige a linha.
-      titulo: (item.titulo || item.patologia || "").trim(),
-      descricao: item.descricao || "",
-      recomendacao: item.recomendacao || "",
-      norma: item.norma || "",
-      fotos: item.fotos || [],
-    })),
+    itens: itens.map((item, i) => {
+      const q = quantidadeDoItem(item);
+      return {
+        n: String(i + 1).padStart(2, "0"),
+        ambiente: item.local || "",
+        categoria: item.categoria || "",
+        severidade: SEVERIDADE_PARA_MODELO[item.severidade] || "media",
+        status: item.status || "pendente",
+        // Sem título preenchido, cai no nome da patologia — o modelo exige a linha.
+        titulo: (item.titulo || item.patologia || "").trim(),
+        descricao: item.descricao || "",
+        recomendacao: item.recomendacao || "",
+        norma: item.norma || "",
+        fotos: item.fotos || [],
+        // Ocorrências individuais (modelo 2) — ver calcularIndicadoresLaudo.
+        quantidade: q.quantidade,
+        quantidadeInformada: q.informada,
+        quantidadeInvalida: q.invalida,
+        quantidadeCorrigida: corrigidasDoItem(item, q.quantidade),
+      };
+    }),
   };
 }
 
-/* ---------- Indicadores do laudo (regras do modelo, ver modelo-laudo/AUTOMACAO.md) ----------
-   Nada aqui e digitado pelo tecnico: tudo sai dos itens. Funcao pura, para poder ser
-   conferida sem abrir a tela. */
+/* ---------- Indicadores do laudo (modelo 2, ver modelo-laudo/AUTOMACAO.md) ----------
+   Nada aqui e digitado pelo tecnico: tudo sai dos itens. Funcoes puras, gemeas de
+   src/laudo-modelo.js no backend (que gera o PDF) — mudou aqui, muda la.
+
+   Modelo 2 (nov/2026) separa REGISTROS TECNICOS (cada constatacao, com fotos e texto) de
+   OCORRENCIAS INDIVIDUAIS (cada peca, componente ou ponto afetado): "11 pecas com som cavo"
+   e 1 registro e 11 ocorrencias. A quantidade vem so do campo `quantidadeOcorrencias` —
+   nunca do texto, onde "60x60", "2,5 m" ou "Quarto 02" virariam quantidade. Item sem o
+   campo (laudo antigo) conta 1 e fica sinalizado para a Gerencia revisar. */
+const VERSAO_MODELO_LAUDO = 2;
 const PESO_SEVERIDADE = { alta: 3, media: 2, baixa: 1 };
 const REFERENCIA_ICC_PADRAO = 120;
 
@@ -904,59 +921,167 @@ const FAIXAS_ICC = [
 const ROTULO_SEVERIDADE = { alta: "Alta", media: "Média", baixa: "Baixa" };
 const ROTULO_STATUS = { pendente: "Pendente", corrigido: "Corrigido", reincidente: "Reincidente" };
 
+/* Inteiro positivo ou null. "3", 3 e 3.0 valem; 0, -1, 2.5, "3 peças" e vazio não. */
+function inteiroPositivo(valor) {
+  if (valor === null || valor === undefined || valor === "") return null;
+  const n = typeof valor === "number" ? valor : (/^\s*\d+\s*$/.test(String(valor)) ? Number(valor) : NaN);
+  return Number.isInteger(n) && n >= 1 ? n : null;
+}
+
+function quantidadeDoItem(item = {}) {
+  const bruto = item.quantidadeOcorrencias;
+  const informada = !(bruto === null || bruto === undefined || bruto === "");
+  const valida = inteiroPositivo(bruto);
+  return { quantidade: valida || 1, informada, invalida: informada && valida === null };
+}
+
+/* "Corrigido" é o item inteiro; nos outros estados vale `quantidadeCorrigida` (parcial). */
+function corrigidasDoItem(item, quantidade) {
+  if (item.status === "corrigido") return quantidade;
+  const bruto = item.quantidadeCorrigida;
+  if (bruto === null || bruto === undefined || bruto === "" || Number(bruto) === 0) return 0;
+  const n = inteiroPositivo(bruto);
+  return n === null ? NaN : n;
+}
+
 function calcularIndicadoresLaudo(laudo, referenciaIcc = REFERENCIA_ICC_PADRAO) {
   const itens = laudo?.itens || [];
   const porSeveridade = { alta: 0, media: 0, baixa: 0 };
-  const porAmbiente = {};
+  const registrosPorSeveridade = { alta: 0, media: 0, baixa: 0 };
+  const ambientes = new Map();
   const porCategoria = {};
-  let corrigidos = 0;
+  let ocorrencias = 0;
+  let corrigidas = 0;
+  let registrosCorrigidos = 0;
 
   itens.forEach((i) => {
-    if (porSeveridade[i.severidade] !== undefined) porSeveridade[i.severidade] += 1;
+    const qtd = Number(i.quantidade) || 1;
+    const corr = Number.isFinite(i.quantidadeCorrigida) ? Math.min(i.quantidadeCorrigida, qtd) : 0;
+    ocorrencias += qtd;
+    corrigidas += corr;
+    if (i.status === "corrigido") registrosCorrigidos += 1;
+    if (porSeveridade[i.severidade] !== undefined) {
+      porSeveridade[i.severidade] += qtd;
+      registrosPorSeveridade[i.severidade] += 1;
+    }
     const amb = (i.ambiente || "").trim() || "(sem ambiente)";
     const cat = (i.categoria || "").trim() || "(sem categoria)";
-    porAmbiente[amb] = (porAmbiente[amb] || 0) + 1;
-    porCategoria[cat] = (porCategoria[cat] || 0) + 1;
-    if (i.status === "corrigido") corrigidos += 1;
+    const a = ambientes.get(amb) || { nome: amb, total: 0, alta: 0, media: 0, baixa: 0, registros: 0 };
+    a.total += qtd;
+    a.registros += 1;
+    if (a[i.severidade] !== undefined) a[i.severidade] += qtd;
+    ambientes.set(amb, a);
+    porCategoria[cat] = (porCategoria[cat] || 0) + qtd;
   });
 
-  // So o que ainda nao foi corrigido pontua — e o que faz o indice subir na revistoria.
+  // Indice: formula de antes, por REGISTRO — so o registro inteiramente corrigido deixa de
+  // pontuar. A versao por ocorrencia esta em compararIcc no backend, so para comparacao.
   const pontos = itens.reduce((soma, i) => soma + (i.status === "corrigido" ? 0 : (PESO_SEVERIDADE[i.severidade] || 0)), 0);
   const ref = Number(referenciaIcc) || REFERENCIA_ICC_PADRAO;
   const icc = Math.max(0, Math.min(100, Math.round(100 - (pontos / ref) * 100)));
   const faixa = FAIXAS_ICC.find((f) => icc >= f.min) || FAIXAS_ICC[FAIXAS_ICC.length - 1];
-  const ordenar = (obj) => Object.entries(obj).sort((a, b) => b[1] - a[1]);
+  const porNome = (a, b) => a.localeCompare(b, "pt-BR");
 
   return {
-    total: itens.length,
+    versaoModelo: VERSAO_MODELO_LAUDO,
+    registros: itens.length,
+    ocorrencias,
     porSeveridade,
-    porAmbiente: ordenar(porAmbiente),
-    porCategoria: ordenar(porCategoria),
-    corrigidos,
-    pendentes: itens.length - corrigidos,
-    ambientesAfetados: Object.keys(porAmbiente).length,
+    registrosPorSeveridade,
+    porAmbiente: [...ambientes.values()].sort((a, b) => b.total - a.total || porNome(a.nome, b.nome)),
+    porCategoria: Object.entries(porCategoria).sort((a, b) => b[1] - a[1] || porNome(a[0], b[0])),
+    corrigidas,
+    pendentes: ocorrencias - corrigidas,
+    registrosCorrigidos,
+    ambientesAfetados: ambientes.size,
     ambientesVistoriados: Number(laudo?.ambientesVistoriados) || 0,
+    registrosSemQuantidade: itens.filter((i) => !i.quantidadeInformada).map((i) => i.n),
     pontos,
     icc,
     faixa,
   };
 }
 
-/* Paragrafo de abertura da conclusao, montado a partir dos numeros. */
+const pluralLaudo = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
+function juntarComE(partes) {
+  if (partes.length <= 1) return partes.join("");
+  return `${partes.slice(0, -1).join(", ")} e ${partes[partes.length - 1]}`;
+}
+
+/* Paragrafos da conclusao, montados a partir dos numeros (lista de paragrafos). */
 function textoConclusaoLaudo(ind) {
-  if (ind.total === 0) return "A vistoria não identificou não conformidades aparentes nos ambientes verificados.";
-  const partes = [];
-  if (ind.porSeveridade.alta) partes.push(`${ind.porSeveridade.alta} de severidade alta`);
-  if (ind.porSeveridade.media) partes.push(`${ind.porSeveridade.media} de severidade média`);
-  if (ind.porSeveridade.baixa) partes.push(`${ind.porSeveridade.baixa} de severidade baixa`);
-  const distribuicao = partes.length ? `, sendo ${partes.join(", ").replace(/, ([^,]*)$/, " e $1")}` : "";
+  if (ind.registros === 0) {
+    return ["A vistoria técnica não identificou não conformidades aparentes nos ambientes verificados."];
+  }
   const ambientes = ind.ambientesVistoriados
-    ? ` distribuídas em ${ind.ambientesAfetados} dos ${ind.ambientesVistoriados} ambientes vistoriados`
-    : ` distribuídas em ${ind.ambientesAfetados} ambiente(s)`;
-  const sanadas = ind.corrigidos
-    ? (ind.corrigidos === 1 ? " Até o momento, 1 já foi sanada." : ` Até o momento, ${ind.corrigidos} já foram sanadas.`)
-    : "";
-  return `A vistoria identificou ${ind.total} não conformidade(s)${distribuicao}${ambientes}.${sanadas}`;
+    ? `${ind.ambientesAfetados} dos ${ind.ambientesVistoriados} ambientes vistoriados`
+    : pluralLaudo(ind.ambientesAfetados, "ambiente do imóvel", "ambientes do imóvel");
+  const p1 = `A vistoria técnica identificou ${pluralLaudo(ind.registros, "constatação", "constatações")}, `
+    + `${ind.registros === 1 ? "correspondente" : "correspondentes"} a `
+    + `${pluralLaudo(ind.ocorrencias, "ocorrência individual", "ocorrências individuais")} de não conformidade, `
+    + `${ind.ocorrencias === 1 ? "localizada" : "distribuídas"} em ${ambientes}.`;
+  const s = ind.porSeveridade;
+  const classes = [
+    `${s.alta} ${s.alta === 1 ? "foi classificada" : "foram classificadas"} como de alta severidade`,
+    `${s.media} como média severidade`,
+    `${s.baixa} como baixa severidade`,
+  ];
+  const p2 = `Das ocorrências identificadas, ${juntarComE(classes)}.`
+    + (ind.corrigidas
+      ? ` Até o momento, ${pluralLaudo(ind.corrigidas, "ocorrência foi sanada", "ocorrências foram sanadas")} `
+        + `e ${pluralLaudo(ind.pendentes, "permanece pendente", "permanecem pendentes")}.`
+      : "");
+  const p3 = "Recomenda-se o encaminhamento das constatações à construtora para avaliação, "
+    + "correção dos problemas apontados e posterior verificação técnica.";
+  return [p1, p2, p3];
+}
+
+function textoIndiceConclusao(ind) {
+  return `O Índice de Conformidade Construtiva apurado é de ${ind.icc}, classificado como ${ind.faixa.label}. `
+    + "O índice resume as constatações aparentes registradas nesta vistoria e não constitui "
+    + "certificação de segurança estrutural do imóvel.";
+}
+
+/* Verificacoes antes da emissao — as mesmas que o servidor faz ao aprovar (e que la barram
+   a aprovacao). Aqui servem para a Gerencia e o tecnico verem o problema antes. */
+function validarIndicadoresLaudo(laudo, ind = calcularIndicadoresLaudo(laudo)) {
+  const itens = laudo?.itens || [];
+  const erros = [];
+  const avisos = [];
+  const soma = (lista) => lista.reduce((s, v) => s + v, 0);
+
+  const invalidas = itens.filter((i) => i.quantidadeInvalida).map((i) => i.n);
+  if (invalidas.length) {
+    erros.push({ codigo: "quantidade_invalida", itens: invalidas,
+      mensagem: "A quantidade de ocorrências precisa ser um número inteiro a partir de 1." });
+  }
+  const corrInvalidas = itens.filter((i) => !Number.isFinite(i.quantidadeCorrigida)
+    || i.quantidadeCorrigida < 0 || i.quantidadeCorrigida > i.quantidade).map((i) => i.n);
+  if (corrInvalidas.length) {
+    erros.push({ codigo: "corrigidas_invalidas", itens: corrInvalidas,
+      mensagem: "A quantidade corrigida precisa ser um número inteiro entre 0 e a quantidade de ocorrências do item." });
+  }
+  const total = soma(itens.map((i) => i.quantidade));
+  const checar = (codigo, valor, mensagem) => {
+    if (valor !== ind.ocorrencias) erros.push({ codigo, itens: [], mensagem: `${mensagem} (${valor} ≠ ${ind.ocorrencias}).` });
+  };
+  checar("soma_severidade", soma(Object.values(ind.porSeveridade)), "A soma por severidade não fecha com o total de ocorrências");
+  checar("soma_ambiente", soma(ind.porAmbiente.map((a) => a.total)), "A soma por ambiente não fecha com o total de ocorrências");
+  checar("soma_sistema", soma(ind.porCategoria.map(([, q]) => q)), "A soma por sistema construtivo não fecha com o total de ocorrências");
+  if (ind.registros !== itens.length) {
+    erros.push({ codigo: "registros", itens: [], mensagem: "O número de registros técnicos não confere com as constatações cadastradas." });
+  }
+  checar("soma_situacao", ind.corrigidas + ind.pendentes, "Pendentes + corrigidas não fecham com o total de ocorrências");
+  checar("quadro_resumo", total, "O quadro-resumo não fecha com o sumário executivo");
+  const semSeveridade = itens.filter((i) => ind.porSeveridade[i.severidade] === undefined).map((i) => i.n);
+  if (semSeveridade.length) {
+    erros.push({ codigo: "severidade", itens: semSeveridade, mensagem: "Item sem severidade reconhecida (alta, média ou baixa)." });
+  }
+  if (ind.registrosSemQuantidade.length) {
+    avisos.push({ codigo: "quantidade_nao_informada", itens: ind.registrosSemQuantidade,
+      mensagem: "Quantidade de ocorrências não informada — contada como 1. Confira se o item tem mais de uma peça ou ponto afetado." });
+  }
+  return { erros, avisos };
 }
 
 /* Cancelar vistoria: a Gerência decide sozinha, então cancela na hora. Os outros perfis
@@ -999,7 +1124,127 @@ function CartaoIndicador({ titulo, valor, apoio, cor }) {
   );
 }
 
-function LaudoModelo({ laudo, assinatura, assinaturaVistoriador, aprovado = true }) {
+/* ---- Peças do sumário executivo (modelo 2). Mesmas cores e ordem do PDF (laudo-pdf.js). ---- */
+const COR_SEVERIDADE_LAUDO = { alta: "#C62828", media: "#E07B00", baixa: "#2E7D32" };
+const COR_STATUS_LAUDO = { pendente: "#B26A00", corrigido: "#2E7D32", reincidente: "#C62828" };
+const ORDEM_SEVERIDADE = ["alta", "media", "baixa"];
+
+function CartaoLaudo({ titulo, valor, apoio, cor, destaque }) {
+  return (
+    <div style={{
+      flex: "1 1 130px", minWidth: 0, borderRadius: 10, padding: "10px 12px",
+      background: destaque ? AZUL_MARINHO : "#fff", border: destaque ? "none" : `1px solid ${CINZA_BORDA}`,
+      borderLeft: destaque ? "none" : `3px solid ${cor || AZUL_MARINHO}`,
+    }}>
+      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: .4, textTransform: "uppercase", color: destaque ? "#C9D6E8" : "#8593a8" }}>{titulo}</div>
+      <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.1, margin: "4px 0 2px", color: destaque ? "#fff" : (cor || AZUL_MARINHO) }}>{valor}</div>
+      <div style={{ fontSize: 10, color: destaque ? "#DCE5F1" : "#65758b" }}>{apoio}</div>
+    </div>
+  );
+}
+
+function IndicadorSecundario({ rotulo, valor, cor }) {
+  return (
+    <div style={{ flex: "1 1 130px", minWidth: 0, display: "flex", alignItems: "center", gap: 7, background: CINZA_CLARO, borderRadius: 9, padding: "7px 11px" }}>
+      <span style={{ width: 8, height: 8, borderRadius: 8, background: cor, flexShrink: 0 }} />
+      <span style={{ fontSize: 10.5, color: "#4a5a70", flex: 1 }}>{rotulo}</span>
+      <strong style={{ fontSize: 16, color: cor }}>{valor}</strong>
+    </div>
+  );
+}
+
+/* Régua 0–100 com as faixas que já existiam (FAIXAS_ICC) e o marcador na pontuação. */
+function ReguaConformidade({ ind }) {
+  const faixas = [...FAIXAS_ICC].sort((a, b) => a.min - b.min);
+  return (
+    <div style={{ position: "relative", margin: "14px 0 16px" }}>
+      <div style={{ display: "flex", height: 7, borderRadius: 4, overflow: "hidden" }}>
+        {faixas.map((f, k) => {
+          const fim = k + 1 < faixas.length ? faixas[k + 1].min : 100;
+          return <div key={f.label} title={`${f.label}: ${f.min} a ${fim}`} style={{ width: `${fim - f.min}%`, background: f.cor, opacity: f === ind.faixa ? 1 : .35 }} />;
+        })}
+      </div>
+      <div style={{ position: "absolute", top: -9, left: `calc(${ind.icc}% - 5px)`, width: 0, height: 0, borderLeft: "5px solid transparent", borderRight: "5px solid transparent", borderTop: `7px solid ${AZUL_MARINHO}` }} />
+      <div style={{ position: "relative", height: 12, fontSize: 8.5, color: "#65758b", marginTop: 2 }}>
+        {[...faixas.map((f) => f.min), 100].map((v) => (
+          <span key={v} style={{ position: "absolute", left: `${v}%`, transform: "translateX(-50%)" }}>{v}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* Barras horizontais empilhadas por severidade, ordenadas pelo total. A barra é relativa ao
+   ambiente com mais ocorrências, para ficar legível mesmo com muitos ambientes. */
+function GraficoOcorrenciasAmbiente({ ind }) {
+  if (ind.porAmbiente.length === 0) {
+    return (
+      <div style={{ background: CINZA_CLARO, borderRadius: 10, padding: "12px 14px", fontSize: 11.5, color: "#4a5a70" }}>
+        Nenhuma não conformidade aparente foi registrada nos ambientes vistoriados.
+      </div>
+    );
+  }
+  const maior = Math.max(...ind.porAmbiente.map((a) => a.total));
+  return (
+    <div role="table" aria-label="Ocorrências por ambiente">
+      {ind.porAmbiente.map((a) => (
+        <div key={a.nome} role="row" style={{ display: "grid", gridTemplateColumns: "minmax(80px, 32%) 1fr auto", alignItems: "center", gap: 8, marginBottom: 6, breakInside: "avoid" }}>
+          <span role="rowheader" style={{ fontSize: 11, color: "#1a2330", overflowWrap: "anywhere", lineHeight: 1.25 }}>{a.nome}</span>
+          <div role="cell" style={{ background: "#EEF1F5", borderRadius: 4, height: 13, overflow: "hidden" }}>
+            <div style={{ display: "flex", height: "100%", width: `${Math.max(3, (a.total / maior) * 100)}%` }}
+              title={ORDEM_SEVERIDADE.filter((s) => a[s]).map((s) => `${ROTULO_SEVERIDADE[s]}: ${a[s]}`).join(" · ")}>
+              {ORDEM_SEVERIDADE.map((s) => a[s] > 0 && (
+                <div key={s} style={{ width: `${(a[s] / a.total) * 100}%`, background: COR_SEVERIDADE_LAUDO[s], color: "#fff", fontSize: 8.5, fontWeight: 700, display: "grid", placeItems: "center", overflow: "hidden", WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }}>
+                  {a[s]}
+                </div>
+              ))}
+            </div>
+          </div>
+          <strong role="cell" style={{ fontSize: 11, color: AZUL_MARINHO, whiteSpace: "nowrap" }}>
+            {a.total} {a.total === 1 ? "ocorrência" : "ocorrências"}
+          </strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LegendaSeveridade() {
+  return (
+    <div style={{ display: "flex", gap: 10, fontSize: 9.5, color: "#4a5a70" }}>
+      {ORDEM_SEVERIDADE.map((s) => (
+        <span key={s} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <span style={{ width: 8, height: 8, borderRadius: 2, background: COR_SEVERIDADE_LAUDO[s] }} />{ROTULO_SEVERIDADE[s]}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/* Quadro das verificações de emissão — só para a equipe (nunca no laudo do cliente). O
+   servidor faz as mesmas contas e barra a aprovação quando há erro. */
+function VerificacaoLaudo({ laudo }) {
+  const { erros, avisos } = validarIndicadoresLaudo(laudo);
+  if (!erros.length && !avisos.length) return null;
+  const linhas = [...erros.map((e) => ({ ...e, erro: true })), ...avisos];
+  return (
+    <div className="no-print" style={{ border: `1px solid ${erros.length ? "#E7B3B3" : "#F0D9A8"}`, background: erros.length ? "#FCEAEA" : "#FFF7E6", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 12 }}>
+      <strong style={{ color: erros.length ? "#C62828" : "#8A5A00" }}>
+        {erros.length ? "Este laudo ainda não pode ser emitido" : "Confira antes de emitir"}
+      </strong>
+      <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+        {linhas.map((l) => (
+          <li key={l.codigo} style={{ color: l.erro ? "#8E1F1F" : "#6B4A00", marginBottom: 2 }}>
+            {l.mensagem}{l.itens.length > 0 && <> Itens: <strong>{l.itens.join(", ")}</strong>.</>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/* verificacao: mostra à equipe as verificações de emissão (nunca no laudo do cliente). */
+function LaudoModelo({ laudo, assinatura, assinaturaVistoriador, aprovado = true, verificacao = false }) {
   const ind = calcularIndicadoresLaudo(laudo);
   /* Se a foto com o cliente não decodificar, a página final inteira some — no laudo do
      cliente não pode sobrar o ícone de imagem quebrada nem um quadro vazio. Mesma regra
@@ -1007,8 +1252,8 @@ function LaudoModelo({ laudo, assinatura, assinaturaVistoriador, aprovado = true
   const [fotoQuebrada, setFotoQuebrada] = useState(false);
   useEffect(() => { setFotoQuebrada(false); }, [laudo.fotoCliente]);
   const itens = laudo.itens || [];
-  const corSeveridade = { alta: "#C62828", media: "#B26A00", baixa: "#2C75B5" };
-  const corStatus = { pendente: "#B26A00", corrigido: "#2E7D32", reincidente: "#C62828" };
+  const corSeveridade = COR_SEVERIDADE_LAUDO;
+  const corStatus = COR_STATUS_LAUDO;
   const linha = { display: "flex", gap: 6, fontSize: 11.5, padding: "3px 0" };
   const chave = { color: "#65758b", width: 120, flexShrink: 0 };
 
@@ -1024,6 +1269,8 @@ function LaudoModelo({ laudo, assinatura, assinaturaVistoriador, aprovado = true
           Versão preliminar — aguardando aprovação da Gerência. Não vale como laudo oficial.
         </div>
       )}
+
+      {verificacao && <VerificacaoLaudo laudo={laudo} />}
 
       {/* ---------- Capa ---------- */}
       <section className="laudo-pagina">
@@ -1064,74 +1311,113 @@ function LaudoModelo({ laudo, assinatura, assinaturaVistoriador, aprovado = true
         </div>
       </section>
 
-      {/* ---------- Sumário executivo ---------- */}
+      {/* ---------- Sumário executivo (painel, modelo 2) ---------- */}
       <section className="laudo-pagina">
         <h2 style={{ fontSize: 15, color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_CLARO}`, paddingBottom: 7, marginBottom: 14 }}>Sumário executivo</h2>
 
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 18 }}>
-          <CartaoIndicador titulo="Não conformidades" valor={ind.total} apoio={`${ind.pendentes} pendente(s)`} />
-          <CartaoIndicador titulo="Severidade alta" valor={ind.porSeveridade.alta} cor={corSeveridade.alta} />
-          <CartaoIndicador titulo="Severidade média" valor={ind.porSeveridade.media} cor={corSeveridade.media} />
-          <CartaoIndicador titulo="Severidade baixa" valor={ind.porSeveridade.baixa} cor={corSeveridade.baixa} />
-          <CartaoIndicador titulo="Ambientes afetados"
-            valor={ind.ambientesVistoriados ? `${ind.ambientesAfetados}/${ind.ambientesVistoriados}` : ind.ambientesAfetados}
-            apoio={ind.ambientesVistoriados ? "de vistoriados" : ""} />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+          <CartaoLaudo destaque titulo="Ocorrências identificadas" valor={ind.ocorrencias}
+            apoio={ind.ocorrencias === 1 ? "ocorrência individual" : "ocorrências individuais"} />
+          <CartaoLaudo titulo="Registros técnicos" valor={ind.registros}
+            apoio={ind.registros === 1 ? "constatação documentada" : "constatações documentadas"} />
+          <CartaoLaudo titulo="Ambientes afetados" valor={ind.ambientesAfetados}
+            apoio={ind.ambientesVistoriados ? `de ${ind.ambientesVistoriados} vistoriados` : (ind.ambientesAfetados === 1 ? "ambiente" : "ambientes")} />
+          <CartaoLaudo titulo="Alta severidade" valor={ind.porSeveridade.alta} cor={COR_SEVERIDADE_LAUDO.alta}
+            apoio={ind.porSeveridade.alta === 1 ? "ocorrência" : "ocorrências"} />
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+          <IndicadorSecundario rotulo="Severidade média" valor={ind.porSeveridade.media} cor={COR_SEVERIDADE_LAUDO.media} />
+          <IndicadorSecundario rotulo="Severidade baixa" valor={ind.porSeveridade.baixa} cor={COR_SEVERIDADE_LAUDO.baixa} />
+          <IndicadorSecundario rotulo="Ocorrências pendentes" valor={ind.pendentes} cor={COR_STATUS_LAUDO.pendente} />
+          <IndicadorSecundario rotulo="Ocorrências corrigidas" valor={ind.corrigidas} cor={COR_STATUS_LAUDO.corrigido} />
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 16, background: ind.faixa.bg, borderRadius: 12, padding: "14px 16px", marginBottom: 20 }}>
-          <div style={{ textAlign: "center", minWidth: 92 }}>
-            <div style={{ fontSize: 34, fontWeight: 800, color: ind.faixa.cor, lineHeight: 1 }}>{ind.icc}</div>
-            <div style={{ fontSize: 9.5, color: ind.faixa.cor, letterSpacing: .4 }}>ÍNDICE</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", background: ind.faixa.bg, borderRadius: 12, padding: "14px 16px", marginBottom: 18, breakInside: "avoid" }}>
+          <div style={{ textAlign: "center", minWidth: 84 }}>
+            <div style={{ fontSize: 40, fontWeight: 800, color: ind.faixa.cor, lineHeight: 1 }}>{ind.icc}</div>
+            <div style={{ fontSize: 10, color: ind.faixa.cor, marginTop: 3 }}>de 100</div>
           </div>
-          <div>
-            <div style={{ fontSize: 13.5, fontWeight: 800, color: ind.faixa.cor }}>{ind.faixa.label}</div>
-            <div style={{ fontSize: 11, color: "#4a5a70", marginTop: 3, maxWidth: 420 }}>
-              Índice de Conformidade Construtiva. Calculado pelo peso das não conformidades ainda não sanadas
-              (alta 3, média 2, baixa 1). Itens corrigidos deixam de pontuar e o índice sobe.
+          <div style={{ flex: "1 1 260px", minWidth: 0 }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: "#65758b", letterSpacing: .4 }}>ÍNDICE DE CONFORMIDADE CONSTRUTIVA</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: ind.faixa.cor }}>{ind.faixa.label}</div>
+            <ReguaConformidade ind={ind} />
+            <div style={{ fontSize: 10, color: "#4a5a70", lineHeight: 1.45 }}>
+              Metodologia: soma dos pesos das constatações ainda não sanadas (alta 3, média 2, baixa 1),
+              comparada à pontuação de referência {REFERENCIA_ICC_PADRAO}: índice = 100 - (pontos ÷ {REFERENCIA_ICC_PADRAO}) × 100.
+              Constatações corrigidas deixam de pontuar. O índice não constitui certificação de segurança estrutural.
             </div>
           </div>
         </div>
 
-        {ind.porAmbiente.length > 0 && (
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 7 }}>Por ambiente</div>
-            {ind.porAmbiente.map(([nome, qtd]) => <BarraProporcao key={nome} rotulo={nome} valor={qtd} total={ind.total} />)}
+        <div style={{ marginBottom: 16, breakInside: "avoid" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: AZUL_MARINHO }}>Ocorrências por ambiente</div>
+            {ind.porAmbiente.length > 0 && <LegendaSeveridade />}
+          </div>
+          <GraficoOcorrenciasAmbiente ind={ind} />
+        </div>
+
+        {ind.porCategoria.length > 0 && (
+          <div style={{ marginBottom: 12, breakInside: "avoid" }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 7 }}>Ocorrências por sistema construtivo</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", columnGap: 22 }}>
+              {ind.porCategoria.map(([nome, qtd]) => (
+                <BarraProporcao key={nome} rotulo={nome} valor={qtd} total={ind.porCategoria[0][1]} />
+              ))}
+            </div>
           </div>
         )}
 
-        {ind.porCategoria.length > 0 && (
-          <div>
-            <div style={{ fontSize: 12, fontWeight: 700, color: AZUL_MARINHO, marginBottom: 7 }}>Por sistema construtivo</div>
-            {ind.porCategoria.map(([nome, qtd]) => <BarraProporcao key={nome} rotulo={nome} valor={qtd} total={ind.total} cor="#5B7C99" />)}
-          </div>
-        )}
+        <div style={{ fontSize: 9.5, color: "#8593a8", lineHeight: 1.45 }}>
+          Registro técnico: cada constatação documentada com fotografias, descrição e recomendação.
+          Ocorrência individual: cada peça, componente ou ponto afetado dentro de uma constatação
+          (ex.: um registro de 11 peças com som cavo corresponde a 11 ocorrências).
+        </div>
       </section>
 
       {/* ---------- Quadro-resumo ---------- */}
       {itens.length > 0 && (
         <section className="laudo-pagina">
-          <h2 style={{ fontSize: 15, color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_CLARO}`, paddingBottom: 7, marginBottom: 12 }}>Quadro-resumo das não conformidades</h2>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5 }}>
-            <thead>
-              <tr style={{ background: CINZA_CLARO }}>
-                {["#", "Ambiente", "Sistema", "Constatação", "Severidade", "Situação"].map((h) => (
-                  <th key={h} style={{ textAlign: "left", padding: "6px 7px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}` }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {itens.map((i) => (
-                <tr key={i.n} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
-                  <td style={{ padding: "5px 7px", fontFamily: "monospace" }}>{i.n}</td>
-                  <td style={{ padding: "5px 7px" }}>{i.ambiente}</td>
-                  <td style={{ padding: "5px 7px" }}>{i.categoria}</td>
-                  <td style={{ padding: "5px 7px" }}>{i.titulo}</td>
-                  <td style={{ padding: "5px 7px", color: corSeveridade[i.severidade], fontWeight: 700 }}>{ROTULO_SEVERIDADE[i.severidade]}</td>
-                  <td style={{ padding: "5px 7px", color: corStatus[i.status], fontWeight: 600 }}>{ROTULO_STATUS[i.status]}</td>
+          <h2 style={{ fontSize: 15, color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_CLARO}`, paddingBottom: 7, marginBottom: 12 }}>Quadro-resumo das constatações</h2>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", minWidth: 520, borderCollapse: "collapse", fontSize: 10.5 }}>
+              <thead>
+                <tr style={{ background: CINZA_CLARO }}>
+                  {["Nº", "Ambiente", "Sistema", "Constatação", "Qtd.", "Severidade", "Situação"].map((h) => (
+                    <th key={h} style={{ textAlign: h === "Qtd." ? "center" : "left", padding: "6px 7px", color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_BORDA}` }}>{h}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {itens.map((i) => {
+                  const parcial = i.status !== "corrigido" && i.quantidadeCorrigida > 0;
+                  return (
+                    <tr key={i.n} style={{ borderBottom: `1px solid ${CINZA_BORDA}`, breakInside: "avoid" }}>
+                      <td style={{ padding: "5px 7px", fontFamily: "monospace", verticalAlign: "top" }}>{i.n}</td>
+                      <td style={{ padding: "5px 7px", verticalAlign: "top", overflowWrap: "anywhere" }}>{i.ambiente}</td>
+                      <td style={{ padding: "5px 7px", verticalAlign: "top", overflowWrap: "anywhere" }}>{i.categoria}</td>
+                      <td style={{ padding: "5px 7px", verticalAlign: "top" }}>{i.titulo}</td>
+                      <td style={{ padding: "5px 7px", verticalAlign: "top", textAlign: "center", fontWeight: 800, color: AZUL_MARINHO }}>{i.quantidade}</td>
+                      <td style={{ padding: "5px 7px", verticalAlign: "top", color: COR_SEVERIDADE_LAUDO[i.severidade], fontWeight: 700 }}>{ROTULO_SEVERIDADE[i.severidade]}</td>
+                      <td style={{ padding: "5px 7px", verticalAlign: "top", color: COR_STATUS_LAUDO[i.status], fontWeight: 600 }}>
+                        {ROTULO_STATUS[i.status]}
+                        {parcial && <div style={{ fontWeight: 400, fontSize: 9.5 }}>{i.quantidadeCorrigida} de {i.quantidade} corrigidas</div>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr style={{ background: CINZA_CLARO, fontWeight: 700, color: AZUL_MARINHO }}>
+                  <td colSpan={4} style={{ padding: "6px 7px", textAlign: "right" }}>
+                    Total · {ind.registros} {ind.registros === 1 ? "registro técnico" : "registros técnicos"}
+                  </td>
+                  <td style={{ padding: "6px 7px", textAlign: "center" }}>{ind.ocorrencias}</td>
+                  <td colSpan={2} style={{ padding: "6px 7px", fontWeight: 400, color: "#4a5a70" }}>{ind.ocorrencias === 1 ? "ocorrência" : "ocorrências"}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
         </section>
       )}
 
@@ -1143,8 +1429,11 @@ function LaudoModelo({ laudo, assinatura, assinaturaVistoriador, aprovado = true
             <strong style={{ fontSize: 12.5, color: AZUL_MARINHO }}>{i.ambiente}</strong>
             <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
               {i.categoria && <span style={{ fontSize: 9.5, border: `1px solid ${CINZA_BORDA}`, borderRadius: 20, padding: "2px 8px", color: "#4a5a70" }}>{i.categoria}</span>}
+              <span style={{ fontSize: 9.5, border: `1px solid ${AZUL_MARINHO}`, borderRadius: 20, padding: "2px 8px", color: AZUL_MARINHO, fontWeight: 700 }}>Qtd. {i.quantidade}</span>
               <span style={{ fontSize: 9.5, borderRadius: 20, padding: "2px 8px", color: "#fff", background: corSeveridade[i.severidade], fontWeight: 700 }}>{ROTULO_SEVERIDADE[i.severidade]}</span>
-              <span style={{ fontSize: 9.5, borderRadius: 20, padding: "2px 8px", color: "#fff", background: corStatus[i.status], fontWeight: 700 }}>{ROTULO_STATUS[i.status]}</span>
+              <span style={{ fontSize: 9.5, borderRadius: 20, padding: "2px 8px", color: "#fff", background: corStatus[i.status], fontWeight: 700 }}>
+                {ROTULO_STATUS[i.status]}{i.status !== "corrigido" && i.quantidadeCorrigida > 0 ? ` · ${i.quantidadeCorrigida} corrigidas` : ""}
+              </span>
             </div>
           </div>
 
@@ -1193,11 +1482,9 @@ function LaudoModelo({ laudo, assinatura, assinaturaVistoriador, aprovado = true
       {/* ---------- Conclusão e assinaturas ---------- */}
       <section className="laudo-pagina">
         <h2 style={{ fontSize: 15, color: AZUL_MARINHO, borderBottom: `2px solid ${CINZA_CLARO}`, paddingBottom: 7, marginBottom: 12 }}>Conclusão</h2>
-        <p style={{ fontSize: 12, lineHeight: 1.65, textAlign: "justify" }}>{textoConclusaoLaudo(ind)}</p>
-        <p style={{ fontSize: 12, lineHeight: 1.65, textAlign: "justify" }}>
-          O índice de conformidade apurado é de <strong>{ind.icc}</strong>, classificado como <strong>{ind.faixa.label}</strong>.
-          Recomenda-se o encaminhamento das não conformidades à construtora para correção e posterior revistoria.
-        </p>
+        {[...textoConclusaoLaudo(ind), textoIndiceConclusao(ind)].map((p, k) => (
+          <p key={k} style={{ fontSize: 12, lineHeight: 1.65, textAlign: "justify" }}>{p}</p>
+        ))}
 
         <div style={{ marginTop: 34, display: "flex", gap: 30, flexWrap: "wrap" }}>
           <div style={{ flex: 1, minWidth: 160, textAlign: "center" }}>
@@ -3957,7 +4244,7 @@ function AppInterno({ session, onLogout }) {
         {abaTop === "laudos" && aba === "laudo-anterior" && (
           <AbaLaudoAnterior laudo={laudoAnterior} carregando={laudoAnteriorCarregando} cliente={clienteEmEdicao} assinatura={assinatura} />
         )}
-        {abaTop === "laudos" && aba === "laudo" && <LaudoModelo laudo={montarLaudoModelo(dados, itens)} assinatura={assinatura} assinaturaVistoriador={minhaAssinatura} aprovado={perfil === "gerencia"} />}
+        {abaTop === "laudos" && aba === "laudo" && <LaudoModelo laudo={montarLaudoModelo(dados, itens)} assinatura={assinatura} assinaturaVistoriador={minhaAssinatura} aprovado={perfil === "gerencia"} verificacao />}
         {abaTop === "laudos" && aba === "realizados" && (
           <AbaLaudosRealizados laudos={meusLaudos} carregando={meusLaudosCarregando}
             recarregar={carregarMeusLaudos} assinatura={assinatura} ehGerencia={perfil === "gerencia"}
@@ -8156,6 +8443,7 @@ function ItemCard({ item, num, onChange, onPatologia, onFotos, onRemoveFoto, onD
           </select>
         </div>
         <Field label="Norma técnica" value={item.norma} onChange={(v) => onChange({ norma: v })} />
+        <CamposQuantidadeItem item={item} alterar={(campo, valor) => onChange({ [campo]: valor })} />
       </Grid>
 
       <Area label="Descrição técnica" value={item.descricao} onChange={(v) => onChange({ descricao: v })} rows={3} placeholder="Verifica-se..." />
@@ -8208,6 +8496,43 @@ function GraficoPatologias({ contagem, totalItens }) {
         Total de {totalItens} não conformidade(s) identificada(s) durante a vistoria técnica.
       </div>
     </div>
+  );
+}
+
+/* Quantidade de ocorrências do item (modelo 2 do laudo) e, na correção parcial, quantas já
+   foram corrigidas. Número digitado pelo técnico — nunca tirado do texto da descrição.
+   alterar(campo, valor) grava no item; o mesmo componente serve ao técnico e à Gerência. */
+function CamposQuantidadeItem({ item, alterar }) {
+  const qtd = quantidadeDoItem(item);
+  const corrigidas = corrigidasDoItem(item, qtd.quantidade);
+  const corrInvalida = !Number.isFinite(corrigidas) || corrigidas > qtd.quantidade;
+  const paraNumero = (v) => (v === "" ? "" : (/^d+$/.test(v) ? Number(v) : v));
+  const erro = { ...inp, borderColor: "#C62828", background: "#FFF6F6" };
+  return (
+    <>
+      <div style={cell(false)}>
+        <label style={lab}>Quantidade de ocorrências</label>
+        <input type="number" inputMode="numeric" min={1} step={1} style={qtd.invalida ? erro : inp}
+          value={item.quantidadeOcorrencias ?? ""} placeholder="1"
+          onChange={(e) => alterar("quantidadeOcorrencias", paraNumero(e.target.value))} />
+        <div style={{ fontSize: 11, marginTop: 3, color: qtd.invalida ? "#C62828" : (qtd.informada ? "#8593a8" : "#B26A00") }}>
+          {qtd.invalida ? "Use um número inteiro a partir de 1."
+            : qtd.informada ? "Peças, componentes ou pontos afetados neste registro."
+            : "Não informada (laudo antigo) — conta como 1. Confira."}
+        </div>
+      </div>
+      {item.status !== "corrigido" && qtd.quantidade > 1 && (
+        <div style={cell(false)}>
+          <label style={lab}>Já corrigidas (correção parcial)</label>
+          <input type="number" inputMode="numeric" min={0} max={qtd.quantidade} step={1} style={corrInvalida ? erro : inp}
+            value={item.quantidadeCorrigida ?? ""} placeholder="0"
+            onChange={(e) => alterar("quantidadeCorrigida", paraNumero(e.target.value))} />
+          <div style={{ fontSize: 11, marginTop: 3, color: corrInvalida ? "#C62828" : "#8593a8" }}>
+            {corrInvalida ? `Entre 0 e ${qtd.quantidade}.` : `Pendentes: ${qtd.quantidade - (corrigidas || 0)} de ${qtd.quantidade}.`}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -9456,6 +9781,7 @@ function EditorLaudoGerencia({ laudo, onSalvar, onCancelar, salvando, patologias
                     {["Baixa", "Média", "Alta"].map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
+                <CamposQuantidadeItem item={item} alterar={(campo, valor) => setItemCampo(item.id, campo, valor)} />
               </Grid>
               {/* Troca a patologia inteira (texto, severidade, norma, recomendação) pela do
                   banco — a gerência não precisa reescrever tudo na mão pra corrigir um item
@@ -9641,7 +9967,7 @@ function CardLaudosPendentes({ laudosPendentes = [], carregando, aprovarLaudo, d
             ) : (
               <>
                 {/* Mesma peça que o cliente recebe — a gerência aprova vendo o resultado final. */}
-                <LaudoModelo laudo={montarLaudoModelo(laudoPreview.dados, laudoPreview.itens || [])} assinatura={assinatura}
+                <LaudoModelo laudo={montarLaudoModelo(laudoPreview.dados, laudoPreview.itens || [])} assinatura={assinatura} verificacao
                   assinaturaVistoriador={laudoPreview.vistoriador_assinatura ? { imagem: laudoPreview.vistoriador_assinatura } : null} />
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
                   <button className="btn-ghost" style={{ color: AZUL_MARINHO, background: CINZA_CLARO }} onClick={() => setPreviewId(null)}>Fechar</button>
