@@ -225,9 +225,27 @@ o técnico", e o cliente passava a ler "Agendado" sem dia nem técnico.
 - **Cartão** (`CardFilaEspera`): técnico, data e horário no próprio cartão (data e horário já vêm com o
   que o cliente pediu) e **Agendar**, que grava os três + "Vistoria agendada" de uma vez
   (`useAgendamentoFila`). Trava com o que falta, data passada ou o técnico já ocupado no horário
-  (`vistoriaNoMesmoHorario`); avisa vistoria agendada a menos de 1h com qualquer técnico. Selo **NOVO**
-  (chegou hoje/ontem) e "esperando há N dias" em vermelho a partir de 3 (`tempoNaFila`, que precisa de
-  `criadoEm` em `mapClienteDaApi`). Não existe mais "aprovar sem técnico": quem não tem técnico fica na fila.
+  (`vistoriaNoMesmoHorario`); avisa vistoria agendada a menos de 1h com qualquer técnico. Faixa laranja
+  **NOVO · chegou hoje/ontem** com o sino e borda laranja, e "esperando há N dias" em vermelho a partir de 3
+  (`tempoNaFila`, que precisa de `criadoEm` em `mapClienteDaApi`). Não existe mais "aprovar sem técnico":
+  quem não tem técnico fica na fila. Na revistoria, o técnico vem preenchido com quem fez a vistoria
+  anterior, e o cartão diz isso ("Sugerido… só entra na agenda do técnico quando você clicar em Agendar").
+- **Duas seções** (pedido da Gerência, 27/11/2026: "na mesma lista de espera tá confuso"): em cima, com
+  borda azul, **Com data e horário pedidos** — lista única por dia e hora (`ordemPorDataEHora`), o dia em
+  destaque no cartão (`comDestaqueData`: "SEX 27/11 · 08:00" e Já passou/Hoje/Amanhã/Em N dias,
+  `urgenciaDaDataPedida`), seis por vez com "Mostrar mais"; embaixo, **Sem data ou horário**, nas colunas
+  por empreendimento de antes, com os novos no topo de cada coluna. O botão **Ver só os novos** filtra as
+  duas; sem novo nenhum, ele some e o filtro se desliga sozinho.
+- **Revistoria só vai ao Calendário depois de agendada** (`revistoriaAguardandoAceite`, 27/11/2026). Ela
+  nasce com técnico, dia e hora preenchidos e aparecia no Calendário com a sigla do técnico, como se
+  estivesse marcada — mas a agenda do técnico só traz "Vistoria agendada"/"Em vistoria", e uma revistoria
+  das 08:00 ficou sem ninguém confirmar. Enquanto está na fila, fica fora da grade, dos contadores, do
+  painel do dia e do formulário "Agendar vistoria" do Calendário; o aviso do Calendário diz quantas esperam.
+- **Calendário com sete colunas iguais** (`COLUNAS_CALENDARIO = repeat(7, minmax(0, 1fr))`, 27/11/2026). Com
+  `repeat(7, 1fr)` cada coluna se alargava até caber o balão mais comprido dela (o texto do balão não
+  quebra): a de quinta ficava larga, a de segunda espremida, e no celular a semana passava da tela. As
+  células têm `minWidth: 0` e cortam com "…". No celular (`.cal-longo`/`.cal-curto` em `estilos`) o
+  balão mostra só a hora (a cor é o técnico), o contador do dia só o número e a coluna da semana "Sem. N".
 - **Destaque:** contador laranja (`BolhaContagem`) em "Agendamento" (barra de cima e menu lateral da
   Gerência) e na sub-aba; o sino leva à fila. A antiga "Análise" virou **Calendário** (chave `"analise"`,
   só o calendário e um aviso com o atalho para a fila).

@@ -6525,6 +6525,16 @@ const STATUS_FILA_ESPERA = ["Em análise", "Agendamento aprovado"];
 function naFilaDeEspera(c) {
   return STATUS_FILA_ESPERA.includes(c.status) && !ehServicoDocumentacao(c);
 }
+/* Revistoria pedida pelo cliente e ainda não aceita pelo Atendimento. Pedido da Gerência
+   (27/11/2026): a revistoria nasce com o técnico da vistoria original já preenchido e com o
+   dia e a hora que o cliente escolheu, e por isso aparecia no Calendário com a sigla do técnico,
+   como se estivesse marcada — mas o técnico não a via, porque a agenda dele só traz "Vistoria
+   agendada"/"Em vistoria" (ver /api/clientes/minha-agenda no backend). Foi o que aconteceu com
+   uma revistoria das 08:00 que ninguém confirmou. Até ser agendada, ela fica só na Fila de
+   espera: fora da grade, dos contadores, do painel do dia e do formulário do Calendário. */
+function revistoriaAguardandoAceite(c) {
+  return ehRevistoria(c) && naFilaDeEspera(c);
+}
 /* "chegou hoje", "chegou ontem", "esperando há 5 dias" — quem espera há mais tempo precisa saltar
    aos olhos, e quem acabou de chegar também. */
 function tempoNaFila(criadoEm, hoje = new Date()) {
@@ -6534,6 +6544,24 @@ function tempoNaFila(criadoEm, hoje = new Date()) {
   if (dias <= 0) return { texto: "chegou hoje", novo: true, atrasado: false };
   if (dias === 1) return { texto: "chegou ontem", novo: true, atrasado: false };
   return { texto: `esperando há ${dias} dias`, novo: false, atrasado: dias >= 3 };
+}
+/* Quanto falta para o dia que o cliente pediu — é o que diz o que o Atendimento resolve primeiro
+   na seção "Com data e horário pedidos" da Fila de espera. */
+function urgenciaDaDataPedida(dataISO, hoje = new Date()) {
+  if (!dataISO) return null;
+  const dias = Math.round((new Date(dataISO) - new Date(paraChaveISO(hoje))) / 86400000);
+  if (Number.isNaN(dias)) return null;
+  if (dias < 0) return { texto: "já passou", cor: "#C62828", fundo: "#FCEAEA" };
+  if (dias === 0) return { texto: "hoje", cor: "#C62828", fundo: "#FCEAEA" };
+  if (dias === 1) return { texto: "amanhã", cor: "#B26A00", fundo: "#FFF4E0" };
+  return { texto: `em ${dias} dias`, cor: AZUL_MARINHO, fundo: "#EAF2FB" };
+}
+/* "SEX 27/11" — o dia da semana ajuda a ler a fila sem abrir o calendário. */
+function rotuloDiaCurto(dataISO) {
+  const d = new Date(`${dataISO}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return dataISO;
+  const semana = d.toLocaleDateString("pt-BR", { weekday: "short" }).replace(".", "").toUpperCase();
+  return `${semana} ${dataISO.slice(8, 10)}/${dataISO.slice(5, 7)}`;
 }
 /* Contador ao lado do nome do menu e da sub-aba: quantos esperam agendamento. */
 function BolhaContagem({ n, titulo = "" }) {
@@ -6545,7 +6573,7 @@ function BolhaContagem({ n, titulo = "" }) {
   );
 }
 
-function CardFilaEspera({ c, todos, podeAgir, onAgendar, onRecusar, vistoriadores = [] }) {
+function CardFilaEspera({ c, todos, podeAgir, onAgendar, onRecusar, vistoriadores = [], comDestaqueData = false }) {
   // Na revistoria o técnico da visita anterior já vem escolhido; data e horário vêm do pedido.
   const [vistoriadorId, setVistoriadorId] = useState(c.vistoriadorId || "");
   const [data, setData] = useState(c.dataDesejada || "");
@@ -6579,13 +6607,41 @@ function CardFilaEspera({ c, todos, podeAgir, onAgendar, onRecusar, vistoriadore
     <span style={{ background: fundo, color: cor, padding: "2px 8px", borderRadius: 20, fontSize: 10.5, fontWeight: 800, whiteSpace: "nowrap" }}>{texto}</span>
   );
   const horarios = horario && !HORARIOS_COMERCIAIS.includes(horario) ? [horario, ...HORARIOS_COMERCIAIS] : HORARIOS_COMERCIAIS;
+  const urgencia = comDestaqueData ? urgenciaDaDataPedida(c.dataDesejada) : null;
+  /* Na revistoria, o técnico já vem preenchido com quem fez a vistoria anterior — e era isso que
+     fazia o pedido parecer agendado em outras telas. Dizer de onde veio e que só vale no Agendar. */
+  const tecnicoSugerido = ehRevistoria(c) && c.vistoriadorId && String(vistoriadorId) === String(c.vistoriadorId);
 
   return (
-    <div style={{ border: `1px solid ${tempo?.novo ? "#F0C48A" : CINZA_BORDA}`, background: tempo?.novo ? "#FFFBF4" : "#fff", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 5 }}>
+    <div style={{ border: tempo?.novo ? "2px solid #F59E0B" : `1px solid ${CINZA_BORDA}`, background: tempo?.novo ? "#FFFBF4" : "#fff", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 5 }}>
+      {/* Com data e horário pedidos, o dia e a hora vêm primeiro e grandes: é por eles que se decide a ordem. */}
+      {urgencia && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, background: urgencia.fundo, borderRadius: 8, padding: "8px 10px", marginBottom: 2 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+            <CalendarDays size={18} color={urgencia.cor} style={{ flexShrink: 0 }} />
+            <div style={{ minWidth: 0 }}>
+              {/* Dia e hora numa linha só: quebrados, "QUI 26/11 ·" e "14:00" pareciam duas informações. */}
+              <div style={{ fontSize: 17, fontWeight: 800, color: urgencia.cor, lineHeight: 1.15, whiteSpace: "nowrap" }}>
+                {rotuloDiaCurto(c.dataDesejada)} · {c.horarioDesejado}
+              </div>
+              <div style={{ fontSize: 10.5, color: "#65758b" }}>dia e hora pedidos pelo cliente</div>
+            </div>
+          </div>
+          <span style={{ background: "#fff", color: urgencia.cor, borderRadius: 20, padding: "2px 9px", fontSize: 11, fontWeight: 800, whiteSpace: "nowrap", textTransform: "uppercase" }}>
+            {urgencia.texto}
+          </span>
+        </div>
+      )}
+      {/* Destaque próprio de quem acabou de chegar (pedido da Gerência, 27/11/2026): faixa laranja
+          com o sino, em vez do selo pequeno que se perdia no meio da fila. */}
+      {tempo?.novo && (
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 6, alignSelf: "flex-start", background: "#F59E0B", color: "#1f1300", borderRadius: 6, padding: "3px 9px", fontSize: 11.5, fontWeight: 800, letterSpacing: 0.3 }}>
+          <Bell size={12} /> NOVO · {tempo.texto}
+        </div>
+      )}
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-        <strong style={{ fontSize: 14 }}>{c.nome}</strong>
+        <strong style={{ fontSize: comDestaqueData ? 15.5 : 14 }}>{c.nome}</strong>
         {ehRevistoria(c) && <SeloRevistoria seq={c.revistoriaSeq} />}
-        {tempo?.novo && selo("NOVO", "#B26A00", "#FFF4E0")}
         {c.status === "Agendamento aprovado" && selo("Aprovado · falta agendar", AZUL_MEDIO, "#EAF2FB")}
       </div>
       <div style={{ fontSize: 12, color: "#65758b" }}>{mascararCpf(c.cpf)}{c.telefone ? ` · ${c.telefone}` : ""}</div>
@@ -6603,9 +6659,9 @@ function CardFilaEspera({ c, todos, podeAgir, onAgendar, onRecusar, vistoriadore
           {c.observacoes}
         </div>
       )}
-      <div style={{ fontSize: 12, fontWeight: 700, color: c.dataDesejada ? "#4a5a70" : "#B26A00" }}>{pediu}</div>
+      {!urgencia && <div style={{ fontSize: 12, fontWeight: 700, color: c.dataDesejada ? "#4a5a70" : "#B26A00" }}>{pediu}</div>}
       <div style={{ fontSize: 11, color: tempo?.atrasado ? "#C62828" : "#8593a8", fontWeight: tempo?.atrasado ? 700 : 400 }}>
-        Cadastrado em {c.criadoEm ? new Date(c.criadoEm).toLocaleDateString("pt-BR") : "—"}{tempo ? ` · ${tempo.texto}` : ""}
+        Cadastrado em {c.criadoEm ? new Date(c.criadoEm).toLocaleDateString("pt-BR") : "—"}{tempo && !tempo.novo ? ` · ${tempo.texto}` : ""}
       </div>
       {podeAgir ? (
         <>
@@ -6616,6 +6672,11 @@ function CardFilaEspera({ c, todos, podeAgir, onAgendar, onRecusar, vistoriadore
                 <option value="">selecionar…</option>
                 {vistoriadores.map((v) => <option key={v.id} value={v.id}>{rotuloTecnico(v)}</option>)}
               </select>
+              {tecnicoSugerido && (
+                <span style={{ fontSize: 11, color: "#6E36BE", marginTop: 3 }}>
+                  Sugerido: quem fez a vistoria anterior. Só entra na agenda do técnico quando você clicar em Agendar.
+                </span>
+              )}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
               <div style={cell(false)}>
@@ -6664,6 +6725,11 @@ function CardFilaEspera({ c, todos, podeAgir, onAgendar, onRecusar, vistoriadore
    até 3 barras de agendamento coloridas por técnico com sigla + horário + cliente. Clicar
    num dia abre o painel lateral com a agenda completa daquele dia. A coluna de domingo
    (sem expediente) é o contador da semana — ver `resumirSemana`. */
+/* Sete colunas sempre iguais (27/11/2026). Com "repeat(7, 1fr)" cada coluna se alargava até caber o
+   balão mais comprido dela, porque o texto do balão não quebra: a quinta com "FE 08:00 KRYSLENE"
+   ficava larga, a segunda sem vistoria ficava espremida, e no celular a semana passava da tela. */
+const COLUNAS_CALENDARIO = "repeat(7, minmax(0, 1fr))";
+
 function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], mesRef, setMesRef, diaSelecionado, setDiaSelecionado, filtroTecnicos, aoTrocarFiltro, filtroEtapa, aoTrocarEtapa, mostrarContagem = false }) {
   const ano = mesRef.getFullYear(), mes = mesRef.getMonth();
   const primeiroDiaSemana = new Date(ano, mes, 1).getDay();
@@ -6681,6 +6747,7 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
     clientes.forEach((c) => {
       if (!c.dataDesejada || !String(c.dataDesejada).startsWith(prefixoMes)) return;
       if (c.status === "Cancelado" || ehServicoDocumentacao(c)) return;
+      if (revistoriaAguardandoAceite(c)) return;
       if (filtroEtapa && etapaVistoriaCliente(c, docs) !== filtroEtapa) return;
       const id = String(c.vistoriadorId ?? "");
       contagemPorTecnico[id] = (contagemPorTecnico[id] || 0) + 1;
@@ -6688,14 +6755,19 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
   }
 
   // Mostra todo cliente já cadastrado com data desejada (não só quem já tem técnico
-  // confirmado) — "Cancelado" fica de fora por não ser mais um compromisso ativo.
+  // confirmado) — "Cancelado" fica de fora por não ser mais um compromisso ativo, e a
+  // revistoria ainda não aceita fica só na Fila de espera (ver revistoriaAguardandoAceite).
   const agendadosPorDia = {};
   clientes.forEach((c) => {
     if (!c.dataDesejada || c.status === "Cancelado" || ehServicoDocumentacao(c)) return;
+    if (revistoriaAguardandoAceite(c)) return;
     if (filtroTecnicos && filtroTecnicos.size > 0 && !filtroTecnicos.has(String(c.vistoriadorId))) return;
     if (filtroEtapa && etapaVistoriaCliente(c, docs) !== filtroEtapa) return;
     (agendadosPorDia[c.dataDesejada] = agendadosPorDia[c.dataDesejada] || []).push(c);
   });
+  // Balões do dia pela hora, como no painel do dia (vinham na ordem do cadastro: 08:00, 11:00, 10:00).
+  Object.values(agendadosPorDia).forEach((lista) =>
+    lista.sort((a, b) => (a.horarioDesejado || "").localeCompare(b.horarioDesejado || "")));
 
   const celulas = [];
   for (let i = 0; i < primeiroDiaSemana; i++) celulas.push(null);
@@ -6782,10 +6854,14 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
         <button className="icon-btn" onClick={() => setMesRef(new Date(ano, mes + 1, 1))} aria-label="Próximo mês"><ChevronRight size={18} /></button>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, fontSize: 11, color: "#8593a8", textAlign: "center", marginBottom: 4 }}>
-        {["Semana", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((d) => <div key={d} style={d === "Semana" ? { fontWeight: 700, color: AZUL_MARINHO, overflowWrap: "normal" } : undefined}>{d}</div>)}
+      <div style={{ display: "grid", gridTemplateColumns: COLUNAS_CALENDARIO, gap: 4, fontSize: 11, color: "#8593a8", textAlign: "center", marginBottom: 4 }}>
+        {["Semana", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((d) => (
+          <div key={d} style={d === "Semana" ? { fontWeight: 700, color: AZUL_MARINHO, overflowWrap: "normal" } : undefined}>
+            {d === "Semana" ? <><span className="cal-longo">Semana</span><span className="cal-curto">Sem.</span></> : d}
+          </div>
+        ))}
       </div>
-      <div ref={gridRef} style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+      <div ref={gridRef} style={{ display: "grid", gridTemplateColumns: COLUNAS_CALENDARIO, gap: 4 }}>
         {celulas.map((dia, i) => {
           if (i % 7 === 0) {
             const s = resumirSemana(i);
@@ -6797,21 +6873,23 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
               <div key={`semana-${i}`}
                 title={`Semana de ${fmt(s.dias[1])} a ${fmt(s.dias[6])}: ${s.total} ${s.total === 1 ? "vistoria" : "vistorias"}${s.semanaToda !== s.total ? ` neste mês, ${s.semanaToda} na semana toda` : ""}`}
                 style={{
-                  // Sem minWidth:0/overflow aqui, e com quebra só entre palavras: senão, numa tela
-                  // estreita, o `overflow-wrap:anywhere` do body espreme a coluna até virar uma
-                  // letra por linha. Aqui só tem número e sigla, nada de nome comprido.
-                  minHeight: 88, overflowWrap: "normal", borderRadius: 8, padding: "4px 4px 4px 7px",
+                  // Quebra só entre palavras: com `overflow-wrap:anywhere` a coluna virava uma letra
+                  // por linha. As colunas agora têm largura fixa (COLUNAS_CALENDARIO), então o
+                  // minWidth:0 só impede que um rótulo empurre a célula para cima da vizinha.
+                  minHeight: 88, minWidth: 0, overflow: "hidden", overflowWrap: "normal", borderRadius: 8, padding: "4px 4px 4px 7px",
                   background: "#F6F8FB", border: "1px solid #E3E8EF",
                   // Friso na semana de hoje: no domingo, o destaque de "hoje" não tem mais célula.
                   boxShadow: s.atual ? `inset 3px 0 0 ${AZUL_MARINHO}` : "none",
                   display: "flex", flexDirection: "column", gap: 3,
                 }}>
                 <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", color: s.atual ? AZUL_MARINHO : "#8593a8" }}>
-                  {s.atual ? "Esta semana" : `Semana ${i / 7 + 1}`}
+                  <span className="cal-longo">{s.atual ? "Esta semana" : `Semana ${i / 7 + 1}`}</span>
+                  {/* No celular a semana atual já se vê pelo friso azul. */}
+                  <span className="cal-curto">{`Sem. ${i / 7 + 1}`}</span>
                 </span>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 3, flexWrap: "wrap" }}>
                   <strong style={{ fontSize: 18, lineHeight: 1, color: s.total > 0 ? AZUL_MARINHO : "#B5C0CF" }}>{s.total}</strong>
-                  <span style={{ fontSize: 9.5, color: "#65758b" }}>{s.total === 1 ? "vistoria" : "vistorias"}</span>
+                  <span className="cal-longo" style={{ fontSize: 9.5, color: "#65758b" }}>{s.total === 1 ? "vistoria" : "vistorias"}</span>
                 </div>
                 {mostrarContagem && s.total > 0 && (
                   <div style={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
@@ -6859,7 +6937,9 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
               onClick={() => setDiaSelecionado(selecionado ? null : chave)}
               title={doDia.length > 0 ? `${doDia.length} vistoria(s) marcada(s) neste dia` : "Nenhuma vistoria marcada"}
               style={{
-                minHeight: 88,
+                // minWidth:0 + overflow: o balão com nome comprido corta com "…" dentro da própria
+                // célula, em vez de alargar a coluna inteira (ver COLUNAS_CALENDARIO).
+                minHeight: 88, minWidth: 0, overflow: "hidden",
                 // Dia com vistoria marcada fica visualmente destacado (fundo e borda azuis),
                 // pra dar pra bater o olho no mês e ver onde tem compromisso.
                 border: selecionado ? `2px solid ${AZUL_MEDIO}` : temAgendamento ? `1.5px solid ${AZUL_MEDIO}` : `1px solid ${CINZA_BORDA}`,
@@ -6872,7 +6952,7 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
                 <span style={{ fontSize: 12, fontWeight: hoje ? 800 : 600, color: hoje ? AZUL_MARINHO : "#1a2330" }}>{dia}</span>
                 {temAgendamento && (
                   <span style={{ background: AZUL_MEDIO, color: "#fff", borderRadius: 10, padding: "1px 6px", fontSize: 9, fontWeight: 800, whiteSpace: "nowrap" }}>
-                    {doDia.length} {doDia.length === 1 ? "vistoria" : "vistorias"}
+                    {doDia.length}<span className="cal-longo"> {doDia.length === 1 ? "vistoria" : "vistorias"}</span>
                   </span>
                 )}
               </div>
@@ -6890,14 +6970,16 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
                   const cor = tecnico ? corDoTecnico(tecnico.id) : "#8593a8";
                   const sigla = tecnico ? siglaDoNome(tecnico.nome) : "—";
                   return (
-                    <div key={c.id} style={{ background: cor, color: "#fff", borderRadius: 4, padding: "1px 4px", fontSize: 9, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {sigla} {c.horarioDesejado || ""} {(c.nome || "").split(" ")[0]}
+                    <div key={c.id} title={`${sigla} ${c.horarioDesejado || ""} ${c.nome || ""}`} style={{ background: cor, color: "#fff", borderRadius: 4, padding: "1px 4px", fontSize: 9, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {/* No celular a coluna só comporta a hora — a cor já diz o técnico, e o nome está no
+                          painel do dia. Com a sigla junto, sobrava "FE …". */}
+                      <span className="cal-longo">{sigla} </span>{c.horarioDesejado || sigla}<span className="cal-longo"> {(c.nome || "").split(" ")[0]}</span>
                     </div>
                   );
                 })}
                 {doDia.length > 3 && (
                   <div style={{ fontSize: 9, color: AZUL_MARINHO, fontWeight: 700 }}>
-                    +{doDia.length - 3} {doDia.length - 3 === 1 ? "outra" : "outras"}
+                    +{doDia.length - 3}<span className="cal-longo"> {doDia.length - 3 === 1 ? "outra" : "outras"}</span>
                   </div>
                 )}
               </div>
@@ -7266,9 +7348,13 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
      o que se espera de quem está olhando o dia e decidindo quem atende. Antes só os aprovados
      entravam na lista, e o formulário abria vazio bem no dia em que havia cadastro esperando. */
   const aguardandoAgenda = clientes.filter(naFilaDeEspera);
+  // Revistoria só se aceita na Fila de espera — o formulário daqui não a oferece.
+  const paraAgendarAqui = aguardandoAgenda.filter((c) => !ehRevistoria(c));
+  const revistoriasNaFila = aguardandoAgenda.length - paraAgendarAqui.length;
   // O painel do dia respeita o mesmo filtro de etapa aplicado ao calendário.
   const doDiaSelecionado = diaSelecionado
-    ? clientes.filter((c) => c.dataDesejada === diaSelecionado && (!filtroEtapa || etapaVistoriaCliente(c, docs) === filtroEtapa))
+    ? clientes.filter((c) => c.dataDesejada === diaSelecionado && !revistoriaAguardandoAceite(c)
+      && (!filtroEtapa || etapaVistoriaCliente(c, docs) === filtroEtapa))
     : [];
   // Com o ano errado ou data que não existe, o cadastro some do mês certo (ver dataDesejadaDistante).
   const comDataParaConferir = clientes.filter((c) =>
@@ -7311,6 +7397,10 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
           <span>
             <Clock size={15} style={{ verticalAlign: "-3px", marginRight: 6 }} />
             <strong>{aguardandoAgenda.length} cliente(s)</strong> na fila de espera, aguardando técnico e data.
+            {revistoriasNaFila > 0 && (
+              <> Entre eles, <strong>{revistoriasNaFila} {revistoriasNaFila === 1 ? "pedido de revistoria" : "pedidos de revistoria"}</strong>: só
+                {revistoriasNaFila === 1 ? " aparece" : " aparecem"} no calendário depois de {revistoriasNaFila === 1 ? "agendado" : "agendados"} na fila.</>
+            )}
           </span>
           {onAbrirFila && (
             <button className="btn-solid" style={{ width: "auto", padding: "6px 12px", fontSize: 12.5 }} onClick={onAbrirFila}>
@@ -7350,7 +7440,7 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
 
       {agendando && (
         <FormAgendarVistoria diaInicial={agendando.dataDesejada} vistoriadores={vistoriadores}
-          clientesParaAgendar={aguardandoAgenda} todosClientes={clientes}
+          clientesParaAgendar={paraAgendarAqui} todosClientes={clientes}
           onFechar={() => setAgendando(null)} onConfirmar={confirmarAgendamento} />
       )}
     </div>
@@ -7359,8 +7449,9 @@ function AbaQualidadeAnalise({ clientes = [], docs = [], carregando, updCliente,
 
 /* ================= Agendamento · Fila de espera: todo cadastro que espera agendamento =================
    Desde nov/2026 é o lugar único do cadastro novo de vistoria, com ou sem data (ver CardFilaEspera).
-   Colunas por empreendimento — mais fácil ver o volume por obra. Dentro de cada coluna, a data
-   pedida mais próxima primeiro; sem data, quem chegou antes. */
+   Colunas por empreendimento — mais fácil ver o volume por obra. Desde 27/11/2026 elas só levam
+   quem ainda não tem data e horário (os que têm ficam na seção de cima, ver AbaQualidadeFila);
+   dentro de cada coluna, os novos primeiro, depois a data pedida mais próxima e quem chegou antes. */
 function ColunaFilaEmpreendimento({ nome, clientes, podeAgir, onAgendar, onRecusar, vistoriadores, todos }) {
   return (
     <div style={{ minWidth: 290, maxWidth: 290, flexShrink: 0, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -7396,65 +7487,137 @@ function ordemDaFila(a, b) {
   return String(a.criadoEm || "").localeCompare(String(b.criadoEm || ""));
 }
 
+/* Dia e hora pedidos, o mais próximo primeiro (a data que já passou fica no topo: é a mais urgente);
+   no empate, quem chegou antes. */
+function ordemPorDataEHora(a, b) {
+  return `${a.dataDesejada} ${a.horarioDesejado}`.localeCompare(`${b.dataDesejada} ${b.horarioDesejado}`)
+    || String(a.criadoEm || "").localeCompare(String(b.criadoEm || ""));
+}
+const temDataEHoraPedidas = (c) => !!(c.dataDesejada && c.horarioDesejado);
+const chegouAgora = (c) => !!tempoNaFila(c.criadoEm)?.novo;
+// Quantos cartões com data aparecem antes do "Mostrar mais": no celular, cada um ocupa a tela inteira.
+const LIMITE_FILA_COM_DATA = 6;
+
+/* Duas seções, a pedido da Gerência (27/11/2026: "na mesma lista de espera tá confuso"):
+   - **Com data e horário pedidos**, em cima e maior: o cliente já escolheu o dia e a hora (toda
+     revistoria entra aqui), então é a fila de quem tem prazo. Lista única por data, com o dia em
+     destaque e Hoje/Amanhã/Data já passou.
+   - **Sem data ou horário**: as colunas por empreendimento de antes, com os novos no topo de cada
+     coluna — no fim da coluna eles ficavam escondidos pela rolagem.
+   Os novos (chegaram hoje ou ontem) têm faixa própria no cartão e o filtro "Só os novos". */
 function AbaQualidadeFila({ clientes = [], carregando, updCliente, usuarios = [], notify, podeAgir = false }) {
   const [busca, setBusca] = useState("");
+  const [soNovos, setSoNovos] = useState(false);
+  const [verTodosComData, setVerTodosComData] = useState(false);
   const vistoriadores = usuarios.filter((u) => fazVistoria(u) && u.ativo);
   const { agendar, recusar } = useAgendamentoFila(clientes, vistoriadores, updCliente, notify);
 
   const termo = busca.trim().toLowerCase();
   const fila = clientes.filter((c) =>
     naFilaDeEspera(c) && (!termo || `${c.nome} ${c.empreendimento}`.toLowerCase().includes(termo)));
+  const recentes = fila.filter(chegouAgora).length;
+  // Sem novo nenhum (agendou todos, ou a busca não acha), o filtro se desliga sozinho: senão a tela
+  // ficaria vazia e sem o botão para voltar.
+  const filtrandoNovos = soNovos && recentes > 0;
+  const visiveis = filtrandoNovos ? fila.filter(chegouAgora) : fila;
+  const comDataHora = visiveis.filter(temDataEHoraPedidas).sort(ordemPorDataEHora);
+  const semDataHora = visiveis.filter((c) => !temDataEHoraPedidas(c));
+  const comDataNaTela = verTodosComData ? comDataHora : comDataHora.slice(0, LIMITE_FILA_COM_DATA);
 
   const porEmpreendimento = useMemo(() => {
     const grupos = new Map();
-    fila.forEach((c) => {
+    semDataHora.forEach((c) => {
       const chave = c.empreendimento || "Sem empreendimento";
       if (!grupos.has(chave)) grupos.set(chave, []);
       grupos.get(chave).push(c);
     });
-    grupos.forEach((lista) => lista.sort(ordemDaFila));
+    grupos.forEach((lista) => lista.sort((a, b) => (chegouAgora(b) - chegouAgora(a)) || ordemDaFila(a, b)));
     return [...grupos.entries()].sort((a, b) => b[1].length - a[1].length);
-  }, [fila]);
+  }, [semDataHora]);
 
-  const comData = fila.filter((c) => c.dataDesejada).length;
-  const recentes = fila.filter((c) => tempoNaFila(c.criadoEm)?.novo).length;
+  const totalComData = fila.filter(temDataEHoraPedidas).length;
+  const revistorias = fila.filter(ehRevistoria).length;
   const numero = (valor, rotulo, cor = AZUL_MARINHO) => (
     <div>
       <div style={{ fontSize: 22, fontWeight: 800, color: cor }}>{valor}</div>
       <div style={{ fontSize: 12, color: "#65758b" }}>{rotulo}</div>
     </div>
   );
+  const contador = (n, fundo) => (
+    <span style={{ background: fundo, color: "#fff", borderRadius: 20, padding: "1px 9px", fontSize: 13, fontWeight: 800 }}>{n}</span>
+  );
 
   return (
     <Card icon={Clock} titulo={fila.length > 0 ? `${fila.length} na fila de espera` : "Fila de espera"}>
       <p style={{ fontSize: 13.5, color: "#65758b", margin: "0 0 14px", lineHeight: 1.5 }}>
-        Todo cadastro novo de vistoria chega aqui, com ou sem data. Escolha o técnico, a data e o horário (já vêm os
-        que o cliente pediu) e clique em <strong>Agendar</strong>: o cliente passa a ver <strong>Agendado</strong> no
-        portal. O contrato já pode ser elaborado em <strong>Contratos</strong> desde a chegada do cliente.
+        Todo cadastro novo de vistoria e todo pedido de revistoria chegam aqui. <strong>Nada desta lista está na
+        agenda do técnico</strong> até você escolher o técnico, a data e o horário (já vêm os que o cliente pediu) e
+        clicar em <strong>Agendar</strong> — aí o cliente passa a ver <strong>Agendado</strong> no portal. O contrato
+        já pode ser elaborado em <strong>Contratos</strong> desde a chegada do cliente.
       </p>
 
       <input style={{ ...inp, marginBottom: 14 }} placeholder="Buscar por cliente ou empreendimento…" value={busca} onChange={(e) => setBusca(e.target.value)} />
 
       {!carregando && fila.length > 0 && (
-        <div style={{ display: "flex", gap: 20, marginBottom: 16, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 20, marginBottom: 14, flexWrap: "wrap" }}>
           {numero(fila.length, "na fila de espera")}
-          {numero(recentes, "chegaram hoje ou ontem", recentes ? "#B26A00" : AZUL_MARINHO)}
-          {numero(comData, "com data pedida")}
-          {numero(fila.length - comData, "sem data — combinar")}
-          {numero(porEmpreendimento.length, "empreendimento(s)")}
+          {numero(recentes, "novos (hoje ou ontem)", recentes ? "#B26A00" : AZUL_MARINHO)}
+          {numero(totalComData, "com data e horário")}
+          {numero(fila.length - totalComData, "sem data — combinar")}
+          {revistorias > 0 && numero(revistorias, "revistoria(s)", "#6E36BE")}
         </div>
+      )}
+
+      {!carregando && recentes > 0 && (
+        <button onClick={() => setSoNovos(!filtrandoNovos)} aria-pressed={filtrandoNovos}
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 16, padding: "7px 12px", borderRadius: 20, cursor: "pointer", fontSize: 12.5, fontWeight: 800, border: "2px solid #F59E0B", background: filtrandoNovos ? "#F59E0B" : "#FFF4E0", color: "#1f1300" }}>
+          <Bell size={14} /> {filtrandoNovos ? `Mostrando só os ${recentes} novos — ver todos` : `Ver só os novos (${recentes})`}
+        </button>
       )}
 
       {carregando && <p style={{ color: "#8593a8", fontSize: 14 }}>Carregando…</p>}
       {!carregando && fila.length === 0 && <p style={{ color: "#8593a8", fontSize: 14 }}>Nenhum cliente esperando agendamento. ✓</p>}
 
-      {fila.length > 0 && (
-        <div className="scroll-x-fila" style={{ display: "flex", gap: 16, overflowX: "auto", paddingBottom: 10 }}>
-          {porEmpreendimento.map(([nome, lista]) => (
-            <ColunaFilaEmpreendimento key={nome} nome={nome} clientes={lista} todos={clientes}
-              podeAgir={podeAgir} onAgendar={agendar} onRecusar={recusar} vistoriadores={vistoriadores} />
-          ))}
-        </div>
+      {comDataHora.length > 0 && (
+        <section style={{ border: `2px solid ${AZUL_MEDIO}`, background: "#F7FAFE", borderRadius: 12, padding: 14, marginBottom: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+            <CalendarDays size={20} color={AZUL_MARINHO} />
+            <strong style={{ fontSize: 17, color: AZUL_MARINHO }}>Com data e horário pedidos</strong>
+            {contador(comDataHora.length, AZUL_MARINHO)}
+          </div>
+          <p style={{ fontSize: 13, color: "#4a5a70", margin: "0 0 12px", lineHeight: 1.45 }}>
+            O cliente já escolheu o dia e a hora. Comece pelos mais próximos: confira o técnico e clique em <strong>Agendar</strong>.
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(290px, 100%), 1fr))", gap: 12 }}>
+            {comDataNaTela.map((c) => (
+              <CardFilaEspera key={c.id} c={c} todos={clientes} podeAgir={podeAgir} onAgendar={agendar} onRecusar={recusar}
+                vistoriadores={vistoriadores} comDestaqueData />
+            ))}
+          </div>
+          {comDataHora.length > LIMITE_FILA_COM_DATA && (
+            <button className="btn-ghost" style={{ marginTop: 12, color: AZUL_MARINHO, background: "#fff", border: `1px solid ${CINZA_BORDA}`, padding: "7px 14px", fontSize: 12.5 }}
+              onClick={() => setVerTodosComData((v) => !v)}>
+              {verTodosComData ? "Mostrar menos" : `Mostrar mais ${comDataHora.length - LIMITE_FILA_COM_DATA}`}
+            </button>
+          )}
+        </section>
+      )}
+
+      {semDataHora.length > 0 && (
+        <section>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+            <Clock size={17} color="#B26A00" />
+            <strong style={{ fontSize: 15, color: AZUL_MARINHO }}>Sem data ou horário — combinar com o cliente</strong>
+            {contador(semDataHora.length, "#65758b")}
+          </div>
+          <p style={{ fontSize: 12.5, color: "#65758b", margin: "0 0 10px" }}>Por empreendimento; os novos vêm primeiro em cada coluna.</p>
+          <div className="scroll-x-fila" style={{ display: "flex", gap: 16, overflowX: "auto", paddingBottom: 10 }}>
+            {porEmpreendimento.map(([nome, lista]) => (
+              <ColunaFilaEmpreendimento key={nome} nome={nome} clientes={lista} todos={clientes}
+                podeAgir={podeAgir} onAgendar={agendar} onRecusar={recusar} vistoriadores={vistoriadores} />
+            ))}
+          </div>
+        </section>
       )}
     </Card>
   );
@@ -10384,9 +10547,12 @@ function CardPadronizarEmpreendimentos({ clientes = [], empreendimentosRef = [],
         exclua, se for cadastro de teste.
       </p>
 
-      <div style={{ display: "grid", gap: 10 }}>
+      {/* minmax(0, 1fr) + minWidth:0: a caixa "renomear para…" mede pelo nome oficial mais comprido da
+          lista, e sem isso empurrava o cartão (e o "Aplicar") para fora da tela no celular — a página
+          inteira ficava mais larga que a tela (27/11/2026). */}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 10 }}>
         {foraDoPadrao.map((l) => (
-          <div key={l.nome} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
+          <div key={l.nome} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
               <strong style={{ fontSize: 14 }}>{l.nome}</strong>
               <span style={{ fontSize: 11.5, color: "#65758b", background: CINZA_CLARO, borderRadius: 20, padding: "2px 9px" }}>
@@ -10398,7 +10564,7 @@ function CardPadronizarEmpreendimentos({ clientes = [], empreendimentosRef = [],
             </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <select style={{ ...inp, flex: 1, minWidth: 220 }}
+              <select style={{ ...inp, flex: "1 1 220px", minWidth: 0, maxWidth: "100%" }}
                 value={escolhas[l.nome] ?? l.sugestao ?? ""}
                 onChange={(e) => setEscolhas((s) => ({ ...s, [l.nome]: e.target.value }))}>
                 <option value="">renomear para…</option>
@@ -11555,25 +11721,24 @@ function CardEntregaEmails({ token, notify, clientes = [], docs = [] }) {
           Último envio bem-sucedido: {fmtDataHora(ultimoOk.criado_em)} para {ultimoOk.para}
         </p>
       )}
+      {/* Linhas que quebram, e não tabela (27/11/2026): no celular a tabela espremia a coluna do e-mail
+          até uma letra, e com o break-all o endereço saía em pé, letra por letra. Agora a data, o tipo e
+          a situação ficam em cima e o e-mail inteiro embaixo, sempre na horizontal. */}
       {envios.length > 0 && (
-        <div style={{ maxHeight: 240, overflowY: "auto", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8 }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
-            <tbody>
-              {envios.map((e, i) => (
-                <tr key={i} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
-                  <td style={{ padding: "6px 9px", whiteSpace: "nowrap", color: "#8593a8" }}>{fmtDataHora(e.criado_em)}</td>
-                  <td style={{ padding: "6px 9px" }}>{e.tipo}</td>
-                  <td style={{ padding: "6px 9px", wordBreak: "break-all" }}>{e.para}</td>
-                  <td style={{ padding: "6px 9px", color: e.ok ? "#2E7D32" : "#C62828", fontWeight: 600 }}>
-                    {e.ok ? "enviado" : (e.erro || "falhou")}
-                  </td>
-                  <td style={{ padding: "6px 9px", textAlign: "right" }}>
-                    <BotaoWhatsappAgradecimento envio={e} clientes={clientes} docs={docs} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div style={{ maxHeight: 240, overflowY: "auto", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, fontSize: 12.5 }}>
+          {envios.map((e, i) => (
+            <div key={i} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "3px 12px", padding: "7px 10px", borderBottom: i < envios.length - 1 ? `1px solid ${CINZA_BORDA}` : "none" }}>
+              <span style={{ whiteSpace: "nowrap", color: "#8593a8" }}>{fmtDataHora(e.criado_em)}</span>
+              <span style={{ whiteSpace: "nowrap" }}>{e.tipo}</span>
+              <span style={{ color: e.ok ? "#2E7D32" : "#C62828", fontWeight: 600 }}>
+                {e.ok ? "enviado" : (e.erro || "falhou")}
+              </span>
+              <span title={e.para} style={{ flex: "1 1 190px", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {e.para}
+              </span>
+              <BotaoWhatsappAgradecimento envio={e} clientes={clientes} docs={docs} />
+            </div>
+          ))}
         </div>
       )}
     </Card>
@@ -22643,6 +22808,13 @@ const estilos = `
     .laudo-modelo img { max-width: 100%; }
   }
   .dia-cel:focus-visible, .chip-tecnico:focus-visible, .aviso-domingo:focus-visible { outline: 2.5px solid ${AZUL_MARINHO}; outline-offset: 2px; }
+  /* Calendário do Agendamento: no celular as sete colunas cabem na tela, então os rótulos longos
+     ("Semana 3", "3 vistorias", o nome no balão) dão lugar aos curtos. */
+  .cal-curto { display: none; }
+  @media (max-width: 640px) {
+    .cal-longo { display: none; }
+    .cal-curto { display: inline; }
+  }
   .aviso-domingo:hover { text-decoration: underline; }
   /* Sino com pendência urgente pulsa de leve, para ser notado sem incomodar. */
   .sino-alerta { animation: pulsa-sino 2s ease-in-out infinite; }
