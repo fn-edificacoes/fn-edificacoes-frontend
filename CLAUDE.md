@@ -241,6 +241,11 @@ o técnico", e o cliente passava a ler "Agendado" sem dia nem técnico.
   estivesse marcada — mas a agenda do técnico só traz "Vistoria agendada"/"Em vistoria", e uma revistoria
   das 08:00 ficou sem ninguém confirmar. Enquanto está na fila, fica fora da grade, dos contadores, do
   painel do dia e do formulário "Agendar vistoria" do Calendário; o aviso do Calendário diz quantas esperam.
+- **Calendário com sete colunas iguais** (`COLUNAS_CALENDARIO = repeat(7, minmax(0, 1fr))`, 27/11/2026). Com
+  `repeat(7, 1fr)` cada coluna se alargava até caber o balão mais comprido dela (o texto do balão não
+  quebra): a de quinta ficava larga, a de segunda espremida, e no celular a semana passava da tela. As
+  células têm `minWidth: 0` e cortam com "…". No celular (`.cal-longo`/`.cal-curto` em `estilos`) o
+  balão mostra só a hora (a cor é o técnico), o contador do dia só o número e a coluna da semana "Sem. N".
 - **Destaque:** contador laranja (`BolhaContagem`) em "Agendamento" (barra de cima e menu lateral da
   Gerência) e na sub-aba; o sino leva à fila. A antiga "Análise" virou **Calendário** (chave `"analise"`,
   só o calendário e um aviso com o atalho para a fila).

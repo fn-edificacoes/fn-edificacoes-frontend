@@ -6725,6 +6725,11 @@ function CardFilaEspera({ c, todos, podeAgir, onAgendar, onRecusar, vistoriadore
    até 3 barras de agendamento coloridas por técnico com sigla + horário + cliente. Clicar
    num dia abre o painel lateral com a agenda completa daquele dia. A coluna de domingo
    (sem expediente) é o contador da semana — ver `resumirSemana`. */
+/* Sete colunas sempre iguais (27/11/2026). Com "repeat(7, 1fr)" cada coluna se alargava até caber o
+   balão mais comprido dela, porque o texto do balão não quebra: a quinta com "FE 08:00 KRYSLENE"
+   ficava larga, a segunda sem vistoria ficava espremida, e no celular a semana passava da tela. */
+const COLUNAS_CALENDARIO = "repeat(7, minmax(0, 1fr))";
+
 function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], mesRef, setMesRef, diaSelecionado, setDiaSelecionado, filtroTecnicos, aoTrocarFiltro, filtroEtapa, aoTrocarEtapa, mostrarContagem = false }) {
   const ano = mesRef.getFullYear(), mes = mesRef.getMonth();
   const primeiroDiaSemana = new Date(ano, mes, 1).getDay();
@@ -6760,6 +6765,9 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
     if (filtroEtapa && etapaVistoriaCliente(c, docs) !== filtroEtapa) return;
     (agendadosPorDia[c.dataDesejada] = agendadosPorDia[c.dataDesejada] || []).push(c);
   });
+  // Balões do dia pela hora, como no painel do dia (vinham na ordem do cadastro: 08:00, 11:00, 10:00).
+  Object.values(agendadosPorDia).forEach((lista) =>
+    lista.sort((a, b) => (a.horarioDesejado || "").localeCompare(b.horarioDesejado || "")));
 
   const celulas = [];
   for (let i = 0; i < primeiroDiaSemana; i++) celulas.push(null);
@@ -6846,10 +6854,14 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
         <button className="icon-btn" onClick={() => setMesRef(new Date(ano, mes + 1, 1))} aria-label="Próximo mês"><ChevronRight size={18} /></button>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, fontSize: 11, color: "#8593a8", textAlign: "center", marginBottom: 4 }}>
-        {["Semana", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((d) => <div key={d} style={d === "Semana" ? { fontWeight: 700, color: AZUL_MARINHO, overflowWrap: "normal" } : undefined}>{d}</div>)}
+      <div style={{ display: "grid", gridTemplateColumns: COLUNAS_CALENDARIO, gap: 4, fontSize: 11, color: "#8593a8", textAlign: "center", marginBottom: 4 }}>
+        {["Semana", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((d) => (
+          <div key={d} style={d === "Semana" ? { fontWeight: 700, color: AZUL_MARINHO, overflowWrap: "normal" } : undefined}>
+            {d === "Semana" ? <><span className="cal-longo">Semana</span><span className="cal-curto">Sem.</span></> : d}
+          </div>
+        ))}
       </div>
-      <div ref={gridRef} style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+      <div ref={gridRef} style={{ display: "grid", gridTemplateColumns: COLUNAS_CALENDARIO, gap: 4 }}>
         {celulas.map((dia, i) => {
           if (i % 7 === 0) {
             const s = resumirSemana(i);
@@ -6861,21 +6873,23 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
               <div key={`semana-${i}`}
                 title={`Semana de ${fmt(s.dias[1])} a ${fmt(s.dias[6])}: ${s.total} ${s.total === 1 ? "vistoria" : "vistorias"}${s.semanaToda !== s.total ? ` neste mês, ${s.semanaToda} na semana toda` : ""}`}
                 style={{
-                  // Sem minWidth:0/overflow aqui, e com quebra só entre palavras: senão, numa tela
-                  // estreita, o `overflow-wrap:anywhere` do body espreme a coluna até virar uma
-                  // letra por linha. Aqui só tem número e sigla, nada de nome comprido.
-                  minHeight: 88, overflowWrap: "normal", borderRadius: 8, padding: "4px 4px 4px 7px",
+                  // Quebra só entre palavras: com `overflow-wrap:anywhere` a coluna virava uma letra
+                  // por linha. As colunas agora têm largura fixa (COLUNAS_CALENDARIO), então o
+                  // minWidth:0 só impede que um rótulo empurre a célula para cima da vizinha.
+                  minHeight: 88, minWidth: 0, overflow: "hidden", overflowWrap: "normal", borderRadius: 8, padding: "4px 4px 4px 7px",
                   background: "#F6F8FB", border: "1px solid #E3E8EF",
                   // Friso na semana de hoje: no domingo, o destaque de "hoje" não tem mais célula.
                   boxShadow: s.atual ? `inset 3px 0 0 ${AZUL_MARINHO}` : "none",
                   display: "flex", flexDirection: "column", gap: 3,
                 }}>
                 <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", color: s.atual ? AZUL_MARINHO : "#8593a8" }}>
-                  {s.atual ? "Esta semana" : `Semana ${i / 7 + 1}`}
+                  <span className="cal-longo">{s.atual ? "Esta semana" : `Semana ${i / 7 + 1}`}</span>
+                  {/* No celular a semana atual já se vê pelo friso azul. */}
+                  <span className="cal-curto">{`Sem. ${i / 7 + 1}`}</span>
                 </span>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 3, flexWrap: "wrap" }}>
                   <strong style={{ fontSize: 18, lineHeight: 1, color: s.total > 0 ? AZUL_MARINHO : "#B5C0CF" }}>{s.total}</strong>
-                  <span style={{ fontSize: 9.5, color: "#65758b" }}>{s.total === 1 ? "vistoria" : "vistorias"}</span>
+                  <span className="cal-longo" style={{ fontSize: 9.5, color: "#65758b" }}>{s.total === 1 ? "vistoria" : "vistorias"}</span>
                 </div>
                 {mostrarContagem && s.total > 0 && (
                   <div style={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
@@ -6923,7 +6937,9 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
               onClick={() => setDiaSelecionado(selecionado ? null : chave)}
               title={doDia.length > 0 ? `${doDia.length} vistoria(s) marcada(s) neste dia` : "Nenhuma vistoria marcada"}
               style={{
-                minHeight: 88,
+                // minWidth:0 + overflow: o balão com nome comprido corta com "…" dentro da própria
+                // célula, em vez de alargar a coluna inteira (ver COLUNAS_CALENDARIO).
+                minHeight: 88, minWidth: 0, overflow: "hidden",
                 // Dia com vistoria marcada fica visualmente destacado (fundo e borda azuis),
                 // pra dar pra bater o olho no mês e ver onde tem compromisso.
                 border: selecionado ? `2px solid ${AZUL_MEDIO}` : temAgendamento ? `1.5px solid ${AZUL_MEDIO}` : `1px solid ${CINZA_BORDA}`,
@@ -6936,7 +6952,7 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
                 <span style={{ fontSize: 12, fontWeight: hoje ? 800 : 600, color: hoje ? AZUL_MARINHO : "#1a2330" }}>{dia}</span>
                 {temAgendamento && (
                   <span style={{ background: AZUL_MEDIO, color: "#fff", borderRadius: 10, padding: "1px 6px", fontSize: 9, fontWeight: 800, whiteSpace: "nowrap" }}>
-                    {doDia.length} {doDia.length === 1 ? "vistoria" : "vistorias"}
+                    {doDia.length}<span className="cal-longo"> {doDia.length === 1 ? "vistoria" : "vistorias"}</span>
                   </span>
                 )}
               </div>
@@ -6954,14 +6970,16 @@ function CalendarioAgendamento({ clientes = [], vistoriadores = [], docs = [], m
                   const cor = tecnico ? corDoTecnico(tecnico.id) : "#8593a8";
                   const sigla = tecnico ? siglaDoNome(tecnico.nome) : "—";
                   return (
-                    <div key={c.id} style={{ background: cor, color: "#fff", borderRadius: 4, padding: "1px 4px", fontSize: 9, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {sigla} {c.horarioDesejado || ""} {(c.nome || "").split(" ")[0]}
+                    <div key={c.id} title={`${sigla} ${c.horarioDesejado || ""} ${c.nome || ""}`} style={{ background: cor, color: "#fff", borderRadius: 4, padding: "1px 4px", fontSize: 9, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {/* No celular a coluna só comporta a hora — a cor já diz o técnico, e o nome está no
+                          painel do dia. Com a sigla junto, sobrava "FE …". */}
+                      <span className="cal-longo">{sigla} </span>{c.horarioDesejado || sigla}<span className="cal-longo"> {(c.nome || "").split(" ")[0]}</span>
                     </div>
                   );
                 })}
                 {doDia.length > 3 && (
                   <div style={{ fontSize: 9, color: AZUL_MARINHO, fontWeight: 700 }}>
-                    +{doDia.length - 3} {doDia.length - 3 === 1 ? "outra" : "outras"}
+                    +{doDia.length - 3}<span className="cal-longo"> {doDia.length - 3 === 1 ? "outra" : "outras"}</span>
                   </div>
                 )}
               </div>
@@ -10529,9 +10547,12 @@ function CardPadronizarEmpreendimentos({ clientes = [], empreendimentosRef = [],
         exclua, se for cadastro de teste.
       </p>
 
-      <div style={{ display: "grid", gap: 10 }}>
+      {/* minmax(0, 1fr) + minWidth:0: a caixa "renomear para…" mede pelo nome oficial mais comprido da
+          lista, e sem isso empurrava o cartão (e o "Aplicar") para fora da tela no celular — a página
+          inteira ficava mais larga que a tela (27/11/2026). */}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 10 }}>
         {foraDoPadrao.map((l) => (
-          <div key={l.nome} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12 }}>
+          <div key={l.nome} style={{ border: `1px solid ${CINZA_BORDA}`, borderRadius: 10, padding: 12, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
               <strong style={{ fontSize: 14 }}>{l.nome}</strong>
               <span style={{ fontSize: 11.5, color: "#65758b", background: CINZA_CLARO, borderRadius: 20, padding: "2px 9px" }}>
@@ -10543,7 +10564,7 @@ function CardPadronizarEmpreendimentos({ clientes = [], empreendimentosRef = [],
             </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <select style={{ ...inp, flex: 1, minWidth: 220 }}
+              <select style={{ ...inp, flex: "1 1 220px", minWidth: 0, maxWidth: "100%" }}
                 value={escolhas[l.nome] ?? l.sugestao ?? ""}
                 onChange={(e) => setEscolhas((s) => ({ ...s, [l.nome]: e.target.value }))}>
                 <option value="">renomear para…</option>
@@ -11700,25 +11721,24 @@ function CardEntregaEmails({ token, notify, clientes = [], docs = [] }) {
           Último envio bem-sucedido: {fmtDataHora(ultimoOk.criado_em)} para {ultimoOk.para}
         </p>
       )}
+      {/* Linhas que quebram, e não tabela (27/11/2026): no celular a tabela espremia a coluna do e-mail
+          até uma letra, e com o break-all o endereço saía em pé, letra por letra. Agora a data, o tipo e
+          a situação ficam em cima e o e-mail inteiro embaixo, sempre na horizontal. */}
       {envios.length > 0 && (
-        <div style={{ maxHeight: 240, overflowY: "auto", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8 }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
-            <tbody>
-              {envios.map((e, i) => (
-                <tr key={i} style={{ borderBottom: `1px solid ${CINZA_BORDA}` }}>
-                  <td style={{ padding: "6px 9px", whiteSpace: "nowrap", color: "#8593a8" }}>{fmtDataHora(e.criado_em)}</td>
-                  <td style={{ padding: "6px 9px" }}>{e.tipo}</td>
-                  <td style={{ padding: "6px 9px", wordBreak: "break-all" }}>{e.para}</td>
-                  <td style={{ padding: "6px 9px", color: e.ok ? "#2E7D32" : "#C62828", fontWeight: 600 }}>
-                    {e.ok ? "enviado" : (e.erro || "falhou")}
-                  </td>
-                  <td style={{ padding: "6px 9px", textAlign: "right" }}>
-                    <BotaoWhatsappAgradecimento envio={e} clientes={clientes} docs={docs} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div style={{ maxHeight: 240, overflowY: "auto", border: `1px solid ${CINZA_BORDA}`, borderRadius: 8, fontSize: 12.5 }}>
+          {envios.map((e, i) => (
+            <div key={i} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "3px 12px", padding: "7px 10px", borderBottom: i < envios.length - 1 ? `1px solid ${CINZA_BORDA}` : "none" }}>
+              <span style={{ whiteSpace: "nowrap", color: "#8593a8" }}>{fmtDataHora(e.criado_em)}</span>
+              <span style={{ whiteSpace: "nowrap" }}>{e.tipo}</span>
+              <span style={{ color: e.ok ? "#2E7D32" : "#C62828", fontWeight: 600 }}>
+                {e.ok ? "enviado" : (e.erro || "falhou")}
+              </span>
+              <span title={e.para} style={{ flex: "1 1 190px", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {e.para}
+              </span>
+              <BotaoWhatsappAgradecimento envio={e} clientes={clientes} docs={docs} />
+            </div>
+          ))}
         </div>
       )}
     </Card>
@@ -22788,6 +22808,13 @@ const estilos = `
     .laudo-modelo img { max-width: 100%; }
   }
   .dia-cel:focus-visible, .chip-tecnico:focus-visible, .aviso-domingo:focus-visible { outline: 2.5px solid ${AZUL_MARINHO}; outline-offset: 2px; }
+  /* Calendário do Agendamento: no celular as sete colunas cabem na tela, então os rótulos longos
+     ("Semana 3", "3 vistorias", o nome no balão) dão lugar aos curtos. */
+  .cal-curto { display: none; }
+  @media (max-width: 640px) {
+    .cal-longo { display: none; }
+    .cal-curto { display: inline; }
+  }
   .aviso-domingo:hover { text-decoration: underline; }
   /* Sino com pendência urgente pulsa de leve, para ser notado sem incomodar. */
   .sino-alerta { animation: pulsa-sino 2s ease-in-out infinite; }
