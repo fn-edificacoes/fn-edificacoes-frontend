@@ -1983,12 +1983,11 @@ function ModalTrocarSenha({ token, onFechar, notify }) {
    cadastro ou não recebeu o link. */
 const linkDeTexto = { background: "none", border: "none", padding: 0, color: AZUL_MEDIO, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" };
 
-function PedirLinkDeSenha({ motivo = "esqueci", emailInicial = "", onVoltar }) {
+function PedirLinkDeSenha({ emailInicial = "", onVoltar }) {
   const [email, setEmail] = useState(emailInicial);
   const [enviando, setEnviando] = useState(false);
   const [mensagem, setMensagem] = useState("");
   const [erro, setErro] = useState("");
-  const primeiroAcesso = motivo === "primeiro-acesso";
 
   const pedir = async () => {
     const alvo = email.trim();
@@ -2005,16 +2004,16 @@ function PedirLinkDeSenha({ motivo = "esqueci", emailInicial = "", onVoltar }) {
     setEnviando(false);
   };
 
-  const textoWhatsapp = `Olá! Preciso de ajuda para entrar no sistema da FN Edificações: ${primeiroAcesso ? "é o meu primeiro acesso" : "esqueci minha senha"}.`
+  const textoWhatsapp = "Olá! Preciso de ajuda para entrar no sistema da FN Edificações: esqueci minha senha."
     + (email.trim() ? ` Meu e-mail de cadastro: ${email.trim()}` : "");
 
   return (
     <>
       <h2 style={{ textAlign: "center", color: AZUL_MARINHO, fontSize: 18, margin: "0 0 4px" }}>
-        {primeiroAcesso ? "Primeiro acesso" : "Esqueceu a senha?"}
+        Esqueceu a senha?
       </h2>
       <p style={{ textAlign: "center", color: "#65758b", fontSize: 13, margin: "0 0 20px", lineHeight: 1.5 }}>
-        Digite o e-mail do seu cadastro. Enviamos um link para você criar {primeiroAcesso ? "a sua senha" : "uma senha nova"}.
+        Digite o e-mail do seu cadastro. Enviamos um link para você criar uma senha nova.
       </p>
 
       {mensagem ? (
@@ -2058,8 +2057,8 @@ function TelaLogin({ onLogin, onVoltar, recuperacaoInicial = null }) {
   const [senha, setSenha] = useState("");
   const [erro, setErro] = useState("");
   const [carregando, setCarregando] = useState(false);
-  /* null: o formulário de entrar. "esqueci" ou "primeiro-acesso": o pedido do link por e-mail
-     (PedirLinkDeSenha), no lugar do formulário. */
+  /* null: o formulário de entrar. "esqueci": o pedido do link por e-mail (PedirLinkDeSenha), no
+     lugar do formulário. */
   const [recuperacao, setRecuperacao] = useState(recuperacaoInicial);
 
   const entrar = async () => {
@@ -2085,7 +2084,7 @@ function TelaLogin({ onLogin, onVoltar, recuperacaoInicial = null }) {
         </div>
 
         {recuperacao ? (
-          <PedirLinkDeSenha motivo={recuperacao} emailInicial={email} onVoltar={() => setRecuperacao(null)} />
+          <PedirLinkDeSenha emailInicial={email} onVoltar={() => setRecuperacao(null)} />
         ) : (
           <>
             <h2 style={{ textAlign: "center", color: AZUL_MARINHO, fontSize: 18, margin: "0 0 4px" }}>Entrar no sistema</h2>
@@ -2117,18 +2116,14 @@ function TelaLogin({ onLogin, onVoltar, recuperacaoInicial = null }) {
               {carregando ? <><Loader2 size={15} className="spin" /> Entrando…</> : "Entrar"}
             </button>
 
-            {/* Aqui já esteve escrita a senha padrão do primeiro acesso — a mesma para todos os
-                clientes, à vista de qualquer visitante. Quem soubesse o e-mail de um cliente abria a
-                conta dele e via laudo, documentos e dados pessoais. Agora o caminho é o link por
-                e-mail: só entra quem recebe na própria caixa. */}
-            <p style={{ textAlign: "center", color: "#8593a8", fontSize: 12.5, margin: "14px 0 0" }}>
-              Primeiro acesso?{" "}
-              <button type="button" onClick={() => setRecuperacao("primeiro-acesso")} style={{ ...linkDeTexto, fontSize: 12.5 }}>Crie sua senha</button>
-            </p>
+            {/* Não há mais "Primeiro acesso? Crie sua senha" (removido em nov/2026): cliente novo se
+                cadastra pela página principal ("Sou cliente e quero me cadastrar"), onde já cria a
+                senha. Quem tem cadastro sem senha usa o "Esqueci minha senha", que manda o mesmo
+                link por e-mail. Nunca volte a escrever uma senha padrão nesta tela. */}
             {/* O suporte pelo WhatsApp continua para quem não tem e-mail no cadastro. Não se chama
                 "esqueci minha senha": esse nome é do botão do link por e-mail, e dois botões com o
                 mesmo nome mandavam a pessoa para lados diferentes. */}
-            <div style={{ textAlign: "center", marginTop: 6, fontSize: 12.5 }}>
+            <div style={{ textAlign: "center", marginTop: 14, fontSize: 12.5 }}>
               <a href={`https://wa.me/${WHATSAPP_ATENDIMENTO_FN}?text=${encodeURIComponent("Olá! Não tenho e-mail no cadastro e preciso de ajuda para entrar no sistema da FN Edificações.")}`}
                 target="_blank" rel="noopener noreferrer" style={{ color: "#8593a8", textDecoration: "none" }}>
                 Sem e-mail no cadastro? Fale com a FN pelo WhatsApp

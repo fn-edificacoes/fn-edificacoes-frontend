@@ -131,7 +131,7 @@ export function mensagemWhatsappContrato({ nome, numero, servico, dataVistoria, 
     `1. Acesse ${AREA_CLIENTE_URL}`,
     temAcessoAoPortal
       ? "2. Entre com o e-mail e a senha do seu cadastro"
-      : "2. Toque em *Primeiro acesso? Crie sua senha* e use o e-mail do seu cadastro",
+      : "2. Toque em *Esqueci minha senha* e use o e-mail do seu cadastro para receber o link de criar a senha",
     "3. Em *Meus contratos*, toque em *Assinar contrato* — aqui na FN ou pelo GOV.BR, como preferir",
     "",
     "⚠️ A vistoria só é realizada depois da assinatura do contrato.",
@@ -966,7 +966,7 @@ function AgendadosParaContrato({ token, apiFetch, apiUrl, notify, perfil, versao
           </div>
         </div>
         {!a.temAcessoAoPortal && (
-          <div style={{ fontSize: 12, color: AMBAR }}>Cliente ainda sem senha no portal — a mensagem do WhatsApp já explica o "Primeiro acesso".</div>
+          <div style={{ fontSize: 12, color: AMBAR }}>Cliente ainda sem senha no portal — a mensagem do WhatsApp já explica como criar a senha.</div>
         )}
         <div className="fnc-acoes">
           {!c && (
@@ -1325,7 +1325,7 @@ function FichaContrato({ id, token, apiFetch, apiUrl, notify, perfil, onFechar, 
           <div style={{ fontSize: 13, color: "#4a5a70" }}>{c.cliente.empreendimento || "sem empreendimento"}{c.cliente.unidade ? ` · ${c.cliente.unidade}` : ""}</div>
           {c.cliente.temAcessoAoPortal
             ? <div style={{ fontSize: 12.5, color: VERDE, marginTop: 4 }}>✓ Cliente com acesso ao portal — vê e assina o contrato na Área do Cliente.</div>
-            : <Aviso tipo="alerta" style={{ marginTop: 8 }}>Este cliente ainda não criou a senha do portal. Para ver e assinar, ele toca em "Primeiro acesso? Crie sua senha" com o e-mail {c.cliente.email || "do cadastro"} — a mensagem do WhatsApp já explica esse passo.</Aviso>}
+            : <Aviso tipo="alerta" style={{ marginTop: 8 }}>Este cliente ainda não criou a senha do portal. Para ver e assinar, ele toca em "Esqueci minha senha" com o e-mail {c.cliente.email || "do cadastro"} — a mensagem do WhatsApp já explica esse passo.</Aviso>}
         </div>
 
         <div className="fnc-acoes">

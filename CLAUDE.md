@@ -139,7 +139,7 @@ documentação** (o servidor filtra; os de vistoria continuam fora e as telas de
 `temLaudo`), e o servidor recusa que ele altere registro de vistoria.
 
 A tela de login é uma só para os três públicos — equipe, cliente e parceiro/filiado.
-Cliente sem senha usa "primeiro acesso"; parceiro se cadastra pelo botão do rodapé, que
+Cliente novo se cadastra pela página principal; cliente sem senha usa "Esqueci minha senha"; parceiro se cadastra pelo botão do rodapé, que
 abre a `TelaCadastroParceiro`. O login do parceiro nasce desativado e só abre quando a
 Gerência homologa: quem mexer nesse fluxo precisa manter a mensagem de "cadastro em
 análise" que o backend devolve, senão o parceiro acha que errou a senha.
@@ -669,7 +669,7 @@ cadastro e o cliente assina sem custo — na própria FN ou pelo GOV.BR.
   a situação do contrato e **Gerar contrato** / **Conferir e liberar** / **Abrir contrato**. Com o
   contrato liberado, **Enviar pelo WhatsApp** (`BotaoWhatsappContrato`, link `wa.me` com
   `mensagemWhatsappContrato`: data da vistoria, número do contrato, passo a passo na Área do Cliente —
-  ou o "Primeiro acesso", para quem ainda não tem senha — e que a vistoria só acontece depois da
+  ou o "Esqueci minha senha", para quem ainda não tem senha — e que a vistoria só acontece depois da
   assinatura). Para quem ainda aguarda agendamento a mensagem não diz "agendada" ("recebemos o seu
   pedido… o contrato já está pronto"); a ficha do contrato sabe disso por `cliente.aguardandoAgendamento`.
   O mesmo botão está na ficha do contrato. O número sai do `numeroWhatsapp` do laudo.
@@ -740,8 +740,10 @@ imóvel dele. Hoje a senha provisória nasce aleatória e ninguém a conhece.
 
 Quem esqueceu a senha resolve sozinho: **"Esqueci minha senha"**, logo abaixo do campo da senha
 (pedido da Gerência, nov/2026 — antes era uma linha cinza embaixo do "Entrar" que ninguém achava),
-abre `PedirLinkDeSenha` no lugar do formulário, já com o e-mail digitado. **"Primeiro acesso? Crie sua
-senha"** abre a mesma tela. Os dois pedem `POST /api/clientes/solicitar-senha`, que vale para cliente,
+abre `PedirLinkDeSenha` no lugar do formulário, já com o e-mail digitado. **Não existe mais o
+"Primeiro acesso? Crie sua senha"** (removido em nov/2026): cliente novo se cadastra pela página
+principal, onde já cria a senha; quem tem cadastro sem senha usa o "Esqueci minha senha". Ele pede
+`POST /api/clientes/solicitar-senha`, que vale para cliente,
 parceiro e equipe. A resposta é sempre a mesma frase, exista ou não o e-mail: senão a tela vira uma
 forma de descobrir quem é cliente da FN. Recusa (limite de pedidos) aparece em vermelho, com o
 formulário para tentar de novo.
